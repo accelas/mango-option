@@ -699,7 +699,7 @@ PYBIND11_MODULE(mango_option, m) {
 
     // SurfaceContent enum
     py::enum_<mango::SurfaceContent>(m, "SurfaceContent")
-        .value("RawPrice", mango::SurfaceContent::RawPrice)
+        .value("NormalizedPrice", mango::SurfaceContent::NormalizedPrice)
         .value("EarlyExercisePremium", mango::SurfaceContent::EarlyExercisePremium);
 
     // PriceTableMetadata

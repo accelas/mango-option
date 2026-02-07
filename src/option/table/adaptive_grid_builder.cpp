@@ -600,7 +600,7 @@ struct SegmentedBuildResult {
     double min_tau, max_tau;
 };
 
-/// Shared probe-and-build pipeline for build_segmented and build_segmented_strike.
+/// Shared probe-and-build pipeline for build_segmented.
 /// Selects representative probes, runs adaptive refinement per probe, aggregates
 /// grid sizes, then builds one SegmentedSurface per ref_value.
 static std::expected<SegmentedBuildResult, PriceTableError>
@@ -1329,39 +1329,6 @@ AdaptiveGridBuilder::build_segmented(
         .surface = std::move(*surface),
         .grid = build.seg_template.grid,
         .tau_points_per_segment = build.seg_template.tau_points_per_segment,
-    };
-}
-
-std::expected<StrikeAdaptiveResult, PriceTableError>
-AdaptiveGridBuilder::build_segmented_strike(
-    const SegmentedAdaptiveConfig& config,
-    const std::vector<double>& strike_grid,
-    const IVGrid& domain)
-{
-    std::vector<double> strikes = strike_grid;
-    if (strikes.empty()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-    }
-    std::sort(strikes.begin(), strikes.end());
-    strikes.erase(std::unique(strikes.begin(), strikes.end()), strikes.end());
-
-    auto result = probe_and_build(params_, config, strikes, domain);
-    if (!result.has_value()) {
-        return std::unexpected(result.error());
-    }
-
-    std::vector<StrikeEntry> entries;
-    for (size_t i = 0; i < strikes.size(); ++i) {
-        entries.push_back({.strike = strikes[i], .surface = std::move(result->surfaces[i])});
-    }
-    auto surface = build_strike_surface(std::move(entries), /*use_nearest=*/true);
-    if (!surface.has_value()) {
-        return std::unexpected(surface.error());
-    }
-    return StrikeAdaptiveResult{
-        .surface = std::move(*surface),
-        .grid = result->seg_template.grid,
-        .tau_points_per_segment = result->seg_template.tau_points_per_segment,
     };
 }
 

@@ -20,7 +20,7 @@ namespace mango {
 /// Thread-safe after construction.
 class AmericanPriceSurface {
 public:
-    /// Create from price surface. Accepts EarlyExercisePremium or RawPrice content.
+    /// Create from price surface. Accepts EarlyExercisePremium or NormalizedPrice content.
     static std::expected<AmericanPriceSurface, ValidationError> create(
         std::shared_ptr<const PriceTableSurface<4>> eep_surface,
         OptionType type);

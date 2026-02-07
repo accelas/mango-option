@@ -11,8 +11,6 @@
 
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/american_price_surface.hpp"
-#include "mango/option/table/price_table_metadata.hpp"
-#include "mango/option/table/price_table_surface.hpp"
 
 namespace mango {
 
@@ -311,70 +309,6 @@ private:
     std::vector<double> k_refs_;
 };
 
-/// Split strategy for strike grid selection (exact/nearest/linear).
-class StrikeBracket {
-public:
-    explicit StrikeBracket(std::vector<double> strikes, bool use_nearest = true)
-        : strikes_(std::move(strikes))
-        , use_nearest_(use_nearest)
-    {}
-
-    [[nodiscard]] double key(const PriceQuery& q) const noexcept { return q.strike; }
-    [[nodiscard]] size_t num_slices() const noexcept { return strikes_.size(); }
-
-    [[nodiscard]] Bracket bracket(double strike) const noexcept {
-        Bracket br;
-        const size_t n = strikes_.size();
-        if (n == 0) {
-            return br;
-        }
-
-        auto it = std::lower_bound(strikes_.begin(), strikes_.end(), strike);
-        if (it != strikes_.end() && *it == strike) {
-            size_t idx = static_cast<size_t>(it - strikes_.begin());
-            br.items[0] = SliceWeight{idx, 1.0};
-            br.size = 1;
-            return br;
-        }
-
-        if (it == strikes_.begin()) {
-            br.items[0] = SliceWeight{0, 1.0};
-            br.size = 1;
-            return br;
-        }
-        if (it == strikes_.end()) {
-            br.items[0] = SliceWeight{n - 1, 1.0};
-            br.size = 1;
-            return br;
-        }
-
-        size_t hi = static_cast<size_t>(it - strikes_.begin());
-        size_t lo = hi - 1;
-
-        if (use_nearest_) {
-            size_t idx = (std::abs(strikes_[hi] - strike) < std::abs(strike - strikes_[lo]))
-                ? hi : lo;
-            br.items[0] = SliceWeight{idx, 1.0};
-            br.size = 1;
-            return br;
-        }
-
-        double k_lo = strikes_[lo];
-        double k_hi = strikes_[hi];
-        double t = (strike - k_lo) / (k_hi - k_lo);
-        br.items[0] = SliceWeight{lo, 1.0 - t};
-        br.items[1] = SliceWeight{hi, t};
-        br.size = 2;
-        return br;
-    }
-
-    [[nodiscard]] const std::vector<double>& strikes() const noexcept { return strikes_; }
-
-private:
-    std::vector<double> strikes_;
-    bool use_nearest_ = true;
-};
-
 struct WeightedSum {
     [[nodiscard]] double combine(std::span<const Sample> samples,
                                  const PriceQuery&) const noexcept {
@@ -397,10 +331,7 @@ struct SegmentedTransform {
     std::vector<double> tau_start;
     std::vector<double> tau_min;
     std::vector<double> tau_max;
-    std::vector<SurfaceContent> content;
-    std::vector<Dividend> dividends;
     double K_ref = 0.0;
-    double T = 0.0;
 
     [[nodiscard]] PriceQuery to_local(size_t i, const PriceQuery& q) const {
         PriceQuery out = q;
@@ -408,17 +339,8 @@ struct SegmentedTransform {
         // Convert to local segment time and clamp.
         out.tau = std::clamp(q.tau - tau_start[i], tau_min[i], tau_max[i]);
 
-        // Spot adjustment for EEP segments.
-        if (content[i] == SurfaceContent::EarlyExercisePremium) {
-            double t_query = T - q.tau;
-            double t_boundary = T - tau_start[i];
-            out.spot = compute_spot_adjustment(q.spot, t_query, t_boundary);
-        }
-
-        // RawPrice segments are only valid at K_ref.
-        if (content[i] == SurfaceContent::RawPrice) {
-            out.strike = K_ref;
-        }
+        // All segments store V/K_ref, so query at K_ref.
+        out.strike = K_ref;
 
         if (out.spot <= 0.0) {
             out.spot = 1e-8;
@@ -427,23 +349,8 @@ struct SegmentedTransform {
         return out;
     }
 
-    [[nodiscard]] double normalize_value(size_t i, const PriceQuery&, double raw) const noexcept {
-        if (content[i] == SurfaceContent::RawPrice) {
-            return raw * K_ref;
-        }
-        return raw;
-    }
-
-private:
-    [[nodiscard]] double compute_spot_adjustment(double spot, double t_query,
-                                                 double t_boundary) const {
-        double adjustment = 0.0;
-        for (const auto& div : dividends) {
-            if (div.calendar_time > t_query && div.calendar_time <= t_boundary) {
-                adjustment += div.amount;
-            }
-        }
-        return spot - adjustment;
+    [[nodiscard]] double normalize_value(size_t, const PriceQuery&, double raw) const noexcept {
+        return raw * K_ref;
     }
 };
 
@@ -464,20 +371,6 @@ struct KRefTransform {
 
     [[nodiscard]] double denormalize(double combined, const PriceQuery& q) const noexcept {
         return combined * q.strike;
-    }
-};
-
-struct StrikeTransform {
-    std::vector<double> strikes;
-
-    [[nodiscard]] PriceQuery to_local(size_t i, const PriceQuery& q) const noexcept {
-        PriceQuery out = q;
-        out.strike = strikes[i];
-        return out;
-    }
-
-    [[nodiscard]] double normalize_value(size_t, const PriceQuery&, double raw) const noexcept {
-        return raw;
     }
 };
 
@@ -522,14 +415,6 @@ using MultiKRefSurface = SplicedSurface<
     Inner,
     KRefBracket,
     KRefTransform,
-    WeightedSum>;
-
-/// Per-strike surface: select exact/nearest/linear strike slice.
-template<SplicedInner Inner = SegmentedSurface<>>
-using StrikeSurface = SplicedSurface<
-    Inner,
-    StrikeBracket,
-    StrikeTransform,
     WeightedSum>;
 
 // ===========================================================================
@@ -588,8 +473,5 @@ private:
 
 template<SplicedInner Inner = SegmentedSurface<>>
 using MultiKRefSurfaceWrapper = SplicedSurfaceWrapper<MultiKRefSurface<Inner>>;
-
-template<SplicedInner Inner = SegmentedSurface<>>
-using StrikeSurfaceWrapper = SplicedSurfaceWrapper<StrikeSurface<Inner>>;
 
 }  // namespace mango

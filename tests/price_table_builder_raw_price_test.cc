@@ -6,7 +6,7 @@
 
 using namespace mango;
 
-TEST(PriceTableBuilderTest, BuildWithRawPriceMode) {
+TEST(PriceTableBuilderTest, BuildWithNormalizedPriceMode) {
     std::vector<double> m_grid = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     std::vector<double> tau_grid = {0.1, 0.25, 0.5, 1.0};
     std::vector<double> vol_grid = {0.15, 0.20, 0.30, 0.40};
@@ -18,12 +18,12 @@ TEST(PriceTableBuilderTest, BuildWithRawPriceMode) {
     ASSERT_TRUE(setup.has_value());
     auto& [builder, axes] = *setup;
 
-    builder.set_surface_content(SurfaceContent::RawPrice);
+    builder.set_surface_content(SurfaceContent::NormalizedPrice);
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
 
-    // Verify metadata says RawPrice
-    EXPECT_EQ(result->surface->metadata().content, SurfaceContent::RawPrice);
+    // Verify metadata says NormalizedPrice
+    EXPECT_EQ(result->surface->metadata().content, SurfaceContent::NormalizedPrice);
 }
 
 TEST(PriceTableBuilderTest, DefaultBehaviorUnchanged) {

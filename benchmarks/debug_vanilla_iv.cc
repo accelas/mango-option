@@ -86,7 +86,7 @@ int main() {
     auto surface = table_result->surface;
     auto& meta = surface->metadata();
     std::printf("  Surface content: %s\n",
-                meta.content == SurfaceContent::EarlyExercisePremium ? "EEP" : "RawPrice");
+                meta.content == SurfaceContent::EarlyExercisePremium ? "EEP" : "NormalizedPrice");
     std::printf("  K_ref: %.2f\n", meta.K_ref);
 
     // Query the raw surface at our test point
@@ -160,7 +160,7 @@ int main() {
     auto adaptive_surface = adaptive_result->surface;
     auto& adaptive_meta = adaptive_surface->metadata();
     std::printf("  Surface content: %s\n",
-                adaptive_meta.content == SurfaceContent::EarlyExercisePremium ? "EEP" : "RawPrice");
+                adaptive_meta.content == SurfaceContent::EarlyExercisePremium ? "EEP" : "NormalizedPrice");
     std::printf("  K_ref: %.2f\n", adaptive_meta.K_ref);
 
     double adaptive_raw = adaptive_surface->value({m, kTau, kSigma, kRate});
@@ -478,7 +478,7 @@ int main() {
         // Unfortunately we can't access the tensor directly from outside
         // But we CAN check the fitting stats
         std::printf("  Surface metadata content: %s\n",
-                    surf->metadata().content == SurfaceContent::EarlyExercisePremium ? "EEP" : "RawPrice");
+                    surf->metadata().content == SurfaceContent::EarlyExercisePremium ? "EEP" : "NormalizedPrice");
         std::printf("  K_ref: %.2f\n", surf->metadata().K_ref);
 
         // Check if this differs from the direct batch solve

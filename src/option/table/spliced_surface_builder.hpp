@@ -20,9 +20,7 @@ struct SegmentConfig {
 
 struct SegmentedConfig {
     std::vector<SegmentConfig> segments;
-    std::vector<Dividend> dividends;
     double K_ref;
-    double T;  // expiry in calendar time
 };
 
 [[nodiscard]] std::expected<SegmentedSurface<>, PriceTableError>
@@ -37,16 +35,7 @@ struct MultiKRefEntry {
     SegmentedSurface<> surface;
 };
 
-struct StrikeEntry {
-    double strike;
-    SegmentedSurface<> surface;
-};
-
 [[nodiscard]] std::expected<MultiKRefSurface<>, PriceTableError>
 build_multi_kref_surface(std::vector<MultiKRefEntry> entries);
-
-[[nodiscard]] std::expected<StrikeSurface<>, PriceTableError>
-build_strike_surface(std::vector<StrikeEntry> entries,
-                     bool use_nearest = true);
 
 }  // namespace mango

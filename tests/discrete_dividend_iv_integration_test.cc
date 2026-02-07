@@ -103,7 +103,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
 
 TEST_F(DiscreteDividendIVIntegrationTest, DISABLED_ITMPutIVRoundTrip) {
     // ITM put: strike=110, vol=0.20 at various maturities
-    // Regression: spot adjustment must NOT apply to RawPrice (chained) segments
+    // Regression: spot adjustment must NOT apply to NormalizedPrice (chained) segments
     // DISABLED: moneyness=0.909 with $2 dividend pushes into IV failure region
     //   where American vega → 0 and interpolation cannot recover IV (#352)
     for (double tau : {1.0, 0.8, 0.6}) {

@@ -28,14 +28,14 @@ AmericanPriceSurface::create(
 
     const auto& meta = eep_surface->metadata();
     if (meta.content != SurfaceContent::EarlyExercisePremium &&
-        meta.content != SurfaceContent::RawPrice) {
+        meta.content != SurfaceContent::NormalizedPrice) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidBounds, 0.0, 0});
     }
 
     // Discrete dividends are not supported by either content type currently.
     // EEP decomposition assumes continuous dividend yield only;
-    // RawPrice surfaces with discrete dividends require jump-condition handling
+    // NormalizedPrice surfaces with discrete dividends require jump-condition handling
     // that is not yet implemented.
     if (!meta.dividends.discrete_dividends.empty()) {
         return std::unexpected(ValidationError{
@@ -53,8 +53,8 @@ AmericanPriceSurface::create(
 
 double AmericanPriceSurface::price(double spot, double strike, double tau,
                                    double sigma, double rate) const {
-    if (surface_->metadata().content == SurfaceContent::RawPrice) {
-        assert(strike == K_ref_ && "RawPrice surfaces require strike == K_ref");
+    if (surface_->metadata().content == SurfaceContent::NormalizedPrice) {
+        assert(strike == K_ref_ && "NormalizedPrice surfaces require strike == K_ref");
         double x = std::log(spot / K_ref_);
         return surface_->value({x, tau, sigma, rate});
     }
@@ -94,8 +94,8 @@ double AmericanPriceSurface::gamma(double spot, double strike, double tau,
 
 double AmericanPriceSurface::vega(double spot, double strike, double tau,
                                   double sigma, double rate) const {
-    if (surface_->metadata().content == SurfaceContent::RawPrice) {
-        // Compute FD vega for RawPrice surfaces
+    if (surface_->metadata().content == SurfaceContent::NormalizedPrice) {
+        // Compute FD vega for NormalizedPrice surfaces
         constexpr double eps = 1e-4;
         double up = price(spot, strike, tau, sigma + eps, rate);
         double dn = price(spot, strike, tau, sigma - eps, rate);

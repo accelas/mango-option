@@ -22,14 +22,12 @@ build_segmented_surface(SegmentedConfig config) {
     std::vector<double> tau_end;
     std::vector<double> tau_min;
     std::vector<double> tau_max;
-    std::vector<SurfaceContent> content;
     std::vector<AmericanPriceSurfaceAdapter> slices;
 
     tau_start.reserve(config.segments.size());
     tau_end.reserve(config.segments.size());
     tau_min.reserve(config.segments.size());
     tau_max.reserve(config.segments.size());
-    content.reserve(config.segments.size());
     slices.reserve(config.segments.size());
 
     for (auto& seg : config.segments) {
@@ -37,7 +35,6 @@ build_segmented_surface(SegmentedConfig config) {
         tau_end.push_back(seg.tau_end);
         tau_min.push_back(seg.surface.tau_min());
         tau_max.push_back(seg.surface.tau_max());
-        content.push_back(seg.surface.metadata().content);
         slices.emplace_back(std::move(seg.surface));
     }
 
@@ -49,10 +46,7 @@ build_segmented_surface(SegmentedConfig config) {
         .tau_start = std::move(tau_start),
         .tau_min = std::move(tau_min),
         .tau_max = std::move(tau_max),
-        .content = std::move(content),
-        .dividends = std::move(config.dividends),
         .K_ref = config.K_ref,
-        .T = config.T
     };
 
     WeightedSum combiner;
@@ -102,43 +96,6 @@ build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
     WeightedSum combiner;
 
     return MultiKRefSurface<>(
-        std::move(slices),
-        std::move(bracket),
-        std::move(xform),
-        std::move(combiner));
-}
-
-// ===========================================================================
-// Per-strike surface builder
-// ===========================================================================
-
-std::expected<StrikeSurface<>, PriceTableError>
-build_strike_surface(std::vector<StrikeEntry> entries, bool use_nearest) {
-    if (entries.empty()) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::InvalidConfig, 0, 0});
-    }
-
-    std::sort(entries.begin(), entries.end(),
-              [](const StrikeEntry& a, const StrikeEntry& b) {
-                  return a.strike < b.strike;
-              });
-
-    std::vector<double> strikes;
-    std::vector<SegmentedSurface<>> slices;
-    strikes.reserve(entries.size());
-    slices.reserve(entries.size());
-
-    for (auto& entry : entries) {
-        strikes.push_back(entry.strike);
-        slices.push_back(std::move(entry.surface));
-    }
-
-    StrikeTransform xform{.strikes = strikes};
-    StrikeBracket bracket(std::move(strikes), use_nearest);
-    WeightedSum combiner;
-
-    return StrikeSurface<>(
         std::move(slices),
         std::move(bracket),
         std::move(xform),

@@ -131,7 +131,7 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackConsistency) {
     }
 }
 
-TEST(PriceTable4DIntegrationTest, FastPathVsFallbackRawPriceEquivalence) {
+TEST(PriceTable4DIntegrationTest, FastPathVsFallbackNormalizedPriceEquivalence) {
     // REGRESSION TEST: Compare raw precomputed prices (not interpolated)
     // This test ensures fast path and fallback produce identical numerical results
     // at every grid point. If this test fails after code changes, it indicates

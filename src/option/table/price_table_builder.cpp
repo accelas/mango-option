@@ -432,8 +432,8 @@ PriceTableBuilder<N>::extract_tensor(
                         double normalized_price = spline.eval(axes.grids[0][i]);
                         double american_price = K_ref * normalized_price;
 
-                        if (surface_content_ == SurfaceContent::RawPrice) {
-                            // RawPrice mode: store price as function of moneyness
+                        if (surface_content_ == SurfaceContent::NormalizedPrice) {
+                            // NormalizedPrice mode: store price as function of moneyness
                             // Divide by K_ref so the surface is scale-invariant
                             tensor.view[i, j, σ_idx, r_idx] = normalized_price;
                         } else {

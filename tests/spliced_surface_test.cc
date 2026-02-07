@@ -444,10 +444,7 @@ TEST(UnifiedTypeAliasTest, SegmentedSurfaceInstantiates) {
         .tau_start = {0.0, 0.5},
         .tau_min = {0.0, 0.0},
         .tau_max = {0.5, 0.5},
-        .content = {SurfaceContent::EarlyExercisePremium, SurfaceContent::EarlyExercisePremium},
-        .dividends = {},
         .K_ref = 100.0,
-        .T = 1.0
     };
     WeightedSum combine;
 

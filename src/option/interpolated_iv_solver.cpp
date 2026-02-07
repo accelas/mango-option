@@ -24,7 +24,6 @@ namespace mango {
 
 template class InterpolatedIVSolver<AmericanPriceSurface>;
 template class InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>;
-template class InterpolatedIVSolver<StrikeSurfaceWrapper<>>;
 
 // =====================================================================
 // Factory internals
@@ -129,10 +128,6 @@ AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver)
 {}
 
 AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver)
-    : solver_(std::move(solver))
-{}
-
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<StrikeSurfaceWrapper<>> solver)
     : solver_(std::move(solver))
 {}
 
@@ -244,31 +239,6 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
 // Factory: segmented path helpers
 // ---------------------------------------------------------------------------
 
-/// Wrap a StrikeSurface into AnyIVSolver
-static std::expected<AnyIVSolver, ValidationError>
-wrap_strike_surface(StrikeSurface<> surface,
-                    const GridBounds& b, double maturity,
-                    OptionType option_type, double dividend_yield,
-                    const InterpolatedIVSolverConfig& solver_config) {
-    StrikeSurfaceWrapper<>::Bounds bounds{
-        .m_min = b.m_min, .m_max = b.m_max,
-        .tau_min = 0.0, .tau_max = maturity,
-        .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
-        .rate_min = b.rate_min, .rate_max = b.rate_max,
-    };
-
-    auto wrapper = StrikeSurfaceWrapper<>(
-        std::move(surface), bounds, option_type, dividend_yield);
-
-    auto solver = InterpolatedIVSolver<StrikeSurfaceWrapper<>>::create(
-        std::move(wrapper), solver_config);
-    if (!solver.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-    return AnyIVSolver(std::move(*solver));
-}
-
 /// Wrap a MultiKRefSurface into AnyIVSolver
 static std::expected<AnyIVSolver, ValidationError>
 wrap_multi_kref_surface(MultiKRefSurface<> surface,
@@ -294,61 +264,14 @@ wrap_multi_kref_surface(MultiKRefSurface<> surface,
     return AnyIVSolver(std::move(*solver));
 }
 
-/// Build per-strike surface manually (no adaptive grid)
-static std::expected<StrikeSurface<>, ValidationError>
-build_manual_strike_surface(const IVSolverFactoryConfig& config,
-                            const SegmentedIVPath& path,
-                            const std::vector<double>& strikes,
-                            const IVGrid& log_grid) {
-    DividendSpec dividends{
-        .dividend_yield = config.dividend_yield,
-        .discrete_dividends = path.discrete_dividends
-    };
-
-    std::vector<StrikeEntry> entries;
-    entries.reserve(strikes.size());
-    for (double strike : strikes) {
-        SegmentedPriceTableBuilder::Config seg_config{
-            .K_ref = strike,
-            .option_type = config.option_type,
-            .dividends = dividends,
-            .grid = log_grid,
-            .maturity = path.maturity,
-            .tau_points_per_segment = 5,
-        };
-
-        auto surface = SegmentedPriceTableBuilder::build(seg_config);
-        if (!surface.has_value()) {
-            return std::unexpected(ValidationError{
-                ValidationErrorCode::InvalidGridSize, 0.0});
-        }
-
-        entries.push_back(StrikeEntry{
-            .strike = strike,
-            .surface = std::move(*surface),
-        });
-    }
-
-    auto surface = build_strike_surface(std::move(entries), /*use_nearest=*/true);
-    if (!surface.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-    return std::move(*surface);
-}
-
 // ---------------------------------------------------------------------------
 // Factory: segmented path (discrete dividends)
 // ---------------------------------------------------------------------------
 
 static std::expected<AnyIVSolver, ValidationError>
 build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path) {
-    MultiKRefConfig kref_config = path.kref_config;
+    const auto& kref_config = path.kref_config;
     const auto& grid = config.grid;
-    const bool use_per_strike = !path.strike_grid.empty();
-    if (use_per_strike) {
-        kref_config.K_refs = path.strike_grid;
-    }
 
     auto log_m = to_log_moneyness(grid.moneyness);
     if (!log_m.has_value()) {
@@ -370,19 +293,6 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
             .kref_config = kref_config,
         };
 
-        if (use_per_strike) {
-            auto result = builder.build_segmented_strike(
-                seg_config, path.strike_grid,
-                {log_grid.moneyness, log_grid.vol, log_grid.rate});
-            if (!result.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidGridSize, 0.0});
-            }
-            return wrap_strike_surface(std::move(result->surface),
-                b, path.maturity, config.option_type,
-                config.dividend_yield, config.solver_config);
-        }
-
         auto result = builder.build_segmented(
             seg_config, {log_grid.moneyness, log_grid.vol, log_grid.rate});
         if (!result.has_value()) {
@@ -390,18 +300,6 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
                 ValidationErrorCode::InvalidGridSize, 0.0});
         }
         return wrap_multi_kref_surface(std::move(result->surface),
-            b, path.maturity, config.option_type,
-            config.dividend_yield, config.solver_config);
-    }
-
-    // Manual grid path
-    if (use_per_strike) {
-        auto surface = build_manual_strike_surface(
-            config, path, kref_config.K_refs, log_grid);
-        if (!surface.has_value()) {
-            return std::unexpected(surface.error());
-        }
-        return wrap_strike_surface(std::move(*surface),
             b, path.maturity, config.option_type,
             config.dividend_yield, config.solver_config);
     }

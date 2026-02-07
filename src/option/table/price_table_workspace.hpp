@@ -193,7 +193,7 @@ private:
     double dividend_yield_ = 0.0;
     double m_min_ = 0.0;  // Log-moneyness bounds ln(S/K)
     double m_max_ = 0.0;
-    uint8_t surface_content_ = 0;  // 0 = RawPrice (default)
+    uint8_t surface_content_ = 0;  // 0 = NormalizedPrice (default)
 };
 
 }  // namespace mango

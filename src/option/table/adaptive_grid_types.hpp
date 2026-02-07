@@ -114,11 +114,4 @@ struct SegmentedAdaptiveResult {
     int tau_points_per_segment;
 };
 
-/// Result from adaptive segmented grid building (per-strike path)
-struct StrikeAdaptiveResult {
-    StrikeSurface<> surface;
-    IVGrid grid;  ///< The grid sizes adaptive chose
-    int tau_points_per_segment;
-};
-
 }  // namespace mango
