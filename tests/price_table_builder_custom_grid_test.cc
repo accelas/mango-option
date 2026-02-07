@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
+#include <cmath>
 #include "mango/option/table/price_table_builder.hpp"
 #include "tests/price_table_builder_test_access.hpp"
 #include "mango/pde/core/time_domain.hpp"
@@ -23,7 +24,7 @@ TEST(PriceTableBuilderCustomGridTest, CustomGridWithNormalizedCase) {
     PriceTableBuilder<4> builder(config);
 
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.9, 1.0, 1.1, 1.2};     // moneyness: 4 points
+    axes.grids[0] = {std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};  // log-moneyness: 4 points
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};   // maturity: 4 points
     axes.grids[2] = {0.20, 0.25};             // volatility: 2 points
     axes.grids[3] = {0.05, 0.06};             // rate: 2 points
@@ -126,7 +127,7 @@ TEST(PriceTableBuilderCustomGridTest, VerifyNormalizedBatchConditions) {
     PriceTableBuilder<4> builder(config);
 
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.9, 1.0, 1.1, 1.2};
+    axes.grids[0] = {std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.20};
     axes.grids[3] = {0.05};
@@ -168,12 +169,14 @@ TEST(PriceTableBuilderCustomGridTest, VerifyNormalizedBatchConditions) {
 // sized the domain solely from n_sigma * σ√T.  Wide moneyness axes could
 // fall outside the PDE grid, causing extrapolation failures in extract_tensor.
 TEST(PriceTableBuilderCustomGridTest, AutoGridCoversWideMoneyness) {
-    // Wide moneyness with LOW vol and SHORT maturity to trigger the bug.
-    // m ∈ [0.5, 2.0] → log(m) ∈ [-0.69, 0.69]
+    // Wide log-moneyness with LOW vol and SHORT maturity to trigger the bug.
+    // ln(m) ∈ [-0.69, 0.69]
     // All σ ≤ 0.15, T ≤ 0.25 → max(σ√T) = 0.15 * √0.25 = 0.075
     // Without fix: n_sigma=5 → half-width = 0.375, does NOT cover |-0.69|.
     // With fix: n_sigma bumped to ≥ (0.69/0.075)*1.1 ≈ 10.1
-    std::vector<double> moneyness = {0.5, 0.7, 0.85, 1.0, 1.15, 1.3, 1.5, 2.0};
+    std::vector<double> log_moneyness = {
+        std::log(0.5), std::log(0.7), std::log(0.85), std::log(1.0),
+        std::log(1.15), std::log(1.3), std::log(1.5), std::log(2.0)};
     std::vector<double> maturity = {0.04, 0.08, 0.17, 0.25};
     std::vector<double> volatility = {0.10, 0.12, 0.14, 0.15};  // All small
     std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
@@ -182,7 +185,7 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridCoversWideMoneyness) {
     accuracy.tol = 1e-2;  // Fast mode for test speed
 
     auto setup = PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, volatility, rate,
+        log_moneyness, maturity, volatility, rate,
         100.0,                    // K_ref
         accuracy,                 // auto-estimated PDE grid
         OptionType::PUT,
@@ -208,21 +211,21 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridCoversWideMoneyness) {
     auto& surface = result->surface;
     ASSERT_NE(surface, nullptr);
 
-    // Deep ITM put (m=0.5 → spot/strike=0.5 → strike >> spot): high price
-    double deep_itm = surface->value({0.5, 0.17, 0.14, 0.05});
+    // Deep ITM put (ln(0.5) → spot/strike=0.5 → strike >> spot): high price
+    double deep_itm = surface->value({std::log(0.5), 0.17, 0.14, 0.05});
     EXPECT_GT(deep_itm, 0.0) << "Deep ITM put should have positive price";
     EXPECT_FALSE(std::isnan(deep_itm)) << "Deep ITM should not be NaN";
 
-    // Deep OTM put (m=2.0 → spot/strike=2.0 → spot >> strike): near zero
+    // Deep OTM put (ln(2.0) → spot/strike=2.0 → spot >> strike): near zero
     // Debiased softplus can produce tiny negative values (~1e-34) due to FP precision
-    double deep_otm = surface->value({2.0, 0.17, 0.14, 0.05});
+    double deep_otm = surface->value({std::log(2.0), 0.17, 0.14, 0.05});
     EXPECT_GE(deep_otm, -1e-10) << "Put price should be non-negative (within FP tolerance)";
     EXPECT_FALSE(std::isnan(deep_otm)) << "Deep OTM should not be NaN";
 }
 
 // Verify GridAccuracyParams in PriceTableConfig actually drives grid choice
 TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
-    std::vector<double> moneyness = {0.9, 0.95, 1.0, 1.05, 1.1};
+    std::vector<double> log_moneyness = {std::log(0.9), std::log(0.95), std::log(1.0), std::log(1.05), std::log(1.1)};
     std::vector<double> maturity = {0.25, 0.5, 0.75, 1.0};
     std::vector<double> volatility = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
@@ -234,7 +237,7 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
     coarse.max_spatial_points = 51;
 
     auto setup_coarse = PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, volatility, rate,
+        log_moneyness, maturity, volatility, rate,
         100.0, coarse, OptionType::PUT, 0.02, 0.0);
 
     ASSERT_TRUE(setup_coarse.has_value());
@@ -249,7 +252,7 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
     fine.max_spatial_points = 401;
 
     auto setup_fine = PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, volatility, rate,
+        log_moneyness, maturity, volatility, rate,
         100.0, fine, OptionType::PUT, 0.02, 0.0);
 
     ASSERT_TRUE(setup_fine.has_value());
@@ -261,9 +264,9 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
     EXPECT_EQ(result_coarse->failed_pde_slices, 0);
     EXPECT_EQ(result_fine->failed_pde_slices, 0);
 
-    // ATM put prices from both
-    double price_coarse = result_coarse->surface->value({1.0, 0.5, 0.20, 0.05});
-    double price_fine   = result_fine->surface->value({1.0, 0.5, 0.20, 0.05});
+    // ATM put prices from both (log-moneyness 0.0 = ATM)
+    double price_coarse = result_coarse->surface->value({0.0, 0.5, 0.20, 0.05});
+    double price_fine   = result_fine->surface->value({0.0, 0.5, 0.20, 0.05});
 
     // Both should be reasonable ATM put prices
     EXPECT_GT(price_coarse, 0.0);
@@ -287,14 +290,16 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
     auto coarse_grid = GridSpec<double>::uniform(-1.0, 1.0, 21).value();
     PDEGridConfig explicit_pde{coarse_grid, 200};
 
-    // Wide moneyness + low vol/short maturity (same scenario as AutoGridCoversWideMoneyness)
-    std::vector<double> moneyness = {0.5, 0.7, 0.85, 1.0, 1.15, 1.3, 1.5, 2.0};
+    // Wide log-moneyness + low vol/short maturity (same scenario as AutoGridCoversWideMoneyness)
+    std::vector<double> log_moneyness = {
+        std::log(0.5), std::log(0.7), std::log(0.85), std::log(1.0),
+        std::log(1.15), std::log(1.3), std::log(1.5), std::log(2.0)};
     std::vector<double> maturity = {0.04, 0.08, 0.17, 0.25};
     std::vector<double> volatility = {0.10, 0.12, 0.14, 0.15};
     std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
 
     auto setup = PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, volatility, rate,
+        log_moneyness, maturity, volatility, rate,
         100.0,
         explicit_pde,             // triggers fallback due to coarse spacing
         OptionType::PUT,
@@ -327,11 +332,11 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
     auto& surface = result->surface;
     ASSERT_NE(surface, nullptr);
 
-    double deep_itm = surface->value({0.5, 0.17, 0.14, 0.05});
+    double deep_itm = surface->value({std::log(0.5), 0.17, 0.14, 0.05});
     EXPECT_GT(deep_itm, 0.0);
     EXPECT_FALSE(std::isnan(deep_itm));
 
-    double deep_otm = surface->value({2.0, 0.17, 0.14, 0.05});
+    double deep_otm = surface->value({std::log(2.0), 0.17, 0.14, 0.05});
     EXPECT_GE(deep_otm, 0.0);
     EXPECT_FALSE(std::isnan(deep_otm));
 }

@@ -23,7 +23,7 @@ namespace {
 TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     // Grid covering a modest range for the price table
     // Each axis needs >= 4 points for B-spline fitting
-    std::vector<double> moneyness = {0.90, 0.95, 1.00, 1.05, 1.10};
+    std::vector<double> log_moneyness = {std::log(0.90), std::log(0.95), std::log(1.00), std::log(1.05), std::log(1.10)};
     std::vector<double> maturity  = {0.25, 0.50, 0.75, 1.00};
     std::vector<double> vol       = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rate      = {0.02, 0.03, 0.04, 0.05};
@@ -32,7 +32,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
 
     // Build with auto-estimated PDE grid (always produces EEP surface)
     auto setup = PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, vol, rate, K_ref,
+        log_moneyness, maturity, vol, rate, K_ref,
         GridAccuracyParams{},   // auto-estimate PDE grid
         OptionType::PUT,
         0.0,   // dividend_yield
@@ -99,7 +99,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
 /// The softplus floor in extract_tensor should guarantee this.
 TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
     // Small grid — each axis needs >= 4 points for B-spline fitting
-    std::vector<double> moneyness = {0.90, 0.95, 1.00, 1.10};
+    std::vector<double> log_moneyness = {std::log(0.90), std::log(0.95), std::log(1.00), std::log(1.10)};
     std::vector<double> maturity  = {0.25, 0.50, 0.75, 1.00};
     std::vector<double> vol       = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rate      = {0.02, 0.03, 0.04, 0.05};
@@ -107,7 +107,7 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
     double K_ref = 100.0;
 
     auto setup = PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, vol, rate, K_ref,
+        log_moneyness, maturity, vol, rate, K_ref,
         GridAccuracyParams{},
         OptionType::PUT,
         0.0,   // dividend_yield

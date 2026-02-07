@@ -5,6 +5,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <cmath>
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
@@ -19,7 +20,7 @@ namespace {
 class InterpolatedIVSolverTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
+        std::vector<double> m_grid = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
         std::vector<double> tau_grid = {0.25, 0.5, 1.0, 2.0};
         std::vector<double> vol_grid = {0.10, 0.20, 0.30, 0.40};
         std::vector<double> rate_grid = {0.02, 0.04, 0.06, 0.08};
@@ -211,9 +212,9 @@ TEST_F(InterpolatedIVSolverTest, ConvergenceWithinIterations) {
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveWithAmericanPriceSurface) {
-    // Build an EEP surface
+    // Build an EEP surface (axis 0 is log-moneyness)
     PriceTableAxes<4> eep_axes;
-    eep_axes.grids[0] = {0.8, 0.9, 1.0, 1.1, 1.2};
+    eep_axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     eep_axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
     eep_axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
     eep_axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
@@ -221,8 +222,8 @@ TEST_F(InterpolatedIVSolverTest, SolveWithAmericanPriceSurface) {
     std::vector<double> eep_coeffs(5 * 4 * 4 * 4, 2.0);
     PriceTableMetadata eep_meta{
         .K_ref = 100.0,
-        .m_min = 0.8,
-        .m_max = 1.2,
+        .m_min = std::log(0.8),
+        .m_max = std::log(1.2),
         .content = SurfaceContent::EarlyExercisePremium,
     };
 
@@ -264,8 +265,8 @@ TEST_F(InterpolatedIVSolverTest, StandardAliasMatchesExplicitTemplate) {
 // Regression: InterpolatedIVSolver must reject queries with wrong option type
 // Bug: solve() accepted any IVQuery regardless of type, returning wrong IV
 TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
-    // Build an EEP surface for PUT options
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
+    // Build an EEP surface for PUT options (log-moneyness)
+    std::vector<double> m_grid = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     std::vector<double> tau_grid = {0.25, 0.5, 1.0, 2.0};
     std::vector<double> vol_grid = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> rate_grid = {0.02, 0.04, 0.06, 0.08};
@@ -299,8 +300,8 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
 // Bug: AmericanPriceSurface bakes in dividend_yield at construction; callers
 // with a different yield got wrong prices silently
 TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
-    // Build surface with dividend_yield = 0.02
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
+    // Build surface with dividend_yield = 0.02 (log-moneyness)
+    std::vector<double> m_grid = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     std::vector<double> tau_grid = {0.25, 0.5, 1.0, 2.0};
     std::vector<double> vol_grid = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> rate_grid = {0.02, 0.04, 0.06, 0.08};

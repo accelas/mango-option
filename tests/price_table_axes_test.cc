@@ -1,29 +1,30 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/table/price_table_axes.hpp"
+#include <cmath>
 
 namespace mango {
 namespace {
 
 TEST(PriceTableAxesTest, Create4DAxes) {
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    axes.grids[0] = {std::log(0.7), std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2), std::log(1.3)};
     axes.grids[1] = {0.027, 0.1, 0.5, 1.0, 2.0};
     axes.grids[2] = {0.10, 0.20, 0.30};
     axes.grids[3] = {0.0, 0.05, 0.10};
 
-    axes.names[0] = "moneyness";
+    axes.names[0] = "log_moneyness";
     axes.names[1] = "maturity";
     axes.names[2] = "volatility";
     axes.names[3] = "rate";
 
     EXPECT_EQ(axes.grids[0].size(), 7);
-    EXPECT_EQ(axes.names[0], "moneyness");
+    EXPECT_EQ(axes.names[0], "log_moneyness");
 }
 
 TEST(PriceTableAxesTest, TotalGridPoints) {
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.7, 0.8, 0.9, 1.0};  // 4 points
+    axes.grids[0] = {std::log(0.7), std::log(0.8), std::log(0.9), std::log(1.0)};  // 4 points
     axes.grids[1] = {0.1, 0.5};            // 2 points
     axes.grids[2] = {0.10, 0.20, 0.30};    // 3 points
     axes.grids[3] = {0.0, 0.05};           // 2 points

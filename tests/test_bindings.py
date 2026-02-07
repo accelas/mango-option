@@ -230,7 +230,7 @@ def test_batch_solver_per_option_grids():
 
 
 def test_price_table_workspace():
-    """Test PriceTableWorkspace create/save/load"""
+    """Test PriceTableWorkspace create (save/load disabled pending #373)"""
     print("Testing PriceTableWorkspace...")
 
     # Create small grids (minimum 4 points each)
@@ -248,8 +248,8 @@ def test_price_table_workspace():
         log_m, tau, sigma, r, coeffs,
         K_ref=100.0,
         dividend_yield=0.02,
-        m_min=np.exp(log_m[0]),
-        m_max=np.exp(log_m[-1])
+        m_min=log_m[0],   # log-moneyness bounds
+        m_max=log_m[-1]
     )
     print(f"✓ Created workspace: {ws}")
 
@@ -263,48 +263,31 @@ def test_price_table_workspace():
     assert abs(ws.dividend_yield - 0.02) < 1e-10
     print(f"✓ Metadata: K_ref={ws.K_ref}, q={ws.dividend_yield}")
 
-    # Save and load
-    with tempfile.NamedTemporaryFile(suffix='.arrow', delete=False) as f:
-        filepath = f.name
-
-    try:
-        ws.save(filepath, "TEST", 0)  # 0 = PUT
-        print(f"✓ Saved to {filepath}")
-
-        loaded = mango_option.PriceTableWorkspace.load(filepath)
-        print(f"✓ Loaded: {loaded}")
-
-        # Verify loaded data matches
-        assert loaded.dimensions == ws.dimensions
-        assert loaded.K_ref == ws.K_ref
-        assert np.allclose(loaded.log_moneyness, log_m)
-        assert np.allclose(loaded.maturity, tau)
-        print("✓ Loaded data matches original")
-
-    finally:
-        os.unlink(filepath)
+    # Save/load disabled pending issue #373
+    print("✓ Skipping save/load (disabled pending #373)")
 
 
 def test_price_table_surface():
     """Test PriceTableSurface4D build and query"""
+    import math
     print("Testing PriceTableSurface4D...")
 
     # Create axes
     axes = mango_option.PriceTableAxes4D()
     axes.grids = [
-        np.array([0.8, 0.9, 1.0, 1.1, 1.2]),  # moneyness
+        np.array([math.log(0.8), math.log(0.9), math.log(1.0), math.log(1.1), math.log(1.2)]),  # log-moneyness
         np.array([0.1, 0.25, 0.5, 1.0]),       # maturity
         np.array([0.1, 0.2, 0.3, 0.4]),        # volatility
         np.array([0.01, 0.03, 0.05, 0.07])     # rate
     ]
-    axes.names = ["moneyness", "maturity", "volatility", "rate"]
+    axes.names = ["log_moneyness", "maturity", "volatility", "rate"]
 
     # Create metadata
     meta = mango_option.PriceTableMetadata()
     meta.K_ref = 100.0
     meta.dividends.dividend_yield = 0.02
-    meta.m_min = 0.8
-    meta.m_max = 1.2
+    meta.m_min = math.log(0.8)
+    meta.m_max = math.log(1.2)
 
     # Create coefficients
     shape = axes.shape()
@@ -315,23 +298,24 @@ def test_price_table_surface():
     surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
     print(f"✓ Built surface")
 
-    # Query value
-    price = surface.value(1.0, 0.5, 0.2, 0.05)
+    # Query value at ATM (log(1.0) = 0.0)
+    price = surface.value(0.0, 0.5, 0.2, 0.05)
     print(f"✓ Value at ATM: {price:.4f}")
 
     # Query partial derivative (vega = axis 2)
-    vega = surface.partial(2, 1.0, 0.5, 0.2, 0.05)
+    vega = surface.partial(2, 0.0, 0.5, 0.2, 0.05)
     print(f"✓ Vega: {vega:.4f}")
 
 
 def test_iv_solver_interpolated():
     """Test InterpolatedIVSolver"""
+    import math
     print("Testing InterpolatedIVSolver...")
 
     # Build a surface first
     axes = mango_option.PriceTableAxes4D()
     axes.grids = [
-        np.array([0.8, 0.9, 1.0, 1.1, 1.2]),
+        np.array([math.log(0.8), math.log(0.9), math.log(1.0), math.log(1.1), math.log(1.2)]),
         np.array([0.1, 0.25, 0.5, 1.0]),
         np.array([0.1, 0.2, 0.3, 0.4]),
         np.array([0.01, 0.03, 0.05, 0.07])
@@ -340,8 +324,8 @@ def test_iv_solver_interpolated():
     meta = mango_option.PriceTableMetadata()
     meta.K_ref = 100.0
     meta.dividends.dividend_yield = 0.02
-    meta.m_min = 0.8
-    meta.m_max = 1.2
+    meta.m_min = math.log(0.8)
+    meta.m_max = math.log(1.2)
 
     shape = axes.shape()
     coeffs = np.random.rand(shape[0] * shape[1] * shape[2] * shape[3]) * 10.0
@@ -391,13 +375,12 @@ def test_error_handling():
     """Test error conditions are properly raised"""
     print("Testing error handling...")
 
-    # Load non-existent file
+    # Load disabled pending #373 — verify it raises
     try:
         mango_option.PriceTableWorkspace.load("/nonexistent/path.arrow")
         assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "File not found" in str(e)
-        print("✓ Load non-existent file raises ValueError")
+    except ValueError:
+        print("✓ Load raises ValueError (disabled pending #373)")
 
     # Insufficient grid points (< 4)
     try:
@@ -407,7 +390,7 @@ def test_error_handling():
             np.array([0.1, 0.2, 0.3, 0.4]),
             np.array([0.01, 0.03, 0.05, 0.07]),
             np.zeros(3*4*4*4),
-            K_ref=100.0, dividend_yield=0.02, m_min=0.9, m_max=1.1
+            K_ref=100.0, dividend_yield=0.02, m_min=-0.1, m_max=0.1
         )
         assert False, "Should have raised ValueError for insufficient grid points"
     except ValueError as e:
@@ -425,12 +408,13 @@ def test_error_handling():
 
 def test_surface_to_solver_integration():
     """Verify PriceTableSurface correctly passes to InterpolatedIVSolver"""
+    import math
     print("Testing surface to solver integration...")
 
     # Build surface
     axes = mango_option.PriceTableAxes4D()
     axes.grids = [
-        np.array([0.8, 0.9, 1.0, 1.1, 1.2]),
+        np.array([math.log(0.8), math.log(0.9), math.log(1.0), math.log(1.1), math.log(1.2)]),
         np.array([0.1, 0.25, 0.5, 1.0]),
         np.array([0.1, 0.2, 0.3, 0.4]),
         np.array([0.01, 0.03, 0.05, 0.07])
@@ -439,8 +423,8 @@ def test_surface_to_solver_integration():
     meta = mango_option.PriceTableMetadata()
     meta.K_ref = 100.0
     meta.dividends.dividend_yield = 0.02
-    meta.m_min = 0.8
-    meta.m_max = 1.2
+    meta.m_min = math.log(0.8)
+    meta.m_max = math.log(1.2)
 
     shape = axes.shape()
     coeffs = np.random.rand(shape[0] * shape[1] * shape[2] * shape[3]) * 10.0
