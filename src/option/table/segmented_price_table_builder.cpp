@@ -88,23 +88,17 @@ std::vector<Dividend> filter_dividends(
 
 /// Append an upper guard band sized by cubic-spline support in log-moneyness.
 ///
-/// The interpolation axis is log-moneyness. Appending 3 local knot intervals
-/// keeps the original upper domain away from clamped endpoint basis effects.
-void append_upper_tail_moneyness(std::vector<double>& grid,
-                                 double sigma_max,
-                                 double max_segment_width) {
-    if (grid.size() < 2) return;
+/// The interpolation axis is log-moneyness. Appending enough local knot
+/// intervals keeps the original upper domain away from clamped endpoint basis
+/// effects and adds one diffusion-length guard for the widest segment.
+void append_upper_tail_log_moneyness(std::vector<double>& log_grid,
+                                     double sigma_max,
+                                     double max_segment_width) {
+    if (log_grid.size() < 2) return;
 
-    std::sort(grid.begin(), grid.end());
-    grid.erase(std::unique(grid.begin(), grid.end()), grid.end());
-    if (grid.size() < 2) return;
-
-    std::vector<double> log_grid;
-    log_grid.reserve(grid.size());
-    for (double m : grid) {
-        if (m <= 0.0) return;
-        log_grid.push_back(std::log(m));
-    }
+    std::sort(log_grid.begin(), log_grid.end());
+    log_grid.erase(std::unique(log_grid.begin(), log_grid.end()), log_grid.end());
+    if (log_grid.size() < 2) return;
 
     const size_t n = log_grid.size();
     double h_upper = 0.0;
@@ -130,7 +124,7 @@ void append_upper_tail_moneyness(std::vector<double>& grid,
 
     const double x_max = log_grid.back();
     for (int i = 1; i <= tail_points; ++i) {
-        grid.push_back(std::exp(x_max + h_upper * static_cast<double>(i)));
+        log_grid.push_back(x_max + h_upper * static_cast<double>(i));
     }
 }
 
@@ -184,62 +178,71 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     const size_t n_segments = boundaries.size() - 1;
 
     // =====================================================================
-    // Step 3: Expand moneyness grid downward
+    // Step 3: Expand log-moneyness grid downward
     // =====================================================================
-    std::vector<double> expanded_m_grid = config.grid.moneyness;
-    if (!config.skip_moneyness_expansion) {
-        double total_div = 0.0;
-        for (const auto& div : dividends) {
-            total_div += div.amount;
-        }
-        double m_min_expanded = config.grid.moneyness.front() - total_div / K_ref;
-        if (m_min_expanded < 0.01) m_min_expanded = 0.01;
+    std::vector<double> expanded_log_m_grid = config.grid.moneyness;
+    std::sort(expanded_log_m_grid.begin(), expanded_log_m_grid.end());
+    expanded_log_m_grid.erase(
+        std::unique(expanded_log_m_grid.begin(), expanded_log_m_grid.end()),
+        expanded_log_m_grid.end());
 
-        if (m_min_expanded < expanded_m_grid.front()) {
-            // Insert extra points at the low end
-            double step = (expanded_m_grid.front() - m_min_expanded) / 3.0;
-            for (int i = 2; i >= 0; --i) {
-                double val = m_min_expanded + step * static_cast<double>(i);
-                if (val > 0.0 && val < expanded_m_grid.front()) {
-                    expanded_m_grid.insert(expanded_m_grid.begin(), val);
-                }
+    if (expanded_log_m_grid.size() < 2) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InsufficientGridPoints, 0});
+    }
+    if (!std::isfinite(expanded_log_m_grid.front()) ||
+        !std::isfinite(expanded_log_m_grid.back())) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    double total_div = 0.0;
+    for (const auto& div : dividends) {
+        total_div += div.amount;
+    }
+
+    // Expand lower side in moneyness-space, then map back to log-moneyness.
+    const double x_min = expanded_log_m_grid.front();
+    const double m_min = std::exp(x_min);
+    double m_min_expanded = std::max(m_min - total_div / K_ref, 0.01);
+    double x_min_expanded = std::log(m_min_expanded);
+
+    if (x_min_expanded < expanded_log_m_grid.front()) {
+        double step = (expanded_log_m_grid.front() - x_min_expanded) / 3.0;
+        for (int i = 2; i >= 0; --i) {
+            double x = x_min_expanded + step * static_cast<double>(i);
+            if (x < expanded_log_m_grid.front()) {
+                expanded_log_m_grid.insert(expanded_log_m_grid.begin(), x);
             }
         }
-
-        // Add right-tail headroom. Scale by one diffusion length in log-space
-        // (sigma_max * sqrt(max segment width)) and at least one cubic-support
-        // band so the original upper domain stays away from endpoint effects.
-        double sigma_max = *std::max_element(
-            config.grid.vol.begin(), config.grid.vol.end());
-        double max_segment_width = 0.0;
-        for (size_t i = 0; i + 1 < boundaries.size(); ++i) {
-            max_segment_width =
-                std::max(max_segment_width, boundaries[i + 1] - boundaries[i]);
-        }
-        append_upper_tail_moneyness(
-            expanded_m_grid, sigma_max, max_segment_width);
     }
-    // Always sort and deduplicate (even when expansion is skipped,
-    // the caller might pass unsorted or duplicate points)
-    std::sort(expanded_m_grid.begin(), expanded_m_grid.end());
-    expanded_m_grid.erase(
-        std::unique(expanded_m_grid.begin(), expanded_m_grid.end()),
-        expanded_m_grid.end());
 
-    // Ensure at least 4 moneyness points
-    if (expanded_m_grid.size() < 4) {
+    // Add right-tail headroom. Scale by one diffusion length in log-space
+    // (sigma_max * sqrt(max segment width)) and at least one cubic-support
+    // band so the original upper domain stays away from endpoint effects.
+    double sigma_max = *std::max_element(
+        config.grid.vol.begin(), config.grid.vol.end());
+    double max_segment_width = 0.0;
+    for (size_t i = 0; i + 1 < boundaries.size(); ++i) {
+        max_segment_width =
+            std::max(max_segment_width, boundaries[i + 1] - boundaries[i]);
+    }
+    append_upper_tail_log_moneyness(
+        expanded_log_m_grid, sigma_max, max_segment_width);
+
+    std::sort(expanded_log_m_grid.begin(), expanded_log_m_grid.end());
+    expanded_log_m_grid.erase(
+        std::unique(expanded_log_m_grid.begin(), expanded_log_m_grid.end()),
+        expanded_log_m_grid.end());
+
+    // Ensure at least 4 log-moneyness points
+    if (expanded_log_m_grid.size() < 4) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0});
     }
 
-    // Convert moneyness to log-moneyness for from_vectors() (only when
-    // grid came from user-facing IVGrid, not from adaptive builder)
-    if (!config.skip_moneyness_expansion) {
-        for (auto& m : expanded_m_grid) {
-            if (m <= 0.0) {
-                return std::unexpected(PriceTableError{
-                    PriceTableErrorCode::InvalidConfig});
-            }
-            m = std::log(m);
+    for (double x : expanded_log_m_grid) {
+        if (!std::isfinite(x)) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
         }
     }
 
@@ -273,7 +276,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
 
         // Build PriceTableBuilder for this segment
         auto setup = PriceTableBuilder<4>::from_vectors(
-            expanded_m_grid, local_tau, config.grid.vol, config.grid.rate,
+            expanded_log_m_grid, local_tau, config.grid.vol, config.grid.rate,
             K_ref, config.pde_accuracy, config.option_type,
             config.dividends.dividend_yield);
 

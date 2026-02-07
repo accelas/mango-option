@@ -4,8 +4,22 @@
 #include "mango/option/table/segmented_price_table_builder.hpp"
 #include "mango/option/table/spliced_surface.hpp"
 #include <cmath>
+#include <vector>
 
 using namespace mango;
+
+namespace {
+
+std::vector<double> log_m_grid(std::initializer_list<double> moneyness) {
+    std::vector<double> out;
+    out.reserve(moneyness.size());
+    for (double m : moneyness) {
+        out.push_back(std::log(m));
+    }
+    return out;
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Segment routing tests
@@ -21,7 +35,7 @@ TEST(SegmentedSurfaceTest, FindsCorrectSegment) {
             .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}
         },
         .grid = IVGrid{
-            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .moneyness = log_m_grid({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
         },
@@ -56,7 +70,7 @@ TEST(SegmentedSurfaceTest, BoundaryTauGoesToCorrectSegment) {
             .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}
         },
         .grid = IVGrid{
-            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .moneyness = log_m_grid({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
         },
@@ -86,7 +100,7 @@ TEST(SegmentedSurfaceTest, VegaIsPositive) {
             .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}
         },
         .grid = IVGrid{
-            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .moneyness = log_m_grid({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
         },
@@ -116,7 +130,7 @@ TEST(SegmentedSurfaceTest, BoundsSpanFullMaturityRange) {
             .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}
         },
         .grid = IVGrid{
-            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .moneyness = log_m_grid({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
         },
@@ -153,7 +167,7 @@ TEST(SegmentedSurfaceTest, MultipleDividendsCreateMultipleSegments) {
             }
         },
         .grid = IVGrid{
-            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .moneyness = log_m_grid({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
         },
@@ -187,7 +201,7 @@ TEST(SegmentedSurfaceTest, NoDividendsProducesSingleSegment) {
         .option_type = OptionType::PUT,
         .dividends = {.dividend_yield = 0.02},  // No discrete dividends
         .grid = IVGrid{
-            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .moneyness = log_m_grid({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
         },
@@ -218,7 +232,7 @@ TEST(SegmentedSurfaceTest, DividendAtExpiryIsIgnored) {
             .discrete_dividends = {{.calendar_time = 1.0, .amount = 5.0}}
         },
         .grid = IVGrid{
-            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .moneyness = log_m_grid({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
         },
@@ -239,7 +253,7 @@ TEST(SegmentedSurfaceTest, DividendAtTimeZeroIsIgnored) {
             .discrete_dividends = {{.calendar_time = 0.0, .amount = 3.0}}
         },
         .grid = IVGrid{
-            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .moneyness = log_m_grid({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
         },

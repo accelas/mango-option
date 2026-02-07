@@ -32,12 +32,26 @@ template class InterpolatedIVSolver<StrikeSurfaceWrapper<>>;
 
 namespace {
 
+std::expected<std::vector<double>, ValidationError>
+to_log_moneyness(const std::vector<double>& moneyness) {
+    std::vector<double> log_m;
+    log_m.reserve(moneyness.size());
+    for (double m : moneyness) {
+        if (m <= 0.0 || !std::isfinite(m)) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidBounds, m});
+        }
+        log_m.push_back(std::log(m));
+    }
+    return log_m;
+}
+
 /// Build a MultiKRefSurface<> for manual grid path
 std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_manual(
     double spot,
     OptionType option_type,
     const DividendSpec& dividends,
-    const IVGrid& grid,
+    const IVGrid& log_grid,
     double maturity,
     const MultiKRefConfig& kref_config)
 {
@@ -63,10 +77,9 @@ std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_manual(
             .K_ref = K_ref,
             .option_type = option_type,
             .dividends = dividends,
-            .grid = grid,
+            .grid = log_grid,
             .maturity = maturity,
             .tau_points_per_segment = 5,
-            .skip_moneyness_expansion = false,
         };
 
         auto surface = SegmentedPriceTableBuilder::build(seg_config);
@@ -203,18 +216,12 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
     }
 
     // Manual grid: build price table directly
-    // Convert moneyness to log-moneyness for from_vectors
-    std::vector<double> log_m;
-    log_m.reserve(config.grid.moneyness.size());
-    for (double m : config.grid.moneyness) {
-        if (m <= 0.0) {
-            return std::unexpected(ValidationError{
-                ValidationErrorCode::InvalidBounds, m});
-        }
-        log_m.push_back(std::log(m));
+    auto log_m = to_log_moneyness(config.grid.moneyness);
+    if (!log_m.has_value()) {
+        return std::unexpected(log_m.error());
     }
     auto setup = PriceTableBuilder<4>::from_vectors(
-        std::move(log_m), path.maturity_grid, config.grid.vol, config.grid.rate,
+        std::move(*log_m), path.maturity_grid, config.grid.vol, config.grid.rate,
         config.spot, GridAccuracyParams{}, config.option_type,
         config.dividend_yield);
     if (!setup.has_value()) {
@@ -291,7 +298,8 @@ wrap_multi_kref_surface(MultiKRefSurface<> surface,
 static std::expected<StrikeSurface<>, ValidationError>
 build_manual_strike_surface(const IVSolverFactoryConfig& config,
                             const SegmentedIVPath& path,
-                            const std::vector<double>& strikes) {
+                            const std::vector<double>& strikes,
+                            const IVGrid& log_grid) {
     DividendSpec dividends{
         .dividend_yield = config.dividend_yield,
         .discrete_dividends = path.discrete_dividends
@@ -304,10 +312,9 @@ build_manual_strike_surface(const IVSolverFactoryConfig& config,
             .K_ref = strike,
             .option_type = config.option_type,
             .dividends = dividends,
-            .grid = config.grid,
+            .grid = log_grid,
             .maturity = path.maturity,
             .tau_points_per_segment = 5,
-            .skip_moneyness_expansion = false,
         };
 
         auto surface = SegmentedPriceTableBuilder::build(seg_config);
@@ -343,6 +350,13 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
         kref_config.K_refs = path.strike_grid;
     }
 
+    auto log_m = to_log_moneyness(grid.moneyness);
+    if (!log_m.has_value()) {
+        return std::unexpected(log_m.error());
+    }
+    IVGrid log_grid = grid;
+    log_grid.moneyness = std::move(*log_m);
+
     auto b = extract_bounds(grid);
 
     if (config.adaptive.has_value()) {
@@ -359,7 +373,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
         if (use_per_strike) {
             auto result = builder.build_segmented_strike(
                 seg_config, path.strike_grid,
-                {grid.moneyness, grid.vol, grid.rate});
+                {log_grid.moneyness, log_grid.vol, log_grid.rate});
             if (!result.has_value()) {
                 return std::unexpected(ValidationError{
                     ValidationErrorCode::InvalidGridSize, 0.0});
@@ -370,7 +384,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
         }
 
         auto result = builder.build_segmented(
-            seg_config, {grid.moneyness, grid.vol, grid.rate});
+            seg_config, {log_grid.moneyness, log_grid.vol, log_grid.rate});
         if (!result.has_value()) {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::InvalidGridSize, 0.0});
@@ -382,7 +396,8 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
 
     // Manual grid path
     if (use_per_strike) {
-        auto surface = build_manual_strike_surface(config, path, kref_config.K_refs);
+        auto surface = build_manual_strike_surface(
+            config, path, kref_config.K_refs, log_grid);
         if (!surface.has_value()) {
             return std::unexpected(surface.error());
         }
@@ -398,7 +413,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
 
     auto surface = build_multi_kref_manual(
         config.spot, config.option_type, dividends,
-        grid, path.maturity, kref_config);
+        log_grid, path.maturity, kref_config);
     if (!surface.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});

@@ -25,7 +25,6 @@ namespace {
 // ============================================================================
 
 constexpr double kMinPositive = 1e-6;
-constexpr int kCubicSplineDegree = 3;
 
 /// Expand [lo, hi] to at least min_spread wide, keeping lo >= kMinPositive.
 void expand_bounds_positive(double& lo, double& hi, double min_spread) {
@@ -85,7 +84,6 @@ SegmentedPriceTableBuilder::Config make_seg_config(
         .grid = {.moneyness = m_grid, .vol = v_grid, .rate = r_grid},
         .maturity = config.maturity,
         .tau_points_per_segment = tau_pts,
-        .skip_moneyness_expansion = true,
     };
 }
 
@@ -179,72 +177,6 @@ std::vector<double> linspace(double lo, double hi, size_t n) {
     return v;
 }
 
-/// Max segment width in τ-space after splitting by discrete dividend dates.
-double compute_max_segment_width(const std::vector<Dividend>& dividends,
-                                 double maturity) {
-    std::vector<double> boundaries;
-    boundaries.push_back(0.0);
-    for (const auto& d : dividends) {
-        if (d.calendar_time > 0.0 && d.calendar_time < maturity && d.amount > 0.0) {
-            boundaries.push_back(maturity - d.calendar_time);
-        }
-    }
-    boundaries.push_back(maturity);
-    std::sort(boundaries.begin(), boundaries.end());
-    boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
-
-    double max_width = 0.0;
-    for (size_t i = 0; i + 1 < boundaries.size(); ++i) {
-        max_width = std::max(max_width, boundaries[i + 1] - boundaries[i]);
-    }
-    return max_width;
-}
-
-/// Append an upper guard band on the log-moneyness axis.
-///
-/// For clamped cubic B-splines, points within 3 knot intervals of the boundary
-/// use asymmetric endpoint basis functions and are more bias-prone. We preserve
-/// the original domain as an interior region by appending exactly one cubic
-/// support width (3 local intervals) and at least one diffusion length
-/// (sigma_max * sqrt(max_segment_width)) beyond the original upper bound.
-void append_upper_tail_log_moneyness(std::vector<double>& log_m_grid,
-                                     double sigma_max,
-                                     double max_segment_width) {
-    if (log_m_grid.size() < 2) return;
-
-    std::sort(log_m_grid.begin(), log_m_grid.end());
-    log_m_grid.erase(
-        std::unique(log_m_grid.begin(), log_m_grid.end()),
-        log_m_grid.end());
-    if (log_m_grid.size() < 2) return;
-
-    const size_t n = log_m_grid.size();
-    double h_upper = 0.0;
-    const size_t first = (n >= static_cast<size_t>(kCubicSplineDegree + 1))
-        ? (n - static_cast<size_t>(kCubicSplineDegree + 1))
-        : 0;
-    for (size_t i = first; i + 1 < n; ++i) {
-        h_upper = std::max(h_upper, log_m_grid[i + 1] - log_m_grid[i]);
-    }
-    if (!(h_upper > 0.0)) return;
-
-    const double support_headroom =
-        static_cast<double>(kCubicSplineDegree) * h_upper;
-    const double diffusion_headroom =
-        (sigma_max > 0.0 && max_segment_width > 0.0)
-        ? (sigma_max * std::sqrt(max_segment_width))
-        : 0.0;
-    const double required_headroom =
-        std::max(support_headroom, diffusion_headroom);
-    const int tail_points = std::max(
-        kCubicSplineDegree,
-        static_cast<int>(std::ceil(required_headroom / h_upper)));
-
-    const double x_max = log_m_grid.back();
-    for (int i = 1; i <= tail_points; ++i) {
-        log_m_grid.push_back(x_max + h_upper * static_cast<double>(i));
-    }
-}
 
 /// Seed a grid from user-provided knots, or fall back to linspace.
 /// Ensures domain endpoints are included and minimum 4 points for B-spline.
@@ -621,7 +553,7 @@ struct SegmentedBuildResult {
     SegmentedPriceTableBuilder::Config seg_template;
     MaxGridSizes gsz;
     // Domain bounds (needed for validation/retry)
-    double expanded_min_m, max_m;
+    double min_m, max_m;
     double min_vol, max_vol;
     double min_rate, max_rate;
     double min_tau, max_tau;
@@ -641,25 +573,27 @@ probe_and_build(
     auto probes = select_probes(ref_values, config.spot);
 
     // 2. Expand domain bounds
-    double total_div = total_discrete_dividends(config.discrete_dividends, config.maturity);
-    double ref_min = ref_values.front();
-    double expansion = (ref_min > 0.0) ? total_div / ref_min : 0.0;
-
     if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
-    double min_m_money = domain.moneyness.front();  // moneyness space
+    // Expand lower bound in moneyness-space to account for cumulative
+    // discrete-dividend spot shifts, then map back to log-moneyness.
+    double total_div = total_discrete_dividends(
+        config.discrete_dividends, config.maturity);
+    double ref_min = ref_values.front();
+    double expansion = (ref_min > 0.0) ? total_div / ref_min : 0.0;
+    double min_m_money = std::exp(domain.moneyness.front());
     double expanded_min_money = std::max(min_m_money - expansion, 0.01);
-    double expanded_min_m = std::log(expanded_min_money);
-    double max_m = std::log(domain.moneyness.back());
+    double min_m = std::log(expanded_min_money);
+    double max_m = domain.moneyness.back();
 
     double min_vol = domain.vol.front();
     double max_vol = domain.vol.back();
     double min_rate = domain.rate.front();
     double max_rate = domain.rate.back();
 
-    expand_bounds(expanded_min_m, max_m, 0.10);
+    expand_bounds(min_m, max_m, 0.10);
     expand_bounds_positive(min_vol, max_vol, 0.10);
     expand_bounds(min_rate, max_rate, 0.04);
 
@@ -736,7 +670,7 @@ probe_and_build(
             .spot = config.spot,
             .dividend_yield = config.dividend_yield,
             .option_type = config.option_type,
-            .min_moneyness = expanded_min_m,
+            .min_moneyness = min_m,
             .max_moneyness = max_m,
             .min_tau = min_tau,
             .max_tau = max_tau,
@@ -747,10 +681,7 @@ probe_and_build(
         };
 
         InitialGrids initial_grids;
-        initial_grids.moneyness.reserve(domain.moneyness.size());
-        for (double m : domain.moneyness) {
-            initial_grids.moneyness.push_back(std::log(m));
-        }
+        initial_grids.moneyness = domain.moneyness;
         initial_grids.vol = domain.vol;
         initial_grids.rate = domain.rate;
 
@@ -766,10 +697,7 @@ probe_and_build(
     auto gsz = aggregate_max_sizes(probe_results);
 
     // 5. Build final uniform grids and all surfaces
-    auto final_m = linspace(expanded_min_m, max_m, gsz.moneyness);
-    const double max_segment_width = compute_max_segment_width(
-        config.discrete_dividends, config.maturity);
-    append_upper_tail_log_moneyness(final_m, max_vol, max_segment_width);
+    auto final_m = linspace(min_m, max_m, gsz.moneyness);
     auto final_v = linspace(min_vol, max_vol, gsz.vol);
     auto final_r = linspace(min_rate, max_rate, gsz.rate);
     int max_tau_pts = gsz.tau_points;
@@ -785,7 +713,7 @@ probe_and_build(
         .surfaces = std::move(*seg_surfaces),
         .seg_template = std::move(seg_template),
         .gsz = gsz,
-        .expanded_min_m = expanded_min_m,
+        .min_m = min_m,
         .max_m = max_m,
         .min_vol = min_vol,
         .max_vol = max_vol,
@@ -1307,7 +1235,7 @@ AdaptiveGridBuilder::build_segmented(
         params_.validation_samples, params_.lhs_seed + 999);
 
     std::array<std::pair<double, double>, 4> final_bounds = {{
-        {build.expanded_min_m, build.max_m},
+        {build.min_m, build.max_m},
         {build.min_tau, build.max_tau},
         {build.min_vol, build.max_vol},
         {build.min_rate, build.max_rate},
@@ -1359,7 +1287,7 @@ AdaptiveGridBuilder::build_segmented(
         int bumped_tau = std::min(build.gsz.tau_points + 2,
             static_cast<int>(params_.max_points_per_dim));
 
-        auto retry_m = linspace(build.expanded_min_m, build.max_m, bumped_m);
+        auto retry_m = linspace(build.min_m, build.max_m, bumped_m);
         auto retry_v = linspace(build.min_vol, build.max_vol, bumped_v);
         auto retry_r = linspace(build.min_rate, build.max_rate, bumped_r);
 

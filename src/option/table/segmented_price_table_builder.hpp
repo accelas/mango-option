@@ -24,16 +24,16 @@ public:
         OptionType option_type;
         DividendSpec dividends;  ///< Continuous yield + discrete schedule
 
-        /// Grid specification: moneyness, vol, and rate grids
+        /// Grid specification:
+        /// - grid.moneyness: log-moneyness ln(S/K_ref)
+        /// - grid.vol: volatility
+        /// - grid.rate: rate
         IVGrid grid;
 
         double maturity;  // T in years
 
         /// Minimum tau points per segment (actual count may be higher)
         int tau_points_per_segment = 5;
-
-        /// If true, skip internal moneyness expansion (caller pre-expanded).
-        bool skip_moneyness_expansion = false;
 
         /// Target dt between tau grid points.
         /// When > 0, each segment gets ceil(width / tau_target_dt) + 1 points
