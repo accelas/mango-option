@@ -39,24 +39,21 @@ public:
     /// Queries outside grid bounds are clamped to boundary values.
     /// For accurate results, ensure query points lie within grid bounds.
     ///
-    /// @param coords N-dimensional coordinates
+    /// @param coords N-dimensional coordinates (axis 0 = log-moneyness)
     /// @return Interpolated value (clamped at boundaries)
     [[nodiscard]] double value(const std::array<double, N>& coords) const;
 
     /// Partial derivative along specified axis
     ///
     /// @param axis Axis index (0 to N-1)
-    /// @param coords N-dimensional coordinates
+    /// @param coords N-dimensional coordinates (axis 0 = log-moneyness)
     /// @return Partial derivative estimate
     [[nodiscard]] double partial(size_t axis, const std::array<double, N>& coords) const;
 
     /// Second partial derivative along specified axis
     ///
-    /// For axis 0 (moneyness), applies second-order chain rule from
-    /// log-moneyness: ∂²f/∂m² = (g''(x) - g'(x)) / m².
-    ///
     /// @param axis Axis index (0 to N-1)
-    /// @param coords N-dimensional coordinates
+    /// @param coords N-dimensional coordinates (axis 0 = log-moneyness)
     /// @return Second partial derivative estimate
     [[nodiscard]] double second_partial(size_t axis, const std::array<double, N>& coords) const;
 
