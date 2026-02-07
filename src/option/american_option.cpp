@@ -378,13 +378,13 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     bool projection = projection_enabled_;
     auto solve_result = std::visit([&](auto& pde_solver) {
         pde_solver.init_dividends();
+        pde_solver.set_config(trbdf2_config_);
+        pde_solver.set_projection_enabled(projection);
         if (custom_ic_) {
             pde_solver.initialize(*custom_ic_);
         } else {
             pde_solver.initialize(std::remove_reference_t<decltype(pde_solver)>::payoff);
         }
-        pde_solver.set_config(trbdf2_config_);
-        pde_solver.set_projection_enabled(projection);
         return pde_solver.solve();
     }, solver);
 
