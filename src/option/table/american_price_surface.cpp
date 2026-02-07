@@ -10,11 +10,13 @@ namespace mango {
 
 AmericanPriceSurface::AmericanPriceSurface(
     std::shared_ptr<const PriceTableSurface<4>> surface,
-    OptionType type, double K_ref, double dividend_yield)
+    OptionType type, double K_ref, double dividend_yield,
+    std::shared_ptr<const PriceTableSurface<4>> eu_surface)
     : surface_(std::move(surface))
     , type_(type)
     , K_ref_(K_ref)
-    , dividend_yield_(dividend_yield) {}
+    , dividend_yield_(dividend_yield)
+    , eu_surface_(std::move(eu_surface)) {}
 
 std::expected<AmericanPriceSurface, ValidationError>
 AmericanPriceSurface::create(
@@ -27,6 +29,11 @@ AmericanPriceSurface::create(
     }
 
     const auto& meta = eep_surface->metadata();
+    if (meta.content == SurfaceContent::NumericalEEP) {
+        // NumericalEEP requires companion European surface; use the 3-arg overload
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidBounds, 0.0, 0});
+    }
     if (meta.content != SurfaceContent::EarlyExercisePremium &&
         meta.content != SurfaceContent::RawPrice) {
         return std::unexpected(ValidationError{
@@ -51,8 +58,48 @@ AmericanPriceSurface::create(
         std::move(eep_surface), type, meta.K_ref, meta.dividends.dividend_yield);
 }
 
+std::expected<AmericanPriceSurface, ValidationError>
+AmericanPriceSurface::create(
+    std::shared_ptr<const PriceTableSurface<4>> eep_surface,
+    OptionType type,
+    std::shared_ptr<const PriceTableSurface<4>> eu_surface)
+{
+    if (!eep_surface || !eu_surface) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidBounds, 0.0, 0});
+    }
+
+    const auto& meta = eep_surface->metadata();
+    if (meta.content != SurfaceContent::NumericalEEP) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidBounds, 0.0, 0});
+    }
+
+    if (meta.K_ref <= 0.0) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidBounds, meta.K_ref, 0});
+    }
+
+    // Validate K_ref matches between surfaces
+    const auto& eu_meta = eu_surface->metadata();
+    if (std::abs(meta.K_ref - eu_meta.K_ref) > 1e-12) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidBounds, eu_meta.K_ref, 0});
+    }
+
+    return AmericanPriceSurface(
+        std::move(eep_surface), type, meta.K_ref, meta.dividends.dividend_yield,
+        std::move(eu_surface));
+}
+
 double AmericanPriceSurface::price(double spot, double strike, double tau,
                                    double sigma, double rate) const {
+    if (surface_->metadata().content == SurfaceContent::NumericalEEP) {
+        assert(eu_surface_ && "NumericalEEP requires companion European surface");
+        double m = spot / K_ref_;
+        return surface_->value({m, tau, sigma, rate})
+             + eu_surface_->value({m, tau, sigma, rate});
+    }
     if (surface_->metadata().content == SurfaceContent::RawPrice) {
         assert(strike == K_ref_ && "RawPrice surfaces require strike == K_ref");
         double m = spot / K_ref_;
@@ -68,6 +115,12 @@ double AmericanPriceSurface::price(double spot, double strike, double tau,
 
 double AmericanPriceSurface::delta(double spot, double strike, double tau,
                                    double sigma, double rate) const {
+    if (surface_->metadata().content == SurfaceContent::NumericalEEP) {
+        assert(eu_surface_ && "NumericalEEP requires companion European surface");
+        double m = spot / K_ref_;
+        return (1.0 / K_ref_) * (surface_->partial(0, {m, tau, sigma, rate})
+                                + eu_surface_->partial(0, {m, tau, sigma, rate}));
+    }
     double m = spot / strike;
     // partial(0, ...) returns dE/dm (chain rule already applied in PriceTableSurface)
     // delta_eep = (K/K_ref) * dE/dm * dm/dS = (K/K_ref) * dE/dm * (1/K) = (1/K_ref) * dE/dm
@@ -80,6 +133,13 @@ double AmericanPriceSurface::delta(double spot, double strike, double tau,
 
 double AmericanPriceSurface::gamma(double spot, double strike, double tau,
                                    double sigma, double rate) const {
+    if (surface_->metadata().content == SurfaceContent::NumericalEEP) {
+        assert(eu_surface_ && "NumericalEEP requires companion European surface");
+        double m = spot / K_ref_;
+        return (1.0 / (K_ref_ * K_ref_)) *
+            (surface_->second_partial(0, {m, tau, sigma, rate})
+           + eu_surface_->second_partial(0, {m, tau, sigma, rate}));
+    }
     double m = spot / strike;
     // γ_eep = (K/K_ref) · ∂²EEP/∂m² · (1/K)² = 1/(K_ref·K) · ∂²EEP/∂m²
     double eep_gamma = (1.0 / (K_ref_ * strike)) *
@@ -92,6 +152,12 @@ double AmericanPriceSurface::gamma(double spot, double strike, double tau,
 
 double AmericanPriceSurface::vega(double spot, double strike, double tau,
                                   double sigma, double rate) const {
+    if (surface_->metadata().content == SurfaceContent::NumericalEEP) {
+        assert(eu_surface_ && "NumericalEEP requires companion European surface");
+        double m = spot / K_ref_;
+        return surface_->partial(2, {m, tau, sigma, rate})
+             + eu_surface_->partial(2, {m, tau, sigma, rate});
+    }
     if (surface_->metadata().content == SurfaceContent::RawPrice) {
         // Compute FD vega for RawPrice surfaces
         constexpr double eps = 1e-4;
@@ -109,6 +175,12 @@ double AmericanPriceSurface::vega(double spot, double strike, double tau,
 
 double AmericanPriceSurface::theta(double spot, double strike, double tau,
                                    double sigma, double rate) const {
+    if (surface_->metadata().content == SurfaceContent::NumericalEEP) {
+        assert(eu_surface_ && "NumericalEEP requires companion European surface");
+        double m = spot / K_ref_;
+        return -(surface_->partial(1, {m, tau, sigma, rate})
+               + eu_surface_->partial(1, {m, tau, sigma, rate}));
+    }
     double m = spot / strike;
     // partial(1, ...) gives dE/d(tau) in time-to-expiry space.
     // Convert to calendar time: dV/dt = -dV/d(tau).

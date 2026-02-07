@@ -302,5 +302,154 @@ TEST(AmericanPriceSurfaceTest, RegressionEEPStillAccepted) {
     EXPECT_GT(price, raw);
 }
 
+// ===========================================================================
+// NumericalEEP content type tests
+// ===========================================================================
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPWithCompanionCreatesSuccessfully) {
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);
+    auto eu = make_test_surface(SurfaceContent::RawPrice, 5.0);
+    auto result = AmericanPriceSurface::create(eep, OptionType::PUT, eu);
+    EXPECT_TRUE(result.has_value());
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPWithoutCompanionFails) {
+    // The single-surface create() should reject NumericalEEP
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);
+    auto result = AmericanPriceSurface::create(eep, OptionType::PUT);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPWithNullCompanionFails) {
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);
+    auto result = AmericanPriceSurface::create(eep, OptionType::PUT, nullptr);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPWithNullEEPFails) {
+    auto eu = make_test_surface(SurfaceContent::RawPrice, 5.0);
+    auto result = AmericanPriceSurface::create(nullptr, OptionType::PUT, eu);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPRejectsWrongContent) {
+    // 3-arg overload requires NumericalEEP content on the EEP surface
+    auto eep = make_test_surface(SurfaceContent::EarlyExercisePremium, 1.5);
+    auto eu = make_test_surface(SurfaceContent::RawPrice, 5.0);
+    auto result = AmericanPriceSurface::create(eep, OptionType::PUT, eu);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPRejectsKRefMismatch) {
+    // Build EEP surface with K_ref=100
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);
+
+    // Build European surface with K_ref=200
+    PriceTableAxes<4> axes;
+    axes.grids[0] = {0.8, 0.9, 1.0, 1.1, 1.2};
+    axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
+    axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
+    axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
+    std::vector<double> coeffs(5 * 4 * 4 * 4, 5.0);
+    PriceTableMetadata meta{
+        .K_ref = 200.0,
+        .m_min = 0.8,
+        .m_max = 1.2,
+        .content = SurfaceContent::RawPrice
+    };
+    auto eu = PriceTableSurface<4>::build(axes, coeffs, meta).value();
+    auto result = AmericanPriceSurface::create(eep, OptionType::PUT, eu);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPPriceSumsBothSurfaces) {
+    double eep_val = 1.5;
+    double eu_val = 5.0;
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, eep_val);
+    auto eu = make_test_surface(SurfaceContent::RawPrice, eu_val);
+    auto aps = AmericanPriceSurface::create(eep, OptionType::PUT, eu);
+    ASSERT_TRUE(aps.has_value());
+
+    // For NumericalEEP: price = eep_surface(m,tau,sigma,r) + eu_surface(m,tau,sigma,r)
+    double S = 100.0, K = 100.0, tau = 1.0, sigma = 0.20, r = 0.05;
+    double m = S / 100.0;  // K_ref = 100
+    double price = aps->price(S, K, tau, sigma, r);
+    double expected = eep->value({m, tau, sigma, r}) + eu->value({m, tau, sigma, r});
+    EXPECT_NEAR(price, expected, 1e-10);
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPDeltaMatchesFiniteDiff) {
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);
+    auto eu = make_test_surface(SurfaceContent::RawPrice, 5.0);
+    auto aps = AmericanPriceSurface::create(eep, OptionType::PUT, eu);
+    ASSERT_TRUE(aps.has_value());
+
+    double S = 100.0, K = 100.0, tau = 1.0, sigma = 0.20, r = 0.05;
+    double eps = S * 1e-4;
+    double p_up = aps->price(S + eps, K, tau, sigma, r);
+    double p_dn = aps->price(S - eps, K, tau, sigma, r);
+    double fd_delta = (p_up - p_dn) / (2.0 * eps);
+
+    EXPECT_NEAR(aps->delta(S, K, tau, sigma, r), fd_delta, 1e-4);
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPGammaMatchesFiniteDiff) {
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);
+    auto eu = make_test_surface(SurfaceContent::RawPrice, 5.0);
+    auto aps = AmericanPriceSurface::create(eep, OptionType::PUT, eu);
+    ASSERT_TRUE(aps.has_value());
+
+    double S = 100.0, K = 100.0, tau = 1.0, sigma = 0.20, r = 0.05;
+    double eps = S * 1e-3;
+    double p_up = aps->price(S + eps, K, tau, sigma, r);
+    double p_mid = aps->price(S, K, tau, sigma, r);
+    double p_dn = aps->price(S - eps, K, tau, sigma, r);
+    double fd_gamma = (p_up - 2*p_mid + p_dn) / (eps * eps);
+
+    EXPECT_NEAR(aps->gamma(S, K, tau, sigma, r), fd_gamma, 1e-3);
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPVegaMatchesFiniteDiff) {
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);
+    auto eu = make_test_surface(SurfaceContent::RawPrice, 5.0);
+    auto aps = AmericanPriceSurface::create(eep, OptionType::PUT, eu);
+    ASSERT_TRUE(aps.has_value());
+
+    double S = 100.0, K = 100.0, tau = 1.0, sigma = 0.20, r = 0.05;
+    double eps = 1e-5;
+    double p_up = aps->price(S, K, tau, sigma + eps, r);
+    double p_dn = aps->price(S, K, tau, sigma - eps, r);
+    double fd_vega = (p_up - p_dn) / (2.0 * eps);
+
+    EXPECT_NEAR(aps->vega(S, K, tau, sigma, r), fd_vega, 0.01);
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPThetaMatchesFiniteDiff) {
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);
+    auto eu = make_test_surface(SurfaceContent::RawPrice, 5.0);
+    auto aps = AmericanPriceSurface::create(eep, OptionType::PUT, eu);
+    ASSERT_TRUE(aps.has_value());
+
+    double S = 100.0, K = 100.0, tau = 1.0, sigma = 0.20, r = 0.05;
+    double eps = 1e-5;
+    double p_up = aps->price(S, K, tau + eps, sigma, r);
+    double p_dn = aps->price(S, K, tau - eps, sigma, r);
+    // theta is dV/dt (calendar) = -(dP/d(tau))
+    double fd_theta = -(p_up - p_dn) / (2.0 * eps);
+
+    EXPECT_NEAR(aps->theta(S, K, tau, sigma, r), fd_theta, 0.01);
+}
+
+TEST(AmericanPriceSurfaceTest, NumericalEEPMetadata) {
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);
+    auto eu = make_test_surface(SurfaceContent::RawPrice, 5.0);
+    auto aps = AmericanPriceSurface::create(eep, OptionType::PUT, eu);
+    ASSERT_TRUE(aps.has_value());
+
+    EXPECT_EQ(aps->metadata().content, SurfaceContent::NumericalEEP);
+    EXPECT_DOUBLE_EQ(aps->metadata().K_ref, 100.0);
+    EXPECT_EQ(aps->option_type(), OptionType::PUT);
+}
+
 }  // namespace
 }  // namespace mango

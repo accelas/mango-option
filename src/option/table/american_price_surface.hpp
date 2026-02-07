@@ -24,6 +24,12 @@ public:
         std::shared_ptr<const PriceTableSurface<4>> eep_surface,
         OptionType type);
 
+    /// Create from EEP + companion European surface (NumericalEEP content).
+    static std::expected<AmericanPriceSurface, ValidationError> create(
+        std::shared_ptr<const PriceTableSurface<4>> eep_surface,
+        OptionType type,
+        std::shared_ptr<const PriceTableSurface<4>> eu_surface);
+
     /// P = (K/K_ref) * E(m,tau,sigma,r) + P_Eu(S,K,tau,sigma,r,q)
     double price(double spot, double strike, double tau,
                  double sigma, double rate) const;
@@ -62,12 +68,14 @@ public:
 
 private:
     AmericanPriceSurface(std::shared_ptr<const PriceTableSurface<4>> surface,
-                         OptionType type, double K_ref, double dividend_yield);
+                         OptionType type, double K_ref, double dividend_yield,
+                         std::shared_ptr<const PriceTableSurface<4>> eu_surface = nullptr);
 
     std::shared_ptr<const PriceTableSurface<4>> surface_;
     OptionType type_;
     double K_ref_;
     double dividend_yield_;
+    std::shared_ptr<const PriceTableSurface<4>> eu_surface_;
 };
 
 }  // namespace mango
