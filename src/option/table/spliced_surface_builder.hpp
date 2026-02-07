@@ -20,9 +20,7 @@ struct SegmentConfig {
 
 struct SegmentedConfig {
     std::vector<SegmentConfig> segments;
-    std::vector<Dividend> dividends;
     double K_ref;
-    double T;  // expiry in calendar time
 };
 
 [[nodiscard]] std::expected<SegmentedSurface<>, PriceTableError>

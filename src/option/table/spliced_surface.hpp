@@ -11,8 +11,6 @@
 
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/american_price_surface.hpp"
-#include "mango/option/table/price_table_metadata.hpp"
-#include "mango/option/table/price_table_surface.hpp"
 
 namespace mango {
 
@@ -333,10 +331,7 @@ struct SegmentedTransform {
     std::vector<double> tau_start;
     std::vector<double> tau_min;
     std::vector<double> tau_max;
-    std::vector<SurfaceContent> content;
-    std::vector<Dividend> dividends;
     double K_ref = 0.0;
-    double T = 0.0;
 
     [[nodiscard]] PriceQuery to_local(size_t i, const PriceQuery& q) const {
         PriceQuery out = q;
@@ -344,17 +339,8 @@ struct SegmentedTransform {
         // Convert to local segment time and clamp.
         out.tau = std::clamp(q.tau - tau_start[i], tau_min[i], tau_max[i]);
 
-        // Spot adjustment for EEP segments.
-        if (content[i] == SurfaceContent::EarlyExercisePremium) {
-            double t_query = T - q.tau;
-            double t_boundary = T - tau_start[i];
-            out.spot = compute_spot_adjustment(q.spot, t_query, t_boundary);
-        }
-
-        // NormalizedPrice segments are only valid at K_ref.
-        if (content[i] == SurfaceContent::NormalizedPrice) {
-            out.strike = K_ref;
-        }
+        // All segments store V/K_ref, so query at K_ref.
+        out.strike = K_ref;
 
         if (out.spot <= 0.0) {
             out.spot = 1e-8;
@@ -363,23 +349,8 @@ struct SegmentedTransform {
         return out;
     }
 
-    [[nodiscard]] double normalize_value(size_t i, const PriceQuery&, double raw) const noexcept {
-        if (content[i] == SurfaceContent::NormalizedPrice) {
-            return raw * K_ref;
-        }
-        return raw;
-    }
-
-private:
-    [[nodiscard]] double compute_spot_adjustment(double spot, double t_query,
-                                                 double t_boundary) const {
-        double adjustment = 0.0;
-        for (const auto& div : dividends) {
-            if (div.calendar_time > t_query && div.calendar_time <= t_boundary) {
-                adjustment += div.amount;
-            }
-        }
-        return spot - adjustment;
+    [[nodiscard]] double normalize_value(size_t, const PriceQuery&, double raw) const noexcept {
+        return raw * K_ref;
     }
 };
 

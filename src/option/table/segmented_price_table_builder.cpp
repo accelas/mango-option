@@ -403,9 +403,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     SegmentedConfig seg_config{
         .segments = std::move(segment_configs),
-        .dividends = dividends,
         .K_ref = K_ref,
-        .T = T,
     };
 
     return build_segmented_surface(std::move(seg_config));

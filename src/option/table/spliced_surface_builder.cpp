@@ -22,14 +22,12 @@ build_segmented_surface(SegmentedConfig config) {
     std::vector<double> tau_end;
     std::vector<double> tau_min;
     std::vector<double> tau_max;
-    std::vector<SurfaceContent> content;
     std::vector<AmericanPriceSurfaceAdapter> slices;
 
     tau_start.reserve(config.segments.size());
     tau_end.reserve(config.segments.size());
     tau_min.reserve(config.segments.size());
     tau_max.reserve(config.segments.size());
-    content.reserve(config.segments.size());
     slices.reserve(config.segments.size());
 
     for (auto& seg : config.segments) {
@@ -37,7 +35,6 @@ build_segmented_surface(SegmentedConfig config) {
         tau_end.push_back(seg.tau_end);
         tau_min.push_back(seg.surface.tau_min());
         tau_max.push_back(seg.surface.tau_max());
-        content.push_back(seg.surface.metadata().content);
         slices.emplace_back(std::move(seg.surface));
     }
 
@@ -49,10 +46,7 @@ build_segmented_surface(SegmentedConfig config) {
         .tau_start = std::move(tau_start),
         .tau_min = std::move(tau_min),
         .tau_max = std::move(tau_max),
-        .content = std::move(content),
-        .dividends = std::move(config.dividends),
         .K_ref = config.K_ref,
-        .T = config.T
     };
 
     WeightedSum combiner;
