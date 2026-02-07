@@ -158,6 +158,99 @@ TEST(SegmentedPriceTableBuilderTest, ManualPathMatchesBuildPath) {
     EXPECT_TRUE(std::isfinite(price2));
 }
 
+// ===========================================================================
+// Numerical EEP tests
+// ===========================================================================
+
+TEST(SegmentedPriceTableBuilderTest, NumericalEEPWithOneDividend) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0,
+        .option_type = OptionType::PUT,
+        .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}},
+        .grid = IVGrid{
+            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .vol = {0.15, 0.20, 0.30, 0.40},
+            .rate = {0.03, 0.05, 0.07, 0.09},
+        },
+        .maturity = 1.0,
+        .use_numerical_eep = true,
+    };
+
+    auto result = SegmentedPriceTableBuilder::build(config);
+    ASSERT_TRUE(result.has_value()) << "NumericalEEP build should succeed";
+
+    // Query in the chained segment time range (tau > T - t_div = 0.5)
+    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.8, .sigma = 0.20, .rate = 0.05};
+    double price = result->price(q);
+    EXPECT_GT(price, 0.0) << "ATM put price must be positive in chained segment";
+    EXPECT_LT(price, 50.0) << "ATM put price should be reasonable";
+    EXPECT_TRUE(std::isfinite(price));
+
+    // Verify vega is finite and positive
+    double vega = result->vega(q);
+    EXPECT_TRUE(std::isfinite(vega)) << "Vega must be finite";
+    EXPECT_GT(vega, 0.0) << "Vega should be positive for ATM put";
+}
+
+TEST(SegmentedPriceTableBuilderTest, NumericalEEPWithMultipleDividends) {
+    // 2 dividends = 3 segments; chained segments 1 and 2 use numerical EEP
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0,
+        .option_type = OptionType::PUT,
+        .dividends = {
+            .dividend_yield = 0.0,
+            .discrete_dividends = {
+                {.calendar_time = 0.25, .amount = 1.50},
+                {.calendar_time = 0.75, .amount = 1.50},
+            },
+        },
+        .grid = IVGrid{
+            .moneyness = {0.80, 0.90, 1.00, 1.10, 1.20},
+            .vol = {0.15, 0.20, 0.30, 0.40},
+            .rate = {0.03, 0.05, 0.07, 0.09},
+        },
+        .maturity = 1.0,
+        .use_numerical_eep = true,
+    };
+
+    auto result = SegmentedPriceTableBuilder::build(config);
+    ASSERT_TRUE(result.has_value()) << "NumericalEEP build with 2 dividends should succeed";
+
+    // Verify prices at multiple tau values spanning different segments
+    double taus[] = {0.1, 0.4, 0.9};
+    for (double tau : taus) {
+        PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = tau, .sigma = 0.20, .rate = 0.05};
+        double price = result->price(q);
+        EXPECT_TRUE(std::isfinite(price))
+            << "Price must be finite at tau=" << tau;
+        EXPECT_GT(price, 0.0)
+            << "ATM put price must be positive at tau=" << tau;
+    }
+}
+
+TEST(SegmentedPriceTableBuilderTest, NumericalEEPNoDividendsFallsBack) {
+    // No dividends: use_numerical_eep flag should have no effect (single segment)
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0,
+        .option_type = OptionType::PUT,
+        .dividends = {.dividend_yield = 0.02},
+        .grid = IVGrid{
+            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .vol = {0.15, 0.20, 0.30, 0.40},
+            .rate = {0.03, 0.05, 0.07, 0.09},
+        },
+        .maturity = 1.0,
+        .use_numerical_eep = true,
+    };
+
+    auto result = SegmentedPriceTableBuilder::build(config);
+    ASSERT_TRUE(result.has_value());
+
+    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
+    double price = result->price(q);
+    EXPECT_GT(price, 0.0);
+}
+
 // Regression: Unified manual build path must produce finite, positive prices
 // across all segments with multiple dividends.
 // Bug: Manual path for all segments (including segment 0) could diverge from

@@ -46,6 +46,9 @@ public:
         /// PDE grid accuracy for each segment's PDE solve.
         /// Default GridAccuracyParams{} gives ~100 spatial points.
         GridAccuracyParams pde_accuracy = {};
+
+        /// Use numerical EEP for chained segments (two PDE solves per sigma/rate pair).
+        bool use_numerical_eep = false;
     };
 
     /// Build a SegmentedSurface from the given configuration.

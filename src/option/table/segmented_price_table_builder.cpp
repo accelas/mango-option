@@ -5,6 +5,7 @@
 #include "mango/option/american_option.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 
 namespace mango {
@@ -289,6 +290,177 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                 return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
             }
         }
+
+        // =====================================================================
+        // Numerical EEP dual-solve path (chained segments only)
+        // =====================================================================
+        if (!is_last_segment && config.use_numerical_eep) {
+            // 5b. European batch solve (projection disabled)
+            BatchAmericanOptionSolver eu_batch_solver;
+            eu_batch_solver.set_snapshot_times(axes.grids[1]);
+
+            // Wrap setup_callback to also disable projection
+            auto eu_setup_callback = [&setup_callback](
+                size_t index, AmericanOptionSolver& solver)
+            {
+                if (setup_callback) {
+                    setup_callback(index, solver);
+                }
+                solver.set_projection_enabled(false);
+            };
+
+            auto eu_batch_result = eu_batch_solver.solve_batch(
+                batch_params, true, eu_setup_callback, custom_grid);
+
+            // 6b. Union failure masks
+            const size_t n_results = batch_result.results.size();
+            for (size_t k = 0; k < n_results; ++k) {
+                if (!batch_result.results[k].has_value() ||
+                    !eu_batch_result.results[k].has_value()) {
+                    // Mark both as failed if either failed
+                    if (batch_result.results[k].has_value()) {
+                        batch_result.results[k] = std::unexpected(
+                            SolverError{SolverErrorCode::ConvergenceFailure, 0, 0.0});
+                        batch_result.failed_count++;
+                    }
+                    if (eu_batch_result.results[k].has_value()) {
+                        eu_batch_result.results[k] = std::unexpected(
+                            SolverError{SolverErrorCode::ConvergenceFailure, 0, 0.0});
+                        eu_batch_result.failed_count++;
+                    }
+                }
+            }
+
+            // 7a. Extract American tensor as RawPrice
+            builder.set_surface_content(SurfaceContent::RawPrice);
+            auto am_extraction = builder.extract_tensor(batch_result, axes);
+            if (!am_extraction.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+            }
+
+            // 7b. Extract European tensor as RawPrice
+            auto eu_extraction = builder.extract_tensor(eu_batch_result, axes);
+            if (!eu_extraction.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+            }
+
+            // 8. Compute EEP tensor = American - European (in dollar space, softplus floor)
+            const size_t Nm = axes.grids[0].size();
+            const size_t Nt = axes.grids[1].size();
+            const size_t Nsigma = axes.grids[2].size();
+            const size_t Nr_grid = axes.grids[3].size();
+
+            auto eep_tensor_result = PriceTensor<4>::create({Nm, Nt, Nsigma, Nr_grid});
+            if (!eep_tensor_result.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+            }
+            auto eep_tensor = std::move(*eep_tensor_result);
+
+            constexpr double kSharpness = 100.0;
+            const double bias = std::log(2.0) / kSharpness;
+
+            for (size_t i = 0; i < Nm; ++i) {
+                for (size_t j = 0; j < Nt; ++j) {
+                    for (size_t s = 0; s < Nsigma; ++s) {
+                        for (size_t r = 0; r < Nr_grid; ++r) {
+                            double am_val = am_extraction->tensor.view[i, j, s, r];
+                            double eu_val = eu_extraction->tensor.view[i, j, s, r];
+
+                            if (std::isnan(am_val) || std::isnan(eu_val)) {
+                                eep_tensor.view[i, j, s, r] = std::numeric_limits<double>::quiet_NaN();
+                                continue;
+                            }
+
+                            // Convert to dollar space
+                            double eep_dollar = K_ref * (am_val - eu_val);
+
+                            // Softplus floor in dollar space
+                            double floored;
+                            if (kSharpness * eep_dollar > 500.0) {
+                                floored = eep_dollar;
+                            } else {
+                                double softplus = std::log1p(std::exp(kSharpness * eep_dollar)) / kSharpness;
+                                floored = std::max(0.0, softplus - bias);
+                            }
+
+                            // Convert back to normalized space
+                            eep_tensor.view[i, j, s, r] = floored / K_ref;
+                        }
+                    }
+                }
+            }
+
+            // 9. Repair both tensors
+            // Union the failure lists for the EEP tensor (same failures as both)
+            auto eep_repair = builder.repair_failed_slices(
+                eep_tensor, am_extraction->failed_pde,
+                am_extraction->failed_spline, axes);
+            if (!eep_repair.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::RepairFailed});
+            }
+
+            auto eu_repair = builder.repair_failed_slices(
+                eu_extraction->tensor, eu_extraction->failed_pde,
+                eu_extraction->failed_spline, axes);
+            if (!eu_repair.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::RepairFailed});
+            }
+
+            // 10a. Fit B-spline coefficients for EEP tensor
+            auto eep_fit = builder.fit_coeffs(eep_tensor, axes);
+            if (!eep_fit.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
+            }
+
+            // 10b. Fit B-spline coefficients for European tensor
+            auto eu_fit = builder.fit_coeffs(eu_extraction->tensor, axes);
+            if (!eu_fit.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
+            }
+
+            // 11. Build two PriceTableSurfaces and AmericanPriceSurface
+            PriceTableMetadata eep_metadata{
+                .K_ref = K_ref,
+                .dividends = {.dividend_yield = config.dividends.dividend_yield},
+                .content = SurfaceContent::NumericalEEP,
+            };
+
+            auto eep_surface = PriceTableSurface<4>::build(
+                axes, std::move(eep_fit->coefficients), eep_metadata);
+            if (!eep_surface.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+            }
+
+            PriceTableMetadata eu_metadata{
+                .K_ref = K_ref,
+                .dividends = {.dividend_yield = config.dividends.dividend_yield},
+                .content = SurfaceContent::RawPrice,
+            };
+
+            auto eu_surface = PriceTableSurface<4>::build(
+                axes, std::move(eu_fit->coefficients), eu_metadata);
+            if (!eu_surface.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+            }
+
+            auto aps = AmericanPriceSurface::create(
+                *eep_surface, config.option_type, *eu_surface);
+            if (!aps.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+            }
+
+            segment_configs.push_back(SegmentConfig{
+                .surface = std::move(*aps),
+                .tau_start = tau_start,
+                .tau_end = tau_end,
+            });
+            prev_surface_ptr = &segment_configs.back().surface;
+            continue;
+        }
+
+        // =====================================================================
+        // Standard single-solve path
+        // =====================================================================
 
         // 7. Extract tensor
         auto extraction = builder.extract_tensor(batch_result, axes);
