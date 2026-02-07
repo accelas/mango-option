@@ -26,27 +26,25 @@ namespace {
 
 constexpr double kMinPositive = 1e-6;
 
-/// Expand [lo, hi] to at least min_spread wide, keeping lo >= kMinPositive.
-void expand_bounds_positive(double& lo, double& hi, double min_spread) {
+/// Expand [lo, hi] to at least min_spread wide.
+/// If lo_clamp is finite, enforces lo >= lo_clamp (shifting hi to compensate).
+void expand_domain_bounds(double& lo, double& hi, double min_spread,
+                          double lo_clamp = -std::numeric_limits<double>::infinity()) {
     if (hi - lo < min_spread) {
         double mid = (lo + hi) / 2.0;
         lo = mid - min_spread / 2.0;
         hi = mid + min_spread / 2.0;
     }
-    if (lo < kMinPositive) {
-        double shift = kMinPositive - lo;
-        lo = kMinPositive;
-        hi += shift;
+    if (lo < lo_clamp) {
+        hi += (lo_clamp - lo);
+        lo = lo_clamp;
     }
 }
 
-/// Expand [lo, hi] to at least min_spread wide (no positivity constraint).
-void expand_bounds(double& lo, double& hi, double min_spread) {
-    if (hi - lo < min_spread) {
-        double mid = (lo + hi) / 2.0;
-        lo = mid - min_spread / 2.0;
-        hi = mid + min_spread / 2.0;
-    }
+/// One cubic support band (3 × local knot spacing) of headroom per side.
+double spline_support_headroom(double domain_width, size_t n_knots) {
+    size_t n = std::max(n_knots, size_t{4});
+    return 3.0 * domain_width / static_cast<double>(n - 1);
 }
 
 /// Select up to 3 probes from a sorted vector: front, back, and nearest to
@@ -577,29 +575,39 @@ probe_and_build(
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
+    // domain.moneyness is log(S/K) — callers convert from S/K at the
+    // user API boundary (see interpolated_iv_solver.cpp).
+    double min_m = domain.moneyness.front();
+    double max_m = domain.moneyness.back();
+
     // Expand lower bound in moneyness-space to account for cumulative
     // discrete-dividend spot shifts, then map back to log-moneyness.
     double total_div = total_discrete_dividends(
         config.discrete_dividends, config.maturity);
     double ref_min = ref_values.front();
     double expansion = (ref_min > 0.0) ? total_div / ref_min : 0.0;
-    double min_m_money = std::exp(domain.moneyness.front());
-    double expanded_min_money = std::max(min_m_money - expansion, 0.01);
-    double min_m = std::log(expanded_min_money);
-    double max_m = domain.moneyness.back();
+    if (expansion > 0.0) {
+        double m_min_money = std::exp(min_m);
+        double expanded = std::max(m_min_money - expansion, 0.01);
+        min_m = std::log(expanded);
+    }
 
     double min_vol = domain.vol.front();
     double max_vol = domain.vol.back();
     double min_rate = domain.rate.front();
     double max_rate = domain.rate.back();
 
-    expand_bounds(min_m, max_m, 0.10);
-    expand_bounds_positive(min_vol, max_vol, 0.10);
-    expand_bounds(min_rate, max_rate, 0.04);
+    expand_domain_bounds(min_m, max_m, 0.10);
+    double h = spline_support_headroom(max_m - min_m, domain.moneyness.size());
+    min_m -= h;
+    max_m += h;
+
+    expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
+    expand_domain_bounds(min_rate, max_rate, 0.04);
 
     double min_tau = std::min(0.01, config.maturity * 0.5);
     double max_tau = config.maturity;
-    expand_bounds_positive(min_tau, max_tau, 0.1);
+    expand_domain_bounds(min_tau, max_tau, 0.1, kMinPositive);
     max_tau = std::min(max_tau, config.maturity);
 
     // 3. Run adaptive refinement per probe
@@ -778,10 +786,14 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     double min_rate = *std::min_element(chain.rates.begin(), chain.rates.end());
     double max_rate = *std::max_element(chain.rates.begin(), chain.rates.end());
 
-    expand_bounds(min_moneyness, max_moneyness, 0.10);
-    expand_bounds_positive(min_tau, max_tau, 0.5);
-    expand_bounds_positive(min_vol, max_vol, 0.10);
-    expand_bounds(min_rate, max_rate, 0.04);
+    expand_domain_bounds(min_moneyness, max_moneyness, 0.10);
+    double h = spline_support_headroom(max_moneyness - min_moneyness, chain.strikes.size());
+    min_moneyness -= h;
+    max_moneyness += h;
+
+    expand_domain_bounds(min_tau, max_tau, 0.5, kMinPositive);
+    expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
+    expand_domain_bounds(min_rate, max_rate, 0.04);
 
     // ========================================================================
     // 2. Create callbacks for run_refinement

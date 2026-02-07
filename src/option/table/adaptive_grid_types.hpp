@@ -20,6 +20,7 @@ namespace mango {
 /// refinement the values serve as domain bounds; otherwise they are the
 /// exact interpolation knots.
 struct IVGrid {
+    /// S/K moneyness ratio (not log).  Converted to log(S/K) internally.
     std::vector<double> moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
     std::vector<double> vol = {0.05, 0.10, 0.20, 0.30, 0.50};
     std::vector<double> rate = {0.01, 0.03, 0.05, 0.10};
