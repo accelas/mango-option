@@ -24,10 +24,8 @@ struct ChainedICContext {
 /// Generate a τ grid for a segment [tau_start, tau_end].
 /// When tau_target_dt > 0, scales points proportionally to segment width.
 /// Otherwise falls back to constant min_points.
-/// The first segment (closest to expiry) uses a small ε instead of exactly 0
-/// to avoid PDE degeneracy.
 std::vector<double> make_segment_tau_grid(
-    double tau_start, double tau_end, int min_points, bool is_last_segment,
+    double tau_start, double tau_end, int min_points,
     double tau_target_dt = 0.0, int tau_points_min = 4, int tau_points_max = 30)
 {
     double seg_width = tau_end - tau_start;
@@ -45,15 +43,9 @@ std::vector<double> make_segment_tau_grid(
     std::vector<double> grid;
     grid.reserve(static_cast<size_t>(n));
 
-    double effective_start = tau_start;
-    if (is_last_segment && tau_start == 0.0) {
-        // The first tau must be > 0 to avoid PDE degeneracy, but never exceed segment width
-        effective_start = std::min(0.01, tau_end * 0.5);
-    }
-
-    double step = (tau_end - effective_start) / static_cast<double>(n - 1);
+    double step = (tau_end - tau_start) / static_cast<double>(n - 1);
     for (int i = 0; i < n; ++i) {
-        grid.push_back(effective_start + step * static_cast<double>(i));
+        grid.push_back(tau_start + step * static_cast<double>(i));
     }
 
     return grid;
@@ -263,7 +255,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
 
         // Local τ grid for this segment
         auto local_tau = make_segment_tau_grid(
-            0.0, seg_width, config.tau_points_per_segment, (seg_idx == 0),
+            0.0, seg_width, config.tau_points_per_segment,
             config.tau_target_dt, config.tau_points_min, config.tau_points_max);
 
         // All segments store V/K_ref uniformly
@@ -281,6 +273,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
 
         auto& [builder, axes] = *setup;
         builder.set_surface_content(content);
+        builder.set_allow_tau_zero(true);
 
         // ------ Manual build path (used for all segments) ------
 
@@ -299,8 +292,6 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         BatchAmericanOptionSolver::SetupCallback setup_callback = nullptr;
 
         if (seg_idx > 0) {
-            // Chained segment: τ=0 is the boundary, needs custom IC
-            builder.set_allow_tau_zero(true);
 
             const auto& vol_grid = config.grid.vol;
             const auto& rate_grid = config.grid.rate;
