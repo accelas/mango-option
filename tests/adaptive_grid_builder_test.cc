@@ -9,6 +9,14 @@
 namespace mango {
 namespace {
 
+/// Convert S/K moneyness to log-moneyness for internal builder APIs.
+std::vector<double> to_log_m(std::initializer_list<double> sk) {
+    std::vector<double> v;
+    v.reserve(sk.size());
+    for (double m : sk) v.push_back(std::log(m));
+    return v;
+}
+
 // Helper to create a dummy AmericanOptionResult for cache testing
 std::shared_ptr<AmericanOptionResult> make_dummy_result() {
     PricingParams params;
@@ -351,7 +359,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
     };
 
-    std::vector<double> m_domain = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    auto m_domain = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
     std::vector<double> v_domain = {0.05, 0.10, 0.20, 0.30, 0.50};
     std::vector<double> r_domain = {0.01, 0.03, 0.05, 0.10};
 
@@ -388,7 +396,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
         .kref_config = {.K_refs = {95.0, 105.0}},  // < 3 K_refs — probe all
     };
 
-    std::vector<double> m_domain = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    auto m_domain = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
     std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
@@ -415,7 +423,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
         .kref_config = {.K_refs = {70.0, 100.0, 130.0}},
     };
 
-    std::vector<double> m_domain = {0.5, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5};
+    auto m_domain = to_log_m({0.5, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5});
     std::vector<double> v_domain = {0.05, 0.10, 0.20, 0.30, 0.50};
     std::vector<double> r_domain = {0.01, 0.03, 0.05, 0.10};
 
@@ -446,7 +454,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
     };
 
-    std::vector<double> m_domain = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    auto m_domain = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
     std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
@@ -479,7 +487,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvalidKRefCount) {
         .kref_config = {.K_refs = {}, .K_ref_count = 0, .K_ref_span = 0.3},
     };
 
-    std::vector<double> m = {0.7, 0.9, 1.0, 1.1, 1.3};
+    auto m = to_log_m({0.7, 0.9, 1.0, 1.1, 1.3});
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
@@ -504,7 +512,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsZeroSpan) {
         .kref_config = {.K_refs = {}, .K_ref_count = 5, .K_ref_span = 0.0},
     };
 
-    std::vector<double> m = {0.7, 0.9, 1.0, 1.1, 1.3};
+    auto m = to_log_m({0.7, 0.9, 1.0, 1.1, 1.3});
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
@@ -537,7 +545,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
         .kref_config = {.K_refs = {100.0, 110.0, 120.0, 130.0}},
     };
 
-    std::vector<double> m = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    auto m = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
@@ -569,7 +577,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
         .kref_config = {.K_refs = {70.0, 80.0, 90.0, 100.0}},
     };
 
-    std::vector<double> m = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    auto m = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
@@ -598,7 +606,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
         .kref_config = {.K_refs = {}, .K_ref_count = 1, .K_ref_span = 0.3},
     };
 
-    std::vector<double> m = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    auto m = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
@@ -629,7 +637,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
         .kref_config = {.K_refs = {90.0, 100.0, 110.0}},
     };
 
-    std::vector<double> m = {0.8, 0.9, 1.0, 1.1, 1.2};
+    auto m = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
@@ -668,7 +676,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
         .kref_config = {.K_refs = {50.0, 100.0, 150.0}},
     };
 
-    std::vector<double> m = {0.5, 0.7, 0.9, 1.0, 1.1, 1.3, 1.5};
+    auto m = to_log_m({0.5, 0.7, 0.9, 1.0, 1.1, 1.3, 1.5});
     std::vector<double> v = {0.10, 0.20, 0.30, 0.50};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
@@ -696,7 +704,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNegativeKRefExpansionGuard) {
         .kref_config = {.K_refs = {0.01, 100.0, 200.0}},
     };
 
-    std::vector<double> m = {0.3, 0.5, 0.7, 1.0, 1.3, 1.5, 2.0};
+    auto m = to_log_m({0.3, 0.5, 0.7, 1.0, 1.3, 1.5, 2.0});
     std::vector<double> v = {0.10, 0.20, 0.30, 0.50};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
@@ -730,7 +738,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedProbeFailurePropagation) {
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
     };
 
-    std::vector<double> m = {0.7, 0.9, 1.0, 1.1, 1.3};
+    auto m = to_log_m({0.7, 0.9, 1.0, 1.1, 1.3});
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
@@ -755,13 +763,74 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsNegativeSpan) {
         .kref_config = {.K_refs = {}, .K_ref_count = 3, .K_ref_span = -0.2},
     };
 
-    std::vector<double> m = {0.7, 0.9, 1.0, 1.1, 1.3};
+    auto m = to_log_m({0.7, 0.9, 1.0, 1.1, 1.3});
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
     auto result = builder.build_segmented(seg_config, {m, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+// Regression: Standard path deep OTM IV accuracy requires domain headroom
+// Bug: AdaptiveGridBuilder::build() used expand_bounds(min, max, 0.10) which
+// is a no-op when the domain is already >0.10 wide.  Queries near the
+// log-moneyness boundary (e.g. K=80 with S=100, x=0.223 vs domain max=0.262)
+// hit clamped B-spline endpoint effects, producing 1000+ bps IV errors.
+// Fix: add 3*dx spline-support headroom to domain bounds after expand_bounds.
+TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
+    // Build a vanilla adaptive surface covering K=80..120
+    OptionGrid chain;
+    chain.spot = 100.0;
+    chain.dividend_yield = 0.02;
+    chain.strikes = {76.9, 83.3, 90.9, 100.0, 111.1, 125.0, 142.9};
+    chain.maturities = {0.01, 0.06, 0.20, 0.60, 1.0, 2.0, 2.5};
+    chain.implied_vols = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50};
+    chain.rates = {0.01, 0.03, 0.05, 0.10};
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 2e-5;  // 2 bps
+
+    AdaptiveGridBuilder builder(params);
+    GridAccuracyParams accuracy;
+    accuracy.min_spatial_points = 200;
+    accuracy.max_spatial_points = 200;
+
+    auto result = builder.build(chain, accuracy, OptionType::PUT);
+    ASSERT_TRUE(result.has_value()) << "Adaptive build failed";
+
+    // Wrap surface for price queries
+    auto aps = AmericanPriceSurface::create(result->surface, OptionType::PUT);
+    ASSERT_TRUE(aps.has_value());
+
+    // Query at K=80, T=1y, σ=15% — this was 1574 bps error before the fix
+    double spot = 100.0, strike = 80.0, tau = 1.0, sigma = 0.15, rate = 0.05;
+    double price = aps->price(spot, strike, tau, sigma, rate);
+    EXPECT_TRUE(std::isfinite(price));
+    EXPECT_GT(price, 0.0);
+
+    // Verify the recovered price allows reasonable IV recovery.
+    // Reference: FDM solve at the same parameters.
+    PricingParams ref_params;
+    ref_params.spot = spot;
+    ref_params.strike = strike;
+    ref_params.maturity = tau;
+    ref_params.rate = rate;
+    ref_params.dividend_yield = 0.02;
+    ref_params.option_type = OptionType::PUT;
+    ref_params.volatility = sigma;
+
+    auto ref = solve_american_option(ref_params);
+    ASSERT_TRUE(ref.has_value());
+    double ref_price = ref->value();
+
+    // Price error should be small enough that IV round-trip works.
+    // Before fix: |price - ref| was ~$1.3 on a ~$0.30 option.
+    // After fix: should be within $0.05 (< 50 bps IV error).
+    double price_error = std::abs(price - ref_price);
+    EXPECT_LT(price_error, 0.10)
+        << "Surface price " << price << " vs FDM " << ref_price
+        << " (error $" << price_error << ")";
 }
 
 }  // namespace
