@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/math/black_scholes_analytics.hpp"
 
 #include <gtest/gtest.h>
 #include <cmath>
@@ -391,6 +392,83 @@ TEST(AmericanOptionTest, ProjectionDisabledProducesEuropeanValue) {
     EXPECT_GT(eu_price, 0.0);
     // Difference (EEP) should be small but positive for ATM put
     EXPECT_GT(am_price - eu_price, 0.0);
+}
+
+// ===========================================================================
+// European PDE (projection disabled) converges toward BSM as grid refines
+// ===========================================================================
+
+TEST(AmericanOptionTest, EuropeanPDEConvergesToBSM) {
+    // ATM put parameters
+    const double spot = 100.0;
+    const double strike = 100.0;
+    const double maturity = 1.0;
+    const double rate = 0.05;
+    const double dividend_yield = 0.02;
+    const double vol = 0.20;
+
+    PricingParams params(
+        OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+                   .rate = rate, .dividend_yield = dividend_yield,
+                   .option_type = OptionType::PUT},
+        vol);
+
+    // BSM reference price (closed-form European)
+    const double bsm_price = bs_price(spot, strike, maturity, vol, rate,
+                                       dividend_yield, OptionType::PUT);
+    ASSERT_GT(bsm_price, 0.0) << "BSM reference price must be positive";
+
+    // --- Coarse grid: tol=1e-1 (fewer spatial points, larger truncation error) ---
+    GridAccuracyParams coarse_accuracy;
+    coarse_accuracy.tol = 1e-1;
+
+    auto [coarse_grid, coarse_td] = estimate_pde_grid(params, coarse_accuracy);
+    size_t coarse_n = coarse_grid.n_points();
+    std::pmr::vector<double> coarse_buf(PDEWorkspace::required_size(coarse_n),
+                                         std::pmr::get_default_resource());
+    auto coarse_ws = PDEWorkspace::from_buffer(coarse_buf, coarse_n).value();
+    auto coarse_solver = AmericanOptionSolver::create(
+        params, coarse_ws,
+        PDEGridConfig{.grid_spec = coarse_grid, .n_time = coarse_td.n_steps()}).value();
+    coarse_solver.set_projection_enabled(false);
+    auto coarse_result = coarse_solver.solve();
+    ASSERT_TRUE(coarse_result.has_value()) << "Coarse European PDE solve failed";
+    const double coarse_price = coarse_result->value_at(spot);
+    const double coarse_error = std::abs(coarse_price - bsm_price);
+
+    // --- Fine grid: tol=1e-4 (many spatial points, small truncation error) ---
+    GridAccuracyParams fine_accuracy;
+    fine_accuracy.tol = 1e-4;
+
+    auto [fine_grid, fine_td] = estimate_pde_grid(params, fine_accuracy);
+    size_t fine_n = fine_grid.n_points();
+    std::pmr::vector<double> fine_buf(PDEWorkspace::required_size(fine_n),
+                                       std::pmr::get_default_resource());
+    auto fine_ws = PDEWorkspace::from_buffer(fine_buf, fine_n).value();
+    auto fine_solver = AmericanOptionSolver::create(
+        params, fine_ws,
+        PDEGridConfig{.grid_spec = fine_grid, .n_time = fine_td.n_steps()}).value();
+    fine_solver.set_projection_enabled(false);
+    auto fine_result = fine_solver.solve();
+    ASSERT_TRUE(fine_result.has_value()) << "Fine European PDE solve failed";
+    const double fine_price = fine_result->value_at(spot);
+    const double fine_error = std::abs(fine_price - bsm_price);
+
+    // --- Convergence assertions ---
+    // Coarse grid: error should be less than $0.50
+    EXPECT_LT(coarse_error, 0.50)
+        << "Coarse grid error too large: PDE=" << coarse_price
+        << " BSM=" << bsm_price << " error=" << coarse_error;
+
+    // Fine grid: error should be less than $0.01
+    EXPECT_LT(fine_error, 0.01)
+        << "Fine grid error too large: PDE=" << fine_price
+        << " BSM=" << bsm_price << " error=" << fine_error;
+
+    // Fine grid should be strictly more accurate than coarse grid
+    EXPECT_LT(fine_error, coarse_error)
+        << "Fine grid (" << fine_n << " pts, error=" << fine_error
+        << ") should beat coarse grid (" << coarse_n << " pts, error=" << coarse_error << ")";
 }
 
 }  // namespace
