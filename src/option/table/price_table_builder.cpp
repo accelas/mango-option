@@ -259,15 +259,6 @@ PriceTableBuilder<N>::solve_batch(
     // This enables extract_tensor to access surfaces at each maturity point
     solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
 
-    // Create setup callback to inject custom initial condition if set
-    BatchAmericanOptionSolver::SetupCallback setup_cb = nullptr;
-    if (custom_ic_) {
-        auto ic = *custom_ic_;  // copy for lambda capture
-        setup_cb = [ic](size_t /*index*/, AmericanOptionSolver& s) {
-            s.set_initial_condition(ic);
-        };
-    }
-
     return std::visit([&](auto&& grid) -> BatchAmericanOptionResult {
         using T = std::decay_t<decltype(grid)>;
 
@@ -275,7 +266,7 @@ PriceTableBuilder<N>::solve_batch(
             // Auto-estimate PDE grid from batch parameters
             auto [est_grid, est_td] = estimate_pde_grid(batch, axes);
             PDEGridSpec custom_grid = PDEGridConfig{est_grid, est_td.n_steps(), {}};
-            return solver.solve_batch(batch, true, setup_cb, custom_grid);
+            return solver.solve_batch(batch, true, nullptr, custom_grid);
         } else {
             // Explicit grid: check solver stability constraints
             const auto& grid_spec = grid.grid_spec;
@@ -317,7 +308,7 @@ PriceTableBuilder<N>::solve_batch(
                 const double max_maturity = axes.grids[1].back();
                 TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
                 PDEGridSpec custom_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
-                return solver.solve_batch(batch, true, setup_cb, custom_grid);
+                return solver.solve_batch(batch, true, nullptr, custom_grid);
             } else {
                 // Grid violates constraints: fall back to auto-estimation
                 GridAccuracyParams accuracy;
@@ -344,7 +335,7 @@ PriceTableBuilder<N>::solve_batch(
                 ensure_moneyness_coverage<N>(accuracy, batch, axes);
 
                 solver.set_grid_accuracy(accuracy);
-                return solver.solve_batch(batch, true, setup_cb);
+                return solver.solve_batch(batch, true, nullptr);
             }
         }
     }, config_.pde_grid);

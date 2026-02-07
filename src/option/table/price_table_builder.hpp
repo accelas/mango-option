@@ -12,10 +12,8 @@
 #include "mango/option/table/price_table_grid_estimator.hpp"
 #include "mango/support/error_types.hpp"
 #include <expected>
-#include <functional>
 #include <memory>
 #include <optional>
-#include <span>
 #include <tuple>
 #include <vector>
 
@@ -80,12 +78,6 @@ public:
     /// @return PriceTableResult with surface and diagnostics, or error
     [[nodiscard]] std::expected<PriceTableResult<N>, PriceTableError>
     build(const PriceTableAxes<N>& axes);
-
-    /// Callable type for custom initial conditions: f(x, u) fills u given grid points x
-    using InitialCondition = std::function<void(std::span<const double>, std::span<double>)>;
-
-    /// Set a custom initial condition (passed through to AmericanOptionSolver)
-    void set_initial_condition(InitialCondition ic) { custom_ic_ = std::move(ic); }
 
     /// Controls whether output surface stores EEP or raw American prices
     void set_surface_content(SurfaceContent content) { surface_content_ = content; }
@@ -253,7 +245,6 @@ private:
 #endif
 
     PriceTableConfig config_;
-    std::optional<InitialCondition> custom_ic_;
     SurfaceContent surface_content_ = SurfaceContent::EarlyExercisePremium;
     bool allow_tau_zero_ = false;
 };

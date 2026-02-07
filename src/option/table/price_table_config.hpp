@@ -18,7 +18,7 @@ struct PriceTableConfig {
     DividendSpec dividends;                    ///< Continuous yield + discrete schedule
     double max_failure_rate = 0.0;             ///< Maximum tolerable failure rate: 0.0 = strict, 0.1 = allow 10%
     SurfaceContent surface_content = SurfaceContent::EarlyExercisePremium;  ///< Output mode
-    bool allow_tau_zero = false;               ///< Allow τ=0 in maturity grid (requires custom IC)
+    bool allow_tau_zero = false;               ///< Allow τ=0 in maturity grid (used by segmented builder)
 };
 
 /// Validate PriceTableConfig fields
