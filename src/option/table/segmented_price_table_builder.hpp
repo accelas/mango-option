@@ -13,10 +13,9 @@
 namespace mango {
 
 /// Orchestrates backward-chained construction of a SegmentedSurface for a
-/// single K_ref.  Splits maturity at discrete dividend dates, builds the last
-/// segment normally (EEP, payoff IC), and chains earlier segments backward
-/// using NormalizedPrice mode with initial conditions sourced from the previous
-/// segment's surface.
+/// single K_ref.  Splits maturity at discrete dividend dates. All segments use
+/// NormalizedPrice mode (V/K_ref). The last segment uses payoff IC; earlier
+/// segments chain from the previous segment's surface.
 class SegmentedPriceTableBuilder {
 public:
     struct Config {
@@ -53,8 +52,8 @@ public:
     /// Algorithm:
     ///   1. Filter dividends outside (0, T), sort, compute segment boundaries in τ.
     ///   2. Expand moneyness grid downward to accommodate spot adjustment.
-    ///   3. Build last segment (closest to expiry) with EEP and payoff IC.
-    ///   4. Build earlier segments backward with NormalizedPrice and chained IC.
+    ///   3. Build last segment (closest to expiry) with payoff IC.
+    ///   4. Build earlier segments backward with chained IC.
     ///   5. Assemble into SegmentedSurface.
     static std::expected<SegmentedSurface<>, PriceTableError> build(const Config& config);
 };

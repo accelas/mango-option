@@ -19,7 +19,6 @@ struct ChainedICContext {
     double K_ref;
     double prev_tau_end;   ///< Previous segment's local τ at its far boundary
     double boundary_div;   ///< Discrete dividend amount at this boundary
-    bool prev_is_eep;      ///< Whether previous segment uses EEP decomposition
 };
 
 /// Generate a τ grid for a segment [tau_start, tau_end].
@@ -48,7 +47,7 @@ std::vector<double> make_segment_tau_grid(
 
     double effective_start = tau_start;
     if (is_last_segment && tau_start == 0.0) {
-        // For EEP mode the first tau must be > 0, but never exceed segment width
+        // The first tau must be > 0 to avoid PDE degeneracy, but never exceed segment width
         effective_start = std::min(0.01, tau_end * 0.5);
     }
 
@@ -262,17 +261,13 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         double tau_end = boundaries[seg_idx + 1];
         double seg_width = tau_end - tau_start;
 
-        bool is_last_segment = (seg_idx == 0);
-
         // Local τ grid for this segment
         auto local_tau = make_segment_tau_grid(
-            0.0, seg_width, config.tau_points_per_segment, is_last_segment,
+            0.0, seg_width, config.tau_points_per_segment, (seg_idx == 0),
             config.tau_target_dt, config.tau_points_min, config.tau_points_max);
 
-        // Determine surface content mode
-        SurfaceContent content = is_last_segment
-            ? SurfaceContent::EarlyExercisePremium
-            : SurfaceContent::NormalizedPrice;
+        // All segments store V/K_ref uniformly
+        SurfaceContent content = SurfaceContent::NormalizedPrice;
 
         // Build PriceTableBuilder for this segment
         auto setup = PriceTableBuilder<4>::from_vectors(
@@ -303,7 +298,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         // 4. Build setup callback (chained segments only)
         BatchAmericanOptionSolver::SetupCallback setup_callback = nullptr;
 
-        if (!is_last_segment) {
+        if (seg_idx > 0) {
             // Chained segment: τ=0 is the boundary, needs custom IC
             builder.set_allow_tau_zero(true);
 
@@ -323,8 +318,6 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                 .K_ref = K_ref,
                 .prev_tau_end = prev_seg_tau_local_end,
                 .boundary_div = boundary_div,
-                .prev_is_eep = (prev->metadata().content ==
-                                SurfaceContent::EarlyExercisePremium),
             };
 
             setup_callback = [ic_ctx, &vol_grid, &rate_grid, Nr](
@@ -345,8 +338,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                             double raw = ic_ctx.prev->price(
                                 spot_adj, ic_ctx.K_ref, ic_ctx.prev_tau_end,
                                 sigma, rate);
-                            // EEP returns actual price V; NormalizedPrice returns V/K_ref
-                            u[i] = ic_ctx.prev_is_eep ? raw / ic_ctx.K_ref : raw;
+                            u[i] = raw;
                         }
                     });
             };
@@ -360,7 +352,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         // Segment 0: strict (0.0), matching builder.build() default.
         // Chained segments: lenient (0.5), matching old behavior (no check).
         if (!batch_result.results.empty()) {
-            const double max_rate = is_last_segment ? 0.0 : 0.5;
+            const double max_rate = (seg_idx == 0) ? 0.0 : 0.5;
             const double failure_rate = static_cast<double>(batch_result.failed_count) /
                                         static_cast<double>(batch_result.results.size());
             if (failure_rate > max_rate) {
