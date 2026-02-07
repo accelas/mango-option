@@ -10,11 +10,11 @@
 namespace mango {
 namespace {
 
-// Helper to build a test surface
+// Helper to build a test surface (axis 0 is log-moneyness)
 std::shared_ptr<const PriceTableSurface<4>> make_test_surface(
     SurfaceContent content, double eep_value = 2.0, double div_yield = 0.0) {
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.8, 0.9, 1.0, 1.1, 1.2};  // moneyness
+    axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};  // log-moneyness
     axes.grids[1] = {0.25, 0.5, 1.0, 2.0};       // maturity
     axes.grids[2] = {0.10, 0.20, 0.30, 0.40};    // volatility
     axes.grids[3] = {0.02, 0.04, 0.06, 0.08};    // rate
@@ -23,8 +23,8 @@ std::shared_ptr<const PriceTableSurface<4>> make_test_surface(
     PriceTableMetadata meta{
         .K_ref = 100.0,
         .dividends = {.dividend_yield = div_yield},
-        .m_min = 0.8,
-        .m_max = 1.2,
+        .m_min = std::log(0.8),
+        .m_max = std::log(1.2),
         .content = content
     };
 
@@ -53,15 +53,15 @@ TEST(AmericanPriceSurfaceTest, RejectsZeroKRef) {
     auto surface = make_test_surface(SurfaceContent::EarlyExercisePremium);
     // Manually build a surface with K_ref=0 to trigger validation
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.8, 0.9, 1.0, 1.1, 1.2};
+    axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
     axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
     axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
     std::vector<double> coeffs(5 * 4 * 4 * 4, 2.0);
     PriceTableMetadata meta{
         .K_ref = 0.0,
-        .m_min = 0.8,
-        .m_max = 1.2,
+        .m_min = std::log(0.8),
+        .m_max = std::log(1.2),
         .content = SurfaceContent::EarlyExercisePremium
     };
     auto bad_surface = PriceTableSurface<4>::build(axes, coeffs, meta).value();
@@ -72,7 +72,7 @@ TEST(AmericanPriceSurfaceTest, RejectsZeroKRef) {
 TEST(AmericanPriceSurfaceTest, RejectsDiscreteDividends) {
     // EEP decomposition only supports continuous dividend yield
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.8, 0.9, 1.0, 1.1, 1.2};
+    axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
     axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
     axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
@@ -81,8 +81,8 @@ TEST(AmericanPriceSurfaceTest, RejectsDiscreteDividends) {
     PriceTableMetadata meta{
         .K_ref = 100.0,
         .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.50}, {.calendar_time = 0.75, .amount = 1.50}}},
-        .m_min = 0.8,
-        .m_max = 1.2,
+        .m_min = std::log(0.8),
+        .m_max = std::log(1.2),
         .content = SurfaceContent::EarlyExercisePremium,
     };
     auto surface = PriceTableSurface<4>::build(axes, coeffs, meta).value();
@@ -99,8 +99,8 @@ TEST(AmericanPriceSurfaceTest, PriceReconstructsCorrectly) {
     double price = aps->price(S, K, tau, sigma, r);
 
     // Expected: EEP * (K/K_ref) + P_EU
-    double m = S / K;
-    double eep_interp = surface->value({m, tau, sigma, r});
+    double x = std::log(S / K);
+    double eep_interp = surface->value({x, tau, sigma, r});
     auto eu = EuropeanOptionSolver(PricingParams(OptionSpec{.spot = S, .strike = K, .maturity = tau, .rate = r, .dividend_yield = 0.02, .option_type = OptionType::PUT}, sigma)).solve().value();
     double expected = eep_interp * (K / 100.0) + eu.value();
 
@@ -201,7 +201,7 @@ TEST(AmericanPriceSurfaceTest, MetadataAccess) {
 
 TEST(AmericanPriceSurfaceTest, RejectsRawPriceWithDiscreteDividends) {
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.8, 0.9, 1.0, 1.1, 1.2};
+    axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
     axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
     axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
@@ -210,8 +210,8 @@ TEST(AmericanPriceSurfaceTest, RejectsRawPriceWithDiscreteDividends) {
     PriceTableMetadata meta{
         .K_ref = 100.0,
         .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.50}, {.calendar_time = 0.75, .amount = 1.50}}},
-        .m_min = 0.8,
-        .m_max = 1.2,
+        .m_min = std::log(0.8),
+        .m_max = std::log(1.2),
         .content = SurfaceContent::RawPrice,
     };
     auto surface = PriceTableSurface<4>::build(axes, coeffs, meta).value();
@@ -225,11 +225,11 @@ TEST(AmericanPriceSurfaceTest, RawPricePriceReturnsInterpolatedValue) {
     auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
-    // For RawPrice: price = surface_->value({spot/K_ref, tau, sigma, rate})
+    // For RawPrice: price = surface_->value({ln(spot/K_ref), tau, sigma, rate})
     // With constant coefficients, the spline returns approximately val
     double S = 100.0, K = 100.0, tau = 1.0, sigma = 0.20, r = 0.05;
     double price = aps->price(S, K, tau, sigma, r);
-    double direct = surface->value({S / 100.0, tau, sigma, r});
+    double direct = surface->value({std::log(S / 100.0), tau, sigma, r});
     EXPECT_DOUBLE_EQ(price, direct);
 }
 
@@ -253,9 +253,9 @@ TEST(AmericanPriceSurfaceTest, BoundsAccessorsEEP) {
     auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
-    // Moneyness bounds from metadata
-    EXPECT_DOUBLE_EQ(aps->m_min(), 0.8);
-    EXPECT_DOUBLE_EQ(aps->m_max(), 1.2);
+    // Log-moneyness bounds from metadata
+    EXPECT_DOUBLE_EQ(aps->m_min(), std::log(0.8));
+    EXPECT_DOUBLE_EQ(aps->m_max(), std::log(1.2));
 
     // Maturity bounds from axes.grids[1]
     EXPECT_DOUBLE_EQ(aps->tau_min(), 0.25);
@@ -275,8 +275,8 @@ TEST(AmericanPriceSurfaceTest, BoundsAccessorsRawPrice) {
     auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
-    EXPECT_DOUBLE_EQ(aps->m_min(), 0.8);
-    EXPECT_DOUBLE_EQ(aps->m_max(), 1.2);
+    EXPECT_DOUBLE_EQ(aps->m_min(), std::log(0.8));
+    EXPECT_DOUBLE_EQ(aps->m_max(), std::log(1.2));
     EXPECT_DOUBLE_EQ(aps->tau_min(), 0.25);
     EXPECT_DOUBLE_EQ(aps->tau_max(), 2.0);
     EXPECT_DOUBLE_EQ(aps->sigma_min(), 0.10);
@@ -297,7 +297,7 @@ TEST(AmericanPriceSurfaceTest, RegressionEEPStillAccepted) {
     // Verify EEP reconstruction still works (price != raw interpolation)
     double S = 100.0, K = 100.0, tau = 1.0, sigma = 0.20, r = 0.05;
     double price = result->price(S, K, tau, sigma, r);
-    double raw = surface->value({S / K, tau, sigma, r});
+    double raw = surface->value({std::log(S / K), tau, sigma, r});
     // EEP price = raw * (K/K_ref) + European > raw for a put with positive European value
     EXPECT_GT(price, raw);
 }

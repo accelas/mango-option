@@ -55,11 +55,11 @@ double AmericanPriceSurface::price(double spot, double strike, double tau,
                                    double sigma, double rate) const {
     if (surface_->metadata().content == SurfaceContent::RawPrice) {
         assert(strike == K_ref_ && "RawPrice surfaces require strike == K_ref");
-        double m = spot / K_ref_;
-        return surface_->value({m, tau, sigma, rate});
+        double x = std::log(spot / K_ref_);
+        return surface_->value({x, tau, sigma, rate});
     }
-    double m = spot / strike;
-    double eep = surface_->value({m, tau, sigma, rate});
+    double x = std::log(spot / strike);
+    double eep = surface_->value({x, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
         OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
             .rate = rate, .dividend_yield = dividend_yield_, .option_type = type_}, sigma).solve().value();
@@ -68,10 +68,11 @@ double AmericanPriceSurface::price(double spot, double strike, double tau,
 
 double AmericanPriceSurface::delta(double spot, double strike, double tau,
                                    double sigma, double rate) const {
-    double m = spot / strike;
-    // partial(0, ...) returns dE/dm (chain rule already applied in PriceTableSurface)
-    // delta_eep = (K/K_ref) * dE/dm * dm/dS = (K/K_ref) * dE/dm * (1/K) = (1/K_ref) * dE/dm
-    double eep_delta = (1.0 / K_ref_) * surface_->partial(0, {m, tau, sigma, rate});
+    double x = std::log(spot / strike);
+    // partial(0, ...) returns ∂EEP/∂x where x = ln(S/K)
+    // delta_eep = (K/K_ref) · (∂EEP/∂x) · (1/S)
+    double dEdx = surface_->partial(0, {x, tau, sigma, rate});
+    double eep_delta = (strike / (K_ref_ * spot)) * dEdx;
     auto eu = EuropeanOptionSolver(
         OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
             .rate = rate, .dividend_yield = dividend_yield_, .option_type = type_}, sigma).solve().value();
@@ -80,10 +81,11 @@ double AmericanPriceSurface::delta(double spot, double strike, double tau,
 
 double AmericanPriceSurface::gamma(double spot, double strike, double tau,
                                    double sigma, double rate) const {
-    double m = spot / strike;
-    // γ_eep = (K/K_ref) · ∂²EEP/∂m² · (1/K)² = 1/(K_ref·K) · ∂²EEP/∂m²
-    double eep_gamma = (1.0 / (K_ref_ * strike)) *
-        surface_->second_partial(0, {m, tau, sigma, rate});
+    double x = std::log(spot / strike);
+    // ∂²/∂S² [(K/K_ref)·EEP(x)] = (K/K_ref) · [EEP''(x) - EEP'(x)] / S²
+    double dEdx = surface_->partial(0, {x, tau, sigma, rate});
+    double d2Edx2 = surface_->second_partial(0, {x, tau, sigma, rate});
+    double eep_gamma = (strike / K_ref_) * (d2Edx2 - dEdx) / (spot * spot);
     auto eu = EuropeanOptionSolver(
         OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
             .rate = rate, .dividend_yield = dividend_yield_, .option_type = type_}, sigma).solve().value();
@@ -99,8 +101,8 @@ double AmericanPriceSurface::vega(double spot, double strike, double tau,
         double dn = price(spot, strike, tau, sigma - eps, rate);
         return (up - dn) / (2.0 * eps);
     }
-    double m = spot / strike;
-    double eep_vega = (strike / K_ref_) * surface_->partial(2, {m, tau, sigma, rate});
+    double x = std::log(spot / strike);
+    double eep_vega = (strike / K_ref_) * surface_->partial(2, {x, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
         OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
             .rate = rate, .dividend_yield = dividend_yield_, .option_type = type_}, sigma).solve().value();
@@ -109,12 +111,12 @@ double AmericanPriceSurface::vega(double spot, double strike, double tau,
 
 double AmericanPriceSurface::theta(double spot, double strike, double tau,
                                    double sigma, double rate) const {
-    double m = spot / strike;
+    double x = std::log(spot / strike);
     // partial(1, ...) gives dE/d(tau) in time-to-expiry space.
     // Convert to calendar time: dV/dt = -dV/d(tau).
     // European theta() already returns dV/dt (calendar time).
     // theta = -(K/K_ref) * dE/d(tau) + eu.theta()
-    double eep_dtau = (strike / K_ref_) * surface_->partial(1, {m, tau, sigma, rate});
+    double eep_dtau = (strike / K_ref_) * surface_->partial(1, {x, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
         OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
             .rate = rate, .dividend_yield = dividend_yield_, .option_type = type_}, sigma).solve().value();

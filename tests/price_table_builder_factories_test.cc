@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
+#include <cmath>
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/option_grid.hpp"
 
 TEST(PriceTableFactoriesTest, FromVectorsCreatesBuilderAndAxes) {
-    std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> log_moneyness = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)};
     std::vector<double> maturity = {0.25, 0.5, 0.75, 1.0};
     std::vector<double> vol = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
@@ -12,7 +13,7 @@ TEST(PriceTableFactoriesTest, FromVectorsCreatesBuilderAndAxes) {
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
     auto result = mango::PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, vol, rate,
+        log_moneyness, maturity, vol, rate,
         100.0,      // K_ref
         mango::PDEGridConfig{grid_spec, 100},
         mango::OptionType::PUT
@@ -28,7 +29,7 @@ TEST(PriceTableFactoriesTest, FromVectorsCreatesBuilderAndAxes) {
 }
 
 TEST(PriceTableFactoriesTest, FromVectorsSortsAndDedupes) {
-    std::vector<double> moneyness = {1.0, 0.8, 0.9, 1.0, 1.1};  // Has duplicate
+    std::vector<double> log_moneyness = {std::log(1.0), std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)};  // Has duplicate
     std::vector<double> maturity = {0.5, 0.25, 1.0, 0.75};     // Out of order
     std::vector<double> vol = {0.20, 0.15, 0.30, 0.25};
     std::vector<double> rate = {0.04, 0.03, 0.06, 0.05};
@@ -36,21 +37,21 @@ TEST(PriceTableFactoriesTest, FromVectorsSortsAndDedupes) {
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
     auto result = mango::PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, vol, rate,
+        log_moneyness, maturity, vol, rate,
         100.0, mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
 
     ASSERT_TRUE(result.has_value());
     auto& [builder, axes] = result.value();
 
-    // Should have 4 unique moneyness values after deduplication
+    // Should have 4 unique log-moneyness values after deduplication
     EXPECT_EQ(axes.grids[0].size(), 4);
 
     // Should be sorted ascending
-    EXPECT_NEAR(axes.grids[0][0], 0.8, 1e-10);
-    EXPECT_NEAR(axes.grids[0][1], 0.9, 1e-10);
-    EXPECT_NEAR(axes.grids[0][2], 1.0, 1e-10);
-    EXPECT_NEAR(axes.grids[0][3], 1.1, 1e-10);
+    EXPECT_NEAR(axes.grids[0][0], std::log(0.8), 1e-10);
+    EXPECT_NEAR(axes.grids[0][1], std::log(0.9), 1e-10);
+    EXPECT_NEAR(axes.grids[0][2], std::log(1.0), 1e-10);
+    EXPECT_NEAR(axes.grids[0][3], std::log(1.1), 1e-10);
 
     EXPECT_NEAR(axes.grids[1][0], 0.25, 1e-10);
     EXPECT_NEAR(axes.grids[1][1], 0.5, 1e-10);
@@ -60,7 +61,7 @@ TEST(PriceTableFactoriesTest, FromVectorsSortsAndDedupes) {
 
 struct NonPositiveParam {
     std::string name;
-    int axis;  // 0=moneyness, 1=maturity, 2=vol, 3=kref
+    int axis;  // 1=maturity, 2=vol, 3=kref (log-moneyness can be negative, no check)
 };
 
 class FromVectorsRejectsNonPositive
@@ -69,14 +70,13 @@ class FromVectorsRejectsNonPositive
 TEST_P(FromVectorsRejectsNonPositive, ReturnsNonPositiveValueError) {
     auto param = GetParam();
 
-    std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> log_moneyness = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)};
     std::vector<double> maturity = {0.25, 0.5, 0.75, 1.0};
     std::vector<double> vol = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
     double kref = 100.0;
 
     switch (param.axis) {
-        case 0: moneyness[0] = -0.1; break;
         case 1: maturity[0] = -0.1; break;
         case 2: vol[0] = -0.1; break;
         case 3: kref = 0.0; break;
@@ -84,7 +84,7 @@ TEST_P(FromVectorsRejectsNonPositive, ReturnsNonPositiveValueError) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
     auto result = mango::PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, vol, rate,
+        log_moneyness, maturity, vol, rate,
         kref, mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
 
@@ -96,7 +96,7 @@ INSTANTIATE_TEST_SUITE_P(
     PriceTableFactory,
     FromVectorsRejectsNonPositive,
     ::testing::Values(
-        NonPositiveParam{"NegativeMoneyness", 0},
+        // NegativeMoneyness removed: negative log-moneyness is valid
         NonPositiveParam{"NegativeMaturity", 1},
         NonPositiveParam{"NegativeVolatility", 2},
         NonPositiveParam{"ZeroKRef", 3}
@@ -107,7 +107,7 @@ INSTANTIATE_TEST_SUITE_P(
 );
 
 TEST(PriceTableFactoriesTest, FromVectorsAcceptsNegativeRates) {
-    std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> log_moneyness = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)};
     std::vector<double> maturity = {0.25, 0.5, 0.75, 1.0};
     std::vector<double> vol = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rate = {-0.02, -0.01, 0.0, 0.01};  // Negative rates allowed
@@ -115,14 +115,14 @@ TEST(PriceTableFactoriesTest, FromVectorsAcceptsNegativeRates) {
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
     auto result = mango::PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, vol, rate,
+        log_moneyness, maturity, vol, rate,
         100.0, mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
 
     ASSERT_TRUE(result.has_value()) << "Factory rejected valid negative rates: " << result.error();
 }
 
-TEST(PriceTableFactoriesTest, FromStrikesComputesMoneyness) {
+TEST(PriceTableFactoriesTest, FromStrikesComputesLogMoneyness) {
     double spot = 100.0;
     std::vector<double> strikes = {80.0, 90.0, 100.0, 110.0, 120.0};
     std::vector<double> maturities = {0.25, 0.5, 0.75, 1.0};
@@ -139,15 +139,15 @@ TEST(PriceTableFactoriesTest, FromStrikesComputesMoneyness) {
     ASSERT_TRUE(result.has_value()) << "Factory failed: " << result.error();
     auto& [builder, axes] = result.value();
 
-    // Moneyness = spot/strike, sorted ascending
-    // strikes [80, 90, 100, 110, 120] → moneyness [100/120, 100/110, 1.0, 100/90, 100/80]
-    //                                  → sorted: [0.833, 0.909, 1.0, 1.111, 1.25]
+    // Log-moneyness = ln(spot/strike), sorted ascending
+    // strikes [80, 90, 100, 110, 120] → ln(100/K) sorted ascending
+    // ln(100/120) < ln(100/110) < ln(100/100) < ln(100/90) < ln(100/80)
     EXPECT_EQ(axes.grids[0].size(), 5);
-    EXPECT_NEAR(axes.grids[0][0], 100.0/120.0, 1e-6);  // 0.833...
-    EXPECT_NEAR(axes.grids[0][1], 100.0/110.0, 1e-6);  // 0.909...
-    EXPECT_NEAR(axes.grids[0][2], 1.0, 1e-6);          // 1.0
-    EXPECT_NEAR(axes.grids[0][3], 100.0/90.0, 1e-6);   // 1.111...
-    EXPECT_NEAR(axes.grids[0][4], 100.0/80.0, 1e-6);   // 1.25
+    EXPECT_NEAR(axes.grids[0][0], std::log(100.0/120.0), 1e-6);
+    EXPECT_NEAR(axes.grids[0][1], std::log(100.0/110.0), 1e-6);
+    EXPECT_NEAR(axes.grids[0][2], std::log(1.0), 1e-6);
+    EXPECT_NEAR(axes.grids[0][3], std::log(100.0/90.0), 1e-6);
+    EXPECT_NEAR(axes.grids[0][4], std::log(100.0/80.0), 1e-6);
 }
 
 TEST(PriceTableFactoriesTest, FromStrikesRejectsNegativeSpot) {

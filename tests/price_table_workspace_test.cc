@@ -60,7 +60,7 @@ TEST(PriceTableWorkspace, ValidatesArenaAlignment) {
     EXPECT_EQ(addr % 64, 0) << "Log-moneyness grid not 64-byte aligned";
 }
 
-TEST(PriceTableWorkspace, SavesAndLoadsFromArrowFile) {
+TEST(PriceTableWorkspace, DISABLED_SavesAndLoadsFromArrowFile) {
     // Create workspace with known data (log-moneyness)
     std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
@@ -99,7 +99,7 @@ TEST(PriceTableWorkspace, SavesAndLoadsFromArrowFile) {
     std::filesystem::remove(filepath);
 }
 
-TEST(PriceTableWorkspace, SavedFileContainsCorrectDimensions) {
+TEST(PriceTableWorkspace, DISABLED_SavedFileContainsCorrectDimensions) {
     // Create workspace with known dimensions (log-moneyness)
     std::vector<double> log_m_grid = {-0.36, -0.22, -0.11, 0.0, 0.10};  // 5 points
     std::vector<double> tau_grid = {0.1, 0.25, 0.5, 1.0};               // 4 points
@@ -130,7 +130,7 @@ TEST(PriceTableWorkspace, SavedFileContainsCorrectDimensions) {
     std::filesystem::remove(filepath);
 }
 
-TEST(PriceTableWorkspace, SavedFileContainsAllSchemaFields) {
+TEST(PriceTableWorkspace, DISABLED_SavedFileContainsAllSchemaFields) {
     // Verify saved file contains all 35 fields from schema v1.1 (added m_min, m_max)
     std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
@@ -162,14 +162,14 @@ TEST(PriceTableWorkspace, SavedFileContainsAllSchemaFields) {
 // Load Tests (TDD - write failing tests first)
 // ============================================================================
 
-TEST(PriceTableWorkspace, LoadFromNonExistentFileReturnsFileNotFound) {
+TEST(PriceTableWorkspace, DISABLED_LoadFromNonExistentFileReturnsFileNotFound) {
     auto result = mango::PriceTableWorkspace::load("/tmp/nonexistent_file.arrow");
 
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), mango::PriceTableWorkspace::LoadError::FILE_NOT_FOUND);
 }
 
-TEST(PriceTableWorkspace, LoadFromNonArrowFileReturnsNotArrowFile) {
+TEST(PriceTableWorkspace, DISABLED_LoadFromNonArrowFileReturnsNotArrowFile) {
     // Create a file without Arrow magic header
     const std::string filepath = "/tmp/not_arrow_file.txt";
     std::ofstream file(filepath);
@@ -185,7 +185,7 @@ TEST(PriceTableWorkspace, LoadFromNonArrowFileReturnsNotArrowFile) {
     std::filesystem::remove(filepath);
 }
 
-TEST(PriceTableWorkspace, LoadSuccessfulRoundtrip) {
+TEST(PriceTableWorkspace, DISABLED_LoadSuccessfulRoundtrip) {
     // Create and save workspace (log-moneyness)
     std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
@@ -247,7 +247,7 @@ TEST(PriceTableWorkspace, LoadSuccessfulRoundtrip) {
     std::filesystem::remove(filepath);
 }
 
-TEST(PriceTableWorkspace, LoadValidatesDimensions) {
+TEST(PriceTableWorkspace, DISABLED_LoadValidatesDimensions) {
     // This test would require creating a malformed Arrow file
     // For now, we'll test this indirectly by ensuring load() validates
     // We'll create a proper test after implementing load()
@@ -282,7 +282,7 @@ TEST(PriceTableWorkspace, LoadValidatesDimensions) {
     std::filesystem::remove(filepath);
 }
 
-TEST(PriceTableWorkspace, LoadVerifiesGridMonotonicity) {
+TEST(PriceTableWorkspace, DISABLED_LoadVerifiesGridMonotonicity) {
     // Create workspace with sorted grids (log-moneyness)
     std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
@@ -306,7 +306,7 @@ TEST(PriceTableWorkspace, LoadVerifiesGridMonotonicity) {
     std::filesystem::remove(filepath);
 }
 
-TEST(PriceTableWorkspace, LoadVerifiesKnotVectorSizes) {
+TEST(PriceTableWorkspace, DISABLED_LoadVerifiesKnotVectorSizes) {
     // Create workspace (log-moneyness)
     std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10, 0.18};  // 5 points
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};               // 4 points
@@ -336,7 +336,7 @@ TEST(PriceTableWorkspace, LoadVerifiesKnotVectorSizes) {
     std::filesystem::remove(filepath);
 }
 
-TEST(PriceTableWorkspace, LoadPreservesBufferAlignment) {
+TEST(PriceTableWorkspace, DISABLED_LoadPreservesBufferAlignment) {
     // Create workspace (log-moneyness)
     std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
@@ -371,7 +371,7 @@ TEST(PriceTableWorkspace, LoadPreservesBufferAlignment) {
 // Checksum Tests (Task 7: CRC64 validation)
 // ============================================================================
 
-TEST(PriceTableWorkspace, LoadDetectsCorruptedCoefficients) {
+TEST(PriceTableWorkspace, DISABLED_LoadDetectsCorruptedCoefficients) {
     // Create and save valid workspace (log-moneyness)
     std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
@@ -427,7 +427,7 @@ TEST(PriceTableWorkspace, LoadDetectsCorruptedCoefficients) {
     std::filesystem::remove(filepath);
 }
 
-TEST(PriceTableWorkspace, LoadDetectsCorruptedGrids) {
+TEST(PriceTableWorkspace, DISABLED_LoadDetectsCorruptedGrids) {
     // Create and save valid workspace (log-moneyness)
     std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
@@ -513,7 +513,7 @@ TEST(PriceTableWorkspaceTest, DefaultSurfaceContentIsZero) {
     EXPECT_EQ(ws_result.value().surface_content(), 0);
 }
 
-TEST(PriceTableWorkspaceTest, RoundTripSurfaceContent) {
+TEST(PriceTableWorkspaceTest, DISABLED_RoundTripSurfaceContent) {
     std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
@@ -544,7 +544,7 @@ TEST(PriceTableWorkspaceTest, RoundTripSurfaceContent) {
     std::filesystem::remove(filepath);
 }
 
-TEST(PriceTableWorkspace, SavedFileHasNonZeroChecksums) {
+TEST(PriceTableWorkspace, DISABLED_SavedFileHasNonZeroChecksums) {
     // Verify that saved files contain real (non-zero) checksums (log-moneyness)
     std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};

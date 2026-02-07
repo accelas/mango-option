@@ -15,6 +15,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <cmath>
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/american_option_batch.hpp"
@@ -30,7 +31,7 @@ using namespace mango;
 namespace {
 
 struct MarketGrid {
-    std::vector<double> moneyness;
+    std::vector<double> log_moneyness;
     std::vector<double> maturities;
     std::vector<double> volatilities;
     std::vector<double> rates;
@@ -47,11 +48,11 @@ MarketGrid generate_market_grid() {
     grid.K_ref = 450.0;
     grid.dividend = 0.015;
 
-    // Moneyness grid: 0.85 to 1.15
-    grid.moneyness = {
-        0.85, 0.90, 0.93, 0.95, 0.97, 0.99,
-        1.00,
-        1.01, 1.03, 1.05, 1.07, 1.10, 1.15
+    // Log-moneyness grid: ln(0.85) to ln(1.15)
+    grid.log_moneyness = {
+        std::log(0.85), std::log(0.90), std::log(0.93), std::log(0.95), std::log(0.97), std::log(0.99),
+        std::log(1.00),
+        std::log(1.01), std::log(1.03), std::log(1.05), std::log(1.07), std::log(1.10), std::log(1.15)
     };
 
     // Maturities: weekly to 2 years
@@ -79,7 +80,7 @@ MarketGrid generate_small_market_grid() {
     grid.K_ref = 100.0;
     grid.dividend = 0.02;
 
-    grid.moneyness = {0.90, 0.95, 1.00, 1.05, 1.10};
+    grid.log_moneyness = {std::log(0.90), std::log(0.95), std::log(1.00), std::log(1.05), std::log(1.10)};
     grid.maturities = {0.25, 0.5, 1.0, 2.0};  // Need 4+ for B-spline
     grid.volatilities = {0.15, 0.20, 0.25, 0.30};
     grid.rates = {0.02, 0.03, 0.04, 0.05};  // Need 4+ for B-spline
@@ -104,7 +105,7 @@ TEST(ProductionConfig, PriceTableBuilder_SmallGrid_51Points) {
     auto grid_spec = grid_spec_result.value();
 
     auto builder_result = PriceTableBuilder<4>::from_vectors(
-        grid.moneyness,
+        grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
         grid.rates,
@@ -140,7 +141,7 @@ TEST(ProductionConfig, PriceTableBuilder_VerySmallGrid_31Points) {
     ASSERT_TRUE(grid_spec_result.has_value());
 
     auto builder_result = PriceTableBuilder<4>::from_vectors(
-        grid.moneyness,
+        grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
         grid.rates,
@@ -165,7 +166,7 @@ TEST(ProductionConfig, PriceTableBuilder_LargeGrid_201Points) {
     ASSERT_TRUE(grid_spec_result.has_value());
 
     auto builder_result = PriceTableBuilder<4>::from_vectors(
-        grid.moneyness,
+        grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
         grid.rates,
@@ -189,7 +190,7 @@ TEST(ProductionConfig, PriceTableBuilder_FullMarketGrid) {
     ASSERT_TRUE(grid_spec_result.has_value());
 
     auto builder_result = PriceTableBuilder<4>::from_vectors(
-        grid.moneyness,
+        grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
         grid.rates,
@@ -458,7 +459,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_BuildPriceTable) {
     ASSERT_TRUE(grid_spec_result.has_value());
 
     auto builder_result = PriceTableBuilder<4>::from_vectors(
-        grid.moneyness,
+        grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
         grid.rates,
@@ -493,7 +494,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     ASSERT_TRUE(grid_spec_result.has_value());
 
     auto builder_result = PriceTableBuilder<4>::from_vectors(
-        grid.moneyness,
+        grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
         grid.rates,

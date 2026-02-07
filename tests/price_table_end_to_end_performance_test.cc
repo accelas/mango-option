@@ -17,6 +17,7 @@
 #include "mango/option/table/price_table_builder.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 
 using namespace mango;
@@ -24,10 +25,10 @@ using namespace mango;
 class PriceTableEndToEndPerformanceTest : public ::testing::Test {
 protected:
     // Realistic production grid (50×30×20×10 = 300K points)
-    std::vector<double> create_moneyness_grid() {
+    std::vector<double> create_log_moneyness_grid() {
         std::vector<double> m;
         for (double val = 0.7; val <= 1.3; val += 0.012) {
-            m.push_back(val);
+            m.push_back(std::log(val));
         }
         return m;  // ~50 points
     }
@@ -58,7 +59,7 @@ protected:
 };
 
 TEST_F(PriceTableEndToEndPerformanceTest, BandedSolverSpeedup) {
-    auto moneyness = create_moneyness_grid();
+    auto moneyness = create_log_moneyness_grid();
     auto maturity = create_maturity_grid();
     auto volatility = create_volatility_grid();
     auto rate = create_rate_grid();
@@ -95,8 +96,8 @@ TEST_F(PriceTableEndToEndPerformanceTest, BandedSolverSpeedup) {
         std::cout << "  PDE solves: " << result->n_pde_solves << "\n";
         std::cout << "  Throughput: " << (result->n_pde_solves * 1000.0 / duration_ms) << " PDEs/sec\n";
 
-        // Verify prices are sensible
-        double price_atm = result->surface->value({1.0, 1.0, 0.20, 0.05});
+        // Verify prices are sensible (ATM: log-moneyness = 0.0)
+        double price_atm = result->surface->value({0.0, 1.0, 0.20, 0.05});
         EXPECT_GT(price_atm, 0.0);
         EXPECT_LT(price_atm, 100.0);
 
@@ -120,7 +121,7 @@ TEST_F(PriceTableEndToEndPerformanceTest, BandedSolverSpeedup) {
 
 TEST_F(PriceTableEndToEndPerformanceTest, SmallerGridSanityCheck) {
     // Smaller grid for faster test (7×4×4×4 = 448 points)
-    std::vector<double> moneyness = {0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15};
+    std::vector<double> moneyness = {std::log(0.85), std::log(0.9), std::log(0.95), std::log(1.0), std::log(1.05), std::log(1.1), std::log(1.15)};
     std::vector<double> maturity = {0.25, 0.5, 1.0, 1.5};
     std::vector<double> volatility = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rate = {0.02, 0.04, 0.06, 0.08};

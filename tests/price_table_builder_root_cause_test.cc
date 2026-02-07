@@ -3,6 +3,7 @@
 #include "mango/option/table/price_table_builder.hpp"
 #include "tests/price_table_builder_test_access.hpp"
 #include "mango/pde/core/time_domain.hpp"
+#include <cmath>
 
 namespace mango {
 namespace {
@@ -39,7 +40,7 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
 
     PriceTableBuilder<4> builder_narrow(config_narrow);
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.9, 1.0};
+    axes.grids[0] = {std::log(0.9), std::log(1.0)};
     axes.grids[1] = {0.1, 0.5, 1.0};
     axes.grids[2] = {0.20};
     axes.grids[3] = {0.05};

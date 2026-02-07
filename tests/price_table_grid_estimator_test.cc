@@ -92,22 +92,25 @@ TEST(PriceTableGridEstimatorTest, EstimateGridForPriceTable_HigherAccuracy) {
     EXPECT_GT(high_est.grids[2].size(), low_est.grids[2].size());  // volatility
 }
 
-TEST(PriceTableGridEstimatorTest, MoneynessShouldBeLogUniform) {
+TEST(PriceTableGridEstimatorTest, LogMoneynessShouldBeUniform) {
+    // Input bounds are now log-moneyness: ln(0.8) ≈ -0.223, ln(1.2) ≈ 0.182
+    double log_m_min = std::log(0.8);
+    double log_m_max = std::log(1.2);
     auto estimate = estimate_grid_for_price_table(
-        0.8, 1.2, 0.1, 2.0, 0.10, 0.50, 0.01, 0.06);
+        log_m_min, log_m_max, 0.1, 2.0, 0.10, 0.50, 0.01, 0.06);
 
     const auto& m = estimate.grids[0];
     ASSERT_GE(m.size(), 4);
 
-    // Check bounds
-    EXPECT_NEAR(m.front(), 0.8, 0.01);
-    EXPECT_NEAR(m.back(), 1.2, 0.01);
+    // Check bounds (log-moneyness values)
+    EXPECT_NEAR(m.front(), log_m_min, 0.01);
+    EXPECT_NEAR(m.back(), log_m_max, 0.01);
 
-    // Check log-uniform spacing: log(m[i+1]) - log(m[i]) should be constant
+    // Check uniform spacing in log-moneyness: m[i+1] - m[i] should be constant
     if (m.size() >= 3) {
-        double log_spacing1 = std::log(m[1]) - std::log(m[0]);
-        double log_spacing2 = std::log(m[2]) - std::log(m[1]);
-        EXPECT_NEAR(log_spacing1, log_spacing2, 1e-10);
+        double spacing1 = m[1] - m[0];
+        double spacing2 = m[2] - m[1];
+        EXPECT_NEAR(spacing1, spacing2, 1e-10);
     }
 }
 
@@ -199,11 +202,11 @@ TEST(PriceTableGridEstimatorTest, FromChainBounds_BasicFunctionality) {
     EXPECT_FALSE(estimate.grids[2].empty());
     EXPECT_FALSE(estimate.grids[3].empty());
 
-    // Moneyness grid should cover the range (with padding)
-    // spot/max_strike = 100/110 ≈ 0.909
-    // spot/min_strike = 100/90 ≈ 1.111
-    EXPECT_LT(estimate.grids[0].front(), 100.0 / 110.0);  // Below spot/max_strike
-    EXPECT_GT(estimate.grids[0].back(), 100.0 / 90.0);    // Above spot/min_strike
+    // Log-moneyness grid should cover the range (with padding)
+    // ln(spot/max_strike) = ln(100/110) ≈ -0.0953
+    // ln(spot/min_strike) = ln(100/90) ≈ 0.1054
+    EXPECT_LT(estimate.grids[0].front(), std::log(100.0 / 110.0));  // Below ln(spot/max_strike)
+    EXPECT_GT(estimate.grids[0].back(), std::log(100.0 / 90.0));    // Above ln(spot/min_strike)
 }
 
 // ===========================================================================

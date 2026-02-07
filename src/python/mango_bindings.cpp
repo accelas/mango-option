@@ -567,8 +567,8 @@ PYBIND11_MODULE(mango_option, m) {
                     coefficients: B-spline coefficients (size = n_m * n_tau * n_sigma * n_r)
                     K_ref: Reference strike price
                     dividend_yield: Continuous dividend yield
-                    m_min: Minimum moneyness (S/K) for user-facing bounds
-                    m_max: Maximum moneyness (S/K) for user-facing bounds
+                    m_min: Minimum log-moneyness ln(S/K)
+                    m_max: Maximum log-moneyness ln(S/K)
 
                 Returns:
                     PriceTableWorkspace instance
@@ -678,9 +678,9 @@ PYBIND11_MODULE(mango_option, m) {
         .def_property_readonly("dividend_yield", &mango::PriceTableWorkspace::dividend_yield,
             "Continuous dividend yield")
         .def_property_readonly("m_min", &mango::PriceTableWorkspace::m_min,
-            "Minimum moneyness (S/K)")
+            "Minimum log-moneyness ln(S/K)")
         .def_property_readonly("m_max", &mango::PriceTableWorkspace::m_max,
-            "Maximum moneyness (S/K)")
+            "Maximum log-moneyness ln(S/K)")
         .def_property_readonly("dimensions",
             [](const mango::PriceTableWorkspace& self) {
                 auto [nm, nt, nv, nr] = self.dimensions();
@@ -791,12 +791,12 @@ PYBIND11_MODULE(mango_option, m) {
             [](const mango::PriceTableSurface<4>& self, double m, double tau, double sigma, double r) {
                 return self.value({m, tau, sigma, r});
             },
-            py::arg("moneyness"), py::arg("maturity"), py::arg("volatility"), py::arg("rate"),
+            py::arg("log_moneyness"), py::arg("maturity"), py::arg("volatility"), py::arg("rate"),
             R"pbdoc(
                 Evaluate price at query point.
 
                 Args:
-                    moneyness: S/K ratio
+                    log_moneyness: ln(S/K)
                     maturity: Time to maturity (years)
                     volatility: Implied volatility
                     rate: Risk-free rate
@@ -809,14 +809,14 @@ PYBIND11_MODULE(mango_option, m) {
                double m, double tau, double sigma, double r) {
                 return self.partial(axis, {m, tau, sigma, r});
             },
-            py::arg("axis"), py::arg("moneyness"), py::arg("maturity"),
+            py::arg("axis"), py::arg("log_moneyness"), py::arg("maturity"),
             py::arg("volatility"), py::arg("rate"),
             R"pbdoc(
                 Compute partial derivative along specified axis.
 
                 Args:
-                    axis: 0=moneyness, 1=maturity, 2=volatility, 3=rate
-                    moneyness: S/K ratio
+                    axis: 0=log_moneyness, 1=maturity, 2=volatility, 3=rate
+                    log_moneyness: ln(S/K)
                     maturity: Time to maturity (years)
                     volatility: Implied volatility
                     rate: Risk-free rate

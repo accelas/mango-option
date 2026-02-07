@@ -380,7 +380,7 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
             double rate = sample[3];
 
             // Interpolated price from surface via callback
-            double strike = ctx.spot / m;
+            double strike = ctx.spot * std::exp(-m);
             double interp_price = handle.price(ctx.spot, strike, tau, sigma, rate);
 
             // Fresh FD solve for reference via callback
@@ -581,16 +581,17 @@ probe_and_build(
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
-    double min_m = domain.moneyness.front();
-    double max_m = domain.moneyness.back();
-    double expanded_min_m = std::max(min_m - expansion, 0.01);
+    double min_m_money = domain.moneyness.front();  // moneyness space
+    double expanded_min_money = std::max(min_m_money - expansion, 0.01);
+    double expanded_min_m = std::log(expanded_min_money);
+    double max_m = std::log(domain.moneyness.back());
 
     double min_vol = domain.vol.front();
     double max_vol = domain.vol.back();
     double min_rate = domain.rate.front();
     double max_rate = domain.rate.back();
 
-    expand_bounds_positive(expanded_min_m, max_m, 0.10);
+    expand_bounds(expanded_min_m, max_m, 0.10);
     expand_bounds_positive(min_vol, max_vol, 0.10);
     expand_bounds(min_rate, max_rate, 0.04);
 
@@ -678,7 +679,10 @@ probe_and_build(
         };
 
         InitialGrids initial_grids;
-        initial_grids.moneyness = domain.moneyness;
+        initial_grids.moneyness.reserve(domain.moneyness.size());
+        for (double m : domain.moneyness) {
+            initial_grids.moneyness.push_back(std::log(m));
+        }
         initial_grids.vol = domain.vol;
         initial_grids.rate = domain.rate;
 
@@ -761,7 +765,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     double max_moneyness = std::numeric_limits<double>::lowest();
 
     for (double strike : chain.strikes) {
-        double m = chain.spot / strike;
+        double m = std::log(chain.spot / strike);
         min_moneyness = std::min(min_moneyness, m);
         max_moneyness = std::max(max_moneyness, m);
     }
@@ -775,7 +779,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     double min_rate = *std::min_element(chain.rates.begin(), chain.rates.end());
     double max_rate = *std::max_element(chain.rates.begin(), chain.rates.end());
 
-    expand_bounds_positive(min_moneyness, max_moneyness, 0.10);
+    expand_bounds(min_moneyness, max_moneyness, 0.10);
     expand_bounds_positive(min_tau, max_tau, 0.5);
     expand_bounds_positive(min_vol, max_vol, 0.10);
     expand_bounds(min_rate, max_rate, 0.04);
@@ -1074,7 +1078,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     InitialGrids initial_grids;
     initial_grids.moneyness.reserve(chain.strikes.size());
     for (double strike : chain.strikes) {
-        initial_grids.moneyness.push_back(chain.spot / strike);
+        initial_grids.moneyness.push_back(std::log(chain.spot / strike));
     }
     initial_grids.tau = chain.maturities;
     initial_grids.vol = chain.implied_vols;
@@ -1244,7 +1248,7 @@ AdaptiveGridBuilder::build_segmented(
 
     for (const auto& sample : scaled) {
         double m = sample[0], tau = sample[1], sigma = sample[2], rate = sample[3];
-        double strike = config.spot / m;
+        double strike = config.spot * std::exp(-m);
 
         PriceQuery query{
             .spot = config.spot,

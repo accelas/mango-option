@@ -51,11 +51,6 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
         }
     }
 
-    // Check positive moneyness (needed for log)
-    if (axes.grids[0].front() <= 0.0) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 0});
-    }
-
     // Check positive maturity (strict > 0, unless allow_tau_zero is set)
     if (!allow_tau_zero_ && axes.grids[1].front() <= 0.0) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 1});
@@ -78,8 +73,8 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     // Check PDE domain coverage (only for explicit grids; auto-estimated grids
     // are computed from batch parameters and always cover the needed domain)
     if (auto* explicit_grid = std::get_if<PDEGridConfig>(&config_.pde_grid)) {
-        const double x_min_requested = std::log(axes.grids[0].front());
-        const double x_max_requested = std::log(axes.grids[0].back());
+        const double x_min_requested = axes.grids[0].front();
+        const double x_max_requested = axes.grids[0].back();
         const double x_min = explicit_grid->grid_spec.x_min();
         const double x_max = explicit_grid->grid_spec.x_max();
 
@@ -209,8 +204,8 @@ static void ensure_moneyness_coverage(
     const std::vector<PricingParams>& batch,
     const PriceTableAxes<N>& axes)
 {
-    const double log_m_min = std::log(axes.grids[0].front());
-    const double log_m_max = std::log(axes.grids[0].back());
+    const double log_m_min = axes.grids[0].front();
+    const double log_m_max = axes.grids[0].back();
     const double required_half_width = std::max(std::abs(log_m_min), std::abs(log_m_max));
 
     // Compute max σ√T across the batch (floor to avoid division by zero)
@@ -373,13 +368,6 @@ PriceTableBuilder<N>::extract_tensor(
 
     auto tensor = tensor_result.value();
 
-    // Precompute log-moneyness for interpolation
-    std::vector<double> log_moneyness(Nm);
-    #pragma omp simd
-    for (size_t i = 0; i < Nm; ++i) {
-        log_moneyness[i] = std::log(axes.grids[0][i]);
-    }
-
     // Failure tracking
     std::vector<size_t> failed_pde;
     std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
@@ -441,7 +429,7 @@ PriceTableBuilder<N>::extract_tensor(
                     // needs to be scaled back to actual prices: V_actual = K_ref * V_norm
                     const double K_ref = config_.K_ref;
                     for (size_t i = 0; i < Nm; ++i) {
-                        double normalized_price = spline.eval(log_moneyness[i]);
+                        double normalized_price = spline.eval(axes.grids[0][i]);
                         double american_price = K_ref * normalized_price;
 
                         if (surface_content_ == SurfaceContent::RawPrice) {
@@ -450,11 +438,11 @@ PriceTableBuilder<N>::extract_tensor(
                             tensor.view[i, j, σ_idx, r_idx] = normalized_price;
                         } else {
                             // EEP mode: subtract European price
-                            double m = axes.grids[0][i];
+                            double x = axes.grids[0][i];  // log-moneyness
                             double tau = axes.grids[1][j];
                             double sigma = axes.grids[2][σ_idx];
                             double rate = axes.grids[3][r_idx];
-                            double spot = m * K_ref;
+                            double spot = std::exp(x) * K_ref;
 
                             auto eu = EuropeanOptionSolver(
                                 OptionSpec{.spot = spot, .strike = K_ref, .maturity = tau,
@@ -497,18 +485,10 @@ PriceTableBuilder<N>::fit_coeffs(
     static_assert(N == 4, "PriceTableBuilder only supports N=4");
 
     // Extract grids for BSplineNDSeparable
-    // IMPORTANT: Transform axis 0 from moneyness to log-moneyness to match
-    // PriceTableSurface::build() which also uses log-moneyness internally.
-    // The B-spline coefficients must be fitted in the same coordinate system
-    // that the surface will use for evaluation.
+    // Axis 0 is already log-moneyness, matching PriceTableSurface's coordinate system.
     std::array<std::vector<double>, N> grids;
     for (size_t i = 0; i < N; ++i) {
         grids[i] = axes.grids[i];
-    }
-    if constexpr (N >= 1) {
-        for (double& m : grids[0]) {
-            m = std::log(m);  // moneyness → log-moneyness
-        }
     }
 
     // Create fitter
@@ -559,7 +539,7 @@ std::vector<double> sort_and_dedupe(std::vector<double> v) {
 template <>
 PriceTableBuilder<4>::Setup
 PriceTableBuilder<4>::from_vectors(
-    std::vector<double> moneyness,
+    std::vector<double> log_moneyness,
     std::vector<double> maturity,
     std::vector<double> volatility,
     std::vector<double> rate,
@@ -570,15 +550,12 @@ PriceTableBuilder<4>::from_vectors(
     double max_failure_rate)
 {
     // Sort and dedupe
-    moneyness = sort_and_dedupe(std::move(moneyness));
+    log_moneyness = sort_and_dedupe(std::move(log_moneyness));
     maturity = sort_and_dedupe(std::move(maturity));
     volatility = sort_and_dedupe(std::move(volatility));
     rate = sort_and_dedupe(std::move(rate));
 
-    // Validate positivity
-    if (!moneyness.empty() && moneyness.front() <= 0.0) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 0});
-    }
+    // Validate positivity (log-moneyness can be negative, no check needed)
     if (!maturity.empty() && maturity.front() < 0.0) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 1});
     }
@@ -591,11 +568,11 @@ PriceTableBuilder<4>::from_vectors(
 
     // Build axes
     PriceTableAxes<4> axes;
-    axes.grids[0] = std::move(moneyness);
+    axes.grids[0] = std::move(log_moneyness);
     axes.grids[1] = std::move(maturity);
     axes.grids[2] = std::move(volatility);
     axes.grids[3] = std::move(rate);
-    axes.names = {"moneyness", "maturity", "volatility", "rate"};
+    axes.names = {"log_moneyness", "maturity", "volatility", "rate"};
 
     // Build config
     PriceTableConfig config;
@@ -641,17 +618,14 @@ PriceTableBuilder<4>::from_strikes(
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 0});
     }
 
-    // Compute moneyness = spot/strike
-    // C++23 ranges::to materializes the transform view into a vector
-    auto moneyness = strikes
-        | std::views::transform([spot](double K) { return spot / K; })
+    // Compute log-moneyness = log(spot/strike)
+    auto log_moneyness = strikes
+        | std::views::transform([spot](double K) { return std::log(spot / K); })
         | std::ranges::to<std::vector>();
-    // Note: if strikes are ascending, moneyness is descending
-    // Sort to make ascending
-    std::ranges::sort(moneyness);
+    std::ranges::sort(log_moneyness);
 
     return from_vectors(
-        std::move(moneyness),
+        std::move(log_moneyness),
         std::move(maturities),
         std::move(volatilities),
         std::move(rates),

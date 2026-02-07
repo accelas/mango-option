@@ -94,8 +94,12 @@ GridBounds extract_bounds(const IVGrid& grid) {
     auto minmax_m = std::minmax_element(grid.moneyness.begin(), grid.moneyness.end());
     auto minmax_v = std::minmax_element(grid.vol.begin(), grid.vol.end());
     auto minmax_r = std::minmax_element(grid.rate.begin(), grid.rate.end());
+    // Moneyness must be positive for log conversion
+    if (*minmax_m.first <= 0.0) {
+        return {};  // Zero-initialized; caller validates non-empty bounds
+    }
     return {
-        .m_min = *minmax_m.first, .m_max = *minmax_m.second,
+        .m_min = std::log(*minmax_m.first), .m_max = std::log(*minmax_m.second),
         .sigma_min = *minmax_v.first, .sigma_max = *minmax_v.second,
         .rate_min = *minmax_r.first, .rate_max = *minmax_r.second,
     };
@@ -199,8 +203,18 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
     }
 
     // Manual grid: build price table directly
+    // Convert moneyness to log-moneyness for from_vectors
+    std::vector<double> log_m;
+    log_m.reserve(config.grid.moneyness.size());
+    for (double m : config.grid.moneyness) {
+        if (m <= 0.0) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidBounds, m});
+        }
+        log_m.push_back(std::log(m));
+    }
     auto setup = PriceTableBuilder<4>::from_vectors(
-        config.grid.moneyness, path.maturity_grid, config.grid.vol, config.grid.rate,
+        std::move(log_m), path.maturity_grid, config.grid.vol, config.grid.rate,
         config.spot, GridAccuracyParams{}, config.option_type,
         config.dividend_yield);
     if (!setup.has_value()) {

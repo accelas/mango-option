@@ -14,7 +14,8 @@ namespace mango {
 /// prices from Early Exercise Premium (EEP) data.
 ///
 /// Reconstruction formula:
-///   P_American = (K/K_ref) * EEP_spline(m, tau, sigma, r) + P_European(S, K, tau, sigma, r, q)
+///   P_American = (K/K_ref) * EEP_spline(x, tau, sigma, r) + P_European(S, K, tau, sigma, r, q)
+///   where x = ln(S/K)
 ///
 /// Thread-safe after construction.
 class AmericanPriceSurface {
@@ -24,15 +25,15 @@ public:
         std::shared_ptr<const PriceTableSurface<4>> eep_surface,
         OptionType type);
 
-    /// P = (K/K_ref) * E(m,tau,sigma,r) + P_Eu(S,K,tau,sigma,r,q)
+    /// P = (K/K_ref) * E(x,tau,sigma,r) + P_Eu(S,K,tau,sigma,r,q)  where x = ln(S/K)
     double price(double spot, double strike, double tau,
                  double sigma, double rate) const;
 
-    /// Delta = (1/K_ref) * partial_0(E) + Delta_Eu
+    /// Delta = (K/(K_ref·S)) * ∂E/∂x + Delta_Eu  where x = ln(S/K)
     double delta(double spot, double strike, double tau,
                  double sigma, double rate) const;
 
-    /// Gamma = (1/(K_ref·K)) * ∂²E/∂m² + Gamma_Eu
+    /// Gamma = (K/K_ref) * (∂²E/∂x² - ∂E/∂x) / S² + Gamma_Eu
     double gamma(double spot, double strike, double tau,
                  double sigma, double rate) const;
 

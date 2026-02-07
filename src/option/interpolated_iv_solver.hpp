@@ -124,13 +124,13 @@ private:
 
     /// Check if query parameters are within surface bounds
     bool is_in_bounds(const IVQuery& query, double vol) const {
-        const double m = query.spot / query.strike;
+        const double x = std::log(query.spot / query.strike);
 
         // Extract zero rate for bounds check - must match what solve uses
         // Using get_zero_rate() ensures consistency: -ln(D(T))/T for curves
         double rate_value = get_zero_rate(query.rate, query.maturity);
 
-        return m >= m_range_.first && m <= m_range_.second &&
+        return x >= m_range_.first && x <= m_range_.second &&
                query.maturity >= tau_range_.first && query.maturity <= tau_range_.second &&
                vol >= sigma_range_.first && vol <= sigma_range_.second &&
                rate_value >= r_range_.first && rate_value <= r_range_.second;

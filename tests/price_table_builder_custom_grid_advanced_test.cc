@@ -3,6 +3,7 @@
 #include "mango/option/table/price_table_builder.hpp"
 #include "tests/price_table_builder_test_access.hpp"
 #include "mango/pde/core/time_domain.hpp"
+#include <cmath>
 
 namespace mango {
 namespace {
@@ -23,7 +24,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
     PriceTableBuilder<4> builder(config);
 
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.9, 1.0, 1.1, 1.2};
+    axes.grids[0] = {std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.20, 0.25};
     axes.grids[3] = {0.05, 0.06};
@@ -93,7 +94,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
 
     // Include moneyness = 1.0 (ATM point, log(1.0) = 0.0)
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.95, 1.0, 1.05, 1.10};  // Includes exact ATM
+    axes.grids[0] = {std::log(0.95), std::log(1.0), std::log(1.05), std::log(1.10)};  // Includes exact ATM (log(1.0)=0.0)
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.20};
     axes.grids[3] = {0.05};
@@ -165,7 +166,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, SimulatePlanModification) {
     PriceTableBuilder<4> builder(config);
 
     PriceTableAxes<4> axes;
-    axes.grids[0] = {0.8, 0.9, 1.0, 1.1};
+    axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)};
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.15, 0.20, 0.25, 0.30};
     axes.grids[3] = {0.02, 0.04, 0.06, 0.08};

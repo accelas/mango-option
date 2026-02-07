@@ -16,6 +16,7 @@
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/american_price_surface.hpp"
 #include <gtest/gtest.h>
+#include <cmath>
 
 using namespace mango;
 using namespace mango::testing;
@@ -43,8 +44,9 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     auto scenarios = get_standard_test_scenarios();
 
     // Build price table for interpolated IV (auto grid estimation)
-    double m_min = std::numeric_limits<double>::max();
-    double m_max = std::numeric_limits<double>::lowest();
+    // Compute log-moneyness bounds from scenarios
+    double lm_min = std::numeric_limits<double>::max();
+    double lm_max = std::numeric_limits<double>::lowest();
     double tau_min = std::numeric_limits<double>::max();
     double tau_max = std::numeric_limits<double>::lowest();
     double sigma_min = std::numeric_limits<double>::max();
@@ -53,9 +55,9 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     double r_max = std::numeric_limits<double>::lowest();
 
     for (const auto& scenario : scenarios) {
-        const double m = scenario.spot / scenario.strike;
-        m_min = std::min(m_min, m);
-        m_max = std::max(m_max, m);
+        const double lm = std::log(scenario.spot / scenario.strike);
+        lm_min = std::min(lm_min, lm);
+        lm_max = std::max(lm_max, lm);
         tau_min = std::min(tau_min, scenario.maturity);
         tau_max = std::max(tau_max, scenario.maturity);
         sigma_min = std::min(sigma_min, scenario.volatility);
@@ -65,8 +67,9 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     }
 
     // Pad bounds to avoid extrapolation at edges
-    m_min *= 0.98;
-    m_max *= 1.02;
+    // Log-moneyness: pad symmetrically
+    lm_min -= 0.02;
+    lm_max += 0.02;
     tau_min *= 0.9;
     tau_max *= 1.1;
     sigma_min = std::max(0.01, sigma_min * 0.9);
@@ -77,7 +80,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     auto grid_params = make_price_table_grid_accuracy(PriceTableGridProfile::High);
 
     auto grid_estimate = estimate_grid_for_price_table(
-        m_min, m_max, tau_min, tau_max, sigma_min, sigma_max, r_min, r_max, grid_params);
+        lm_min, lm_max, tau_min, tau_max, sigma_min, sigma_max, r_min, r_max, grid_params);
 
     std::vector<double> moneyness_grid = std::move(grid_estimate.moneyness_grid());
     std::vector<double> maturity_grid = std::move(grid_estimate.maturity_grid());
