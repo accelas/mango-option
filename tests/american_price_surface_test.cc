@@ -32,8 +32,8 @@ std::shared_ptr<const PriceTableSurface<4>> make_test_surface(
     return result.value();
 }
 
-TEST(AmericanPriceSurfaceTest, AcceptsRawPriceSurface) {
-    auto surface = make_test_surface(SurfaceContent::RawPrice);
+TEST(AmericanPriceSurfaceTest, AcceptsNormalizedPriceSurface) {
+    auto surface = make_test_surface(SurfaceContent::NormalizedPrice);
     auto result = AmericanPriceSurface::create(surface, OptionType::PUT);
     EXPECT_TRUE(result.has_value());
 }
@@ -196,10 +196,10 @@ TEST(AmericanPriceSurfaceTest, MetadataAccess) {
 }
 
 // ===========================================================================
-// RawPrice content type tests
+// NormalizedPrice content type tests
 // ===========================================================================
 
-TEST(AmericanPriceSurfaceTest, RejectsRawPriceWithDiscreteDividends) {
+TEST(AmericanPriceSurfaceTest, RejectsNormalizedPriceWithDiscreteDividends) {
     PriceTableAxes<4> axes;
     axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
@@ -212,20 +212,20 @@ TEST(AmericanPriceSurfaceTest, RejectsRawPriceWithDiscreteDividends) {
         .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.50}, {.calendar_time = 0.75, .amount = 1.50}}},
         .m_min = std::log(0.8),
         .m_max = std::log(1.2),
-        .content = SurfaceContent::RawPrice,
+        .content = SurfaceContent::NormalizedPrice,
     };
     auto surface = PriceTableSurface<4>::build(axes, coeffs, meta).value();
     auto result = AmericanPriceSurface::create(surface, OptionType::PUT);
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(AmericanPriceSurfaceTest, RawPricePriceReturnsInterpolatedValue) {
+TEST(AmericanPriceSurfaceTest, NormalizedPricePriceReturnsInterpolatedValue) {
     double val = 7.5;
-    auto surface = make_test_surface(SurfaceContent::RawPrice, val);
+    auto surface = make_test_surface(SurfaceContent::NormalizedPrice, val);
     auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
-    // For RawPrice: price = surface_->value({ln(spot/K_ref), tau, sigma, rate})
+    // For NormalizedPrice: price = surface_->value({ln(spot/K_ref), tau, sigma, rate})
     // With constant coefficients, the spline returns approximately val
     double S = 100.0, K = 100.0, tau = 1.0, sigma = 0.20, r = 0.05;
     double price = aps->price(S, K, tau, sigma, r);
@@ -233,9 +233,9 @@ TEST(AmericanPriceSurfaceTest, RawPricePriceReturnsInterpolatedValue) {
     EXPECT_DOUBLE_EQ(price, direct);
 }
 
-TEST(AmericanPriceSurfaceTest, RawPriceVegaReturnsFiniteFDValue) {
-    // RawPrice surfaces now compute FD vega (previously returned NaN)
-    auto surface = make_test_surface(SurfaceContent::RawPrice, 5.0);
+TEST(AmericanPriceSurfaceTest, NormalizedPriceVegaReturnsFiniteFDValue) {
+    // NormalizedPrice surfaces now compute FD vega (previously returned NaN)
+    auto surface = make_test_surface(SurfaceContent::NormalizedPrice, 5.0);
     auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
@@ -270,8 +270,8 @@ TEST(AmericanPriceSurfaceTest, BoundsAccessorsEEP) {
     EXPECT_DOUBLE_EQ(aps->rate_max(), 0.08);
 }
 
-TEST(AmericanPriceSurfaceTest, BoundsAccessorsRawPrice) {
-    auto surface = make_test_surface(SurfaceContent::RawPrice);
+TEST(AmericanPriceSurfaceTest, BoundsAccessorsNormalizedPrice) {
+    auto surface = make_test_surface(SurfaceContent::NormalizedPrice);
     auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 

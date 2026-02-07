@@ -272,7 +272,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         // Determine surface content mode
         SurfaceContent content = is_last_segment
             ? SurfaceContent::EarlyExercisePremium
-            : SurfaceContent::RawPrice;
+            : SurfaceContent::NormalizedPrice;
 
         // Build PriceTableBuilder for this segment
         auto setup = PriceTableBuilder<4>::from_vectors(
@@ -345,7 +345,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                             double raw = ic_ctx.prev->price(
                                 spot_adj, ic_ctx.K_ref, ic_ctx.prev_tau_end,
                                 sigma, rate);
-                            // EEP returns actual price V; RawPrice returns V/K_ref
+                            // EEP returns actual price V; NormalizedPrice returns V/K_ref
                             u[i] = ic_ctx.prev_is_eep ? raw / ic_ctx.K_ref : raw;
                         }
                     });

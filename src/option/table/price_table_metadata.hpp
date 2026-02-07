@@ -9,7 +9,7 @@ namespace mango {
 
 /// What the surface tensor contains
 enum class SurfaceContent : uint8_t {
-    RawPrice = 0,              ///< Raw American option prices
+    NormalizedPrice = 0,       ///< V/K_ref as function of log-moneyness
     EarlyExercisePremium = 1   ///< P_Am - P_Eu (requires reconstruction)
 };
 

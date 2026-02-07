@@ -37,7 +37,7 @@ TEST(PriceTableMetadataTest, CanSetToEEP) {
 }
 
 TEST(PriceTableMetadataTest, SurfaceContentEnumValues) {
-    EXPECT_EQ(static_cast<uint8_t>(SurfaceContent::RawPrice), 0);
+    EXPECT_EQ(static_cast<uint8_t>(SurfaceContent::NormalizedPrice), 0);
     EXPECT_EQ(static_cast<uint8_t>(SurfaceContent::EarlyExercisePremium), 1);
 }
 
