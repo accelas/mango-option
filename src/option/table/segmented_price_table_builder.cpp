@@ -199,7 +199,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         // Build PriceTableBuilder for this segment
         auto setup = PriceTableBuilder<4>::from_vectors(
             expanded_m_grid, local_tau, config.grid.vol, config.grid.rate,
-            K_ref, GridAccuracyParams{}, config.option_type,
+            K_ref, config.pde_accuracy, config.option_type,
             config.dividends.dividend_yield);
 
         if (!setup.has_value()) {
