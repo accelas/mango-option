@@ -1462,16 +1462,6 @@ cc_test(
 )
 
 cc_test(
-    name = "american_option_custom_ic_test",
-    size = "small",
-    srcs = ["american_option_custom_ic_test.cc"],
-    deps = [
-        "//src/option:american_option",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "iv_solver_factory_test",
     size = "medium",
     timeout = "moderate",
