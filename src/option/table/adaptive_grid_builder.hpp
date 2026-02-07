@@ -10,6 +10,7 @@
 #include "mango/pde/core/grid.hpp"
 #include "mango/support/error_types.hpp"
 #include <expected>
+#include <functional>
 
 namespace mango {
 
@@ -21,6 +22,13 @@ struct SegmentedAdaptiveConfig {
     std::vector<Dividend> discrete_dividends;
     double maturity;
     MultiKRefConfig kref_config;
+};
+
+/// Type-erased surface handle for validation queries during adaptive refinement
+struct SurfaceHandle {
+    std::function<double(double spot, double strike, double tau,
+                         double sigma, double rate)> price;
+    size_t pde_solves = 0;
 };
 
 /// Adaptive grid builder for price tables
@@ -104,6 +112,22 @@ private:
         const std::vector<PricingParams>& all_params,
         const std::vector<size_t>& fresh_indices,
         const BatchAmericanOptionResult& fresh_results) const;
+
+    /// Build a cached price table surface from grids (standard adaptive path).
+    /// Manages PDE batch solving, slice caching, tensor extraction, and surface construction.
+    [[nodiscard]] std::expected<SurfaceHandle, PriceTableError>
+    build_cached_surface(
+        const std::vector<double>& m_grid,
+        const std::vector<double>& tau_grid,
+        const std::vector<double>& v_grid,
+        const std::vector<double>& r_grid,
+        double K_ref,
+        double dividend_yield,
+        const PDEGridSpec& pde_grid,
+        OptionType type,
+        size_t& build_iteration,
+        std::shared_ptr<const PriceTableSurface<4>>& last_surface,
+        PriceTableAxes<4>& last_axes);
 };
 
 }  // namespace mango
