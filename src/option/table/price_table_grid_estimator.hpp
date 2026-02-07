@@ -170,13 +170,13 @@ inline std::vector<double> sqrt_uniform_grid(double min_val, double max_val, siz
  * Allocates more points to dimensions with higher curvature (4th derivative).
  *
  * Grid spacing strategies by dimension:
- * - Moneyness: log-uniform (matches internal log-moneyness storage)
+ * - Log-moneyness: uniform (native log-moneyness coordinate)
  * - Maturity: sqrt-uniform (concentrates near short maturities)
  * - Volatility: uniform (highest curvature dimension)
  * - Rate: uniform (lowest curvature, nearly linear)
  *
- * @param m_min Minimum moneyness (e.g., 0.8)
- * @param m_max Maximum moneyness (e.g., 1.2)
+ * @param m_min Minimum log-moneyness ln(S/K) (e.g., -0.22)
+ * @param m_max Maximum log-moneyness ln(S/K) (e.g., 0.18)
  * @param tau_min Minimum maturity in years (e.g., 0.01)
  * @param tau_max Maximum maturity in years (e.g., 2.0)
  * @param sigma_min Minimum volatility (e.g., 0.05)
@@ -211,8 +211,8 @@ inline PriceTableGridEstimate<4> estimate_grid_for_price_table(
     // Step 3: Generate grid vectors with dimension-appropriate spacing
     PriceTableGridEstimate<4> estimate;
 
-    // Moneyness: log-uniform (matches internal log-moneyness storage)
-    estimate.grids[0] = detail::log_uniform_grid(m_min, m_max, n_m);
+    // Log-moneyness: uniform (native log-moneyness coordinate)
+    estimate.grids[0] = detail::uniform_grid(m_min, m_max, n_m);
 
     // Maturity: sqrt-uniform (concentrates near short maturities)
     estimate.grids[1] = detail::sqrt_uniform_grid(tau_min, tau_max, n_tau);
@@ -264,16 +264,18 @@ inline PriceTableGridEstimate<4> estimate_grid_from_grid_bounds(
         return PriceTableGridEstimate<4>{};
     }
 
-    // Compute moneyness bounds from strikes
-    double m_min = spot / *std::max_element(strikes.begin(), strikes.end());
-    double m_max = spot / *std::min_element(strikes.begin(), strikes.end());
+    // Compute log-moneyness bounds from strikes: ln(spot / K)
+    double log_m_min = std::log(spot / *std::max_element(strikes.begin(), strikes.end()));
+    double log_m_max = std::log(spot / *std::min_element(strikes.begin(), strikes.end()));
 
-    // Ensure m_min < m_max (handles edge cases)
-    if (m_min > m_max) std::swap(m_min, m_max);
+    // Ensure log_m_min < log_m_max (handles edge cases)
+    if (log_m_min > log_m_max) std::swap(log_m_min, log_m_max);
 
-    // Add small padding to ensure interpolation doesn't extrapolate
-    m_min *= 0.99;
-    m_max *= 1.01;
+    // Add small padding in log-space to ensure interpolation doesn't extrapolate
+    double pad = 0.01 * (log_m_max - log_m_min);
+    if (pad < 0.01) pad = 0.01;  // minimum padding
+    log_m_min -= pad;
+    log_m_max += pad;
 
     // Get bounds for other dimensions
     auto [tau_min_it, tau_max_it] = std::minmax_element(maturities.begin(), maturities.end());
@@ -288,7 +290,7 @@ inline PriceTableGridEstimate<4> estimate_grid_from_grid_bounds(
     double r_max = *r_max_it + 0.005;
 
     return estimate_grid_for_price_table(
-        m_min, m_max,
+        log_m_min, log_m_max,
         tau_min, tau_max,
         sigma_min, sigma_max,
         r_min, r_max,

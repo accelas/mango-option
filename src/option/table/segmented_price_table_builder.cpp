@@ -168,6 +168,14 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0});
     }
 
+    // Convert moneyness to log-moneyness for from_vectors() (only when
+    // grid came from user-facing IVGrid, not from adaptive builder)
+    if (!config.skip_moneyness_expansion) {
+        for (auto& m : expanded_m_grid) {
+            m = std::log(m);
+        }
+    }
+
     // =====================================================================
     // Step 4: Build segments (last first, then backward)
     // =====================================================================
