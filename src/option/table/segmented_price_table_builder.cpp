@@ -11,9 +11,7 @@ namespace mango {
 
 namespace {
 
-constexpr double kUpperMoneynessTailScale = 1.25;
-constexpr int kUpperMoneynessTailPoints = 3;
-constexpr double kTailEnableMaturityYears = 1.25;
+constexpr int kCubicSplineDegree = 3;
 
 /// Context for sampling a previous segment's surface as an initial condition.
 struct ChainedICContext {
@@ -88,23 +86,51 @@ std::vector<Dividend> filter_dividends(
     return merged;
 }
 
-/// Append sparse right-tail moneyness points beyond the current max.
-/// This adds boundary headroom for chained segments without reducing interior
-/// resolution (existing interior knots are preserved).
-void append_upper_tail_moneyness(std::vector<double>& grid, double maturity) {
-    if (maturity < kTailEnableMaturityYears) return;
-    if (grid.empty()) return;
+/// Append an upper guard band sized by cubic-spline support in log-moneyness.
+///
+/// The interpolation axis is log-moneyness. Appending 3 local knot intervals
+/// keeps the original upper domain away from clamped endpoint basis effects.
+void append_upper_tail_moneyness(std::vector<double>& grid,
+                                 double sigma_max,
+                                 double max_segment_width) {
+    if (grid.size() < 2) return;
 
-    const double max_m = grid.back();
-    if (max_m <= 0.0) return;
+    std::sort(grid.begin(), grid.end());
+    grid.erase(std::unique(grid.begin(), grid.end()), grid.end());
+    if (grid.size() < 2) return;
 
-    const double target_max = max_m * kUpperMoneynessTailScale;
-    if (target_max <= max_m) return;
+    std::vector<double> log_grid;
+    log_grid.reserve(grid.size());
+    for (double m : grid) {
+        if (m <= 0.0) return;
+        log_grid.push_back(std::log(m));
+    }
 
-    const double step = (target_max - max_m) /
-                        static_cast<double>(kUpperMoneynessTailPoints);
-    for (int i = 1; i <= kUpperMoneynessTailPoints; ++i) {
-        grid.push_back(max_m + step * static_cast<double>(i));
+    const size_t n = log_grid.size();
+    double h_upper = 0.0;
+    const size_t first = (n >= static_cast<size_t>(kCubicSplineDegree + 1))
+        ? (n - static_cast<size_t>(kCubicSplineDegree + 1))
+        : 0;
+    for (size_t i = first; i + 1 < n; ++i) {
+        h_upper = std::max(h_upper, log_grid[i + 1] - log_grid[i]);
+    }
+    if (!(h_upper > 0.0)) return;
+
+    const double support_headroom =
+        static_cast<double>(kCubicSplineDegree) * h_upper;
+    const double diffusion_headroom =
+        (sigma_max > 0.0 && max_segment_width > 0.0)
+        ? (sigma_max * std::sqrt(max_segment_width))
+        : 0.0;
+    const double required_headroom =
+        std::max(support_headroom, diffusion_headroom);
+    const int tail_points = std::max(
+        kCubicSplineDegree,
+        static_cast<int>(std::ceil(required_headroom / h_upper)));
+
+    const double x_max = log_grid.back();
+    for (int i = 1; i <= tail_points; ++i) {
+        grid.push_back(std::exp(x_max + h_upper * static_cast<double>(i)));
     }
 }
 
@@ -180,8 +206,18 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             }
         }
 
-        // Add sparse right-tail headroom to reduce chained-segment edge bias.
-        append_upper_tail_moneyness(expanded_m_grid, config.maturity);
+        // Add right-tail headroom. Scale by one diffusion length in log-space
+        // (sigma_max * sqrt(max segment width)) and at least one cubic-support
+        // band so the original upper domain stays away from endpoint effects.
+        double sigma_max = *std::max_element(
+            config.grid.vol.begin(), config.grid.vol.end());
+        double max_segment_width = 0.0;
+        for (size_t i = 0; i + 1 < boundaries.size(); ++i) {
+            max_segment_width =
+                std::max(max_segment_width, boundaries[i + 1] - boundaries[i]);
+        }
+        append_upper_tail_moneyness(
+            expanded_m_grid, sigma_max, max_segment_width);
     }
     // Always sort and deduplicate (even when expansion is skipped,
     // the caller might pass unsorted or duplicate points)

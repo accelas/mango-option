@@ -25,9 +25,7 @@ namespace {
 // ============================================================================
 
 constexpr double kMinPositive = 1e-6;
-constexpr double kSegmentUpperMoneynessTailScale = 1.25;
-constexpr int kSegmentUpperMoneynessTailPoints = 3;
-constexpr double kSegmentTailEnableMaturityYears = 1.25;
+constexpr int kCubicSplineDegree = 3;
 
 /// Expand [lo, hi] to at least min_spread wide, keeping lo >= kMinPositive.
 void expand_bounds_positive(double& lo, double& hi, double min_spread) {
@@ -181,31 +179,71 @@ std::vector<double> linspace(double lo, double hi, size_t n) {
     return v;
 }
 
-/// Append sparse upper-tail knots in log-moneyness space.
-/// Input grid is expected sorted ascending.
-void append_upper_tail_log_moneyness(std::vector<double>& log_m_grid,
-                                     double maturity) {
-    if (maturity < kSegmentTailEnableMaturityYears) return;
-    if (log_m_grid.empty()) return;
-
-    const double max_log_m = log_m_grid.back();
-    const double max_m = std::exp(max_log_m);
-    if (max_m <= 0.0) return;
-
-    const double target_max_m = max_m * kSegmentUpperMoneynessTailScale;
-    if (target_max_m <= max_m) return;
-
-    const double step = (target_max_m - max_m) /
-                        static_cast<double>(kSegmentUpperMoneynessTailPoints);
-    for (int i = 1; i <= kSegmentUpperMoneynessTailPoints; ++i) {
-        double m = max_m + step * static_cast<double>(i);
-        log_m_grid.push_back(std::log(m));
+/// Max segment width in τ-space after splitting by discrete dividend dates.
+double compute_max_segment_width(const std::vector<Dividend>& dividends,
+                                 double maturity) {
+    std::vector<double> boundaries;
+    boundaries.push_back(0.0);
+    for (const auto& d : dividends) {
+        if (d.calendar_time > 0.0 && d.calendar_time < maturity && d.amount > 0.0) {
+            boundaries.push_back(maturity - d.calendar_time);
+        }
     }
+    boundaries.push_back(maturity);
+    std::sort(boundaries.begin(), boundaries.end());
+    boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
+
+    double max_width = 0.0;
+    for (size_t i = 0; i + 1 < boundaries.size(); ++i) {
+        max_width = std::max(max_width, boundaries[i + 1] - boundaries[i]);
+    }
+    return max_width;
+}
+
+/// Append an upper guard band on the log-moneyness axis.
+///
+/// For clamped cubic B-splines, points within 3 knot intervals of the boundary
+/// use asymmetric endpoint basis functions and are more bias-prone. We preserve
+/// the original domain as an interior region by appending exactly one cubic
+/// support width (3 local intervals) and at least one diffusion length
+/// (sigma_max * sqrt(max_segment_width)) beyond the original upper bound.
+void append_upper_tail_log_moneyness(std::vector<double>& log_m_grid,
+                                     double sigma_max,
+                                     double max_segment_width) {
+    if (log_m_grid.size() < 2) return;
 
     std::sort(log_m_grid.begin(), log_m_grid.end());
     log_m_grid.erase(
         std::unique(log_m_grid.begin(), log_m_grid.end()),
         log_m_grid.end());
+    if (log_m_grid.size() < 2) return;
+
+    const size_t n = log_m_grid.size();
+    double h_upper = 0.0;
+    const size_t first = (n >= static_cast<size_t>(kCubicSplineDegree + 1))
+        ? (n - static_cast<size_t>(kCubicSplineDegree + 1))
+        : 0;
+    for (size_t i = first; i + 1 < n; ++i) {
+        h_upper = std::max(h_upper, log_m_grid[i + 1] - log_m_grid[i]);
+    }
+    if (!(h_upper > 0.0)) return;
+
+    const double support_headroom =
+        static_cast<double>(kCubicSplineDegree) * h_upper;
+    const double diffusion_headroom =
+        (sigma_max > 0.0 && max_segment_width > 0.0)
+        ? (sigma_max * std::sqrt(max_segment_width))
+        : 0.0;
+    const double required_headroom =
+        std::max(support_headroom, diffusion_headroom);
+    const int tail_points = std::max(
+        kCubicSplineDegree,
+        static_cast<int>(std::ceil(required_headroom / h_upper)));
+
+    const double x_max = log_m_grid.back();
+    for (int i = 1; i <= tail_points; ++i) {
+        log_m_grid.push_back(x_max + h_upper * static_cast<double>(i));
+    }
 }
 
 /// Seed a grid from user-provided knots, or fall back to linspace.
@@ -729,7 +767,9 @@ probe_and_build(
 
     // 5. Build final uniform grids and all surfaces
     auto final_m = linspace(expanded_min_m, max_m, gsz.moneyness);
-    append_upper_tail_log_moneyness(final_m, config.maturity);
+    const double max_segment_width = compute_max_segment_width(
+        config.discrete_dividends, config.maturity);
+    append_upper_tail_log_moneyness(final_m, max_vol, max_segment_width);
     auto final_v = linspace(min_vol, max_vol, gsz.vol);
     auto final_r = linspace(min_rate, max_rate, gsz.rate);
     int max_tau_pts = gsz.tau_points;
