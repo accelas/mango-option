@@ -199,6 +199,7 @@ cc_library(
         ":spliced_surface",
         ":spliced_surface_builder",
         "//src/option:american_option",
+        "//src/option:grid_spec_types",
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
