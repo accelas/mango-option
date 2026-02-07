@@ -700,7 +700,8 @@ PYBIND11_MODULE(mango_option, m) {
     // SurfaceContent enum
     py::enum_<mango::SurfaceContent>(m, "SurfaceContent")
         .value("RawPrice", mango::SurfaceContent::RawPrice)
-        .value("EarlyExercisePremium", mango::SurfaceContent::EarlyExercisePremium);
+        .value("EarlyExercisePremium", mango::SurfaceContent::EarlyExercisePremium)
+        .value("NumericalEEP", mango::SurfaceContent::NumericalEEP);
 
     // PriceTableMetadata
     py::class_<mango::PriceTableMetadata>(m, "PriceTableMetadata")
@@ -854,6 +855,40 @@ PYBIND11_MODULE(mango_option, m) {
                 Args:
                     eep_surface: Pre-computed PriceTableSurface4D with EEP data
                     option_type: OptionType.PUT or OptionType.CALL
+
+                Returns:
+                    AmericanPriceSurface instance
+
+                Raises:
+                    ValueError: If validation fails
+            )pbdoc")
+        .def_static("create_numerical_eep",
+            [](std::shared_ptr<const mango::PriceTableSurface<4>> eep,
+               mango::OptionType type,
+               std::shared_ptr<const mango::PriceTableSurface<4>> eu) {
+                auto result = mango::AmericanPriceSurface::create(
+                    std::move(eep), type, std::move(eu));
+                if (!result.has_value()) {
+                    throw py::value_error(
+                        "Failed to create AmericanPriceSurface (NumericalEEP): "
+                        "validation error code " +
+                        std::to_string(static_cast<int>(result.error().code)));
+                }
+                return std::move(result.value());
+            },
+            py::arg("eep_surface"), py::arg("option_type"), py::arg("eu_surface"),
+            R"pbdoc(
+                Create an AmericanPriceSurface from a NumericalEEP surface
+                with a companion European surface.
+
+                Reconstructs full American prices as:
+                  P = (K/K_ref) * NumericalEEP(m, tau, sigma, r)
+                    + (K/K_ref) * European(m, tau, sigma, r)
+
+                Args:
+                    eep_surface: Pre-computed PriceTableSurface4D with NumericalEEP data
+                    option_type: OptionType.PUT or OptionType.CALL
+                    eu_surface: Companion European price surface
 
                 Returns:
                     AmericanPriceSurface instance
