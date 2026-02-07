@@ -331,6 +331,17 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                 }
             }
 
+            // 6c. Post-union failure rate check
+            {
+                const size_t union_failed = batch_result.failed_count;
+                const double failure_rate = n_results > 0
+                    ? static_cast<double>(union_failed) / static_cast<double>(n_results)
+                    : 0.0;
+                if (failure_rate > 0.5) {
+                    return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+                }
+            }
+
             // 7a. Extract American tensor as RawPrice
             builder.set_surface_content(SurfaceContent::RawPrice);
             auto am_extraction = builder.extract_tensor(batch_result, axes);
@@ -391,10 +402,21 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             }
 
             // 9. Repair both tensors
-            // Union the failure lists for the EEP tensor (same failures as both)
+            // Union PDE and spline failure lists from both extractions for EEP
+            auto eep_failed_pde = am_extraction->failed_pde;
+            for (auto idx : eu_extraction->failed_pde) {
+                if (std::find(eep_failed_pde.begin(), eep_failed_pde.end(), idx)
+                    == eep_failed_pde.end()) {
+                    eep_failed_pde.push_back(idx);
+                }
+            }
+            auto eep_failed_spline = am_extraction->failed_spline;
+            eep_failed_spline.insert(eep_failed_spline.end(),
+                eu_extraction->failed_spline.begin(),
+                eu_extraction->failed_spline.end());
+
             auto eep_repair = builder.repair_failed_slices(
-                eep_tensor, am_extraction->failed_pde,
-                am_extraction->failed_spline, axes);
+                eep_tensor, eep_failed_pde, eep_failed_spline, axes);
             if (!eep_repair.has_value()) {
                 return std::unexpected(PriceTableError{PriceTableErrorCode::RepairFailed});
             }

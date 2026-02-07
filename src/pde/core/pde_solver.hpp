@@ -785,7 +785,7 @@ private:
 
             // Apply obstacle projection AFTER boundary conditions
             // This ensures complementarity: u ≥ ψ
-            apply_obstacle(t, u);
+            if (projection_enabled_) apply_obstacle(t, u);
 
             // Check convergence via step delta
             double error = compute_step_delta_error(u, workspace_.newton_u_old());

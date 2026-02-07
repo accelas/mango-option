@@ -340,6 +340,14 @@ TEST(AmericanPriceSurfaceTest, NumericalEEPRejectsWrongContent) {
     EXPECT_FALSE(result.has_value());
 }
 
+TEST(AmericanPriceSurfaceTest, NumericalEEPRejectsWrongCompanionContent) {
+    // Companion surface must be RawPrice content
+    auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);
+    auto eu = make_test_surface(SurfaceContent::EarlyExercisePremium, 5.0);
+    auto result = AmericanPriceSurface::create(eep, OptionType::PUT, eu);
+    EXPECT_FALSE(result.has_value());
+}
+
 TEST(AmericanPriceSurfaceTest, NumericalEEPRejectsKRefMismatch) {
     // Build EEP surface with K_ref=100
     auto eep = make_test_surface(SurfaceContent::NumericalEEP, 1.5);

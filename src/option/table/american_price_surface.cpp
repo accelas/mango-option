@@ -80,8 +80,14 @@ AmericanPriceSurface::create(
             ValidationErrorCode::InvalidBounds, meta.K_ref, 0});
     }
 
-    // Validate K_ref matches between surfaces
+    // Validate companion surface is RawPrice content
     const auto& eu_meta = eu_surface->metadata();
+    if (eu_meta.content != SurfaceContent::RawPrice) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidBounds, 0.0, 0});
+    }
+
+    // Validate K_ref matches between surfaces
     if (std::abs(meta.K_ref - eu_meta.K_ref) > 1e-12) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidBounds, eu_meta.K_ref, 0});
