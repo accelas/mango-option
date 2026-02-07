@@ -162,7 +162,7 @@ static std::vector<std::pair<size_t, AnyIVSolver>> build_div_solvers() {
             .path = SegmentedIVPath{
                 .maturity = mat,
                 .discrete_dividends = divs,
-                .strike_grid = std::vector<double>(kStrikes.begin(), kStrikes.end()),
+                .kref_config = {.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end())},
             },
         };
 
