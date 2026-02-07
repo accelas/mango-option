@@ -128,14 +128,14 @@ public:
     const auto& spatial_operator() const { return spatial_op_; }
 
     void obstacle(double /*t*/, std::span<const double> x, std::span<double> psi) const {
-        put_payoff(x, psi);
+        log_put_payoff(x, psi);
     }
 
     size_t n_space() const { return grid_->n_space(); }
     size_t n_time() const { return grid_->time().n_steps(); }
 
     static void payoff(std::span<const double> x, std::span<double> u) {
-        put_payoff(x, u);
+        log_put_payoff(x, u);
     }
 
     /// Initialize dividend events. Must be called after the object is in its
@@ -161,7 +161,7 @@ public:
 
     struct LeftBCFunction {
         double operator()(double /*t*/, double x) const {
-            return put_payoff(x);
+            return log_put_payoff(x);
         }
     };
 
@@ -226,14 +226,14 @@ public:
     const auto& spatial_operator() const { return spatial_op_; }
 
     void obstacle(double /*t*/, std::span<const double> x, std::span<double> psi) const {
-        call_payoff(x, psi);
+        log_call_payoff(x, psi);
     }
 
     size_t n_space() const { return grid_->n_space(); }
     size_t n_time() const { return grid_->time().n_steps(); }
 
     static void payoff(std::span<const double> x, std::span<double> u) {
-        call_payoff(x, u);
+        log_call_payoff(x, u);
     }
 
     /// Initialize dividend events. Must be called after the object is in its

@@ -63,20 +63,12 @@ inline double bs_price(double spot, double strike, double tau, double sigma, dou
     // Edge cases: zero maturity or zero vol -> intrinsic value
     if (tau <= 0.0 || sigma <= 0.0) {
         if (tau <= 0.0) {
-            if (option_type == OptionType::PUT) {
-                return std::max(strike - spot, 0.0);
-            } else {
-                return std::max(spot - strike, 0.0);
-            }
+            return intrinsic_value(spot, strike, option_type);
         }
         // Zero vol, positive maturity: discounted intrinsic
         double S_fwd = spot * std::exp(-dividend_yield * tau);
         double K_disc = strike * std::exp(-rate * tau);
-        if (option_type == OptionType::PUT) {
-            return std::max(K_disc - S_fwd, 0.0);
-        } else {
-            return std::max(S_fwd - K_disc, 0.0);
-        }
+        return intrinsic_value(S_fwd, K_disc, option_type);
     }
 
     double d1 = bs_d1(spot, strike, tau, sigma, rate, dividend_yield);
