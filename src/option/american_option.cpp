@@ -128,20 +128,14 @@ public:
     const auto& spatial_operator() const { return spatial_op_; }
 
     void obstacle(double /*t*/, std::span<const double> x, std::span<double> psi) const {
-        #pragma omp simd
-        for (size_t i = 0; i < x.size(); ++i) {
-            psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
-        }
+        put_payoff(x, psi);
     }
 
     size_t n_space() const { return grid_->n_space(); }
     size_t n_time() const { return grid_->time().n_steps(); }
 
     static void payoff(std::span<const double> x, std::span<double> u) {
-        #pragma omp simd
-        for (size_t i = 0; i < x.size(); ++i) {
-            u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
-        }
+        put_payoff(x, u);
     }
 
     /// Initialize dividend events. Must be called after the object is in its
@@ -167,7 +161,7 @@ public:
 
     struct LeftBCFunction {
         double operator()(double /*t*/, double x) const {
-            return std::max(1.0 - std::exp(x), 0.0);
+            return put_payoff(x);
         }
     };
 
@@ -232,20 +226,14 @@ public:
     const auto& spatial_operator() const { return spatial_op_; }
 
     void obstacle(double /*t*/, std::span<const double> x, std::span<double> psi) const {
-        #pragma omp simd
-        for (size_t i = 0; i < x.size(); ++i) {
-            psi[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
-        }
+        call_payoff(x, psi);
     }
 
     size_t n_space() const { return grid_->n_space(); }
     size_t n_time() const { return grid_->time().n_steps(); }
 
     static void payoff(std::span<const double> x, std::span<double> u) {
-        #pragma omp simd
-        for (size_t i = 0; i < x.size(); ++i) {
-            u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
-        }
+        call_payoff(x, u);
     }
 
     /// Initialize dividend events. Must be called after the object is in its

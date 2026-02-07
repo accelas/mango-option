@@ -6,9 +6,12 @@
 
 #pragma once
 
+#include <cmath>
 #include <expected>
 #include "mango/support/error_types.hpp"
+#include "mango/support/parallel.hpp"
 #include "mango/math/yield_curve.hpp"
+#include <span>
 #include <string>
 #include <vector>
 #include <utility>
@@ -110,6 +113,36 @@ enum class OptionType {
     CALL,
     PUT
 };
+
+// ============================================================================
+// Payoff functions in log-moneyness coordinates (x = ln(S/K))
+// ============================================================================
+
+/// Put payoff: max(1 - e^x, 0)
+inline void put_payoff(std::span<const double> x, std::span<double> out) {
+    MANGO_PRAGMA_SIMD
+    for (size_t i = 0; i < x.size(); ++i) {
+        out[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+    }
+}
+
+/// Call payoff: max(e^x - 1, 0)
+inline void call_payoff(std::span<const double> x, std::span<double> out) {
+    MANGO_PRAGMA_SIMD
+    for (size_t i = 0; i < x.size(); ++i) {
+        out[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
+    }
+}
+
+/// Scalar put payoff: max(1 - e^x, 0)
+inline double put_payoff(double x) {
+    return std::max(1.0 - std::exp(x), 0.0);
+}
+
+/// Scalar call payoff: max(e^x - 1, 0)
+inline double call_payoff(double x) {
+    return std::max(std::exp(x) - 1.0, 0.0);
+}
 
 /// Discrete dividend event
 ///
