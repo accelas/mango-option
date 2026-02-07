@@ -86,14 +86,6 @@ public:
     build_segmented(const SegmentedAdaptiveConfig& config,
                     const IVGrid& domain);
 
-    /// Build segmented surface using per-strike surfaces (no K_ref interpolation).
-    ///
-    /// `domain.moneyness` is interpreted as log-moneyness ln(S/K_ref).
-    [[nodiscard]] std::expected<StrikeAdaptiveResult, PriceTableError>
-    build_segmented_strike(const SegmentedAdaptiveConfig& config,
-                           const std::vector<double>& strike_grid,
-                           const IVGrid& domain);
-
 private:
     AdaptiveGridParams params_;
     SliceCache cache_;

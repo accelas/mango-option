@@ -108,41 +108,4 @@ build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
         std::move(combiner));
 }
 
-// ===========================================================================
-// Per-strike surface builder
-// ===========================================================================
-
-std::expected<StrikeSurface<>, PriceTableError>
-build_strike_surface(std::vector<StrikeEntry> entries, bool use_nearest) {
-    if (entries.empty()) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::InvalidConfig, 0, 0});
-    }
-
-    std::sort(entries.begin(), entries.end(),
-              [](const StrikeEntry& a, const StrikeEntry& b) {
-                  return a.strike < b.strike;
-              });
-
-    std::vector<double> strikes;
-    std::vector<SegmentedSurface<>> slices;
-    strikes.reserve(entries.size());
-    slices.reserve(entries.size());
-
-    for (auto& entry : entries) {
-        strikes.push_back(entry.strike);
-        slices.push_back(std::move(entry.surface));
-    }
-
-    StrikeTransform xform{.strikes = strikes};
-    StrikeBracket bracket(std::move(strikes), use_nearest);
-    WeightedSum combiner;
-
-    return StrikeSurface<>(
-        std::move(slices),
-        std::move(bracket),
-        std::move(xform),
-        std::move(combiner));
-}
-
 }  // namespace mango
