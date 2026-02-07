@@ -26,7 +26,7 @@ namespace mango {
 ///   [metadata: K_ref, dividend_yield, m_min, m_max]
 ///
 /// Note: Axis 0 stores log-moneyness (ln(S/K)) for better B-spline interpolation.
-/// The original moneyness bounds are stored in m_min, m_max for user-facing APIs.
+/// The bounds (m_min, m_max) store log-moneyness ln(S/K).
 ///
 /// Example:
 ///   auto ws = PriceTableWorkspace::create(log_m, tau, sigma, r, coeffs, K_ref, q, m_min, m_max);
@@ -42,8 +42,8 @@ public:
     /// @param coefficients B-spline coefficients (size = n_m * n_tau * n_sigma * n_r)
     /// @param K_ref Reference strike price
     /// @param dividend_yield Continuous dividend yield
-    /// @param m_min Minimum moneyness (S/K) for user-facing bounds
-    /// @param m_max Maximum moneyness (S/K) for user-facing bounds
+    /// @param m_min Minimum log-moneyness ln(S/K)
+    /// @param m_max Maximum log-moneyness ln(S/K)
     /// @return Expected workspace or error message
     static std::expected<PriceTableWorkspace, std::string> create(
         std::span<const double> log_m_grid,
@@ -64,7 +64,7 @@ public:
     std::span<const double> volatility() const { return volatility_; }
     std::span<const double> rate() const { return rate_; }
 
-    /// Original moneyness bounds (for user-facing APIs)
+    /// Log-moneyness bounds ln(S/K)
     double m_min() const { return m_min_; }
     double m_max() const { return m_max_; }
 
@@ -191,7 +191,7 @@ private:
     // Scalar metadata
     double K_ref_ = 0.0;
     double dividend_yield_ = 0.0;
-    double m_min_ = 0.0;  // Original moneyness bounds
+    double m_min_ = 0.0;  // Log-moneyness bounds ln(S/K)
     double m_max_ = 0.0;
     uint8_t surface_content_ = 0;  // 0 = RawPrice (default)
 };
