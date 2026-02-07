@@ -415,8 +415,9 @@ struct SegmentedTransform {
             out.spot = compute_spot_adjustment(q.spot, t_query, t_boundary);
         }
 
-        // RawPrice segments are only valid at K_ref.
-        if (content[i] == SurfaceContent::RawPrice) {
+        // RawPrice and NumericalEEP segments are only valid at K_ref.
+        if (content[i] == SurfaceContent::RawPrice ||
+            content[i] == SurfaceContent::NumericalEEP) {
             out.strike = K_ref;
         }
 
@@ -428,7 +429,8 @@ struct SegmentedTransform {
     }
 
     [[nodiscard]] double normalize_value(size_t i, const PriceQuery&, double raw) const noexcept {
-        if (content[i] == SurfaceContent::RawPrice) {
+        if (content[i] == SurfaceContent::RawPrice ||
+            content[i] == SurfaceContent::NumericalEEP) {
             return raw * K_ref;
         }
         return raw;

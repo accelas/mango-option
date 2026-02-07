@@ -249,3 +249,70 @@ TEST(SegmentedSurfaceTest, DividendAtTimeZeroIsIgnored) {
     auto result = SegmentedPriceTableBuilder::build(config);
     ASSERT_TRUE(result.has_value());
 }
+
+// ---------------------------------------------------------------------------
+// SegmentedTransform unit tests for NumericalEEP
+// ---------------------------------------------------------------------------
+
+TEST(SegmentedTransformTest, NumericalEEPPinsStrikeToKRef) {
+    // NumericalEEP segments should pin strike to K_ref, like RawPrice
+    constexpr double K_ref = 100.0;
+    SegmentedTransform xform{
+        .tau_start = {0.0},
+        .tau_min = {0.0},
+        .tau_max = {1.0},
+        .content = {SurfaceContent::NumericalEEP},
+        .dividends = {{.calendar_time = 0.5, .amount = 2.0}},
+        .K_ref = K_ref,
+        .T = 1.0,
+    };
+
+    PriceQuery q{.spot = 105.0, .strike = 110.0, .tau = 0.8, .sigma = 0.25, .rate = 0.05};
+    PriceQuery local = xform.to_local(0, q);
+
+    // Strike must be pinned to K_ref, not pass-through
+    EXPECT_DOUBLE_EQ(local.strike, K_ref);
+}
+
+TEST(SegmentedTransformTest, NumericalEEPDoesNotAdjustSpot) {
+    // NumericalEEP segments must NOT adjust spot (dividends handled via IC chaining)
+    constexpr double K_ref = 100.0;
+    constexpr double spot = 105.0;
+    SegmentedTransform xform{
+        .tau_start = {0.0},
+        .tau_min = {0.0},
+        .tau_max = {1.0},
+        .content = {SurfaceContent::NumericalEEP},
+        .dividends = {{.calendar_time = 0.5, .amount = 2.0}},
+        .K_ref = K_ref,
+        .T = 1.0,
+    };
+
+    // Query at tau=0.8 means calendar time = 0.2, dividend at t=0.5 is between
+    // t_query=0.2 and t_boundary=1.0, so EEP would adjust spot by -2.0
+    PriceQuery q{.spot = spot, .strike = 110.0, .tau = 0.8, .sigma = 0.25, .rate = 0.05};
+    PriceQuery local = xform.to_local(0, q);
+
+    // Spot must remain unadjusted for NumericalEEP
+    EXPECT_DOUBLE_EQ(local.spot, spot);
+}
+
+TEST(SegmentedTransformTest, NumericalEEPNormalizeValueMultipliesByKRef) {
+    // normalize_value for NumericalEEP should return raw * K_ref (like RawPrice)
+    constexpr double K_ref = 100.0;
+    SegmentedTransform xform{
+        .tau_start = {0.0},
+        .tau_min = {0.0},
+        .tau_max = {1.0},
+        .content = {SurfaceContent::NumericalEEP},
+        .dividends = {},
+        .K_ref = K_ref,
+        .T = 1.0,
+    };
+
+    PriceQuery q{.spot = 105.0, .strike = 110.0, .tau = 0.5, .sigma = 0.25, .rate = 0.05};
+    double raw = 0.05;  // some raw interpolated value
+
+    double normalized = xform.normalize_value(0, q, raw);
+    EXPECT_DOUBLE_EQ(normalized, raw * K_ref);
+}
