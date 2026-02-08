@@ -1029,7 +1029,7 @@ AdaptiveGridBuilder::build_cached_surface(
 
     // Return a handle that queries the surface (reconstruct full American price)
     auto surface_ptr = surface.value();
-    auto wrapper = build_standard_surface(surface_ptr, type, dividend_yield);
+    auto wrapper = make_standard_wrapper(surface_ptr, type);
     if (!wrapper.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }

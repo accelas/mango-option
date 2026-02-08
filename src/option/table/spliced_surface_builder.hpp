@@ -12,24 +12,6 @@ namespace mango {
 template <size_t N> class PriceTableSurface;
 
 // ===========================================================================
-// Standard surface builder
-// ===========================================================================
-
-/// Build a StandardSurfaceWrapper from a pre-built EEP price table surface.
-///
-/// Wraps the surface in EEPPriceTableInner (query-time EEP reconstruction)
-/// and SplicedSurfaceWrapper (PriceSurface-compatible bounds).
-///
-/// @param surface EEP price table surface (from PriceTableBuilder)
-/// @param option_type PUT or CALL
-/// @param dividend_yield Continuous dividend yield
-/// @return StandardSurfaceWrapper or error
-[[nodiscard]] std::expected<StandardSurfaceWrapper, PriceTableError>
-build_standard_surface(std::shared_ptr<const PriceTableSurface<4>> surface,
-                       OptionType option_type,
-                       double dividend_yield);
-
-// ===========================================================================
 // Segmented surface builder
 // ===========================================================================
 

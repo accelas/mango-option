@@ -7,42 +7,6 @@
 namespace mango {
 
 // ===========================================================================
-// Standard surface builder
-// ===========================================================================
-
-std::expected<StandardSurfaceWrapper, PriceTableError>
-build_standard_surface(std::shared_ptr<const PriceTableSurface<4>> surface,
-                       OptionType option_type,
-                       double dividend_yield) {
-    if (!surface) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::InvalidConfig, 0, 0});
-    }
-
-    const auto& meta = surface->metadata();
-    const auto& axes = surface->axes();
-    double K_ref = meta.K_ref;
-
-    // Create EEP-reconstructing inner adapter
-    EEPPriceTableInner inner(surface, option_type, K_ref, dividend_yield);
-
-    // Wrap in StandardSurface (1 slice, identity transform)
-    StandardSurface std_surface(
-        {std::move(inner)}, SingleBracket{}, IdentityTransform{}, WeightedSum{});
-
-    // Extract bounds from surface metadata/axes
-    StandardSurfaceWrapper::Bounds bounds{
-        .m_min = meta.m_min, .m_max = meta.m_max,
-        .tau_min = axes.grids[1].front(), .tau_max = axes.grids[1].back(),
-        .sigma_min = axes.grids[2].front(), .sigma_max = axes.grids[2].back(),
-        .rate_min = axes.grids[3].front(), .rate_max = axes.grids[3].back(),
-    };
-
-    return StandardSurfaceWrapper(
-        std::move(std_surface), bounds, option_type, dividend_yield);
-}
-
-// ===========================================================================
 // Segmented surface builder
 // ===========================================================================
 

@@ -216,7 +216,7 @@ TEST_F(InterpolatedIVSolverTest, ConvergenceWithinIterations) {
     }
 }
 
-TEST_F(InterpolatedIVSolverTest, SolveWithAmericanPriceSurface) {
+TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
     // Build an EEP surface (axis 0 is log-moneyness)
     PriceTableAxes<4> eep_axes;
     eep_axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
@@ -306,8 +306,8 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
 }
 
 // Regression: InterpolatedIVSolver must reject queries with wrong dividend_yield
-// Bug: AmericanPriceSurface bakes in dividend_yield at construction; callers
-// with a different yield got wrong prices silently
+// Bug: StandardSurfaceWrapper bakes in dividend_yield at construction; callers
+// with a different yield get wrong prices silently
 TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
     // Build surface with dividend_yield = 0.02 (log-moneyness)
     std::vector<double> m_grid = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};

@@ -17,7 +17,7 @@ namespace mango {
 using StandardSurface = SplicedSurface<EEPPriceTableInner, SingleBracket, IdentityTransform, WeightedSum>;
 using StandardSurfaceWrapper = SplicedSurfaceWrapper<StandardSurface>;
 
-/// Segmented surface types using PriceTableInner (replaces AmericanPriceSurfaceAdapter defaults)
+/// Segmented surface types using PriceTableInner (NormalizedPrice content)
 using SegmentedSurfacePI = SegmentedSurface<PriceTableInner>;
 using MultiKRefSurfacePI = MultiKRefSurface<SegmentedSurfacePI>;
 using MultiKRefSurfaceWrapperPI = SplicedSurfaceWrapper<MultiKRefSurfacePI>;
