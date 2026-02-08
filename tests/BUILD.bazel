@@ -1639,6 +1639,16 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "tucker_decomposition_4d_test",
+    size = "small",
+    srcs = ["tucker_decomposition_4d_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:tucker_decomposition_4d",
+        "@googletest//:gtest_main",
+    ],
+)
+
 py_test(
     name = "python_bindings_test",
     size = "medium",
