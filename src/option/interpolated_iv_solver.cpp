@@ -151,9 +151,8 @@ BatchIVResult AnyIVSolver::solve_batch(const std::vector<IVQuery>& queries) cons
 static std::expected<AnyIVSolver, ValidationError>
 wrap_surface(std::shared_ptr<const PriceTableSurface<4>> surface,
              OptionType option_type,
-             double dividend_yield,
              const InterpolatedIVSolverConfig& solver_config) {
-    auto wrapper = build_standard_surface(surface, option_type, dividend_yield);
+    auto wrapper = make_standard_wrapper(surface, option_type);
     if (!wrapper.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
@@ -200,8 +199,7 @@ build_standard_adaptive(const IVSolverFactoryConfig& config,
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    return wrap_surface(result->surface, config.option_type,
-                        config.dividend_yield, config.solver_config);
+    return wrap_surface(result->surface, config.option_type, config.solver_config);
 }
 
 // ---------------------------------------------------------------------------
@@ -241,8 +239,7 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    return wrap_surface(table_result->surface, config.option_type,
-                        config.dividend_yield, config.solver_config);
+    return wrap_surface(table_result->surface, config.option_type, config.solver_config);
 }
 
 // ---------------------------------------------------------------------------

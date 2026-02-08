@@ -31,6 +31,54 @@ struct MockSurface {
 
 static_assert(SplicedInner<MockSurface>, "MockSurface must satisfy SplicedInner");
 
+// Test-only split strategy: linear interpolation between tau grid points.
+// Exercises the 2-slice weighted-sum path in SplicedSurface.
+class LinearBracket {
+public:
+    explicit LinearBracket(std::vector<double> grid)
+        : grid_(std::move(grid))
+    {}
+
+    [[nodiscard]] double key(const PriceQuery& q) const noexcept { return q.tau; }
+    [[nodiscard]] size_t num_slices() const noexcept { return grid_.size(); }
+
+    [[nodiscard]] Bracket bracket(double tau) const noexcept {
+        Bracket br;
+        const size_t n = grid_.size();
+        if (n == 0) {
+            return br;
+        }
+        if (tau <= grid_.front()) {
+            br.items[0] = SliceWeight{0, 1.0};
+            br.size = 1;
+            return br;
+        }
+        if (tau >= grid_.back()) {
+            br.items[0] = SliceWeight{n - 1, 1.0};
+            br.size = 1;
+            return br;
+        }
+
+        size_t hi = 1;
+        while (hi < n && grid_[hi] < tau) {
+            ++hi;
+        }
+        size_t lo = hi - 1;
+
+        double tau_lo = grid_[lo];
+        double tau_hi = grid_[hi];
+        double t = (tau - tau_lo) / (tau_hi - tau_lo);
+
+        br.items[0] = SliceWeight{lo, 1.0 - t};
+        br.items[1] = SliceWeight{hi, t};
+        br.size = 2;
+        return br;
+    }
+
+private:
+    std::vector<double> grid_;
+};
+
 // ===========================================================================
 // Concept verification tests
 // ===========================================================================

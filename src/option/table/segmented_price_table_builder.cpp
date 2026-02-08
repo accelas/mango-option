@@ -240,7 +240,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Step 4: Build segments (last first, then backward)
     // =====================================================================
-    // We'll store AmericanPriceSurface for each segment, then assemble.
+    // Build each segment's surface, then assemble into SegmentedSurface.
     // Index 0 = closest to expiry.
     std::vector<SegmentConfig> segment_configs;
     segment_configs.reserve(n_segments);

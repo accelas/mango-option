@@ -34,7 +34,7 @@ struct EEPDecomposer {
 ///   price = EEP(ln(S/K)) * (K/K_ref) + V_european(S, K, tau, sigma, rate)
 ///   vega  = dEEP/dsigma  * (K/K_ref) + vega_european(S, K, tau, sigma, rate)
 ///
-/// This encapsulates all query-time EEP math, replacing AmericanPriceSurface.
+/// Encapsulates all query-time EEP math for the SplicedSurface framework.
 class EEPPriceTableInner {
 public:
     EEPPriceTableInner(std::shared_ptr<const PriceTableSurface<4>> surface,

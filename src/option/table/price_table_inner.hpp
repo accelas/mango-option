@@ -10,7 +10,7 @@
 namespace mango {
 
 /// Universal adapter wrapping PriceTableSurface<4> for SplicedInner concept.
-/// Replaces AmericanPriceSurfaceAdapter. Used by both standard and segmented paths.
+/// Used by segmented paths (NormalizedPrice content; no EEP reconstruction).
 class PriceTableInner {
 public:
     explicit PriceTableInner(std::shared_ptr<const PriceTableSurface<4>> surface)
