@@ -29,8 +29,12 @@
  *     OptionType::PUT,
  *     dividend).value();
  *
- * // Step 2: Build price table (one-time precomputation)
- * auto result = builder.build(axes);
+ * // Step 2: Build price table with EEP decomposition (one-time precomputation)
+ * EEPDecomposer decomposer{OptionType::PUT, K_ref, dividend};
+ * auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+ *     [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+ *         decomposer.decompose(tensor, a);
+ *     });
  *
  * // Step 3: Create IV solver from surface
  * auto wrapper = make_standard_wrapper(result.value().surface, OptionType::PUT);
@@ -51,6 +55,7 @@
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>
@@ -251,7 +256,12 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
         return;
     }
     auto [builder, axes] = std::move(builder_axes_result.value());
-    auto price_table_result = builder.build(axes);
+
+    EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
+    auto price_table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
 
     if (!price_table_result) {
         state.SkipWithError("PriceTableBuilder::build failed");
@@ -365,7 +375,12 @@ static void BM_API_EndToEnd(benchmark::State& state) {
             return;
         }
         auto [builder, axes] = std::move(builder_axes_result.value());
-        auto price_table_result = builder.build(axes);
+
+        EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
+        auto price_table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
 
         if (!price_table_result) {
             state.SkipWithError("PriceTableBuilder::build failed");

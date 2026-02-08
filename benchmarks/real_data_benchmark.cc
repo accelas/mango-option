@@ -16,6 +16,7 @@
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/option_grid.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_grid_estimator.hpp"
 #include "mango/option/table/standard_surface.hpp"
@@ -154,7 +155,11 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to create PriceTableBuilder");
         }
         auto [builder, axes] = std::move(result.value());
-        auto table = builder.build(axes);
+        EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
         if (!table) {
             throw std::runtime_error("Failed to build price table");
         }
@@ -547,7 +552,11 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result) {
         throw std::runtime_error("Failed to build price table");
     }
@@ -645,7 +654,11 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result) {
         throw std::runtime_error("Failed to build price table");
     }
@@ -806,7 +819,11 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
         return;
@@ -913,7 +930,11 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
         return;
@@ -1031,7 +1052,11 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
         return;

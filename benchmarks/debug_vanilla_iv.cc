@@ -11,6 +11,7 @@
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/table/standard_surface.hpp"
 #include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/eep_transform.hpp"
 
 using namespace mango;
 
@@ -76,7 +77,11 @@ int main() {
     }
 
     auto& [builder, axes] = *setup;
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, kSpot, kDivYield};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result.has_value()) {
         std::fprintf(stderr, "PriceTableBuilder build failed: error code %d\n",
                      static_cast<int>(table_result.error().code));
@@ -201,7 +206,11 @@ int main() {
         kSpot, high_acc, OptionType::PUT, kDivYield);
     if (setup_hi.has_value()) {
         auto& [builder_hi, axes_hi] = *setup_hi;
-        auto result_hi = builder_hi.build(axes_hi);
+        EEPDecomposer decomposer_hi{OptionType::PUT, kSpot, kDivYield};
+        auto result_hi = builder_hi.build(axes_hi, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer_hi.decompose(tensor, a);
+            });
         if (result_hi.has_value()) {
             double raw_hi = result_hi->surface->value({m, kTau, kSigma, kRate});
             std::printf("  High-accuracy raw EEP (tol=1e-6): %.6f\n", raw_hi);

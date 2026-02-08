@@ -18,6 +18,7 @@
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/adaptive_grid_builder.hpp"
 #include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/standard_surface.hpp"
 #include "mango/option/option_grid.hpp"
@@ -223,7 +224,11 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
             std::abort();
         }
         auto& [ptb, axes] = *setup;
-        auto result = ptb.build(axes);
+        EEPDecomposer decomposer{OptionType::PUT, base_K_ref, kDivYield};
+        auto result = ptb.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
         if (!result) {
             std::fprintf(stderr, "PriceTableBuilder::build failed (scale=%d)\n", scale);
             std::abort();

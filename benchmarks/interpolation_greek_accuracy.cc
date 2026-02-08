@@ -15,6 +15,7 @@
 
 #include "mango/option/american_option.hpp"
 #include "mango/option/european_option.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/standard_surface.hpp"
@@ -69,7 +70,11 @@ const EEPFixture& GetEEPFixture() {
             throw std::runtime_error("Failed to create PriceTableBuilder");
         }
         auto [builder, axes] = std::move(result.value());
-        auto table = builder.build(axes);
+        EEPDecomposer decomposer{OptionType::PUT, K_ref, q};
+        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
         if (!table) {
             throw std::runtime_error("Failed to build price table");
         }

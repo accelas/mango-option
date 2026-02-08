@@ -13,9 +13,11 @@ make_standard_wrapper(
     }
 
     const auto& meta = surface->metadata();
-    if (meta.content != SurfaceContent::EarlyExercisePremium &&
-        meta.content != SurfaceContent::NormalizedPrice) {
-        return std::unexpected(std::string("unsupported content type"));
+    if (meta.content != SurfaceContent::EarlyExercisePremium) {
+        return std::unexpected(std::string(
+            "make_standard_wrapper requires EEP content; got NormalizedPrice. "
+            "Build with SurfaceContent::EarlyExercisePremium + EEPDecomposer, "
+            "or use make_interpolated_iv_solver() which handles this internally."));
     }
 
     if (!meta.dividends.discrete_dividends.empty()) {

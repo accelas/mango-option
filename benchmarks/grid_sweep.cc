@@ -5,6 +5,7 @@
 //
 // Sweeps PriceTableGridAccuracyParams.target_iv_error from coarse to fine,
 // measuring interpolated IV accuracy against FDM ground truth.
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/price_table_grid_estimator.hpp"
@@ -123,8 +124,12 @@ int main() {
         }
 
         auto& [builder, axes] = builder_result.value();
+        EEPDecomposer decomposer{OptionType::PUT, spot, div_yield};
         auto t0 = std::chrono::steady_clock::now();
-        auto table_result = builder.build(axes);
+        auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
         auto t1 = std::chrono::steady_clock::now();
         double build_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
