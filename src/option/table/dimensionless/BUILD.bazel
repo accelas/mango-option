@@ -85,6 +85,15 @@ cc_library(
     include_prefix = "mango/option/table/dimensionless",
 )
 
+cc_library(
+    name = "tucker_decomposition",
+    hdrs = ["tucker_decomposition.hpp"],
+    deps = ["@eigen//:eigen"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
 cc_binary(
     name = "golden_surface_generator",
     srcs = ["golden_surface_generator.cpp"],
