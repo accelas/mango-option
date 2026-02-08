@@ -165,7 +165,7 @@ cc_binary(
 
 cc_binary(
     name = "iv_interpolation_sweep",
-    srcs = ["iv_interpolation_sweep.cc", "iv_benchmark_common.hpp", "iv_benchmark_ql.hpp"],
+    srcs = ["iv_interpolation_sweep.cc", "iv_benchmark_common.hpp", "iv_benchmark_ql.hpp", "chebyshev_eep_inner.hpp", "chebyshev_4d_eep_inner.hpp"],
     copts = [
         "-Wall",
         "-Wextra",
@@ -181,6 +181,8 @@ cc_binary(
     linkstatic = True,
     deps = [
         "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/option:european_option",
         "//src/option:iv_solver",
         "//src/option:interpolated_iv_solver",
         "//src/option:option_grid",
@@ -192,7 +194,11 @@ cc_binary(
         "//src/option/table:spliced_surface_builder",
         "//src/option/table:eep_transform",
         "//src/math:bspline_nd_separable",
+        "//src/math:cubic_spline_solver",
+        "//src/option/table/dimensionless:chebyshev_tucker",
+        "//src/option/table/dimensionless:chebyshev_tucker_4d",
         "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_european",
         "//src/option/table/dimensionless:dimensionless_inner",
         "@google_benchmark//:benchmark",
     ],
@@ -462,7 +468,7 @@ cc_binary(
 
 cc_binary(
     name = "interp_iv_safety",
-    srcs = ["interp_iv_safety.cc", "iv_benchmark_common.hpp"],
+    srcs = ["interp_iv_safety.cc", "iv_benchmark_common.hpp", "chebyshev_eep_inner.hpp", "chebyshev_4d_eep_inner.hpp"],
     copts = [
         "-Wall",
         "-Wextra",
@@ -475,10 +481,15 @@ cc_binary(
     deps = [
         "//src/option:american_option",
         "//src/option:american_option_batch",
+        "//src/option:european_option",
         "//src/option:iv_solver",
         "//src/option:interpolated_iv_solver",
+        "//src/option/table/dimensionless:chebyshev_tucker",
+        "//src/option/table/dimensionless:chebyshev_tucker_4d",
         "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_european",
         "//src/option/table/dimensionless:dimensionless_inner",
+        "//src/math:cubic_spline_solver",
     ],
     tags = ["manual"],
 )
