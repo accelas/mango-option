@@ -1521,6 +1521,17 @@ cc_test(
 )
 
 cc_test(
+    name = "dimensionless_european_test",
+    size = "small",
+    srcs = ["dimensionless_european_test.cc"],
+    deps = [
+        "//src/option/table:dimensionless_european",
+        "//src/option:european_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "dimensionless_pde_test",
     size = "small",
     srcs = ["dimensionless_pde_test.cc"],
