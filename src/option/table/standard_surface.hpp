@@ -4,6 +4,9 @@
 #include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_inner.hpp"
 #include "mango/option/table/spliced_surface.hpp"
+#include <expected>
+#include <memory>
+#include <string>
 
 namespace mango {
 
@@ -18,5 +21,13 @@ using StandardSurfaceWrapper = SplicedSurfaceWrapper<StandardSurface>;
 using SegmentedSurfacePI = SegmentedSurface<PriceTableInner>;
 using MultiKRefSurfacePI = MultiKRefSurface<SegmentedSurfacePI>;
 using MultiKRefSurfaceWrapperPI = SplicedSurfaceWrapper<MultiKRefSurfacePI>;
+
+/// Create a StandardSurfaceWrapper from a pre-built PriceTableSurface.
+/// Reads K_ref and dividend_yield from surface metadata.
+/// Accepts EarlyExercisePremium or NormalizedPrice content.
+[[nodiscard]] std::expected<StandardSurfaceWrapper, std::string>
+make_standard_wrapper(
+    std::shared_ptr<const PriceTableSurface<4>> surface,
+    OptionType type);
 
 }  // namespace mango

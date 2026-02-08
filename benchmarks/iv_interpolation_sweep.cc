@@ -19,7 +19,7 @@
 #include "mango/option/table/adaptive_grid_builder.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include "mango/option/option_grid.hpp"
 #include <benchmark/benchmark.h>
 #include <array>
@@ -233,12 +233,12 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
     }
 
     // 4. Create InterpolatedIVSolver
-    auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
-    if (!aps) {
-        std::fprintf(stderr, "AmericanPriceSurface::create failed (scale=%d)\n", scale);
+    auto wrapper = make_standard_wrapper(surface, OptionType::PUT);
+    if (!wrapper) {
+        std::fprintf(stderr, "make_standard_wrapper failed (scale=%d)\n", scale);
         std::abort();
     }
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps));
+    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
     if (!solver) {
         std::fprintf(stderr, "InterpolatedIVSolver::create failed (scale=%d)\n", scale);
         std::abort();

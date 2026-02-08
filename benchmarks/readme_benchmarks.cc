@@ -6,7 +6,7 @@
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include "mango/option/table/eep_transform.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
@@ -122,12 +122,12 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    // Create AmericanPriceSurface wrapper and IV solver
-    auto aps = AmericanPriceSurface::create(surf.surface, OptionType::PUT);
-    if (!aps) {
-        throw std::runtime_error("Failed to create AmericanPriceSurface");
+    // Create StandardSurfaceWrapper and IV solver
+    auto wrapper = make_standard_wrapper(surf.surface, OptionType::PUT);
+    if (!wrapper) {
+        throw std::runtime_error("Failed to create StandardSurfaceWrapper");
     }
-    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps).take_wrapper());
+    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
 
     if (!solver_result) {
         auto err = solver_result.error();

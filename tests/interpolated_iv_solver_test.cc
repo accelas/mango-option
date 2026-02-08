@@ -11,7 +11,6 @@
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
-#include "mango/option/table/american_price_surface.hpp"
 #include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/standard_surface.hpp"
 
@@ -43,8 +42,8 @@ protected:
 
     /// Helper to create a StandardSurfaceWrapper for IV solver tests
     StandardSurfaceWrapper make_wrapper() {
-        auto aps = AmericanPriceSurface::create(surface_, OptionType::PUT);
-        return std::move(*aps).take_wrapper();
+        auto result = make_standard_wrapper(surface_, OptionType::PUT);
+        return std::move(*result);
     }
 
     std::shared_ptr<const PriceTableSurface<4>> surface_;
@@ -52,10 +51,10 @@ protected:
 };
 
 TEST_F(InterpolatedIVSolverTest, CreateFromStandardSurfaceWrapper) {
-    auto aps = AmericanPriceSurface::create(surface_, OptionType::PUT);
-    ASSERT_TRUE(aps.has_value());
+    auto wrapper_result = make_standard_wrapper(surface_, OptionType::PUT);
+    ASSERT_TRUE(wrapper_result.has_value());
 
-    auto result = DefaultInterpolatedIVSolver::create(std::move(*aps).take_wrapper());
+    auto result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
     ASSERT_TRUE(result.has_value()) << "Failed to create solver";
 }
 
@@ -236,10 +235,10 @@ TEST_F(InterpolatedIVSolverTest, SolveWithAmericanPriceSurface) {
     auto eep_surface = PriceTableSurface<4>::build(eep_axes, eep_coeffs, eep_meta);
     ASSERT_TRUE(eep_surface.has_value());
 
-    auto aps = AmericanPriceSurface::create(eep_surface.value(), OptionType::PUT);
-    ASSERT_TRUE(aps.has_value());
+    auto wrapper_result = make_standard_wrapper(eep_surface.value(), OptionType::PUT);
+    ASSERT_TRUE(wrapper_result.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps).take_wrapper());
+    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
     ASSERT_TRUE(solver.has_value());
 
     IVQuery query(
@@ -290,10 +289,10 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
         });
     ASSERT_TRUE(table.has_value());
 
-    auto aps = AmericanPriceSurface::create(table->surface, OptionType::PUT);
-    ASSERT_TRUE(aps.has_value());
+    auto wrapper_result = make_standard_wrapper(table->surface, OptionType::PUT);
+    ASSERT_TRUE(wrapper_result.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps).take_wrapper());
+    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
     ASSERT_TRUE(solver.has_value());
 
     // Query with CALL type against a PUT surface — must fail
@@ -330,11 +329,10 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
         });
     ASSERT_TRUE(table.has_value());
 
-    auto aps = AmericanPriceSurface::create(table->surface, OptionType::PUT);
-    ASSERT_TRUE(aps.has_value());
-    EXPECT_NEAR(aps->dividend_yield(), 0.02, 1e-12);
+    auto wrapper_result = make_standard_wrapper(table->surface, OptionType::PUT);
+    ASSERT_TRUE(wrapper_result.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps).take_wrapper());
+    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
     ASSERT_TRUE(solver.has_value());
 
     // Query with dividend_yield = 0.05 — must fail (surface was built with 0.02)

@@ -21,7 +21,7 @@
 #include "mango/option/table/eep_transform.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 
 using namespace mango;
 
@@ -514,15 +514,15 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
         });
     ASSERT_TRUE(table_result.has_value());
 
-    // Create IV solver from surface via AmericanPriceSurface
+    // Create IV solver from surface via StandardSurfaceWrapper
     InterpolatedIVSolverConfig solver_config;
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
-    auto aps = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
-    ASSERT_TRUE(aps.has_value());
+    auto wrapper = make_standard_wrapper(table_result->surface, OptionType::PUT);
+    ASSERT_TRUE(wrapper.has_value()) << wrapper.error();
     auto iv_solver_result = DefaultInterpolatedIVSolver::create(
-        std::move(*aps).take_wrapper(), solver_config);
+        std::move(wrapper).value(), solver_config);
 
     ASSERT_TRUE(iv_solver_result.has_value())
         << "DefaultInterpolatedIVSolver::create failed";
@@ -535,10 +535,10 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     double rate = 0.04;
     double vol = 0.20;
 
-    // Get reconstructed American price from APS
-    auto aps_for_price = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
-    ASSERT_TRUE(aps_for_price.has_value());
-    double price = aps_for_price->price(spot, strike, maturity, vol, rate);
+    // Get reconstructed American price from StandardSurfaceWrapper
+    auto wrapper_for_price = make_standard_wrapper(table_result->surface, OptionType::PUT);
+    ASSERT_TRUE(wrapper_for_price.has_value()) << wrapper_for_price.error();
+    double price = wrapper_for_price->price(spot, strike, maturity, vol, rate);
     EXPECT_GT(price, 0.0);
 
     // Solve for IV

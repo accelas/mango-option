@@ -3,7 +3,7 @@
 /// @brief End-to-end integration tests for EEP decomposition feature
 
 #include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
 #include "mango/option/american_option.hpp"
@@ -20,7 +20,7 @@ namespace {
 // ===========================================================================
 
 /// Build a price table and verify that the reconstructed
-/// American price from AmericanPriceSurface matches a direct PDE solve.
+/// American price from StandardSurfaceWrapper matches a direct PDE solve.
 TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     // Grid covering a modest range for the price table
     // Each axis needs >= 4 points for B-spline fitting
@@ -56,10 +56,11 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     EXPECT_EQ(result->surface->metadata().content,
               SurfaceContent::EarlyExercisePremium);
 
-    // Wrap in AmericanPriceSurface for reconstruction
-    auto aps = AmericanPriceSurface::create(result->surface, OptionType::PUT);
-    ASSERT_TRUE(aps.has_value())
-        << "AmericanPriceSurface::create failed";
+    // Wrap in StandardSurfaceWrapper for reconstruction
+    auto wrapper_result = make_standard_wrapper(result->surface, OptionType::PUT);
+    ASSERT_TRUE(wrapper_result.has_value())
+        << "make_standard_wrapper failed: " << wrapper_result.error();
+    auto wrapper = std::move(*wrapper_result);
 
     // Test point: ATM put, 1-year, 20% vol, 5% rate
     double S     = 100.0;
@@ -68,7 +69,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     double sigma = 0.20;
     double r     = 0.05;
 
-    double reconstructed = aps->price(S, K, tau, sigma, r);
+    double reconstructed = wrapper.price(S, K, tau, sigma, r);
     EXPECT_GT(reconstructed, 0.0) << "Reconstructed price should be positive";
 
     // Direct PDE solve for comparison
