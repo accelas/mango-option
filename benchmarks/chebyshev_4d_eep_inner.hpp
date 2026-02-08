@@ -245,6 +245,192 @@ private:
 };
 
 // ============================================================================
+// Builder: piecewise Chebyshev 4D EEP surface (spectral elements along x)
+// ============================================================================
+
+inline PiecewiseChebyshev4DResult build_piecewise_chebyshev_4d_eep(
+    const PiecewiseChebyshev4DConfig& cfg,
+    double K_ref,
+    OptionType option_type)
+{
+    const size_t n_seg = cfg.x_breaks.size() - 1;
+
+    // ---- 1. Shared axes: headroom + CGL nodes ----
+    auto headroom_fn = [](double lo, double hi, size_t n) {
+        return 3.0 * (hi - lo) / static_cast<double>(std::max(n, size_t{4}) - 1);
+    };
+    double htau   = headroom_fn(cfg.tau_min,   cfg.tau_max,   cfg.num_tau);
+    double hsigma = headroom_fn(cfg.sigma_min, cfg.sigma_max, cfg.num_sigma);
+    double hrate  = headroom_fn(cfg.rate_min,  cfg.rate_max,  cfg.num_rate);
+
+    double tau_lo   = std::max(cfg.tau_min - htau, 1e-4);
+    double tau_hi   = cfg.tau_max + htau;
+    double sigma_lo = std::max(cfg.sigma_min - hsigma, 0.01);
+    double sigma_hi = cfg.sigma_max + hsigma;
+    double rate_lo  = std::max(cfg.rate_min - hrate, -0.05);
+    double rate_hi  = cfg.rate_max + hrate;
+
+    auto tau_nodes   = chebyshev_nodes(cfg.num_tau,   tau_lo,   tau_hi);
+    auto sigma_nodes = chebyshev_nodes(cfg.num_sigma, sigma_lo, sigma_hi);
+    auto rate_nodes  = chebyshev_nodes(cfg.num_rate,  rate_lo,  rate_hi);
+
+    // ---- 2. Per-segment x-domains (headroom on outer edges only) ----
+    std::vector<double> x_bounds(n_seg + 1);
+    std::vector<std::vector<double>> seg_x_nodes(n_seg);
+
+    for (size_t s = 0; s < n_seg; ++s) {
+        double lo = cfg.x_breaks[s];
+        double hi = cfg.x_breaks[s + 1];
+
+        if (s == 0) {
+            double h = headroom_fn(lo, hi, cfg.num_x_per_seg);
+            lo -= h;
+        }
+        if (s == n_seg - 1) {
+            double h = headroom_fn(cfg.x_breaks[s], cfg.x_breaks[s + 1],
+                                    cfg.num_x_per_seg);
+            hi += h;
+        }
+
+        x_bounds[s] = lo;
+        if (s == n_seg - 1) x_bounds[s + 1] = hi;
+
+        seg_x_nodes[s] = chebyshev_nodes(cfg.num_x_per_seg, lo, hi);
+    }
+    // Interior boundaries use the break values directly
+    for (size_t s = 1; s < n_seg; ++s) {
+        x_bounds[s] = cfg.x_breaks[s];
+    }
+
+    auto t0 = std::chrono::steady_clock::now();
+
+    // ---- 3. Shared PDE batch: N_sigma x N_rate ----
+    const double tau_solve = tau_nodes.back() * 1.01;
+
+    std::vector<PricingParams> batch;
+    batch.reserve(cfg.num_sigma * cfg.num_rate);
+    for (size_t sv = 0; sv < cfg.num_sigma; ++sv) {
+        for (size_t rv = 0; rv < cfg.num_rate; ++rv) {
+            batch.emplace_back(
+                OptionSpec{.spot = K_ref, .strike = K_ref, .maturity = tau_solve,
+                           .rate = rate_nodes[rv],
+                           .dividend_yield = cfg.dividend_yield,
+                           .option_type = option_type},
+                sigma_nodes[sv]);
+        }
+    }
+
+    BatchAmericanOptionSolver solver;
+    solver.set_grid_accuracy(make_grid_accuracy(GridAccuracyProfile::Ultra));
+    solver.set_snapshot_times(std::span<const double>{tau_nodes});
+    auto batch_result = solver.solve_batch(batch, /*use_shared_grid=*/true);
+
+    // ---- 4. Phase 1: cache splines per (sigma, rate, tau) ----
+    // Layout: spline_cache[batch_idx][tau_idx] — one CubicSpline per triple
+    const size_t Ns = cfg.num_sigma;
+    const size_t Nr = cfg.num_rate;
+    const size_t Nt = cfg.num_tau;
+    const size_t Nx = cfg.num_x_per_seg;
+
+    struct SplineEntry {
+        CubicSpline<double> spline;
+        bool valid = false;
+    };
+    std::vector<std::vector<SplineEntry>> spline_cache(Ns * Nr);
+
+    for (size_t sv = 0; sv < Ns; ++sv) {
+        for (size_t rv = 0; rv < Nr; ++rv) {
+            size_t batch_idx = sv * Nr + rv;
+            auto& cache = spline_cache[batch_idx];
+            cache.resize(Nt);
+
+            if (!batch_result.results[batch_idx].has_value()) continue;
+
+            const auto& result = batch_result.results[batch_idx].value();
+            auto x_grid = result.grid()->x();
+
+            for (size_t j = 0; j < Nt; ++j) {
+                auto spatial = result.at_time(j);
+                if (!cache[j].spline.build(x_grid, spatial).has_value()) {
+                    cache[j].valid = true;
+                }
+            }
+        }
+    }
+
+    // ---- 5. Phase 2: fill per-segment tensors from cached splines ----
+    std::vector<ChebyshevTucker4D> segments;
+    segments.reserve(n_seg);
+
+    for (size_t seg = 0; seg < n_seg; ++seg) {
+        std::vector<double> tensor(Nx * Nt * Ns * Nr, 0.0);
+        const auto& x_nodes = seg_x_nodes[seg];
+
+        for (size_t sv = 0; sv < Ns; ++sv) {
+            double sigma = sigma_nodes[sv];
+            for (size_t rv = 0; rv < Nr; ++rv) {
+                double rate = rate_nodes[rv];
+                size_t batch_idx = sv * Nr + rv;
+                const auto& cache = spline_cache[batch_idx];
+
+                for (size_t j = 0; j < Nt; ++j) {
+                    if (!cache[j].valid) continue;
+                    double tau = tau_nodes[j];
+
+                    for (size_t i = 0; i < Nx; ++i) {
+                        double am = cache[j].spline.eval(x_nodes[i]) * K_ref;
+
+                        double spot_local = std::exp(x_nodes[i]) * K_ref;
+                        auto eu = EuropeanOptionSolver(
+                            OptionSpec{.spot = spot_local, .strike = K_ref,
+                                       .maturity = tau, .rate = rate,
+                                       .dividend_yield = cfg.dividend_yield,
+                                       .option_type = option_type},
+                            sigma).solve().value();
+
+                        double eep_raw = am - eu.value();
+
+                        constexpr double kSharpness = 100.0;
+                        double eep;
+                        if (kSharpness * eep_raw > 500.0) {
+                            eep = eep_raw;
+                        } else {
+                            double softplus =
+                                std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
+                            double bias = std::log(2.0) / kSharpness;
+                            eep = cfg.use_hard_max
+                                ? std::max(0.0, softplus - bias)
+                                : (softplus - bias);
+                        }
+
+                        tensor[i * Nt * Ns * Nr + j * Ns * Nr + sv * Nr + rv] = eep;
+                    }
+                }
+            }
+        }
+
+        double seg_x_lo = x_bounds[seg];
+        double seg_x_hi = x_bounds[seg + 1];
+
+        ChebyshevTucker4DDomain dom{
+            .bounds = {{{seg_x_lo, seg_x_hi}, {tau_lo, tau_hi},
+                        {sigma_lo, sigma_hi}, {rate_lo, rate_hi}}}};
+        ChebyshevTucker4DConfig tcfg{
+            .num_pts = {Nx, Nt, Ns, Nr},
+            .epsilon = cfg.epsilon};
+
+        segments.push_back(
+            ChebyshevTucker4D::build_from_values(tensor, dom, tcfg));
+    }
+
+    auto t1 = std::chrono::steady_clock::now();
+
+    return {std::move(segments), x_bounds,
+            static_cast<int>(cfg.num_sigma * cfg.num_rate),
+            std::chrono::duration<double>(t1 - t0).count()};
+}
+
+// ============================================================================
 // Builder: batch-PDE Chebyshev 4D EEP surface
 // ============================================================================
 
