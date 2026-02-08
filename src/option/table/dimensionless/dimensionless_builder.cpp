@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "mango/option/table/dimensionless_builder.hpp"
-#include "mango/option/table/dimensionless_european.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless/dimensionless_european.hpp"
 #include "mango/option/table/price_tensor.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/math/bspline_nd_separable.hpp"

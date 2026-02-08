@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "mango/option/table/golden_surface.hpp"
+#include "mango/option/table/dimensionless/golden_surface.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 
 namespace mango {

@@ -8,8 +8,8 @@
  * and computes vega via the chain rule with two B-spline partials.
  */
 
-#include "mango/option/table/dimensionless_inner.hpp"
-#include "mango/option/table/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless/dimensionless_inner.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/american_option.hpp"
 
 #include <gtest/gtest.h>

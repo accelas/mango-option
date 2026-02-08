@@ -74,7 +74,4 @@ private:
 /// Convenience alias for the common 4D case.
 using PriceTableSurface = PriceTableSurfaceND<kPriceTableDim>;
 
-/// 3D surface for dimensionless coordinates (x, τ', ln κ).
-using DimensionlessPriceSurface = PriceTableSurfaceND<3>;
-
 } // namespace mango

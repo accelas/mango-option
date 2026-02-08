@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/dimensionless_european.hpp"
+#include "mango/option/table/dimensionless/dimensionless_european.hpp"
 #include "mango/option/european_option.hpp"
 #include <cmath>
 

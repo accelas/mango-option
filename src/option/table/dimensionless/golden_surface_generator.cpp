@@ -6,7 +6,7 @@
 // Usage:
 //   bazel run //src/option/table:golden_surface_generator > src/option/table/golden_surface_data.inc
 
-#include "mango/option/table/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include <cstdio>
 #include <cstdlib>
 
