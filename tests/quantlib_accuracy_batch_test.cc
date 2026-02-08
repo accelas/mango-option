@@ -15,6 +15,7 @@
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -122,8 +123,12 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
     auto [builder, axes] = std::move(builder_axes_result.value());
 
-    // Pre-compute prices for PUT options
-    auto precompute_result = builder.build(axes);
+    // Pre-compute prices for PUT options with EEP decomposition
+    EEPDecomposer decomposer{OptionType::PUT, 100.0, dividend_yield};
+    auto precompute_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     ASSERT_TRUE(precompute_result.has_value())
         << "Price table precomputation failed: " << precompute_result.error();
 
@@ -138,7 +143,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     };
     auto aps = AmericanPriceSurface::create(price_table_result.surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps), iv_config);
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps).take_wrapper(), iv_config);
     ASSERT_TRUE(iv_solver_result.has_value())
         << "Failed to create interpolated IV solver: " << iv_solver_result.error();
 

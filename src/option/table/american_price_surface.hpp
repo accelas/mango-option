@@ -63,9 +63,9 @@ public:
     [[nodiscard]] double rate_max() const noexcept;
 
     /// Access the underlying StandardSurfaceWrapper for use with InterpolatedIVSolver.
-    /// Only valid for EEP content.
-    [[nodiscard]] const StandardSurfaceWrapper& wrapper() const noexcept { return wrapper_; }
-    [[nodiscard]] StandardSurfaceWrapper take_wrapper() && { return std::move(wrapper_); }
+    /// Only valid for EEP content (asserts is_eep_).
+    [[nodiscard]] const StandardSurfaceWrapper& wrapper() const noexcept;
+    [[nodiscard]] StandardSurfaceWrapper take_wrapper() &&;
 
 private:
     AmericanPriceSurface(StandardSurfaceWrapper wrapper,

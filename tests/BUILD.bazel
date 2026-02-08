@@ -936,6 +936,7 @@ cc_test(
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
         "//src/option/table:american_price_surface",
+        "//src/option/table:eep_transform",
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],

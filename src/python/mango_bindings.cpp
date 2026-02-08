@@ -18,6 +18,7 @@
 #include "mango/option/table/price_table_workspace.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
@@ -917,7 +918,13 @@ PYBIND11_MODULE(mango_option, m) {
             }
 
             auto [builder, axes] = std::move(builder_axes.value());
-            auto build_result = builder.build(axes);
+            double K_ref = spot;  // from_grid_auto_profile uses spot as K_ref
+            mango::EEPDecomposer decomposer{type, K_ref, dividend_yield};
+            auto build_result = builder.build(axes,
+                mango::SurfaceContent::EarlyExercisePremium,
+                [&](mango::PriceTensor<4>& tensor, const mango::PriceTableAxes<4>& a) {
+                    decomposer.decompose(tensor, a);
+                });
             if (!build_result.has_value()) {
                 std::ostringstream oss;
                 oss << "price table build failed: " << build_result.error();
@@ -967,7 +974,13 @@ PYBIND11_MODULE(mango_option, m) {
             }
 
             auto [builder, axes] = std::move(builder_axes.value());
-            auto build_result = builder.build(axes);
+            double K_ref = chain.spot;  // from_grid_auto_profile uses spot as K_ref
+            mango::EEPDecomposer decomposer{type, K_ref, chain.dividend_yield};
+            auto build_result = builder.build(axes,
+                mango::SurfaceContent::EarlyExercisePremium,
+                [&](mango::PriceTensor<4>& tensor, const mango::PriceTableAxes<4>& a) {
+                    decomposer.decompose(tensor, a);
+                });
             if (!build_result.has_value()) {
                 std::ostringstream oss;
                 oss << "price table build failed: " << build_result.error();

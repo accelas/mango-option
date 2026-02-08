@@ -94,8 +94,19 @@ double AmericanPriceSurface::vega(double spot, double strike, double tau,
     return wrapper_.vega(spot, strike, tau, sigma, rate);
 }
 
+const StandardSurfaceWrapper& AmericanPriceSurface::wrapper() const noexcept {
+    assert(is_eep_ && "wrapper() requires EEP content");
+    return wrapper_;
+}
+
+StandardSurfaceWrapper AmericanPriceSurface::take_wrapper() && {
+    assert(is_eep_ && "take_wrapper() requires EEP content");
+    return std::move(wrapper_);
+}
+
 double AmericanPriceSurface::delta(double spot, double strike, double tau,
                                    double sigma, double rate) const {
+    assert(is_eep_ && "delta() requires EEP content");
     double x = std::log(spot / strike);
     double dEdx = surface_->partial(0, {x, tau, sigma, rate});
     double eep_delta = (strike / (K_ref_ * spot)) * dEdx;
@@ -107,6 +118,7 @@ double AmericanPriceSurface::delta(double spot, double strike, double tau,
 
 double AmericanPriceSurface::gamma(double spot, double strike, double tau,
                                    double sigma, double rate) const {
+    assert(is_eep_ && "gamma() requires EEP content");
     double x = std::log(spot / strike);
     double dEdx = surface_->partial(0, {x, tau, sigma, rate});
     double d2Edx2 = surface_->second_partial(0, {x, tau, sigma, rate});
@@ -119,6 +131,7 @@ double AmericanPriceSurface::gamma(double spot, double strike, double tau,
 
 double AmericanPriceSurface::theta(double spot, double strike, double tau,
                                    double sigma, double rate) const {
+    assert(is_eep_ && "theta() requires EEP content");
     double x = std::log(spot / strike);
     double eep_dtau = (strike / K_ref_) * surface_->partial(1, {x, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(

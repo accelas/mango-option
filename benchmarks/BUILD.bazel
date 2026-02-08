@@ -72,6 +72,7 @@ cc_binary(
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
         "//src/option/table:american_price_surface",
+        "//src/option/table:eep_transform",
         "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],
