@@ -253,7 +253,6 @@ cc_library(
     hdrs = ["standard_surface.hpp"],
     deps = [
         ":eep_transform",
-        ":price_table_inner",
         ":spliced_surface",
     ],
     visibility = ["//visibility:public"],
@@ -266,7 +265,9 @@ cc_library(
     srcs = ["spliced_surface_builder.cpp"],
     hdrs = ["spliced_surface_builder.hpp"],
     deps = [
+        ":price_table_surface",
         ":spliced_surface",
+        ":standard_surface",
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],

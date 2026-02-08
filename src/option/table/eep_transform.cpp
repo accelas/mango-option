@@ -2,28 +2,16 @@
 #include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/spliced_surface.hpp"  // for PriceQuery
 #include "mango/option/european_option.hpp"
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 
 namespace mango {
 
-PriceQuery EEPTransform::to_local(size_t, const PriceQuery& q) const noexcept {
-    return q;
-}
+// ===========================================================================
+// EEPDecomposer: build-time
+// ===========================================================================
 
-double EEPTransform::normalize_value(size_t, const PriceQuery& q, double eep) const noexcept {
-    return eep * (q.strike / K_ref);
-}
-
-double EEPTransform::denormalize(double scaled_eep, const PriceQuery& q) const {
-    auto eu = EuropeanOptionSolver(
-        OptionSpec{.spot = q.spot, .strike = q.strike, .maturity = q.tau,
-            .rate = q.rate, .dividend_yield = dividend_yield,
-            .option_type = option_type}, q.sigma).solve().value();
-    return scaled_eep + eu.value();
-}
-
-void EEPTransform::decompose(PriceTensor<4>& tensor, const PriceTableAxes<4>& axes) const {
+void EEPDecomposer::decompose(PriceTensor<4>& tensor, const PriceTableAxes<4>& axes) const {
     const size_t Nm = axes.grids[0].size();
     const size_t Nt = axes.grids[1].size();
     const size_t Nv = axes.grids[2].size();
@@ -64,6 +52,30 @@ void EEPTransform::decompose(PriceTensor<4>& tensor, const PriceTableAxes<4>& ax
             }
         }
     }
+}
+
+// ===========================================================================
+// EEPPriceTableInner: query-time
+// ===========================================================================
+
+double EEPPriceTableInner::price(const PriceQuery& q) const {
+    double x = std::log(q.spot / q.strike);
+    double eep = surface_->value({x, q.tau, q.sigma, q.rate});
+    auto eu = EuropeanOptionSolver(
+        OptionSpec{.spot = q.spot, .strike = q.strike, .maturity = q.tau,
+            .rate = q.rate, .dividend_yield = dividend_yield_,
+            .option_type = type_}, q.sigma).solve().value();
+    return eep * (q.strike / K_ref_) + eu.value();
+}
+
+double EEPPriceTableInner::vega(const PriceQuery& q) const {
+    double x = std::log(q.spot / q.strike);
+    double eep_vega = (q.strike / K_ref_) * surface_->partial(2, {x, q.tau, q.sigma, q.rate});
+    auto eu = EuropeanOptionSolver(
+        OptionSpec{.spot = q.spot, .strike = q.strike, .maturity = q.tau,
+            .rate = q.rate, .dividend_yield = dividend_yield_,
+            .option_type = type_}, q.sigma).solve().value();
+    return eep_vega + eu.vega();
 }
 
 }  // namespace mango
