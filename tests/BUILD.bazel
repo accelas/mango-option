@@ -1649,6 +1649,16 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "chebyshev_tucker_4d_test",
+    size = "small",
+    srcs = ["chebyshev_tucker_4d_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:chebyshev_tucker_4d",
+        "@googletest//:gtest_main",
+    ],
+)
+
 py_test(
     name = "python_bindings_test",
     size = "medium",
