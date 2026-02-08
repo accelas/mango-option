@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "mango/option/table/dimensionless_inner.hpp"
+#include "mango/option/table/dimensionless/dimensionless_inner.hpp"
 #include "mango/option/european_option.hpp"
 #include <cmath>
 

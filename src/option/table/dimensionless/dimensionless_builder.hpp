@@ -10,6 +10,9 @@
 
 namespace mango {
 
+/// 3D surface for dimensionless coordinates (x, τ', ln κ).
+using DimensionlessPriceSurface = PriceTableSurfaceND<3>;
+
 /// Axes for dimensionless 3D price surface.
 struct DimensionlessAxes {
     std::vector<double> log_moneyness;  ///< x = ln(S/K), sorted ascending

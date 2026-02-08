@@ -4,7 +4,7 @@
  * @brief Tests for pre-computed golden dimensionless surface
  */
 
-#include "mango/option/table/golden_surface.hpp"
+#include "mango/option/table/dimensionless/golden_surface.hpp"
 
 #include <gtest/gtest.h>
 #include <cmath>

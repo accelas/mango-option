@@ -34,8 +34,8 @@
 #include <numeric>
 #include <vector>
 
-#include "mango/option/table/dimensionless_builder.hpp"
-#include "mango/option/table/dimensionless_inner.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless/dimensionless_inner.hpp"
 
 using namespace mango;
 using namespace mango::bench;

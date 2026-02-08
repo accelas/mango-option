@@ -8,7 +8,7 @@
  * evaluation, and cross-validation against single-point PDE reference solves.
  */
 
-#include "mango/option/table/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/european_option.hpp"

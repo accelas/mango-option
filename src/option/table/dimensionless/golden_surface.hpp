@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/option/table/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include <memory>
 
 namespace mango {

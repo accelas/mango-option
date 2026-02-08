@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: MIT
+
+cc_library(
+    name = "dimensionless_european",
+    hdrs = ["dimensionless_european.hpp"],
+    deps = ["//src/option:option_spec"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
+cc_library(
+    name = "dimensionless_builder",
+    srcs = ["dimensionless_builder.cpp"],
+    hdrs = ["dimensionless_builder.hpp"],
+    copts = ["-fopenmp", "-pthread"],
+    linkopts = ["-fopenmp", "-pthread"],
+    deps = [
+        ":dimensionless_european",
+        "//src/option/table:price_table_surface",
+        "//src/option/table:price_table_metadata",
+        "//src/option/table:price_tensor",
+        "//src/option:american_option_batch",
+        "//src/math:bspline_nd_separable",
+        "//src/math:cubic_spline_solver",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
+cc_library(
+    name = "dimensionless_adaptive",
+    srcs = ["dimensionless_adaptive.cpp"],
+    hdrs = ["dimensionless_builder.hpp"],
+    copts = ["-fopenmp", "-pthread"],
+    linkopts = ["-fopenmp", "-pthread"],
+    deps = [
+        ":dimensionless_builder",
+        ":dimensionless_european",
+        "//src/option/table:error_attribution",
+        "//src/option:american_option_batch",
+        "//src/math:cubic_spline_solver",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
+cc_library(
+    name = "dimensionless_inner",
+    srcs = ["dimensionless_inner.cpp"],
+    hdrs = ["dimensionless_inner.hpp"],
+    deps = [
+        "//src/option/table:price_table_surface",
+        "//src/option/table:price_query",
+        "//src/option:european_option",
+        "//src/option:option_spec",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
+cc_library(
+    name = "golden_surface",
+    srcs = ["golden_surface.cpp"],
+    hdrs = ["golden_surface.hpp"],
+    textual_hdrs = ["golden_surface_data.inc"],
+    deps = [
+        ":dimensionless_builder",
+        "//src/option/table:price_table_surface",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
+cc_binary(
+    name = "golden_surface_generator",
+    srcs = ["golden_surface_generator.cpp"],
+    deps = [":dimensionless_adaptive"],
+)

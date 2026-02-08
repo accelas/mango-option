@@ -1525,7 +1525,7 @@ cc_test(
     size = "small",
     srcs = ["dimensionless_european_test.cc"],
     deps = [
-        "//src/option/table:dimensionless_european",
+        "//src/option/table/dimensionless:dimensionless_european",
         "//src/option:european_option",
         "@googletest//:gtest_main",
     ],
@@ -1547,7 +1547,7 @@ cc_test(
     size = "medium",
     srcs = ["dimensionless_builder_test.cc"],
     deps = [
-        "//src/option/table:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_builder",
         "//src/option:american_option",
         "//src/option:american_option_batch",
         "//src/option:european_option",
@@ -1560,8 +1560,8 @@ cc_test(
     size = "medium",
     srcs = ["dimensionless_inner_test.cc"],
     deps = [
-        "//src/option/table:dimensionless_inner",
-        "//src/option/table:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_inner",
+        "//src/option/table/dimensionless:dimensionless_builder",
         "//src/option:american_option",
         "@googletest//:gtest_main",
     ],
@@ -1572,8 +1572,8 @@ cc_test(
     size = "medium",
     srcs = ["dimensionless_comparison_test.cc"],
     deps = [
-        "//src/option/table:dimensionless_builder",
-        "//src/option/table:dimensionless_inner",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_inner",
         "//src/option:american_option",
         "@googletest//:gtest_main",
     ],
@@ -1584,7 +1584,7 @@ cc_test(
     size = "small",
     srcs = ["golden_surface_test.cc"],
     deps = [
-        "//src/option/table:golden_surface",
+        "//src/option/table/dimensionless:golden_surface",
         "@googletest//:gtest_main",
     ],
 )
@@ -1594,7 +1594,7 @@ cc_test(
     size = "large",
     srcs = ["dimensionless_adaptive_test.cc"],
     deps = [
-        "//src/option/table:dimensionless_adaptive",
+        "//src/option/table/dimensionless:dimensionless_adaptive",
         "@googletest//:gtest_main",
     ],
 )

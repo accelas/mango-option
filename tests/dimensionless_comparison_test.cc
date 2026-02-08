@@ -9,8 +9,8 @@
  */
 
 #include <gtest/gtest.h>
-#include "mango/option/table/dimensionless_builder.hpp"
-#include "mango/option/table/dimensionless_inner.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless/dimensionless_inner.hpp"
 #include "mango/option/american_option.hpp"
 #include <chrono>
 #include <cmath>
