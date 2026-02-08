@@ -1456,7 +1456,7 @@ cc_test(
     srcs = ["price_table_builder_raw_price_test.cc"],
     deps = [
         "//src/option/table:price_table_builder",
-        "//src/option/table:american_price_surface",
+        "//src/option/table:eep_transform",
         "@googletest//:gtest_main",
     ],
 )

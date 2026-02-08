@@ -133,7 +133,6 @@ cc_library(
         "//src/option:option_grid",
         "//src/option:american_option",
         "//src/option:american_option_batch",
-        "//src/option:european_option",
         "//src/math:cubic_spline_solver",
         "//src/math:bspline_nd_separable",
         "//src/math:bspline_collocation_workspace",

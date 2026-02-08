@@ -258,9 +258,6 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             0.0, seg_width, config.tau_points_per_segment,
             config.tau_target_dt, config.tau_points_min, config.tau_points_max);
 
-        // All segments store V/K_ref uniformly
-        SurfaceContent content = SurfaceContent::NormalizedPrice;
-
         // Build PriceTableBuilder for this segment
         auto setup = PriceTableBuilder<4>::from_vectors(
             expanded_log_m_grid, local_tau, config.grid.vol, config.grid.rate,
@@ -272,7 +269,6 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         }
 
         auto& [builder, axes] = *setup;
-        builder.set_surface_content(content);
         builder.set_allow_tau_zero(true);
 
         // ------ Manual build path (used for all segments) ------
@@ -375,7 +371,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         PriceTableMetadata metadata{
             .K_ref = K_ref,
             .dividends = {.dividend_yield = config.dividends.dividend_yield},
-            .content = content,
+            .content = SurfaceContent::NormalizedPrice,
         };
 
         auto surface = PriceTableSurface<4>::build(

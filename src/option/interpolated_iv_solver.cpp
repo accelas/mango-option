@@ -10,6 +10,7 @@
 
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"
@@ -228,7 +229,13 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
     }
 
     auto& [builder, axes] = *setup;
-    auto table_result = builder.build(axes);
+
+    // Standard path: decompose tensor to EEP before B-spline fitting
+    EEPDecomposer decomposer{config.option_type, config.spot, config.dividend_yield};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});

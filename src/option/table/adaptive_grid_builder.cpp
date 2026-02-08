@@ -3,7 +3,7 @@
 #include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/latin_hypercube.hpp"
 #include "mango/option/american_option_batch.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"
@@ -994,6 +994,10 @@ AdaptiveGridBuilder::build_cached_surface(
             return std::unexpected(repair_result.error());
         }
     }
+
+    // EEP decomposition: convert normalized prices to early exercise premium
+    EEPDecomposer decomposer{type, K_ref, dividend_yield};
+    decomposer.decompose(extraction.tensor, axes);
 
     // Fit coefficients
     auto fit_result = builder.fit_coeffs(extraction.tensor, axes);

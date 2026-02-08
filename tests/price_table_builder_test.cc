@@ -406,8 +406,8 @@ TEST(PriceTableBuilderTest, BuildPopulatesTotalSlicesAndPoints) {
     EXPECT_EQ(build_result->total_points, 4 * 4 * 4);  // Nσ × Nr × Nt = 4 × 4 × 4
 }
 
-// Default mode always produces EarlyExercisePremium metadata
-TEST(PriceTableBuilderTest, DefaultModeProducesEEPMetadata) {
+// Default mode always produces NormalizedPrice metadata
+TEST(PriceTableBuilderTest, DefaultModeProducesNormalizedPriceMetadata) {
     auto setup = PriceTableBuilder<4>::from_vectors(
         {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)},
         {0.25, 0.5, 0.75, 1.0},
@@ -422,7 +422,7 @@ TEST(PriceTableBuilderTest, DefaultModeProducesEEPMetadata) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value()) << "Build failed: " << result.error();
     EXPECT_EQ(result->surface->metadata().content,
-              SurfaceContent::EarlyExercisePremium);
+              SurfaceContent::NormalizedPrice);
 }
 
 } // namespace
