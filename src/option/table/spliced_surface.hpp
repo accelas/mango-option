@@ -309,6 +309,18 @@ private:
     std::vector<double> k_refs_;
 };
 
+/// Split strategy for single-surface queries. Always returns index 0 with weight 1.0.
+struct SingleBracket {
+    [[nodiscard]] double key(const PriceQuery&) const noexcept { return 0.0; }
+    [[nodiscard]] size_t num_slices() const noexcept { return 1; }
+    [[nodiscard]] Bracket bracket(double) const noexcept {
+        Bracket br;
+        br.items[0] = SliceWeight{0, 1.0};
+        br.size = 1;
+        return br;
+    }
+};
+
 struct WeightedSum {
     [[nodiscard]] double combine(std::span<const Sample> samples,
                                  const PriceQuery&) const noexcept {

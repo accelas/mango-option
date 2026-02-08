@@ -249,6 +249,19 @@ cc_library(
 )
 
 cc_library(
+    name = "standard_surface",
+    hdrs = ["standard_surface.hpp"],
+    deps = [
+        ":eep_transform",
+        ":price_table_inner",
+        ":spliced_surface",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "spliced_surface_builder",
     srcs = ["spliced_surface_builder.cpp"],
     hdrs = ["spliced_surface_builder.hpp"],
