@@ -671,10 +671,9 @@ probe_and_build(
                 return std::unexpected(surface.error());
             }
             auto shared = std::make_shared<SegmentedPriceSurface>(std::move(*surface));
-            double spot = config.spot;
             return SurfaceHandle{
-                .price = [shared, spot](double /*spot_arg*/, double strike,
-                                        double tau, double sigma, double rate) -> double {
+                .price = [shared](double spot, double strike,
+                                  double tau, double sigma, double rate) -> double {
                     return shared->price(PriceQuery{spot, strike, tau, sigma, rate});
                 },
                 .pde_solves = 0
