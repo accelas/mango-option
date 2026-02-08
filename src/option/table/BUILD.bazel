@@ -71,6 +71,18 @@ cc_library(
 )
 
 cc_library(
+    name = "price_table_inner",
+    hdrs = ["price_table_inner.hpp"],
+    deps = [
+        ":price_table_surface",
+        ":spliced_surface",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "price_table_config",
     hdrs = ["price_table_config.hpp"],
     deps = [
