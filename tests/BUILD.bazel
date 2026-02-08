@@ -1526,6 +1526,7 @@ cc_test(
     srcs = ["dimensionless_pde_test.cc"],
     deps = [
         "//src/option:american_option",
+        "//src/option/table:price_table_surface",
         "@googletest//:gtest_main",
     ],
 )

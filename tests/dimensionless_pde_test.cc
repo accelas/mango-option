@@ -17,6 +17,7 @@
  */
 
 #include "mango/option/american_option.hpp"
+#include "mango/option/table/price_table_surface.hpp"
 
 #include <gtest/gtest.h>
 #include <cmath>
@@ -219,6 +220,26 @@ TEST(DimensionlessPDETest, EquivalenceAcrossMultipleKappaValues) {
             << "\n  physical V/K = " << v_phys_call
             << "\n  dimensionless V/K = " << v_dim_call;
     }
+}
+
+// ===========================================================================
+// Compile test: PriceTableSurfaceND<3> instantiation via alias
+// ===========================================================================
+TEST(DimensionlessSurface, SurfaceND3Compiles) {
+    // Verify PriceTableSurfaceND<3> can be instantiated via axes
+    PriceTableAxesND<3> axes;
+    axes.grids[0] = {-1.0, -0.5, 0.0, 0.5, 1.0};       // log-moneyness
+    axes.grids[1] = {0.0, 0.01, 0.02, 0.04, 0.08};      // tau_prime
+    axes.grids[2] = {-2.0, -1.0, 0.0, 1.0, 2.0};        // ln_kappa
+    axes.names = {"log_moneyness", "tau_prime", "ln_kappa"};
+
+    auto validate_result = axes.validate();
+    EXPECT_TRUE(validate_result.has_value());
+
+    auto shape = axes.shape();
+    EXPECT_EQ(shape[0], 5u);
+    EXPECT_EQ(shape[1], 5u);
+    EXPECT_EQ(shape[2], 5u);
 }
 
 }  // namespace
