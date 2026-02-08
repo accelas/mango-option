@@ -1609,6 +1609,16 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "chebyshev_nodes_test",
+    size = "small",
+    srcs = ["chebyshev_nodes_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:chebyshev_nodes",
+        "@googletest//:gtest_main",
+    ],
+)
+
 py_test(
     name = "python_bindings_test",
     size = "medium",
