@@ -6,6 +6,7 @@
 
 #include <array>
 #include <functional>
+#include <span>
 #include <vector>
 
 namespace mango {
@@ -53,6 +54,29 @@ public:
                         f(interp.nodes_[0][i], interp.nodes_[1][j], interp.nodes_[2][k]);
 
         // Tucker compress
+        interp.tucker_ = tucker_hosvd(T, {n[0], n[1], n[2]}, config.epsilon);
+
+        return interp;
+    }
+
+    /// Build interpolant from pre-computed tensor values on Chebyshev nodes.
+    /// values: row-major tensor of shape num_pts[0] x num_pts[1] x num_pts[2],
+    /// sampled at CGL nodes on the domain (same ordering as build() would use).
+    [[nodiscard]] static ChebyshevTucker3D
+    build_from_values(std::span<const double> values,
+                      const ChebyshevTuckerDomain& domain,
+                      const ChebyshevTuckerConfig& config) {
+        ChebyshevTucker3D interp;
+        interp.domain_ = domain;
+
+        for (size_t d = 0; d < 3; ++d) {
+            auto [a, b] = domain.bounds[d];
+            interp.nodes_[d] = chebyshev_nodes(config.num_pts[d], a, b);
+            interp.weights_[d] = chebyshev_barycentric_weights(config.num_pts[d]);
+        }
+
+        auto& n = config.num_pts;
+        std::vector<double> T(values.begin(), values.end());
         interp.tucker_ = tucker_hosvd(T, {n[0], n[1], n[2]}, config.epsilon);
 
         return interp;
