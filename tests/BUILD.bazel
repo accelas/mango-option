@@ -1567,6 +1567,18 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "dimensionless_comparison_test",
+    size = "medium",
+    srcs = ["dimensionless_comparison_test.cc"],
+    deps = [
+        "//src/option/table:dimensionless_builder",
+        "//src/option/table:dimensionless_inner",
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
 py_test(
     name = "python_bindings_test",
     size = "medium",
