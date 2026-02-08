@@ -21,6 +21,7 @@ struct ChebyshevTucker4DDomain {
 struct ChebyshevTucker4DConfig {
     std::array<size_t, 4> num_pts = {10, 10, 10, 6};  ///< Sample points per axis
     double epsilon = 1e-8;                              ///< Tucker truncation threshold
+    bool use_tucker = true;                             ///< false = skip HOSVD, store raw tensor
 };
 
 /// 4D Chebyshev interpolant with Tucker compression.
@@ -82,8 +83,19 @@ public:
 
         auto& n = config.num_pts;
         std::vector<double> T(values.begin(), values.end());
-        interp.tucker_ =
-            tucker_hosvd_4d(T, {n[0], n[1], n[2], n[3]}, config.epsilon);
+
+        if (config.use_tucker) {
+            interp.tucker_ =
+                tucker_hosvd_4d(T, {n[0], n[1], n[2], n[3]}, config.epsilon);
+        } else {
+            // Skip HOSVD: store raw tensor as core, identity factors
+            interp.tucker_.core = std::move(T);
+            interp.tucker_.shape = {n[0], n[1], n[2], n[3]};
+            interp.tucker_.ranks = {n[0], n[1], n[2], n[3]};
+            for (size_t d = 0; d < 4; ++d)
+                interp.tucker_.factors[d] =
+                    Eigen::MatrixXd::Identity(n[d], n[d]);
+        }
 
         return interp;
     }

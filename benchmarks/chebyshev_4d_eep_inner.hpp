@@ -124,6 +124,7 @@ struct Chebyshev4DEEPConfig {
     size_t num_sigma = 15;
     size_t num_rate = 6;
     double epsilon = 1e-8;
+    bool use_tucker = true;   // false = skip HOSVD, store raw tensor
 
     double x_min = -0.50;     // ln(0.60)
     double x_max = 0.40;      // ln(1.50)
@@ -170,6 +171,7 @@ struct PiecewiseChebyshev4DConfig {
     size_t num_sigma = 15;
     size_t num_rate = 6;
     double epsilon = 1e-8;
+    bool use_tucker = true;
 
     double tau_min = 0.019;
     double tau_max = 2.0;
@@ -417,7 +419,8 @@ inline PiecewiseChebyshev4DResult build_piecewise_chebyshev_4d_eep(
                         {sigma_lo, sigma_hi}, {rate_lo, rate_hi}}}};
         ChebyshevTucker4DConfig tcfg{
             .num_pts = {Nx, Nt, Ns, Nr},
-            .epsilon = cfg.epsilon};
+            .epsilon = cfg.epsilon,
+            .use_tucker = cfg.use_tucker};
 
         segments.push_back(
             ChebyshevTucker4D::build_from_values(tensor, dom, tcfg));
@@ -519,7 +522,8 @@ inline Chebyshev4DEEPResult build_chebyshev_4d_eep(
                     {sigma_lo, sigma_hi}, {rate_lo, rate_hi}}}};
     ChebyshevTucker4DConfig tcfg{
         .num_pts = {cfg.num_x, cfg.num_tau, cfg.num_sigma, cfg.num_rate},
-        .epsilon = cfg.epsilon};
+        .epsilon = cfg.epsilon,
+        .use_tucker = cfg.use_tucker};
 
     auto t0 = std::chrono::steady_clock::now();
 

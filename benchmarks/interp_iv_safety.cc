@@ -589,6 +589,7 @@ static Chebyshev4DEEPInner build_chebyshev_4d_surface() {
     Chebyshev4DEEPConfig cfg;
     cfg.num_x = 40;
     cfg.num_tau = 15;
+    cfg.use_tucker = false;
 
     // Coordinate transforms (toggle individually)
     cfg.use_sinh_x = false;      // sinh mapping clusters x-nodes near ATM
@@ -1114,6 +1115,7 @@ static void run_cheb4d_diag() {
 
 static PiecewiseChebyshev4DEEPInner build_piecewise_chebyshev_4d_surface() {
     PiecewiseChebyshev4DConfig cfg;
+    cfg.use_tucker = false;
     // Default breaks: [-0.50, -0.10, 0.15, 0.40], 15 nodes/seg
 
     auto t0 = std::chrono::steady_clock::now();
