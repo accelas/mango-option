@@ -22,7 +22,7 @@ namespace mango {
 // Explicit template instantiations
 // =====================================================================
 
-template class InterpolatedIVSolver<AmericanPriceSurface>;
+template class InterpolatedIVSolver<StandardSurfaceWrapper>;
 template class InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>;
 
 // =====================================================================
@@ -123,7 +123,7 @@ GridBounds extract_bounds(const IVGrid& grid) {
 // AnyIVSolver: type-erased wrapper
 // =====================================================================
 
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver)
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<StandardSurfaceWrapper> solver)
     : solver_(std::move(solver))
 {}
 
@@ -150,14 +150,16 @@ BatchIVResult AnyIVSolver::solve_batch(const std::vector<IVQuery>& queries) cons
 static std::expected<AnyIVSolver, ValidationError>
 wrap_surface(std::shared_ptr<const PriceTableSurface<4>> surface,
              OptionType option_type,
+             double dividend_yield,
              const InterpolatedIVSolverConfig& solver_config) {
-    auto aps = AmericanPriceSurface::create(surface, option_type);
-    if (!aps.has_value()) {
-        return std::unexpected(aps.error());
+    auto wrapper = build_standard_surface(surface, option_type, dividend_yield);
+    if (!wrapper.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    auto solver = InterpolatedIVSolver<AmericanPriceSurface>::create(
-        std::move(*aps), solver_config);
+    auto solver = InterpolatedIVSolver<StandardSurfaceWrapper>::create(
+        std::move(*wrapper), solver_config);
     if (!solver.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
@@ -197,7 +199,8 @@ build_standard_adaptive(const IVSolverFactoryConfig& config,
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    return wrap_surface(result->surface, config.option_type, config.solver_config);
+    return wrap_surface(result->surface, config.option_type,
+                        config.dividend_yield, config.solver_config);
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +235,7 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
     }
 
     return wrap_surface(table_result->surface, config.option_type,
-                        config.solver_config);
+                        config.dividend_yield, config.solver_config);
 }
 
 // ---------------------------------------------------------------------------

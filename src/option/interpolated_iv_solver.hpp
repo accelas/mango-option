@@ -22,7 +22,7 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/iv_result.hpp"
 #include "mango/option/table/price_surface_concept.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include "mango/option/table/spliced_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/support/error_types.hpp"
@@ -143,8 +143,8 @@ private:
     std::pair<double, double> adaptive_bounds(const IVQuery& query) const;
 };
 
-/// Type alias for backward compatibility: InterpolatedIVSolver with AmericanPriceSurface
-using DefaultInterpolatedIVSolver = InterpolatedIVSolver<AmericanPriceSurface>;
+/// Type alias for backward compatibility: InterpolatedIVSolver with StandardSurfaceWrapper
+using DefaultInterpolatedIVSolver = InterpolatedIVSolver<StandardSurfaceWrapper>;
 
 // =====================================================================
 // Factory: config types, type-erased solver, and factory function
@@ -183,14 +183,14 @@ public:
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
     /// Constructor from standard solver
-    explicit AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver);
+    explicit AnyIVSolver(InterpolatedIVSolver<StandardSurfaceWrapper> solver);
 
     /// Constructor from segmented solver (spliced surface)
     explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver);
 
 private:
     using SolverVariant = std::variant<
-        InterpolatedIVSolver<AmericanPriceSurface>,
+        InterpolatedIVSolver<StandardSurfaceWrapper>,
         InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>
     >;
     SolverVariant solver_;
@@ -198,7 +198,7 @@ private:
 
 /// Factory function: build price surface and IV solver from config
 ///
-/// If path holds StandardIVPath, uses the AmericanPriceSurface path.
+/// If path holds StandardIVPath, uses the StandardSurface path.
 /// If path holds SegmentedIVPath, uses the MultiKRefSurface path.
 /// If adaptive is set, uses AdaptiveGridBuilder
 /// to automatically refine grid density until the target IV error is met.
