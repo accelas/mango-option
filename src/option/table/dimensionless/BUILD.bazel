@@ -95,6 +95,15 @@ cc_library(
 )
 
 cc_library(
+    name = "tucker_decomposition_4d",
+    hdrs = ["tucker_decomposition_4d.hpp"],
+    deps = ["@eigen//:eigen"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
+cc_library(
     name = "chebyshev_tucker",
     hdrs = ["chebyshev_tucker.hpp"],
     deps = [
