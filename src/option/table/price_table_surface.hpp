@@ -34,6 +34,11 @@ public:
     /// Access metadata
     [[nodiscard]] const PriceTableMetadata& metadata() const noexcept { return meta_; }
 
+    /// Access B-spline coefficients (for serialization)
+    [[nodiscard]] const std::vector<double>& coefficients() const noexcept {
+        return spline_->coefficients();
+    }
+
     /// Evaluate price at query point
     ///
     /// Queries outside grid bounds are clamped to boundary values.
