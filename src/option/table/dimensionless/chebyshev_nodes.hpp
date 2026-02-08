@@ -53,4 +53,33 @@ chebyshev_interpolate(double x,
     return numer / denom;
 }
 
+/// Generate Clenshaw-Curtis nodes at level l on [a, b].
+/// Returns 2^l + 1 nodes (same as CGL nodes at that count), sorted ascending.
+/// Levels are nested: every node at level l appears at level l+1.
+[[nodiscard]] inline std::vector<double>
+cc_level_nodes(size_t level, double a, double b) {
+    return chebyshev_nodes((1u << level) + 1, a, b);
+}
+
+/// Return only the NEW nodes introduced at level l (not present at level l-1).
+/// At level 0, returns all 2 nodes (both endpoints).
+/// At level l >= 1, returns 2^(l-1) new interior nodes, sorted ascending.
+[[nodiscard]] inline std::vector<double>
+cc_new_nodes_at_level(size_t level, double a, double b) {
+    auto all = cc_level_nodes(level, a, b);
+    if (level == 0) return all;
+    auto prev = cc_level_nodes(level - 1, a, b);
+    std::vector<double> result;
+    result.reserve(all.size() - prev.size());
+    size_t pi = 0;
+    for (double node : all) {
+        if (pi < prev.size() && std::abs(node - prev[pi]) < 1e-14 * (b - a + 1.0)) {
+            ++pi;
+        } else {
+            result.push_back(node);
+        }
+    }
+    return result;
+}
+
 }  // namespace mango

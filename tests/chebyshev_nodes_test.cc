@@ -72,5 +72,59 @@ TEST(ChebyshevNodesTest, BarycentricExactAtNodes) {
     }
 }
 
+TEST(ChebyshevNodesTest, CCLevelZeroGivesTwoNodes) {
+    auto nodes = cc_level_nodes(0, -1.0, 1.0);
+    ASSERT_EQ(nodes.size(), 2u);
+    EXPECT_DOUBLE_EQ(nodes[0], -1.0);
+    EXPECT_DOUBLE_EQ(nodes[1], 1.0);
+}
+
+TEST(ChebyshevNodesTest, CCLevelNodesMatchChebyshevNodes) {
+    for (size_t l = 0; l <= 4; ++l) {
+        size_t n = (1u << l) + 1;
+        auto cc = cc_level_nodes(l, 0.0, 5.0);
+        auto cgl = chebyshev_nodes(n, 0.0, 5.0);
+        ASSERT_EQ(cc.size(), n) << "Level " << l;
+        for (size_t i = 0; i < n; ++i) {
+            EXPECT_NEAR(cc[i], cgl[i], 1e-15)
+                << "Level " << l << ", node " << i;
+        }
+    }
+}
+
+TEST(ChebyshevNodesTest, CCLevelsAreNested) {
+    for (size_t l = 0; l <= 3; ++l) {
+        auto coarse = cc_level_nodes(l, -2.0, 3.0);
+        auto fine = cc_level_nodes(l + 1, -2.0, 3.0);
+        for (double c : coarse) {
+            bool found = false;
+            for (double f : fine) {
+                if (std::abs(c - f) < 1e-14) { found = true; break; }
+            }
+            EXPECT_TRUE(found) << "Level " << l << " node " << c
+                               << " not found at level " << l + 1;
+        }
+    }
+}
+
+TEST(ChebyshevNodesTest, CCNewNodesAtLevel) {
+    auto new2 = cc_new_nodes_at_level(2, -1.0, 1.0);
+    auto full2 = cc_level_nodes(2, -1.0, 1.0);
+    auto full1 = cc_level_nodes(1, -1.0, 1.0);
+    EXPECT_EQ(new2.size(), 2u);
+    for (double n : new2) {
+        bool in_fine = false, in_coarse = false;
+        for (double f : full2) if (std::abs(n - f) < 1e-14) in_fine = true;
+        for (double c : full1) if (std::abs(n - c) < 1e-14) in_coarse = true;
+        EXPECT_TRUE(in_fine) << "New node " << n << " not in level 2";
+        EXPECT_FALSE(in_coarse) << "New node " << n << " already in level 1";
+    }
+}
+
+TEST(ChebyshevNodesTest, CCNewNodesAtLevelZeroReturnsAll) {
+    auto new0 = cc_new_nodes_at_level(0, -1.0, 1.0);
+    EXPECT_EQ(new0.size(), 2u);
+}
+
 }  // namespace
 }  // namespace mango
