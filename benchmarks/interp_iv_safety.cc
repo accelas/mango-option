@@ -13,6 +13,16 @@
  *  4. Error = |interp_iv − fdm_iv| in basis points
  *
  * Run with: bazel run //benchmarks:interp_iv_safety
+ *
+ * Individual sections:
+ *   bazel run //benchmarks:interp_iv_safety -- vanilla
+ *   bazel run //benchmarks:interp_iv_safety -- dividends
+ *   bazel run //benchmarks:interp_iv_safety -- bspline-3d
+ *   bazel run //benchmarks:interp_iv_safety -- bspline-4d
+ *   bazel run //benchmarks:interp_iv_safety -- cheb3d
+ *   bazel run //benchmarks:interp_iv_safety -- cheb4d
+ *
+ * Multiple:  ... -- cheb3d cheb4d
  */
 
 #include "iv_benchmark_common.hpp"
@@ -21,11 +31,15 @@
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/option_spec.hpp"
+#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/adaptive_grid_builder.hpp"
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
@@ -572,7 +586,14 @@ static ErrorTable compute_errors_chebyshev(const PriceGrid& prices,
 // ============================================================================
 
 static Chebyshev4DEEPInner build_chebyshev_4d_surface() {
-    Chebyshev4DEEPConfig cfg;  // use defaults: 10x10x15x6, epsilon=1e-8
+    Chebyshev4DEEPConfig cfg;
+    cfg.num_x = 40;
+    cfg.num_tau = 15;
+
+    // Coordinate transforms (toggle individually)
+    cfg.use_sinh_x = false;      // sinh mapping clusters x-nodes near ATM
+    cfg.use_sqrt_tau = false;    // sqrt(tau) clusters nodes at short maturities
+    cfg.use_log_eep = false;     // log(EEP+eps) smooths sharp EEP transition
 
     auto t0 = std::chrono::steady_clock::now();
     auto result = build_chebyshev_4d_eep(cfg, kSpot, OptionType::PUT);
@@ -584,9 +605,14 @@ static Chebyshev4DEEPInner build_chebyshev_4d_surface() {
                 "ranks=(%zu,%zu,%zu,%zu)\n",
                 result.n_pde_solves, elapsed,
                 ranks[0], ranks[1], ranks[2], ranks[3]);
+    std::printf("  Transforms: sinh_x=%s sqrt_tau=%s log_eep=%s\n",
+                cfg.use_sinh_x ? "ON" : "off",
+                cfg.use_sqrt_tau ? "ON" : "off",
+                cfg.use_log_eep ? "ON" : "off");
 
     return Chebyshev4DEEPInner(
-        std::move(result.interp), OptionType::PUT, kSpot, 0.0);
+        std::move(result.interp), OptionType::PUT, kSpot, 0.0,
+        result.transforms);
 }
 
 static ErrorTable compute_errors_chebyshev_4d(const PriceGrid& prices,
@@ -640,6 +666,96 @@ static ErrorTable compute_errors_chebyshev_4d(const PriceGrid& prices,
 }
 
 // ============================================================================
+// Generic Brent-based error computation (works with any price function)
+// ============================================================================
+
+template <typename PriceFn>
+static ErrorTable compute_errors_brent(const PriceGrid& prices,
+                                        PriceFn&& price_fn,
+                                        size_t vol_idx,
+                                        double div_yield = 0.0) {
+    ErrorTable errors{};
+    IVSolverConfig fdm_config;
+    IVSolver fdm_solver(fdm_config);
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            IVQuery fdm_q;
+            fdm_q.spot = kSpot;
+            fdm_q.strike = kStrikes[si];
+            fdm_q.maturity = kMaturities[ti];
+            fdm_q.rate = kRate;
+            fdm_q.dividend_yield = div_yield;
+            fdm_q.option_type = OptionType::PUT;
+            fdm_q.market_price = price;
+
+            auto fdm_result = fdm_solver.solve(fdm_q);
+            if (!fdm_result) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            double iv = brent_solve_iv(
+                [&](double vol) -> double {
+                    return price_fn(kSpot, kStrikes[si], kMaturities[ti], vol, kRate);
+                },
+                price);
+
+            if (!std::isfinite(iv)) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            errors[ti][si] = std::abs(iv - fdm_result->implied_vol) * 10000.0;
+        }
+    }
+    return errors;
+}
+
+// Build B-spline 4D surface wrapper for Brent-based comparison
+static StandardSurfaceWrapper build_bspline_4d_wrapper() {
+    auto t0 = std::chrono::steady_clock::now();
+
+    OptionGrid chain;
+    chain.spot = kSpot;
+    chain.dividend_yield = 0.0;
+    chain.strikes = {76.9, 83.3, 90.9, 100.0, 111.1, 125.0, 142.9};
+    chain.maturities = {0.01, 0.03, 0.06, 0.12, 0.20,
+                        0.35, 0.60, 1.0, 1.5, 2.0, 2.5};
+    chain.implied_vols = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50};
+    chain.rates = {0.01, 0.03, 0.05, 0.10};
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 2e-5;
+    AdaptiveGridBuilder builder(params);
+    GridAccuracyParams accuracy = make_grid_accuracy(GridAccuracyProfile::High);
+
+    auto result = builder.build(chain, accuracy, OptionType::PUT);
+    if (!result) {
+        std::fprintf(stderr, "B-spline 4D surface build failed\n");
+        std::exit(1);
+    }
+
+    auto t1 = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(t1 - t0).count();
+    std::printf("  B-spline 4D surface: %zu PDE solves, %.3fs build\n",
+                result->total_pde_solves, elapsed);
+
+    auto wrapper = make_standard_wrapper(result->surface, OptionType::PUT);
+    if (!wrapper) {
+        std::fprintf(stderr, "B-spline wrapper failed: %s\n", wrapper.error().c_str());
+        std::exit(1);
+    }
+    return std::move(*wrapper);
+}
+
+// ============================================================================
 // Step 5: Print heatmap
 // ============================================================================
 
@@ -684,16 +800,397 @@ static void print_heatmap(const char* title, const ErrorTable& errors) {
 }
 
 // ============================================================================
+// Diagnostic: dual price + IV error computation
+// ============================================================================
+
+struct DualError {
+    double price_err;  // dollars
+    double iv_err;     // bps
+};
+using DualErrorTable = std::array<std::array<DualError, kNS>, kNT>;
+
+template <typename PriceFn>
+static DualErrorTable compute_dual_errors(const PriceGrid& prices,
+                                           PriceFn&& price_fn,
+                                           size_t vol_idx,
+                                           double div_yield = 0.0) {
+    DualErrorTable errors{};
+    IVSolverConfig fdm_config;
+    IVSolver fdm_solver(fdm_config);
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        for (size_t si = 0; si < kNS; ++si) {
+            double ref_price = prices[vol_idx][ti][si];
+            if (std::isnan(ref_price) || ref_price <= 0) {
+                errors[ti][si] = {std::nan(""), std::nan("")};
+                continue;
+            }
+
+            // FDM reference IV
+            IVQuery fdm_q;
+            fdm_q.spot = kSpot;
+            fdm_q.strike = kStrikes[si];
+            fdm_q.maturity = kMaturities[ti];
+            fdm_q.rate = kRate;
+            fdm_q.dividend_yield = div_yield;
+            fdm_q.option_type = OptionType::PUT;
+            fdm_q.market_price = ref_price;
+
+            auto fdm_result = fdm_solver.solve(fdm_q);
+            if (!fdm_result) {
+                errors[ti][si] = {std::nan(""), std::nan("")};
+                continue;
+            }
+            double ref_iv = fdm_result->implied_vol;
+
+            // Price error: evaluate interpolant at reference IV
+            double interp_price = price_fn(kSpot, kStrikes[si],
+                                            kMaturities[ti], ref_iv, kRate);
+            double price_err = std::abs(interp_price - ref_price);
+
+            // IV error: Brent inversion
+            double interp_iv = brent_solve_iv(
+                [&](double vol) -> double {
+                    return price_fn(kSpot, kStrikes[si],
+                                     kMaturities[ti], vol, kRate);
+                },
+                ref_price);
+
+            double iv_err = std::isfinite(interp_iv)
+                ? std::abs(interp_iv - ref_iv) * 10000.0
+                : std::nan("");
+
+            errors[ti][si] = {price_err, iv_err};
+        }
+    }
+    return errors;
+}
+
+static void print_dual_heatmap(const char* title, const DualErrorTable& errors) {
+    std::printf("\n=== %s ===\n", title);
+    std::printf("  Format: $price_err / iv_bps\n\n");
+
+    // Header
+    std::printf("          ");
+    for (size_t si = 0; si < kNS; ++si) {
+        std::printf("    K=%-3.0f     ", kStrikes[si]);
+    }
+    std::printf("\n");
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        std::printf("  T=%s  ", kMatLabels[ti]);
+        for (size_t si = 0; si < kNS; ++si) {
+            auto [pe, ie] = errors[ti][si];
+            if (std::isnan(pe) && std::isnan(ie)) {
+                std::printf("     ---      ");
+            } else if (std::isnan(ie)) {
+                std::printf(" $%5.3f/---   ", pe);
+            } else {
+                std::printf(" $%5.3f/%4.0f  ", pe, ie);
+            }
+        }
+        std::printf("\n");
+    }
+
+    // Summary: median vega amplification ratio where both are valid
+    std::vector<double> ratios;
+    for (size_t ti = 0; ti < kNT; ++ti)
+        for (size_t si = 0; si < kNS; ++si) {
+            auto [pe, ie] = errors[ti][si];
+            if (std::isfinite(pe) && std::isfinite(ie) && pe > 1e-6)
+                ratios.push_back(ie / (pe * 10000.0));  // bps per dollar
+        }
+    if (!ratios.empty()) {
+        std::sort(ratios.begin(), ratios.end());
+        double median = ratios[ratios.size() / 2];
+        std::printf("\n  Median IV/price amplification: %.0f bps per $0.01 price error\n",
+                    median * 100.0);
+    }
+}
+
+// ============================================================================
+// Section runners
+// ============================================================================
+
+static void run_vanilla() {
+    std::printf("\n--- Generating vanilla reference prices (batch chain solver)...\n");
+    auto prices = generate_prices(/*with_dividends=*/false);
+
+    std::printf("--- Building vanilla interpolated solver (adaptive)...\n");
+    auto solver = build_vanilla_solver();
+
+    std::printf("--- Computing vanilla IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Interpolation IV Error (bps) — σ=%.0f%%, no dividends",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_vanilla(prices, solver, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+static void run_dividends() {
+    std::printf("\n--- Generating dividend reference prices (batch solver)...\n");
+    auto prices = generate_prices(/*with_dividends=*/true);
+
+    std::printf("--- Building dividend interpolated solvers (per-maturity)...\n");
+    auto solvers = build_div_solvers();
+
+    std::printf("--- Computing dividend IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Interpolation IV Error (bps) — σ=%.0f%%, quarterly $0.50 div",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_div(prices, solvers, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+static const PriceGrid& get_q0_prices() {
+    static PriceGrid prices = [] {
+        std::printf("--- Generating q=0 reference prices...\n");
+        return generate_prices_q0();
+    }();
+    return prices;
+}
+
+static void run_bspline_3d() {
+    std::printf("\n================================================================\n");
+    std::printf("B-spline 3D Dimensionless — q=0, no dividends\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    std::printf("--- Building 3D dimensionless surface...\n");
+    auto inner_3d = build_3d_surface();
+
+    std::printf("--- Computing errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "3D Dimensionless IV Error (bps) — σ=%.0f%%, q=0",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_3d(q0_prices, inner_3d, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+static void run_bspline_4d() {
+    std::printf("\n================================================================\n");
+    std::printf("B-spline 4D Standard (Brent) — q=0, no dividends\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    std::printf("--- Building 4D standard surface (q=0)...\n");
+    auto wrapper = build_bspline_4d_wrapper();
+
+    std::printf("--- Computing errors (Brent)...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "4D Standard IV Error (bps, Brent) — σ=%.0f%%, q=0",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_brent(q0_prices,
+            [&](double S, double K, double tau, double sigma, double r) {
+                return wrapper.price(S, K, tau, sigma, r);
+            }, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+static void run_cheb3d() {
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev-Tucker 3D — q=0, no dividends\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    std::printf("--- Building Chebyshev-Tucker 3D surface...\n");
+    auto inner = build_chebyshev_3d_surface();
+
+    std::printf("--- Computing Chebyshev 3D IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Chebyshev-Tucker 3D IV Error (bps) — σ=%.0f%%, q=0",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_chebyshev(q0_prices, inner, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+static void run_cheb4d() {
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev-Tucker 4D (Brent) — q=0, no dividends\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    std::printf("--- Building Chebyshev-Tucker 4D surface...\n");
+    auto inner = build_chebyshev_4d_surface();
+
+    std::printf("--- Computing Chebyshev 4D IV errors (Brent)...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Chebyshev-Tucker 4D IV Error (bps, Brent) — σ=%.0f%%, q=0",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_brent(q0_prices,
+            [&](double S, double K, double tau, double sigma, double r) {
+                PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                             .sigma = sigma, .rate = r};
+                return inner.price(q);
+            }, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+static void run_cheb4d_diag() {
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev 4D Diagnostics — price vs IV error, smooth floor\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    // --- Diagnostic A: dual price + IV error heatmap (hard max floor) ---
+    std::printf("--- [A] Building Chebyshev 4D (hard max floor)...\n");
+    auto inner = build_chebyshev_4d_surface();
+
+    auto price_fn = [&](double S, double K, double tau, double sigma, double r) {
+        PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                     .sigma = sigma, .rate = r};
+        return inner.price(q);
+    };
+
+    std::printf("--- [A] Computing dual price + IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Price($) vs IV(bps) — σ=%.0f%%, hard max floor",
+                      kVols[vi] * 100);
+        auto dual = compute_dual_errors(q0_prices, price_fn, vi);
+        print_dual_heatmap(title, dual);
+    }
+
+    // --- Diagnostic B: softplus-only floor (no hard max) ---
+    std::printf("\n--- [B] Building Chebyshev 4D (smooth softplus-only floor)...\n");
+
+    Chebyshev4DEEPConfig cfg_smooth;
+    cfg_smooth.num_x = 40;
+    cfg_smooth.num_tau = 15;
+    cfg_smooth.use_hard_max = false;
+    cfg_smooth.use_sinh_x = false;
+    cfg_smooth.use_sqrt_tau = false;
+    cfg_smooth.use_log_eep = false;
+
+    auto result_smooth = build_chebyshev_4d_eep(cfg_smooth, kSpot, OptionType::PUT);
+    auto ranks = result_smooth.interp.ranks();
+    std::printf("  Smooth floor: %d PDE, ranks=(%zu,%zu,%zu,%zu)\n",
+                result_smooth.n_pde_solves,
+                ranks[0], ranks[1], ranks[2], ranks[3]);
+
+    Chebyshev4DEEPInner inner_smooth(
+        std::move(result_smooth.interp), OptionType::PUT, kSpot, 0.0,
+        result_smooth.transforms);
+
+    std::printf("--- [B] Computing IV errors (smooth floor)...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Chebyshev 4D IV Error (bps) — σ=%.0f%%, smooth softplus-only",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_brent(q0_prices,
+            [&](double S, double K, double tau, double sigma, double r) {
+                PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                             .sigma = sigma, .rate = r};
+                return inner_smooth.price(q);
+            }, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+static PiecewiseChebyshev4DEEPInner build_piecewise_chebyshev_4d_surface() {
+    PiecewiseChebyshev4DConfig cfg;
+    // Default breaks: [-0.50, -0.10, 0.15, 0.40], 15 nodes/seg
+
+    auto t0 = std::chrono::steady_clock::now();
+    auto result = build_piecewise_chebyshev_4d_eep(cfg, kSpot, OptionType::PUT);
+    auto t1 = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(t1 - t0).count();
+
+    std::printf("  Piecewise 4D: %d PDE solves, %zu segments, %.3fs build\n",
+                result.n_pde_solves, result.segments.size(), elapsed);
+    for (size_t s = 0; s < result.segments.size(); ++s) {
+        auto r = result.segments[s].ranks();
+        std::printf("    seg %zu [%.2f, %.2f]: ranks=(%zu,%zu,%zu,%zu)\n",
+                    s, result.x_bounds[s], result.x_bounds[s + 1],
+                    r[0], r[1], r[2], r[3]);
+    }
+
+    return PiecewiseChebyshev4DEEPInner(
+        std::move(result.segments), std::move(result.x_bounds),
+        OptionType::PUT, kSpot, 0.0);
+}
+
+static void run_cheb4d_pw() {
+    std::printf("\n================================================================\n");
+    std::printf("Piecewise Chebyshev 4D (Brent) — q=0, no dividends\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    std::printf("--- Building Piecewise Chebyshev 4D surface...\n");
+    auto inner = build_piecewise_chebyshev_4d_surface();
+
+    std::printf("--- Computing IV errors (Brent)...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Piecewise Cheb 4D IV Error (bps, Brent) — σ=%.0f%%, q=0",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_brent(q0_prices,
+            [&](double S, double K, double tau, double sigma, double r) {
+                PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                             .sigma = sigma, .rate = r};
+                return inner.price(q);
+            }, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
-int main() {
+static constexpr const char* kSections[] = {
+    "vanilla", "dividends", "bspline-3d", "bspline-4d", "cheb3d", "cheb4d",
+    "cheb4d-diag", "cheb4d-pw"
+};
+
+int main(int argc, char* argv[]) {
+    // Parse section names from argv. No args = print help.
+    std::unordered_set<std::string> selected;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+            selected.clear();
+            break;
+        }
+        selected.insert(argv[i]);
+    }
+    if (selected.empty()) {
+        std::printf("Usage: %s <section> [section...]\n\nSections:\n", argv[0]);
+        for (const char* s : kSections) std::printf("  %s\n", s);
+        std::printf("\nSpecify one or more sections to run.\n");
+        return 0;
+    }
+    auto want = [&](const char* name) { return selected.count(name) > 0; };
+
     std::printf("Interpolation IV Safety Diagnostic\n");
     std::printf("===================================\n");
     std::printf("S=%.0f, r=%.2f, q=%.2f, PUT\n", kSpot, kRate, kDivYield);
-    std::printf("Reference prices: BatchAmericanOptionSolver (chain mode)\n");
-    std::printf("Interpolated IV:  adaptive IVGrid + make_interpolated_iv_solver\n");
-    std::printf("FDM reference IV: IVSolver (vanilla) / Brent solver (dividends)\n");
     std::printf("Error = |interp_iv - fdm_iv| in basis points\n\n");
 
     std::printf("Strikes: ");
@@ -704,115 +1201,14 @@ int main() {
     for (double v : kVols) std::printf("%.0f%% ", v * 100);
     std::printf("\n");
 
-    // Step 1: Generate reference prices
-    std::printf("\n--- Generating vanilla reference prices (batch chain solver)...\n");
-    auto vanilla_prices = generate_prices(/*with_dividends=*/false);
-
-    std::printf("--- Generating dividend reference prices (batch solver)...\n");
-    auto div_prices = generate_prices(/*with_dividends=*/true);
-
-    // Step 2: Build interpolated solvers
-    std::printf("--- Building vanilla interpolated solver (adaptive)...\n");
-    auto vanilla_solver = build_vanilla_solver();
-
-    std::printf("--- Building dividend interpolated solvers (per-maturity)...\n");
-    auto div_solvers = build_div_solvers();
-
-    // Step 3 & 4: Compute errors and print heatmaps
-    std::printf("--- Computing vanilla IV errors...\n");
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        char title[128];
-        std::snprintf(title, sizeof(title),
-                      "Interpolation IV Error (bps) — σ=%.0f%%, no dividends",
-                      kVols[vi] * 100);
-        auto errors = compute_errors_vanilla(vanilla_prices, vanilla_solver, vi);
-        print_heatmap(title, errors);
-    }
-
-    std::printf("\n--- Computing dividend IV errors...\n");
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        char title[128];
-        std::snprintf(title, sizeof(title),
-                      "Interpolation IV Error (bps) — σ=%.0f%%, quarterly $0.50 div",
-                      kVols[vi] * 100);
-        auto errors = compute_errors_div(div_prices, div_solvers, vi);
-        print_heatmap(title, errors);
-    }
-
-    // ================================================================
-    // 3D Dimensionless vs 4D Standard (q=0)
-    // ================================================================
-    std::printf("\n\n================================================================\n");
-    std::printf("3D Dimensionless vs 4D Standard — q=0, no dividends\n");
-    std::printf("================================================================\n\n");
-
-    std::printf("--- Generating q=0 reference prices...\n");
-    auto q0_prices = generate_prices_q0();
-
-    std::printf("--- Building 3D dimensionless surface...\n");
-    auto inner_3d = build_3d_surface();
-
-    std::printf("--- Building 4D standard surface (q=0)...\n");
-    auto solver_4d_q0 = build_vanilla_solver_q0();
-
-    std::printf("--- Computing errors...\n");
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        char title_3d[128], title_4d[128];
-        std::snprintf(title_3d, sizeof(title_3d),
-                      "3D Dimensionless IV Error (bps) — σ=%.0f%%, q=0",
-                      kVols[vi] * 100);
-        std::snprintf(title_4d, sizeof(title_4d),
-                      "4D Standard IV Error (bps) — σ=%.0f%%, q=0",
-                      kVols[vi] * 100);
-
-        auto errors_3d = compute_errors_3d(q0_prices, inner_3d, vi);
-        auto errors_4d = compute_errors_vanilla(q0_prices, solver_4d_q0, vi, 0.0);
-
-        print_heatmap(title_3d, errors_3d);
-        print_heatmap(title_4d, errors_4d);
-    }
-
-    // ================================================================
-    // Chebyshev-Tucker 3D vs B-spline 3D (q=0)
-    // ================================================================
-    std::printf("\n\n================================================================\n");
-    std::printf("Chebyshev-Tucker 3D vs B-spline 3D — q=0, no dividends\n");
-    std::printf("================================================================\n\n");
-
-    std::printf("--- Building Chebyshev-Tucker 3D surface...\n");
-    auto inner_cheb = build_chebyshev_3d_surface();
-
-    std::printf("--- Computing Chebyshev IV errors...\n");
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        char title_cheb[128];
-        std::snprintf(title_cheb, sizeof(title_cheb),
-                      "Chebyshev-Tucker IV Error (bps) — σ=%.0f%%, q=0",
-                      kVols[vi] * 100);
-
-        auto errors_cheb = compute_errors_chebyshev(q0_prices, inner_cheb, vi);
-        print_heatmap(title_cheb, errors_cheb);
-    }
-
-    // ================================================================
-    // Chebyshev-Tucker 4D (ln(S/K), tau, sigma, rate)
-    // ================================================================
-    std::printf("\n\n================================================================\n");
-    std::printf("Chebyshev-Tucker 4D — q=0, no dividends\n");
-    std::printf("================================================================\n\n");
-
-    std::printf("--- Building Chebyshev-Tucker 4D surface...\n");
-    auto inner_cheb4d = build_chebyshev_4d_surface();
-
-    std::printf("--- Computing Chebyshev 4D IV errors...\n");
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        char title_cheb4d[128];
-        std::snprintf(title_cheb4d, sizeof(title_cheb4d),
-                      "Chebyshev-Tucker 4D IV Error (bps) — σ=%.0f%%, q=0",
-                      kVols[vi] * 100);
-
-        auto errors_cheb4d = compute_errors_chebyshev_4d(q0_prices, inner_cheb4d, vi);
-        print_heatmap(title_cheb4d, errors_cheb4d);
-    }
+    if (want("vanilla"))    run_vanilla();
+    if (want("dividends"))  run_dividends();
+    if (want("bspline-3d")) run_bspline_3d();
+    if (want("bspline-4d")) run_bspline_4d();
+    if (want("cheb3d"))      run_cheb3d();
+    if (want("cheb4d"))      run_cheb4d();
+    if (want("cheb4d-diag")) run_cheb4d_diag();
+    if (want("cheb4d-pw"))   run_cheb4d_pw();
 
     return 0;
 }

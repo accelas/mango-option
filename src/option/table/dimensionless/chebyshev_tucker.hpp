@@ -83,7 +83,14 @@ public:
     }
 
     /// Evaluate at a 3D point using Tucker-contracted barycentric interpolation.
+    /// Out-of-domain queries are clamped to domain boundaries.
     [[nodiscard]] double eval(const std::array<double, 3>& query) const {
+        // Clamp to domain (matches B-spline boundary behavior)
+        std::array<double, 3> q = query;
+        for (size_t d = 0; d < 3; ++d) {
+            q[d] = std::clamp(q[d], domain_.bounds[d][0], domain_.bounds[d][1]);
+        }
+
         auto [R0, R1, R2] = tucker_.ranks;
 
         // Step 1: Barycentric weights -> factor-contracted coefficients per axis
@@ -99,7 +106,7 @@ public:
             bool at_node = false;
             size_t node_idx = 0;
             for (size_t j = 0; j < nodes_[d].size(); ++j) {
-                if (query[d] == nodes_[d][j]) {
+                if (q[d] == nodes_[d][j]) {
                     at_node = true;
                     node_idx = j;
                     break;
@@ -115,12 +122,12 @@ public:
                 // Barycentric interpolation of each column of U_d
                 double denom = 0.0;
                 for (size_t j = 0; j < nodes_[d].size(); ++j) {
-                    denom += weights_[d][j] / (query[d] - nodes_[d][j]);
+                    denom += weights_[d][j] / (q[d] - nodes_[d][j]);
                 }
                 for (size_t r = 0; r < R; ++r) {
                     double numer = 0.0;
                     for (size_t j = 0; j < nodes_[d].size(); ++j) {
-                        double term = weights_[d][j] / (query[d] - nodes_[d][j]);
+                        double term = weights_[d][j] / (q[d] - nodes_[d][j]);
                         numer += term * tucker_.factors[d](j, r);
                     }
                     contracted[d][r] = numer / denom;
@@ -137,6 +144,24 @@ public:
                             * contracted[0][r0] * contracted[1][r1] * contracted[2][r2];
 
         return result;
+    }
+
+    /// Partial derivative along one axis via central finite difference.
+    [[nodiscard]] double partial(size_t axis,
+                                 const std::array<double, 3>& coords) const {
+        double lo = domain_.bounds[axis][0];
+        double hi = domain_.bounds[axis][1];
+        double h = 1e-6 * (hi - lo);
+
+        auto fwd = coords, bwd = coords;
+        fwd[axis] += h;
+        bwd[axis] -= h;
+        fwd[axis] = std::min(fwd[axis], hi);
+        bwd[axis] = std::max(bwd[axis], lo);
+
+        double dh = fwd[axis] - bwd[axis];
+        if (dh <= 0.0) return 0.0;
+        return (eval(fwd) - eval(bwd)) / dh;
     }
 
     /// Number of stored coefficients (core + factor entries).

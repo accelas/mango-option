@@ -117,5 +117,42 @@ TEST(ChebyshevTuckerTest, EvalFullMatchesEvalTucker) {
     EXPECT_LT(comp_err, 1e-6) << "Compressed should still be accurate";
 }
 
+TEST(ChebyshevTuckerTest, PartialDerivativeAccuracy) {
+    // f(x,y,z) = sin(x) * cos(y) * z
+    // df/dx = cos(x) * cos(y) * z
+    // df/dy = -sin(x) * sin(y) * z
+    // df/dz = sin(x) * cos(y)
+    auto f = [](double x, double y, double z) {
+        return std::sin(x) * std::cos(y) * z;
+    };
+
+    ChebyshevTuckerDomain domain{
+        .bounds = {{{-1.0, 1.0}, {-1.0, 1.0}, {-1.0, 1.0}}},
+    };
+    auto interp = ChebyshevTucker3D::build(
+        f, domain, {.num_pts = {16, 16, 16}, .epsilon = 1e-14});
+
+    for (double x : {-0.5, 0.3, 0.8}) {
+        for (double y : {-0.4, 0.6}) {
+            for (double z : {-0.7, 0.2}) {
+                double dx = interp.partial(0, {x, y, z});
+                double dy = interp.partial(1, {x, y, z});
+                double dz = interp.partial(2, {x, y, z});
+
+                double dx_exact = std::cos(x) * std::cos(y) * z;
+                double dy_exact = -std::sin(x) * std::sin(y) * z;
+                double dz_exact = std::sin(x) * std::cos(y);
+
+                EXPECT_NEAR(dx, dx_exact, 1e-5)
+                    << "df/dx at (" << x << "," << y << "," << z << ")";
+                EXPECT_NEAR(dy, dy_exact, 1e-5)
+                    << "df/dy at (" << x << "," << y << "," << z << ")";
+                EXPECT_NEAR(dz, dz_exact, 1e-5)
+                    << "df/dz at (" << x << "," << y << "," << z << ")";
+            }
+        }
+    }
+}
+
 }  // namespace
 }  // namespace mango

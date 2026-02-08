@@ -484,6 +484,8 @@ cc_binary(
         "//src/option:european_option",
         "//src/option:iv_solver",
         "//src/option:interpolated_iv_solver",
+        "//src/option/table:adaptive_grid_builder",
+        "//src/option/table:standard_surface",
         "//src/option/table/dimensionless:chebyshev_tucker",
         "//src/option/table/dimensionless:chebyshev_tucker_4d",
         "//src/option/table/dimensionless:dimensionless_builder",
