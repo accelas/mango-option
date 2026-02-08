@@ -36,6 +36,8 @@
 
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/table/dimensionless/dimensionless_inner.hpp"
+#include "chebyshev_eep_inner.hpp"
+#include "chebyshev_4d_eep_inner.hpp"
 
 using namespace mango;
 using namespace mango::bench;
@@ -531,6 +533,154 @@ static void BM_4D_q0_IV(benchmark::State& state) {
 }
 
 BENCHMARK(BM_4D_q0_IV)
+    ->DenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1)
+    ->Unit(benchmark::kMicrosecond);
+
+// ============================================================================
+// BM_Chebyshev_IV: Chebyshev-Tucker 3D surface (q=0)
+// ============================================================================
+
+struct ChebyshevEntry {
+    std::shared_ptr<ChebyshevEEPInner> inner;
+    double build_time_ms = 0;
+    int n_pde_solves = 0;
+};
+
+static const ChebyshevEntry& get_chebyshev_solver() {
+    static ChebyshevEntry entry = [] {
+        ChebyshevEEPConfig cfg;  // use wide defaults
+
+        auto t0 = std::chrono::steady_clock::now();
+        auto result = build_chebyshev_eep(cfg, kSpot, OptionType::PUT);
+        auto t1 = std::chrono::steady_clock::now();
+
+        return ChebyshevEntry{
+            .inner = std::make_shared<ChebyshevEEPInner>(
+                std::move(result.interp), OptionType::PUT, kSpot, 0.0),
+            .build_time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count(),
+            .n_pde_solves = result.n_pde_solves,
+        };
+    }();
+    return entry;
+}
+
+static double solve_iv_newton_chebyshev(const ChebyshevEEPInner& inner,
+                                         double spot, double strike, double tau,
+                                         double rate, double market_price) {
+    double sigma = 0.20;
+    for (int iter = 0; iter < 30; ++iter) {
+        PriceQuery q{.spot = spot, .strike = strike, .tau = tau,
+                     .sigma = sigma, .rate = rate};
+        double price = inner.price(q);
+        double vega = inner.vega(q);
+        if (std::abs(vega) < 1e-10) break;
+        double step = (price - market_price) / vega;
+        sigma -= step;
+        sigma = std::clamp(sigma, 0.01, 5.0);
+        if (std::abs(step) < 1e-8) break;
+    }
+    return sigma;
+}
+
+static void BM_Chebyshev_IV(benchmark::State& state) {
+    size_t si = static_cast<size_t>(state.range(0));
+    double K = kStrikes[si];
+    double ref_price = get_q0_reference_prices()[si];
+    if (!std::isfinite(ref_price)) {
+        state.SkipWithError("q=0 reference not available");
+        return;
+    }
+
+    const auto& entry = get_chebyshev_solver();
+    double last_iv = 0;
+    for (auto _ : state) {
+        last_iv = solve_iv_newton_chebyshev(*entry.inner, kSpot, K, kMaturity, kRate, ref_price);
+        benchmark::DoNotOptimize(last_iv);
+    }
+
+    state.SetLabel(std::format("K={:.0f} Cheb", K));
+    state.counters["strike"] = K;
+    state.counters["iv"] = last_iv;
+    state.counters["iv_err_bps"] = std::abs(last_iv - kTrueVol) * 10000.0;
+    state.counters["build_ms"] = entry.build_time_ms;
+    state.counters["n_pde_solves"] = static_cast<double>(entry.n_pde_solves);
+}
+
+BENCHMARK(BM_Chebyshev_IV)
+    ->DenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1)
+    ->Unit(benchmark::kMicrosecond);
+
+// ============================================================================
+// BM_Chebyshev4D_IV: Chebyshev-Tucker 4D surface (q=0)
+// ============================================================================
+
+struct Chebyshev4DEntry {
+    std::shared_ptr<Chebyshev4DEEPInner> inner;
+    double build_time_ms = 0;
+    int n_pde_solves = 0;
+};
+
+static const Chebyshev4DEntry& get_chebyshev_4d_solver() {
+    static Chebyshev4DEntry entry = [] {
+        Chebyshev4DEEPConfig cfg;  // use defaults
+
+        auto t0 = std::chrono::steady_clock::now();
+        auto result = build_chebyshev_4d_eep(cfg, kSpot, OptionType::PUT);
+        auto t1 = std::chrono::steady_clock::now();
+
+        return Chebyshev4DEntry{
+            .inner = std::make_shared<Chebyshev4DEEPInner>(
+                std::move(result.interp), OptionType::PUT, kSpot, 0.0),
+            .build_time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count(),
+            .n_pde_solves = result.n_pde_solves,
+        };
+    }();
+    return entry;
+}
+
+static double solve_iv_newton_chebyshev_4d(const Chebyshev4DEEPInner& inner,
+                                            double spot, double strike, double tau,
+                                            double rate, double market_price) {
+    double sigma = 0.20;
+    for (int iter = 0; iter < 30; ++iter) {
+        PriceQuery q{.spot = spot, .strike = strike, .tau = tau,
+                     .sigma = sigma, .rate = rate};
+        double price = inner.price(q);
+        double vega = inner.vega(q);
+        if (std::abs(vega) < 1e-10) break;
+        double step = (price - market_price) / vega;
+        sigma -= step;
+        sigma = std::clamp(sigma, 0.01, 5.0);
+        if (std::abs(step) < 1e-8) break;
+    }
+    return sigma;
+}
+
+static void BM_Chebyshev4D_IV(benchmark::State& state) {
+    size_t si = static_cast<size_t>(state.range(0));
+    double K = kStrikes[si];
+    double ref_price = get_q0_reference_prices()[si];
+    if (!std::isfinite(ref_price)) {
+        state.SkipWithError("q=0 reference not available");
+        return;
+    }
+
+    const auto& entry = get_chebyshev_4d_solver();
+    double last_iv = 0;
+    for (auto _ : state) {
+        last_iv = solve_iv_newton_chebyshev_4d(*entry.inner, kSpot, K, kMaturity, kRate, ref_price);
+        benchmark::DoNotOptimize(last_iv);
+    }
+
+    state.SetLabel(std::format("K={:.0f} Cheb4D", K));
+    state.counters["strike"] = K;
+    state.counters["iv"] = last_iv;
+    state.counters["iv_err_bps"] = std::abs(last_iv - kTrueVol) * 10000.0;
+    state.counters["build_ms"] = entry.build_time_ms;
+    state.counters["n_pde_solves"] = static_cast<double>(entry.n_pde_solves);
+}
+
+BENCHMARK(BM_Chebyshev4D_IV)
     ->DenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1)
     ->Unit(benchmark::kMicrosecond);
 
