@@ -1555,6 +1555,18 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "dimensionless_inner_test",
+    size = "medium",
+    srcs = ["dimensionless_inner_test.cc"],
+    deps = [
+        "//src/option/table:dimensionless_inner",
+        "//src/option/table:dimensionless_builder",
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
 py_test(
     name = "python_bindings_test",
     size = "medium",
