@@ -1520,6 +1520,85 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "dimensionless_european_test",
+    size = "small",
+    srcs = ["dimensionless_european_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_european",
+        "//src/option:european_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dimensionless_pde_test",
+    size = "small",
+    srcs = ["dimensionless_pde_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option/table:price_table_surface",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dimensionless_builder_test",
+    size = "medium",
+    srcs = ["dimensionless_builder_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/option:european_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dimensionless_inner_test",
+    size = "medium",
+    srcs = ["dimensionless_inner_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_inner",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dimensionless_comparison_test",
+    size = "medium",
+    srcs = ["dimensionless_comparison_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_inner",
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "golden_surface_test",
+    size = "small",
+    srcs = ["golden_surface_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:golden_surface",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dimensionless_adaptive_test",
+    size = "large",
+    srcs = ["dimensionless_adaptive_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_adaptive",
+        "@googletest//:gtest_main",
+    ],
+)
+
 py_test(
     name = "python_bindings_test",
     size = "medium",
