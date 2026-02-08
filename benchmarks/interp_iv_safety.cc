@@ -22,10 +22,14 @@
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/option_spec.hpp"
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
+
+#include "mango/option/table/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless_inner.hpp"
 
 using namespace mango;
 using namespace mango::bench;
@@ -213,7 +217,8 @@ using ErrorTable = std::array<std::array<double, kNS>, kNT>;
 
 static ErrorTable compute_errors_vanilla(const PriceGrid& prices,
                                           const AnyIVSolver& interp_solver,
-                                          size_t vol_idx) {
+                                          size_t vol_idx,
+                                          double div_yield = kDivYield) {
     ErrorTable errors{};
     IVSolverConfig fdm_config;
     IVSolver fdm_solver(fdm_config);
@@ -236,7 +241,7 @@ static ErrorTable compute_errors_vanilla(const PriceGrid& prices,
             q.strike = kStrikes[si];
             q.maturity = kMaturities[ti];
             q.rate = kRate;
-            q.dividend_yield = kDivYield;
+            q.dividend_yield = div_yield;
             q.option_type = OptionType::PUT;
             q.market_price = price;
             queries.push_back(q);
@@ -333,6 +338,156 @@ static ErrorTable compute_errors_div(
         }
     }
 
+    return errors;
+}
+
+// ============================================================================
+// 3D Dimensionless surface helpers (q=0 comparison)
+// ============================================================================
+
+static PriceGrid generate_prices_q0() {
+    PriceGrid prices{};
+    BatchAmericanOptionSolver batch_solver;
+    std::vector<PricingParams> all_params;
+    all_params.reserve(kNV * kNT * kNS);
+
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        for (size_t ti = 0; ti < kNT; ++ti) {
+            for (size_t si = 0; si < kNS; ++si) {
+                PricingParams p;
+                p.spot = kSpot;
+                p.strike = kStrikes[si];
+                p.maturity = kMaturities[ti];
+                p.rate = kRate;
+                p.dividend_yield = 0.0;  // q=0 for dimensionless comparison
+                p.option_type = OptionType::PUT;
+                p.volatility = kVols[vi];
+                all_params.push_back(std::move(p));
+            }
+        }
+    }
+
+    auto result = batch_solver.solve_batch(all_params, /*use_shared_grid=*/true);
+    size_t idx = 0;
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        for (size_t ti = 0; ti < kNT; ++ti) {
+            for (size_t si = 0; si < kNS; ++si) {
+                if (result.results[idx].has_value()) {
+                    prices[vi][ti][si] = result.results[idx]->value();
+                } else {
+                    prices[vi][ti][si] = std::nan("");
+                }
+                ++idx;
+            }
+        }
+    }
+    return prices;
+}
+
+static DimensionlessEEPInner build_3d_surface() {
+    auto t0 = std::chrono::steady_clock::now();
+    DimensionlessAxes axes;
+    // x: log-moneyness covering S/K from ~0.65 to ~1.5
+    axes.log_moneyness = {-0.40, -0.30, -0.20, -0.10, -0.05, 0.0,
+                          0.05, 0.10, 0.20, 0.30, 0.40};
+    // tau' = sigma^2*tau/2: covers sigma=[0.10,0.50], tau=[30d,2y]
+    // Very short maturities (7d,14d) at low vol may extrapolate
+    axes.tau_prime = {0.005, 0.01, 0.02, 0.03, 0.05,
+                      0.07, 0.09, 0.11, 0.125};
+    // ln(kappa) = ln(2r/sigma^2): r=0.05, sigma=[0.10,0.50]
+    // kappa range ~[0.14, 16.4] → ln_kappa ~[-2.0, 2.8]
+    axes.ln_kappa = {-2.0, -1.2, -0.5, 0.0, 0.5, 1.0,
+                     1.5, 2.0, 2.5, 2.8};
+
+    auto result = build_dimensionless_surface(
+        axes, kSpot, OptionType::PUT, SurfaceContent::EarlyExercisePremium);
+    if (!result) {
+        std::fprintf(stderr, "3D surface build failed (code=%d)\n",
+                     static_cast<int>(result.error().code));
+        std::exit(1);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(t1 - t0).count();
+    std::printf("  3D surface: %d PDE solves, %.3fs build\n",
+                result->n_pde_solves, elapsed);
+
+    return DimensionlessEEPInner(result->surface, OptionType::PUT, kSpot, 0.0);
+}
+
+static AnyIVSolver build_vanilla_solver_q0() {
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = kSpot,
+        .dividend_yield = 0.0,
+        .grid = IVGrid{
+            .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
+            .vol = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50},
+            .rate = {0.01, 0.03, 0.05, 0.10},
+        },
+        .adaptive = AdaptiveGridParams{.target_iv_error = 2e-5},
+        .path = StandardIVPath{
+            .maturity_grid = {0.01, 0.03, 0.06, 0.12, 0.20,
+                              0.35, 0.60, 1.0, 1.5, 2.0, 2.5},
+        },
+    };
+
+    auto solver = make_interpolated_iv_solver(config);
+    if (!solver) {
+        std::fprintf(stderr, "Failed to build 4D q=0 solver\n");
+        std::exit(1);
+    }
+    return std::move(*solver);
+}
+
+static ErrorTable compute_errors_3d(const PriceGrid& prices,
+                                     const DimensionlessEEPInner& inner_3d,
+                                     size_t vol_idx) {
+    ErrorTable errors{};
+    IVSolverConfig fdm_config;
+    IVSolver fdm_solver(fdm_config);
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            // FDM reference IV at q=0
+            IVQuery fdm_q;
+            fdm_q.spot = kSpot;
+            fdm_q.strike = kStrikes[si];
+            fdm_q.maturity = kMaturities[ti];
+            fdm_q.rate = kRate;
+            fdm_q.dividend_yield = 0.0;
+            fdm_q.option_type = OptionType::PUT;
+            fdm_q.market_price = price;
+
+            auto fdm_result = fdm_solver.solve(fdm_q);
+            if (!fdm_result) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            // 3D interpolated IV via Brent
+            double iv_3d = brent_solve_iv(
+                [&](double vol) -> double {
+                    PriceQuery q{.spot = kSpot, .strike = kStrikes[si],
+                                 .tau = kMaturities[ti], .sigma = vol,
+                                 .rate = kRate};
+                    return inner_3d.price(q);
+                },
+                price);
+
+            if (!std::isfinite(iv_3d)) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            errors[ti][si] = std::abs(iv_3d - fdm_result->implied_vol) * 10000.0;
+        }
+    }
     return errors;
 }
 
@@ -434,6 +589,39 @@ int main() {
                       kVols[vi] * 100);
         auto errors = compute_errors_div(div_prices, div_solvers, vi);
         print_heatmap(title, errors);
+    }
+
+    // ================================================================
+    // 3D Dimensionless vs 4D Standard (q=0)
+    // ================================================================
+    std::printf("\n\n================================================================\n");
+    std::printf("3D Dimensionless vs 4D Standard — q=0, no dividends\n");
+    std::printf("================================================================\n\n");
+
+    std::printf("--- Generating q=0 reference prices...\n");
+    auto q0_prices = generate_prices_q0();
+
+    std::printf("--- Building 3D dimensionless surface...\n");
+    auto inner_3d = build_3d_surface();
+
+    std::printf("--- Building 4D standard surface (q=0)...\n");
+    auto solver_4d_q0 = build_vanilla_solver_q0();
+
+    std::printf("--- Computing errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title_3d[128], title_4d[128];
+        std::snprintf(title_3d, sizeof(title_3d),
+                      "3D Dimensionless IV Error (bps) — σ=%.0f%%, q=0",
+                      kVols[vi] * 100);
+        std::snprintf(title_4d, sizeof(title_4d),
+                      "4D Standard IV Error (bps) — σ=%.0f%%, q=0",
+                      kVols[vi] * 100);
+
+        auto errors_3d = compute_errors_3d(q0_prices, inner_3d, vi);
+        auto errors_4d = compute_errors_vanilla(q0_prices, solver_4d_q0, vi, 0.0);
+
+        print_heatmap(title_3d, errors_3d);
+        print_heatmap(title_4d, errors_4d);
     }
 
     return 0;

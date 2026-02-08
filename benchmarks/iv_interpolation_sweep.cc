@@ -23,6 +23,7 @@
 #include "mango/option/table/standard_surface.hpp"
 #include "mango/option/option_grid.hpp"
 #include <benchmark/benchmark.h>
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -32,6 +33,9 @@
 #include <memory_resource>
 #include <numeric>
 #include <vector>
+
+#include "mango/option/table/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless_inner.hpp"
 
 using namespace mango;
 using namespace mango::bench;
@@ -58,14 +62,15 @@ static constexpr std::array<int, 2> kScales = {1, 2};
 // ============================================================================
 
 /// Solve American put at given accuracy for all kStrikes
-static std::vector<double> solve_reference_prices(const GridAccuracyParams& accuracy) {
+static std::vector<double> solve_reference_prices(const GridAccuracyParams& accuracy,
+                                                   double div_yield = kDivYield) {
     std::vector<double> p;
     p.reserve(kStrikes.size());
 
     for (double K : kStrikes) {
         PricingParams params(
             OptionSpec{.spot = kSpot, .strike = K, .maturity = kMaturity,
-                .rate = kRate, .dividend_yield = kDivYield,
+                .rate = kRate, .dividend_yield = div_yield,
                 .option_type = OptionType::PUT},
             kTrueVol);
 
@@ -112,6 +117,17 @@ static const std::vector<double>& get_pde_baseline_prices() {
         table_accuracy.min_spatial_points = 201;
         table_accuracy.max_spatial_points = 301;
         return solve_reference_prices(table_accuracy);
+    }();
+    return prices;
+}
+
+/// q=0 reference prices for dimensionless 3D comparison
+static const std::vector<double>& get_q0_reference_prices() {
+    static std::vector<double> prices = [] {
+        GridAccuracyParams high_accuracy;
+        high_accuracy.min_spatial_points = 401;
+        high_accuracy.max_spatial_points = 501;
+        return solve_reference_prices(high_accuracy, 0.0);
     }();
     return prices;
 }
@@ -263,6 +279,119 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
 }
 
 // ============================================================================
+// 3D Dimensionless vs 4D Standard (q=0 comparison)
+// ============================================================================
+
+static std::vector<double> linspace_vec(double lo, double hi, int n) {
+    std::vector<double> v(n);
+    for (int i = 0; i < n; ++i)
+        v[i] = lo + (hi - lo) * i / (n - 1);
+    return v;
+}
+
+struct Dim3DEntry {
+    std::shared_ptr<DimensionlessEEPInner> inner;
+    double build_time_ms = 0;
+    int n_pde_solves = 0;
+};
+
+static const Dim3DEntry& get_3d_solver() {
+    static Dim3DEntry entry = [] {
+        auto t0 = std::chrono::steady_clock::now();
+        DimensionlessAxes axes;
+        axes.log_moneyness = linspace_vec(-0.45, 0.35, 13);
+        axes.tau_prime = {0.005, 0.01, 0.02, 0.03, 0.05,
+                          0.07, 0.09, 0.11, 0.125};
+        axes.ln_kappa = linspace_vec(-2.0, 2.8, 10);
+
+        auto result = build_dimensionless_surface(
+            axes, kSpot, OptionType::PUT, SurfaceContent::EarlyExercisePremium);
+        if (!result) {
+            auto& err = result.error();
+            std::fprintf(stderr, "3D build failed: code=%d axis=%zu count=%zu\n",
+                         static_cast<int>(err.code), err.axis_index, err.count);
+            std::fprintf(stderr, "  ln_kappa range: [%.2f, %.2f] (%zu pts)\n",
+                         axes.ln_kappa.front(), axes.ln_kappa.back(),
+                         axes.ln_kappa.size());
+            std::fprintf(stderr, "  tau_prime range: [%.4f, %.4f] (%zu pts)\n",
+                         axes.tau_prime.front(), axes.tau_prime.back(),
+                         axes.tau_prime.size());
+            std::abort();
+        }
+        auto t1 = std::chrono::steady_clock::now();
+        return Dim3DEntry{
+            .inner = std::make_shared<DimensionlessEEPInner>(
+                result->surface, OptionType::PUT, kSpot, 0.0),
+            .build_time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count(),
+            .n_pde_solves = result->n_pde_solves,
+        };
+    }();
+    return entry;
+}
+
+static double solve_iv_newton_3d(const DimensionlessEEPInner& inner,
+                                  double spot, double strike, double tau,
+                                  double rate, double market_price) {
+    double sigma = 0.20;
+    for (int iter = 0; iter < 30; ++iter) {
+        PriceQuery q{.spot = spot, .strike = strike, .tau = tau,
+                     .sigma = sigma, .rate = rate};
+        double price = inner.price(q);
+        double vega = inner.vega(q);
+        if (std::abs(vega) < 1e-10) break;
+        double step = (price - market_price) / vega;
+        sigma -= step;
+        sigma = std::clamp(sigma, 0.01, 5.0);
+        if (std::abs(step) < 1e-8) break;
+    }
+    return sigma;
+}
+
+struct Q0SolverEntry {
+    std::unique_ptr<DefaultInterpolatedIVSolver> solver;
+    double build_time_ms = 0;
+};
+
+static const Q0SolverEntry& get_4d_q0_solver() {
+    static Q0SolverEntry entry = [] {
+        auto t0 = std::chrono::steady_clock::now();
+
+        OptionGrid chain;
+        chain.spot = kSpot;
+        chain.strikes = {kStrikes.begin(), kStrikes.end()};
+        chain.maturities = {0.25, 0.5, 1.0, 1.5, 2.0};
+        chain.implied_vols = {0.05, 0.10, 0.20, 0.30, 0.50};
+        chain.rates = {0.01, 0.03, 0.05, 0.10};
+        chain.dividend_yield = 0.0;  // q=0
+
+        AdaptiveGridParams params;
+        params.target_iv_error = 2e-5;  // 2 bps
+
+        AdaptiveGridBuilder builder(params);
+        GridAccuracyParams pde_accuracy;
+        pde_accuracy.min_spatial_points = 201;
+        pde_accuracy.max_spatial_points = 301;
+        auto result = builder.build(chain, PDEGridSpec{pde_accuracy}, OptionType::PUT);
+        if (!result) {
+            std::fprintf(stderr, "4D q=0 adaptive build failed\n");
+            std::abort();
+        }
+
+        auto wrapper = make_standard_wrapper(result->surface, OptionType::PUT);
+        if (!wrapper) { std::abort(); }
+        auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
+        if (!solver) { std::abort(); }
+
+        auto t1 = std::chrono::steady_clock::now();
+        return Q0SolverEntry{
+            .solver = std::make_unique<DefaultInterpolatedIVSolver>(std::move(*solver)),
+            .build_time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count(),
+        };
+    }();
+    return entry;
+}
+
+// ============================================================================
 // BM_Adaptive_IV_Scaled: parametrized by (strike_idx, scale_idx)
 // ============================================================================
 
@@ -329,6 +458,81 @@ BENCHMARK(BM_Adaptive_IV_Scaled)
         benchmark::CreateDenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1),
         benchmark::CreateDenseRange(0, static_cast<int>(kScales.size()) - 1, 1),
     })
+    ->Unit(benchmark::kMicrosecond);
+
+// ============================================================================
+// BM_3D_IV: dimensionless 3D surface (q=0)
+// ============================================================================
+
+static void BM_3D_IV(benchmark::State& state) {
+    size_t si = static_cast<size_t>(state.range(0));
+    double K = kStrikes[si];
+    double ref_price = get_q0_reference_prices()[si];
+    if (!std::isfinite(ref_price)) {
+        state.SkipWithError("q=0 reference not available");
+        return;
+    }
+
+    const auto& entry = get_3d_solver();
+    double last_iv = 0;
+    for (auto _ : state) {
+        last_iv = solve_iv_newton_3d(*entry.inner, kSpot, K, kMaturity, kRate, ref_price);
+        benchmark::DoNotOptimize(last_iv);
+    }
+
+    state.SetLabel(std::format("K={:.0f} 3D", K));
+    state.counters["strike"] = K;
+    state.counters["iv"] = last_iv;
+    state.counters["iv_err_bps"] = std::abs(last_iv - kTrueVol) * 10000.0;
+    state.counters["build_ms"] = entry.build_time_ms;
+    state.counters["n_pde_solves"] = static_cast<double>(entry.n_pde_solves);
+}
+
+BENCHMARK(BM_3D_IV)
+    ->DenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1)
+    ->Unit(benchmark::kMicrosecond);
+
+// ============================================================================
+// BM_4D_q0_IV: standard 4D surface at q=0 (fair comparison)
+// ============================================================================
+
+static void BM_4D_q0_IV(benchmark::State& state) {
+    size_t si = static_cast<size_t>(state.range(0));
+    double K = kStrikes[si];
+    double ref_price = get_q0_reference_prices()[si];
+    if (!std::isfinite(ref_price)) {
+        state.SkipWithError("q=0 reference not available");
+        return;
+    }
+
+    OptionSpec spec{
+        .spot = kSpot, .strike = K, .maturity = kMaturity,
+        .rate = kRate, .dividend_yield = 0.0,
+        .option_type = OptionType::PUT
+    };
+    IVQuery query(spec, ref_price);
+
+    const auto& entry = get_4d_q0_solver();
+    std::expected<IVSuccess, IVError> last_result;
+    for (auto _ : state) {
+        last_result = entry.solver->solve(query);
+        if (!last_result) {
+            state.SkipWithError("4D q=0 IV solve failed");
+            return;
+        }
+        benchmark::DoNotOptimize(last_result);
+    }
+
+    double iv = last_result->implied_vol;
+    state.SetLabel(std::format("K={:.0f} 4D-q0", K));
+    state.counters["strike"] = K;
+    state.counters["iv"] = iv;
+    state.counters["iv_err_bps"] = std::abs(iv - kTrueVol) * 10000.0;
+    state.counters["build_ms"] = entry.build_time_ms;
+}
+
+BENCHMARK(BM_4D_q0_IV)
+    ->DenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1)
     ->Unit(benchmark::kMicrosecond);
 
 BENCHMARK_MAIN();
