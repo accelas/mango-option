@@ -1025,15 +1025,15 @@ AdaptiveGridBuilder::build_cached_surface(
 
     // Return a handle that queries the surface (reconstruct full American price)
     auto surface_ptr = surface.value();
-    auto aps = AmericanPriceSurface::create(surface_ptr, type);
-    if (!aps.has_value()) {
+    auto wrapper = build_standard_surface(surface_ptr, type, dividend_yield);
+    if (!wrapper.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
     return SurfaceHandle{
-        .price = [aps = std::move(*aps)](double query_spot, double strike, double tau,
-                                         double sigma, double rate) -> double {
-            return aps.price(query_spot, strike, tau, sigma, rate);
+        .price = [w = std::move(*wrapper)](double query_spot, double strike, double tau,
+                                           double sigma, double rate) -> double {
+            return w.price(query_spot, strike, tau, sigma, rate);
         },
         .pde_solves = pde_solves
     };
