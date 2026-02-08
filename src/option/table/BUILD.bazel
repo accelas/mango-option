@@ -325,6 +325,30 @@ cc_library(
 )
 
 cc_library(
+    name = "dimensionless_adaptive",
+    srcs = ["dimensionless_adaptive.cpp"],
+    hdrs = ["dimensionless_builder.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    deps = [
+        ":dimensionless_builder",
+        ":dimensionless_european",
+        ":error_attribution",
+        "//src/option:american_option_batch",
+        "//src/math:cubic_spline_solver",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "dimensionless_inner",
     srcs = ["dimensionless_inner.cpp"],
     hdrs = ["dimensionless_inner.hpp"],

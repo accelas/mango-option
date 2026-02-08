@@ -69,10 +69,9 @@ build_dimensionless_surface(
     // 3. Solve batch with snapshot times = tau_prime grid, shared grid
     // -----------------------------------------------------------------------
     BatchAmericanOptionSolver solver;
-    // Use medium accuracy to ensure time grid is fine enough to distinguish
-    // all snapshot times (default "fast" mode may be too coarse for close
-    // tau' values like 0.005 and 0.01).
-    solver.set_grid_accuracy(make_grid_accuracy(GridAccuracyProfile::Medium));
+    // Use high accuracy to minimize PDE discretization noise — the B-spline
+    // interpolant amplifies any noise in the training data.
+    solver.set_grid_accuracy(make_grid_accuracy(GridAccuracyProfile::Ultra));
     solver.set_snapshot_times(std::span<const double>{axes.tau_prime});
 
     auto batch_result = solver.solve_batch(batch, /*use_shared_grid=*/true);
