@@ -529,3 +529,25 @@ cc_binary(
     tags = ["benchmark", "manual"],
 )
 
+cc_binary(
+    name = "chebyshev_vs_bspline",
+    srcs = ["chebyshev_vs_bspline.cc"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    linkstatic = True,
+    deps = [
+        "//src/option/table/dimensionless:chebyshev_tucker",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_european",
+        "//src/option:american_option_batch",
+        "//src/math:cubic_spline_solver",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
