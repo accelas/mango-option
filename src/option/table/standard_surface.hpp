@@ -22,9 +22,9 @@ using SegmentedSurfacePI = SegmentedSurface<PriceTableInner>;
 using MultiKRefSurfacePI = MultiKRefSurface<SegmentedSurfacePI>;
 using MultiKRefSurfaceWrapperPI = SplicedSurfaceWrapper<MultiKRefSurfacePI>;
 
-/// Create a StandardSurfaceWrapper from a pre-built PriceTableSurface.
+/// Create a StandardSurfaceWrapper from a pre-built EEP surface.
 /// Reads K_ref and dividend_yield from surface metadata.
-/// Accepts EarlyExercisePremium or NormalizedPrice content.
+/// Requires SurfaceContent::EarlyExercisePremium; rejects NormalizedPrice.
 [[nodiscard]] std::expected<StandardSurfaceWrapper, std::string>
 make_standard_wrapper(
     std::shared_ptr<const PriceTableSurface<4>> surface,

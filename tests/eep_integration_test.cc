@@ -164,5 +164,45 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
         << "most negative = " << most_negative;
 }
 
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: make_standard_wrapper must reject NormalizedPrice content
+// Bug: Previously accepted NormalizedPrice but always used EEPPriceTableInner,
+// which adds the European component at query time — double-counting it for
+// surfaces that already contain full American prices.
+TEST(EEPIntegrationTest, MakeStandardWrapperRejectsNormalizedPrice) {
+    std::vector<double> log_moneyness = {std::log(0.90), std::log(0.95), std::log(1.00), std::log(1.10)};
+    std::vector<double> maturity  = {0.25, 0.50, 0.75, 1.00};
+    std::vector<double> vol       = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> rate      = {0.02, 0.03, 0.04, 0.05};
+
+    double K_ref = 100.0;
+
+    auto setup = PriceTableBuilder<4>::from_vectors(
+        log_moneyness, maturity, vol, rate, K_ref,
+        GridAccuracyParams{},
+        OptionType::PUT,
+        0.0,   // dividend_yield
+        0.0);  // max_failure_rate
+    ASSERT_TRUE(setup.has_value());
+
+    auto& [builder, axes] = *setup;
+
+    // Default build produces NormalizedPrice content
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->surface->metadata().content,
+              SurfaceContent::NormalizedPrice);
+
+    // make_standard_wrapper must reject this
+    auto wrapper_result = make_standard_wrapper(result->surface, OptionType::PUT);
+    EXPECT_FALSE(wrapper_result.has_value())
+        << "make_standard_wrapper should reject NormalizedPrice surfaces";
+    EXPECT_NE(wrapper_result.error().find("EEP"), std::string::npos)
+        << "Error message should mention EEP; got: " << wrapper_result.error();
+}
+
 }  // namespace
 }  // namespace mango
