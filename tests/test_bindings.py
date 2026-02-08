@@ -268,12 +268,12 @@ def test_price_table_workspace():
 
 
 def test_price_table_surface():
-    """Test PriceTableSurface4D build and query"""
+    """Test PriceTableSurface build and query"""
     import math
-    print("Testing PriceTableSurface4D...")
+    print("Testing PriceTableSurface...")
 
     # Create axes
-    axes = mango_option.PriceTableAxes4D()
+    axes = mango_option.PriceTableAxes()
     axes.grids = [
         np.array([math.log(0.8), math.log(0.9), math.log(1.0), math.log(1.1), math.log(1.2)]),  # log-moneyness
         np.array([0.1, 0.25, 0.5, 1.0]),       # maturity
@@ -295,7 +295,7 @@ def test_price_table_surface():
     coeffs = np.random.rand(n_coeffs) * 10.0
 
     # Build surface
-    surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
+    surface = mango_option.PriceTableSurface.build(axes, coeffs, meta)
     print(f"✓ Built surface")
 
     # Query value at ATM (log(1.0) = 0.0)
@@ -380,7 +380,7 @@ def test_error_handling():
         print(f"✓ Insufficient grid points raises ValueError: {e}")
 
     # PriceTableAxes with wrong number of grids
-    axes = mango_option.PriceTableAxes4D()
+    axes = mango_option.PriceTableAxes()
     try:
         axes.grids = [np.array([1.0, 2.0, 3.0, 4.0])]  # Only 1 grid instead of 4
         assert False, "Should have raised ValueError"

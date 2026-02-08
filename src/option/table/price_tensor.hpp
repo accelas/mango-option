@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "mango/option/table/price_table_axes.hpp"
 #include "mango/support/aligned_allocator.hpp"
 #include "mango/math/safe_math.hpp"
 #include <experimental/mdspan>
@@ -19,7 +20,7 @@ namespace mango {
 ///
 /// @tparam N Number of dimensions
 template <size_t N>
-struct PriceTensor {
+struct PriceTensorND {
     std::shared_ptr<AlignedVector<double>> storage;  ///< Owns the memory
     std::experimental::mdspan<double, std::experimental::dextents<size_t, N>> view;  ///< Type-safe view
 
@@ -30,10 +31,10 @@ struct PriceTensor {
     /// memory alive until all references are destroyed.
     ///
     /// @param shape Number of elements per dimension
-    /// @return PriceTensor on success, or error message on failure
+    /// @return PriceTensorND on success, or error message on failure
     ///         Error conditions:
     ///         - Shape overflow (product of dimensions exceeds SIZE_MAX)
-    [[nodiscard]] static std::expected<PriceTensor, std::string>
+    [[nodiscard]] static std::expected<PriceTensorND, std::string>
     create(std::array<size_t, N> shape) {
         // Calculate total elements with overflow check
         auto total_result = safe_product(shape);
@@ -46,7 +47,7 @@ struct PriceTensor {
         auto storage_ptr = std::make_shared<AlignedVector<double>>(total);
 
         // Create mdspan view
-        PriceTensor tensor;
+        PriceTensorND tensor;
         tensor.storage = storage_ptr;
 
         // Construct mdspan with dextents
@@ -62,7 +63,7 @@ struct PriceTensor {
         } else if constexpr (N == 5) {
             extents = std::experimental::dextents<size_t, 5>(shape[0], shape[1], shape[2], shape[3], shape[4]);
         } else {
-            static_assert(N <= 5, "PriceTensor supports up to 5 dimensions");
+            static_assert(N <= 5, "PriceTensorND supports up to 5 dimensions");
         }
 
         tensor.view = std::experimental::mdspan<double, std::experimental::dextents<size_t, N>>(
@@ -71,5 +72,8 @@ struct PriceTensor {
         return tensor;
     }
 };
+
+/// Convenience alias for the common 4D case.
+using PriceTensor = PriceTensorND<kPriceTableDim>;
 
 } // namespace mango

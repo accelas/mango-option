@@ -2,6 +2,7 @@
 #pragma once
 
 #include <expected>
+#include "mango/option/table/price_table_metadata.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/math/bspline_basis.hpp"
 #include <experimental/mdspan>
@@ -14,7 +15,7 @@
 
 namespace mango {
 
-/// Workspace holding all data for PriceTableSurface in single contiguous allocation
+/// Workspace holding all data for PriceTableSurfaceND in single contiguous allocation
 ///
 /// Enables zero-copy mmap loading from Arrow IPC files. All numeric data is
 /// 64-byte aligned for AVX-512 SIMD operations.
@@ -55,7 +56,7 @@ public:
         double dividend_yield,
         double m_min,
         double m_max,
-        uint8_t surface_content = 0);
+        SurfaceContent surface_content = SurfaceContent::NormalizedPrice);
 
     /// Grid accessors (zero-copy spans into arena)
     /// Note: log_moneyness() returns ln(S/K), use m_min()/m_max() for original bounds
@@ -93,7 +94,7 @@ public:
     /// Metadata accessors
     double K_ref() const { return K_ref_; }
     double dividend_yield() const { return dividend_yield_; }
-    uint8_t surface_content() const { return surface_content_; }
+    SurfaceContent surface_content() const { return surface_content_; }
 
     /// Grid dimensions
     std::tuple<size_t, size_t, size_t, size_t> dimensions() const {
@@ -193,7 +194,7 @@ private:
     double dividend_yield_ = 0.0;
     double m_min_ = 0.0;  // Log-moneyness bounds ln(S/K)
     double m_max_ = 0.0;
-    uint8_t surface_content_ = 0;  // 0 = NormalizedPrice (default)
+    SurfaceContent surface_content_ = SurfaceContent::NormalizedPrice;
 };
 
 }  // namespace mango

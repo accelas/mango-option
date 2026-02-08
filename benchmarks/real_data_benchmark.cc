@@ -135,7 +135,7 @@ double analytic_bs_price(double S, double K, double tau, double sigma, double r,
 // Fixture for B-spline interpolation surface
 struct AnalyticSurfaceFixture {
     double K_ref;
-    std::shared_ptr<const PriceTableSurface<4>> surface;
+    std::shared_ptr<const PriceTableSurface> surface;
 };
 
 const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
@@ -148,16 +148,16 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         std::vector<double> vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30};
         std::vector<double> rate_grid = {0.0, 0.02, 0.04, 0.06};
 
-        auto result = PriceTableBuilder<4>::from_vectors(
+        auto result = PriceTableBuilder::from_vectors(
             m_grid, tau_grid, vol_grid, rate_grid, SPOT,
             GridAccuracyParams{}, OptionType::PUT, DIVIDEND_YIELD);
         if (!result) {
-            throw std::runtime_error("Failed to create PriceTableBuilder");
+            throw std::runtime_error("Failed to create PriceTableBuilderND");
         }
         auto [builder, axes] = std::move(result.value());
         EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
         auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });
         if (!table) {
@@ -502,7 +502,7 @@ static void BM_RealData_IVSmile_BuildTable(benchmark::State& state) {
     size_t n_pde_solves = 0;
 
     for (auto _ : state) {
-        auto builder_result = PriceTableBuilder<4>::from_grid(
+        auto builder_result = PriceTableBuilder::from_grid(
             fixture.chain,
             PDEGridConfig{fixture.grid_spec, 200},
             OptionType::PUT,
@@ -541,7 +541,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     const auto& fixture = GetIVSmileFixture();
 
     // Build price table once (not timed)
-    auto builder_result = PriceTableBuilder<4>::from_grid(
+    auto builder_result = PriceTableBuilder::from_grid(
         fixture.chain,
         PDEGridConfig{fixture.grid_spec, 200},
         OptionType::PUT,
@@ -554,7 +554,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     auto& [builder, axes] = builder_result.value();
     EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
     auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     if (!table_result) {
@@ -643,7 +643,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     const auto& fixture = GetIVSmileFixture();
 
     // Build price table
-    auto builder_result = PriceTableBuilder<4>::from_grid(
+    auto builder_result = PriceTableBuilder::from_grid(
         fixture.chain,
         PDEGridConfig{fixture.grid_spec, 200},
         OptionType::PUT,
@@ -656,7 +656,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     auto& [builder, axes] = builder_result.value();
     EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
     auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     if (!table_result) {
@@ -807,7 +807,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     DenseGridFixture fixture(n_maturities, n_vols, n_rates);
 
     // Build price table
-    auto builder_result = PriceTableBuilder<4>::from_grid(
+    auto builder_result = PriceTableBuilder::from_grid(
         fixture.chain,
         PDEGridConfig{fixture.grid_spec, 200},
         OptionType::PUT,
@@ -821,7 +821,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     auto& [builder, axes] = builder_result.value();
     EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
     auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     if (!table_result) {
@@ -918,7 +918,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     accuracy.target_iv_error = target_iv_error;
 
     // Build price table with automatic grid estimation
-    auto builder_result = PriceTableBuilder<4>::from_grid_auto(
+    auto builder_result = PriceTableBuilder::from_grid_auto(
         iv_fixture.chain,
         PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 200},
         OptionType::PUT,
@@ -932,7 +932,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     auto& [builder, axes] = builder_result.value();
     EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
     auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     if (!table_result) {
@@ -1041,7 +1041,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
 
     const auto& iv_fixture = GetIVSmileFixture();
 
-    auto builder_result = PriceTableBuilder<4>::from_grid_auto_profile(
+    auto builder_result = PriceTableBuilder::from_grid_auto_profile(
         iv_fixture.chain,
         grid_profile,
         pde_profile,
@@ -1054,7 +1054,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     auto& [builder, axes] = builder_result.value();
     EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
     auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     if (!table_result) {

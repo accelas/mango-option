@@ -78,10 +78,10 @@ struct IterationStats {
 /// Final result with full diagnostics
 struct AdaptiveResult {
     /// The built price table surface
-    std::shared_ptr<const PriceTableSurface<4>> surface = nullptr;
+    std::shared_ptr<const PriceTableSurface> surface = nullptr;
 
     /// Final axes used for the surface
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
 
     /// Query price from the surface
     /// Returns NaN if no surface is available (build failure or not yet built)
@@ -109,7 +109,7 @@ struct AdaptiveResult {
 
 /// Result from adaptive segmented grid building (multi-K_ref path)
 struct SegmentedAdaptiveResult {
-    MultiKRefSurfacePI surface;
+    MultiKRefPriceSurface surface;
     IVGrid grid;  ///< The grid sizes adaptive chose
     int tau_points_per_segment;
 };

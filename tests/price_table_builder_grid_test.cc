@@ -7,7 +7,7 @@
 
 TEST(PriceTableBuilderGridTest, RespectsUserGridBounds) {
     // Create axes with specific log-moneyness range
-    mango::PriceTableAxes<4> axes;
+    mango::PriceTableAxes axes;
     axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};  // log-moneyness
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.15, 0.20, 0.25, 0.30};
@@ -21,7 +21,7 @@ TEST(PriceTableBuilderGridTest, RespectsUserGridBounds) {
     config.K_ref = 100.0;
     config.pde_grid = mango::PDEGridConfig{mango::GridSpec<double>::uniform(-0.5, 0.5, 51).value(), 100};
 
-    mango::PriceTableBuilder<4> builder(config);
+    mango::PriceTableBuilder builder(config);
     auto result = builder.build(axes);
 
     // Should succeed because grid bounds cover moneyness range
@@ -30,7 +30,7 @@ TEST(PriceTableBuilderGridTest, RespectsUserGridBounds) {
 }
 
 TEST(PriceTableBuilderGridTest, RejectsInsufficientGridBounds) {
-    mango::PriceTableAxes<4> axes;
+    mango::PriceTableAxes axes;
     axes.grids[0] = {std::log(0.5), std::log(0.75), std::log(1.0), std::log(1.5), std::log(2.0)};  // Wide log-moneyness range
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.15, 0.20, 0.25, 0.30};
@@ -44,7 +44,7 @@ TEST(PriceTableBuilderGridTest, RejectsInsufficientGridBounds) {
     config.K_ref = 100.0;
     config.pde_grid = mango::PDEGridConfig{mango::GridSpec<double>::uniform(-0.1, 0.1, 51).value(), 100};
 
-    mango::PriceTableBuilder<4> builder(config);
+    mango::PriceTableBuilder builder(config);
     auto result = builder.build(axes);
 
     // Should fail validation because grid bounds don't cover moneyness range

@@ -32,7 +32,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     double K_ref = 100.0;
 
     // Build with auto-estimated PDE grid, then apply EEP decomposition
-    auto setup = PriceTableBuilder<4>::from_vectors(
+    auto setup = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, vol, rate, K_ref,
         GridAccuracyParams{},   // auto-estimate PDE grid
         OptionType::PUT,
@@ -45,7 +45,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     auto& [builder, axes] = *setup;
     EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
     auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     ASSERT_TRUE(result.has_value())
@@ -112,7 +112,7 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
 
     double K_ref = 100.0;
 
-    auto setup = PriceTableBuilder<4>::from_vectors(
+    auto setup = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, vol, rate, K_ref,
         GridAccuracyParams{},
         OptionType::PUT,
@@ -125,7 +125,7 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
     auto& [builder, axes] = *setup;
     EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
     auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     ASSERT_TRUE(result.has_value())
@@ -180,7 +180,7 @@ TEST(EEPIntegrationTest, MakeStandardWrapperRejectsNormalizedPrice) {
 
     double K_ref = 100.0;
 
-    auto setup = PriceTableBuilder<4>::from_vectors(
+    auto setup = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, vol, rate, K_ref,
         GridAccuracyParams{},
         OptionType::PUT,

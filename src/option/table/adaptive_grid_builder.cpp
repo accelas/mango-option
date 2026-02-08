@@ -568,12 +568,12 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
 
 /// Build a SegmentedSurface for each K_ref in the list.
 /// Takes a Config template with K_ref set per iteration.
-std::expected<std::vector<SegmentedSurfacePI>, PriceTableError>
+std::expected<std::vector<SegmentedPriceSurface>, PriceTableError>
 build_segmented_surfaces(
     SegmentedPriceTableBuilder::Config base_config,
     const std::vector<double>& ref_values)
 {
-    std::vector<SegmentedSurfacePI> surfaces;
+    std::vector<SegmentedPriceSurface> surfaces;
     surfaces.reserve(ref_values.size());
 
     for (double ref : ref_values) {
@@ -590,7 +590,7 @@ build_segmented_surfaces(
 
 /// Result of the shared segmented probe-and-build pipeline.
 struct SegmentedBuildResult {
-    std::vector<SegmentedSurfacePI> surfaces;
+    std::vector<SegmentedPriceSurface> surfaces;
     SegmentedPriceTableBuilder::Config seg_template;
     MaxGridSizes gsz;
     // Domain bounds (needed for validation/retry)
@@ -670,7 +670,7 @@ probe_and_build(
             if (!surface.has_value()) {
                 return std::unexpected(surface.error());
             }
-            auto shared = std::make_shared<SegmentedSurfacePI>(std::move(*surface));
+            auto shared = std::make_shared<SegmentedPriceSurface>(std::move(*surface));
             double spot = config.spot;
             return SurfaceHandle{
                 .price = [shared, spot](double /*spot_arg*/, double strike,
@@ -906,10 +906,10 @@ AdaptiveGridBuilder::build_cached_surface(
     const PDEGridSpec& pde_grid,
     OptionType type,
     size_t& build_iteration,
-    std::shared_ptr<const PriceTableSurface<4>>& last_surface,
-    PriceTableAxes<4>& last_axes)
+    std::shared_ptr<const PriceTableSurface>& last_surface,
+    PriceTableAxes& last_axes)
 {
-    auto builder_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_result = PriceTableBuilder::from_vectors(
         m_grid, tau_grid, v_grid, r_grid,
         K_ref, pde_grid, type, dividend_yield,
         params_.max_failure_rate);
@@ -1015,7 +1015,7 @@ AdaptiveGridBuilder::build_cached_surface(
     metadata.content = SurfaceContent::EarlyExercisePremium;
 
     // Build surface
-    auto surface = PriceTableSurface<4>::build(
+    auto surface = PriceTableSurface::build(
         axes, std::move(fit_result->coefficients), metadata);
     if (!surface.has_value()) {
         return std::unexpected(surface.error());
@@ -1059,8 +1059,8 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     ctx.option_type = type;
 
     // Shared state for the last surface built (so we can extract it after refinement)
-    std::shared_ptr<const PriceTableSurface<4>> last_surface;
-    PriceTableAxes<4> last_axes;
+    std::shared_ptr<const PriceTableSurface> last_surface;
+    PriceTableAxes last_axes;
 
     // Iteration counter for cache management (set_tau_grid vs invalidate_if_tau_changed)
     size_t build_iteration = 0;

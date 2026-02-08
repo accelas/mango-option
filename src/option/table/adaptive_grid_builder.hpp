@@ -118,8 +118,8 @@ private:
         const PDEGridSpec& pde_grid,
         OptionType type,
         size_t& build_iteration,
-        std::shared_ptr<const PriceTableSurface<4>>& last_surface,
-        PriceTableAxes<4>& last_axes);
+        std::shared_ptr<const PriceTableSurface>& last_surface,
+        PriceTableAxes& last_axes);
 };
 
 }  // namespace mango

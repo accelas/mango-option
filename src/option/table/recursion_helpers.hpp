@@ -17,7 +17,7 @@ namespace mango {
 /// @tparam Func Callable accepting std::array<size_t, N>
 template <size_t Axis, size_t N, typename Func>
 void for_each_axis_index_impl(
-    const PriceTableAxes<N>& axes,
+    const PriceTableAxesND<N>& axes,
     std::array<size_t, N>& indices,
     Func&& func)
 {
@@ -39,7 +39,7 @@ void for_each_axis_index_impl(
 /// @tparam N Number of dimensions
 /// @tparam Func Callable accepting std::array<size_t, N>
 template <size_t StartAxis, size_t N, typename Func>
-void for_each_axis_index(const PriceTableAxes<N>& axes, Func&& func) {
+void for_each_axis_index(const PriceTableAxesND<N>& axes, Func&& func) {
     std::array<size_t, N> indices{};
     for_each_axis_index_impl<StartAxis>(axes, indices, std::forward<Func>(func));
 }

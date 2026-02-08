@@ -695,7 +695,7 @@ PYBIND11_MODULE(mango_option, m) {
         });
 
     // =========================================================================
-    // PriceTableSurface (4D B-spline interpolation)
+    // PriceTableSurfaceND (4D B-spline interpolation)
     // =========================================================================
 
     // SurfaceContent enum
@@ -712,18 +712,18 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("m_max", &mango::PriceTableMetadata::m_max)
         .def_readwrite("content", &mango::PriceTableMetadata::content);
 
-    // PriceTableAxes<4>
-    py::class_<mango::PriceTableAxes<4>>(m, "PriceTableAxes4D")
+    // PriceTableAxes
+    py::class_<mango::PriceTableAxes>(m, "PriceTableAxes")
         .def(py::init<>())
         .def_property("grids",
-            [](const mango::PriceTableAxes<4>& self) {
+            [](const mango::PriceTableAxes& self) {
                 py::list result;
                 for (const auto& grid : self.grids) {
                     result.append(py::array_t<double>(grid.size(), grid.data()));
                 }
                 return result;
             },
-            [](mango::PriceTableAxes<4>& self, const py::list& grids) {
+            [](mango::PriceTableAxes& self, const py::list& grids) {
                 if (grids.size() != 4) {
                     throw py::value_error("Must provide exactly 4 grids");
                 }
@@ -733,14 +733,14 @@ PYBIND11_MODULE(mango_option, m) {
                 }
             })
         .def_property("names",
-            [](const mango::PriceTableAxes<4>& self) {
+            [](const mango::PriceTableAxes& self) {
                 py::list result;
                 for (const auto& name : self.names) {
                     result.append(name);
                 }
                 return result;
             },
-            [](mango::PriceTableAxes<4>& self, const py::list& names) {
+            [](mango::PriceTableAxes& self, const py::list& names) {
                 if (names.size() != 4) {
                     throw py::value_error("Must provide exactly 4 names");
                 }
@@ -748,24 +748,24 @@ PYBIND11_MODULE(mango_option, m) {
                     self.names[i] = names[i].cast<std::string>();
                 }
             })
-        .def("total_points", [](const mango::PriceTableAxes<4>& self) {
+        .def("total_points", [](const mango::PriceTableAxes& self) {
             return self.total_points();
         })
-        .def("shape", [](const mango::PriceTableAxes<4>& self) {
+        .def("shape", [](const mango::PriceTableAxes& self) {
             auto s = self.shape();
             return py::make_tuple(s[0], s[1], s[2], s[3]);
         });
 
-    // PriceTableSurface<4>
-    // Note: We use shared_ptr<mango::PriceTableSurface<4>> as holder, even though
+    // PriceTableSurface
+    // Note: We use shared_ptr<mango::PriceTableSurface> as holder, even though
     // the C++ API returns shared_ptr<const ...>. pybind11 will handle the const conversion.
-    py::class_<mango::PriceTableSurface<4>, std::shared_ptr<mango::PriceTableSurface<4>>>(
-        m, "PriceTableSurface4D")
+    py::class_<mango::PriceTableSurface, std::shared_ptr<mango::PriceTableSurface>>(
+        m, "PriceTableSurface")
         .def_static("build",
-            [](mango::PriceTableAxes<4> axes, py::array_t<double> coeffs,
+            [](mango::PriceTableAxes axes, py::array_t<double> coeffs,
                mango::PriceTableMetadata metadata) {
                 std::vector<double> coeffs_vec(coeffs.data(), coeffs.data() + coeffs.size());
-                auto result = mango::PriceTableSurface<4>::build(
+                auto result = mango::PriceTableSurface::build(
                     std::move(axes), std::move(coeffs_vec), std::move(metadata));
                 if (!result.has_value()) {
                     throw py::value_error("Failed to build surface: error code " +
@@ -778,18 +778,18 @@ PYBIND11_MODULE(mango_option, m) {
                 Build a 4D price table surface from axes and coefficients.
 
                 Args:
-                    axes: PriceTableAxes4D with grid points for each dimension
+                    axes: PriceTableAxes with grid points for each dimension
                     coefficients: B-spline coefficients (flattened, row-major)
                     metadata: PriceTableMetadata with K_ref, dividend info
 
                 Returns:
-                    PriceTableSurface4D instance
+                    PriceTableSurface instance
 
                 Raises:
                     ValueError: If building fails
             )pbdoc")
         .def("value",
-            [](const mango::PriceTableSurface<4>& self, double m, double tau, double sigma, double r) {
+            [](const mango::PriceTableSurface& self, double m, double tau, double sigma, double r) {
                 return self.value({m, tau, sigma, r});
             },
             py::arg("log_moneyness"), py::arg("maturity"), py::arg("volatility"), py::arg("rate"),
@@ -806,7 +806,7 @@ PYBIND11_MODULE(mango_option, m) {
                     Interpolated option price
             )pbdoc")
         .def("partial",
-            [](const mango::PriceTableSurface<4>& self, size_t axis,
+            [](const mango::PriceTableSurface& self, size_t axis,
                double m, double tau, double sigma, double r) {
                 return self.partial(axis, {m, tau, sigma, r});
             },
@@ -825,8 +825,8 @@ PYBIND11_MODULE(mango_option, m) {
                 Returns:
                     Partial derivative estimate
             )pbdoc")
-        .def_property_readonly("axes", &mango::PriceTableSurface<4>::axes)
-        .def_property_readonly("metadata", &mango::PriceTableSurface<4>::metadata);
+        .def_property_readonly("axes", &mango::PriceTableSurface::axes)
+        .def_property_readonly("metadata", &mango::PriceTableSurface::metadata);
 
     // =========================================================================
     // Price table builder convenience wrapper (auto-grid profiles)
@@ -849,7 +849,7 @@ PYBIND11_MODULE(mango_option, m) {
             chain.rates = rates;
             chain.dividend_yield = dividend_yield;
 
-            auto builder_axes = mango::PriceTableBuilder<4>::from_grid_auto_profile(
+            auto builder_axes = mango::PriceTableBuilder::from_grid_auto_profile(
                 chain, grid_profile, pde_profile, type);
             if (!builder_axes.has_value()) {
                 std::ostringstream oss;
@@ -891,7 +891,7 @@ PYBIND11_MODULE(mango_option, m) {
                 pde_profile: GridAccuracyProfile for PDE grid/time steps
 
             Returns:
-                PriceTableSurface4D instance
+                PriceTableSurface instance
         )pbdoc");
 
     m.def("build_price_table_surface_from_grid",
@@ -899,7 +899,7 @@ PYBIND11_MODULE(mango_option, m) {
            mango::OptionType type,
            mango::PriceTableGridProfile grid_profile,
            mango::GridAccuracyProfile pde_profile) {
-            auto builder_axes = mango::PriceTableBuilder<4>::from_grid_auto_profile(
+            auto builder_axes = mango::PriceTableBuilder::from_grid_auto_profile(
                 chain, grid_profile, pde_profile, type);
             if (!builder_axes.has_value()) {
                 std::ostringstream oss;
@@ -931,7 +931,7 @@ PYBIND11_MODULE(mango_option, m) {
                 pde_profile: GridAccuracyProfile for PDE grid/time steps
 
             Returns:
-                PriceTableSurface4D instance
+                PriceTableSurface instance
         )pbdoc");
 
     // =========================================================================

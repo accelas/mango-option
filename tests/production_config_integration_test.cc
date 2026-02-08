@@ -11,7 +11,7 @@
  * Key differences from unit tests:
  * - Explicit small grid sizes (51 pts vs default 101)
  * - Realistic market data grids (SPY-like parameters)
- * - Full PriceTableBuilder workflow
+ * - Full PriceTableBuilderND workflow
  */
 
 #include <gtest/gtest.h>
@@ -92,7 +92,7 @@ MarketGrid generate_small_market_grid() {
 }  // namespace
 
 // ============================================================================
-// PriceTableBuilder Integration Tests
+// PriceTableBuilderND Integration Tests
 // ============================================================================
 
 // This test directly mirrors the benchmark that exposed issue #272
@@ -105,7 +105,7 @@ TEST(ProductionConfig, PriceTableBuilder_SmallGrid_51Points) {
     ASSERT_TRUE(grid_spec_result.has_value());
     auto grid_spec = grid_spec_result.value();
 
-    auto builder_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_result = PriceTableBuilder::from_vectors(
         grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
@@ -117,7 +117,7 @@ TEST(ProductionConfig, PriceTableBuilder_SmallGrid_51Points) {
         0.0);    // max_failure_rate
 
     ASSERT_TRUE(builder_result.has_value())
-        << "PriceTableBuilder::from_vectors failed";
+        << "PriceTableBuilderND::from_vectors failed";
 
     auto [builder, axes] = std::move(builder_result.value());
 
@@ -125,7 +125,7 @@ TEST(ProductionConfig, PriceTableBuilder_SmallGrid_51Points) {
     auto result = builder.build(axes);
 
     ASSERT_TRUE(result.has_value())
-        << "PriceTableBuilder::build failed with error code "
+        << "PriceTableBuilderND::build failed with error code "
         << static_cast<int>(result.error().code)
         << ", axis_index=" << result.error().axis_index
         << ", count=" << result.error().count;
@@ -141,7 +141,7 @@ TEST(ProductionConfig, PriceTableBuilder_VerySmallGrid_31Points) {
     auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 31, 2.0);
     ASSERT_TRUE(grid_spec_result.has_value());
 
-    auto builder_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_result = PriceTableBuilder::from_vectors(
         grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
@@ -166,7 +166,7 @@ TEST(ProductionConfig, PriceTableBuilder_LargeGrid_201Points) {
     auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
     ASSERT_TRUE(grid_spec_result.has_value());
 
-    auto builder_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_result = PriceTableBuilder::from_vectors(
         grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
@@ -190,7 +190,7 @@ TEST(ProductionConfig, PriceTableBuilder_FullMarketGrid) {
     auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0);
     ASSERT_TRUE(grid_spec_result.has_value());
 
-    auto builder_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_result = PriceTableBuilder::from_vectors(
         grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
@@ -459,7 +459,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_BuildPriceTable) {
     auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0);
     ASSERT_TRUE(grid_spec_result.has_value());
 
-    auto builder_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_result = PriceTableBuilder::from_vectors(
         grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
@@ -471,13 +471,13 @@ TEST(BenchmarkAsTest, MarketIVE2E_BuildPriceTable) {
         0.0);    // max_failure_rate
 
     ASSERT_TRUE(builder_result.has_value())
-        << "PriceTableBuilder::from_vectors failed";
+        << "PriceTableBuilderND::from_vectors failed";
 
     auto [builder, axes] = std::move(builder_result.value());
     auto result = builder.build(axes);
 
     ASSERT_TRUE(result.has_value())
-        << "PriceTableBuilder::build failed with error code "
+        << "PriceTableBuilderND::build failed with error code "
         << static_cast<int>(result.error().code);
 
     // Verify result structure
@@ -494,7 +494,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0);
     ASSERT_TRUE(grid_spec_result.has_value());
 
-    auto builder_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_result = PriceTableBuilder::from_vectors(
         grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
@@ -509,7 +509,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     auto [builder, axes] = std::move(builder_result.value());
     EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
     auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     ASSERT_TRUE(table_result.has_value());

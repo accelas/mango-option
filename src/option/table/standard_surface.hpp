@@ -18,16 +18,16 @@ using StandardSurface = SplicedSurface<EEPPriceTableInner, SingleBracket, Identi
 using StandardSurfaceWrapper = SplicedSurfaceWrapper<StandardSurface>;
 
 /// Segmented surface types using PriceTableInner (NormalizedPrice content)
-using SegmentedSurfacePI = SegmentedSurface<PriceTableInner>;
-using MultiKRefSurfacePI = MultiKRefSurface<SegmentedSurfacePI>;
-using MultiKRefSurfaceWrapperPI = SplicedSurfaceWrapper<MultiKRefSurfacePI>;
+using SegmentedPriceSurface = SegmentedSurface<PriceTableInner>;
+using MultiKRefPriceSurface = MultiKRefSurface<SegmentedPriceSurface>;
+using MultiKRefPriceWrapper = SplicedSurfaceWrapper<MultiKRefPriceSurface>;
 
 /// Create a StandardSurfaceWrapper from a pre-built EEP surface.
 /// Reads K_ref and dividend_yield from surface metadata.
 /// Requires SurfaceContent::EarlyExercisePremium; rejects NormalizedPrice.
 [[nodiscard]] std::expected<StandardSurfaceWrapper, std::string>
 make_standard_wrapper(
-    std::shared_ptr<const PriceTableSurface<4>> surface,
+    std::shared_ptr<const PriceTableSurface> surface,
     OptionType type);
 
 }  // namespace mango

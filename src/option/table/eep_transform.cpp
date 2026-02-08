@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/eep_transform.hpp"
-#include "mango/option/table/spliced_surface.hpp"  // for PriceQuery
 #include "mango/option/european_option.hpp"
 #include <algorithm>
 #include <cmath>
@@ -11,7 +10,7 @@ namespace mango {
 // EEPDecomposer: build-time
 // ===========================================================================
 
-void EEPDecomposer::decompose(PriceTensor<4>& tensor, const PriceTableAxes<4>& axes) const {
+void EEPDecomposer::decompose(PriceTensor& tensor, const PriceTableAxes& axes) const {
     const size_t Nm = axes.grids[0].size();
     const size_t Nt = axes.grids[1].size();
     const size_t Nv = axes.grids[2].size();

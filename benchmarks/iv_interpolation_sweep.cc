@@ -159,7 +159,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
 
     // 1. Build adaptive base (only for scale=1, reuse axes for larger scales)
     static AdaptiveResult* base_result = nullptr;
-    static PriceTableAxes<4> base_axes;
+    static PriceTableAxes base_axes;
     static double base_K_ref = 0.0;
 
     if (!base_result) {
@@ -192,7 +192,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
     }
 
     // 2. For scale=1, use adaptive result directly
-    std::shared_ptr<const PriceTableSurface<4>> surface;
+    std::shared_ptr<const PriceTableSurface> surface;
     size_t total_pde = base_result->total_pde_solves;
     std::array<size_t, 4> grid_sizes = {};
 
@@ -216,21 +216,21 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
         pde_accuracy.min_spatial_points = 201;
         pde_accuracy.max_spatial_points = 301;
 
-        auto setup = PriceTableBuilder<4>::from_vectors(
+        auto setup = PriceTableBuilder::from_vectors(
             m_refined, tau_refined, sig_refined, r_refined,
             base_K_ref, PDEGridSpec{pde_accuracy}, OptionType::PUT, kDivYield);
         if (!setup) {
-            std::fprintf(stderr, "PriceTableBuilder::from_vectors failed (scale=%d)\n", scale);
+            std::fprintf(stderr, "PriceTableBuilderND::from_vectors failed (scale=%d)\n", scale);
             std::abort();
         }
         auto& [ptb, axes] = *setup;
         EEPDecomposer decomposer{OptionType::PUT, base_K_ref, kDivYield};
         auto result = ptb.build(axes, SurfaceContent::EarlyExercisePremium,
-            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });
         if (!result) {
-            std::fprintf(stderr, "PriceTableBuilder::build failed (scale=%d)\n", scale);
+            std::fprintf(stderr, "PriceTableBuilderND::build failed (scale=%d)\n", scale);
             std::abort();
         }
         surface = result->surface;

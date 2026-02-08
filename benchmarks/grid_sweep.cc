@@ -114,7 +114,7 @@ int main() {
 
         // Build price table (Medium PDE accuracy — sufficient for table nodes)
         auto pde_accuracy = make_grid_accuracy(GridAccuracyProfile::Medium);
-        auto builder_result = PriceTableBuilder<4>::from_vectors(
+        auto builder_result = PriceTableBuilder::from_vectors(
             estimate.grids[0], estimate.grids[1], estimate.grids[2], estimate.grids[3],
             spot, pde_accuracy, OptionType::PUT, div_yield);
 
@@ -127,7 +127,7 @@ int main() {
         EEPDecomposer decomposer{OptionType::PUT, spot, div_yield};
         auto t0 = std::chrono::steady_clock::now();
         auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });
         auto t1 = std::chrono::steady_clock::now();

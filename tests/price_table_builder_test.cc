@@ -18,9 +18,9 @@ TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {
     PriceTableConfig config{
         .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100}  // Reduce from default 1000 for faster test
     };
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     // Minimum 4 points per axis for cubic B-spline fitting
     axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)};
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
@@ -33,7 +33,7 @@ TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {
     EXPECT_NE(result->surface, nullptr);
 }
 
-// Note: N≠4 tests removed - PriceTableBuilder uses static_assert(N == 4)
+// Note: N≠4 tests removed - PriceTableBuilderND uses static_assert(N == 4)
 // which produces compile-time errors for unsupported dimensions.
 
 TEST(PriceTableBuilderTest, MakeBatchIteratesVolatilityAndRateOnly) {
@@ -47,9 +47,9 @@ TEST(PriceTableBuilderTest, MakeBatchIteratesVolatilityAndRateOnly) {
         .dividends = {.dividend_yield = 0.02}
     };
 
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0), std::log(1.1)};  // log-moneyness: 3 points
     axes.grids[1] = {0.1, 0.5, 1.0};      // maturity: 3 points
     axes.grids[2] = {0.15, 0.20, 0.25};   // volatility: 3 points
@@ -75,9 +75,9 @@ TEST(PriceTableBuilderTest, MakeBatch4D) {
         .dividends = {.dividend_yield = 0.02, .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.0}}}
     };
 
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0)};  // log-moneyness: 2 points
     axes.grids[1] = {0.1, 0.5};      // maturity: 2 points
     axes.grids[2] = {0.20};          // volatility: 1 point
@@ -111,9 +111,9 @@ TEST(PriceTableBuilderTest, SolveBatchRegistersMaturitySnapshots) {
         .dividends = {.dividend_yield = 0.02}
     };
 
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0)};
     axes.grids[1] = {0.1, 0.5, 1.0};  // 3 maturity points
     axes.grids[2] = {0.20};           // 1 vol
@@ -148,9 +148,9 @@ TEST(PriceTableBuilderTest, DISABLED_ExtractTensorInterpolatesSurfaces) {
         .dividends = {.dividend_yield = 0.02}
     };
 
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0), std::log(1.1)};  // 3 log-moneyness points
     axes.grids[1] = {0.1, 0.5, 1.0};      // 3 maturity points
     axes.grids[2] = {0.20};               // 1 vol
@@ -206,10 +206,10 @@ TEST(PriceTableBuilderTest, BuildRejectsInvalidConfig) {
     config.option_type = mango::OptionType::PUT;
     config.K_ref = 100.0;
 
-    mango::PriceTableBuilder<4> builder(config);
+    mango::PriceTableBuilder builder(config);
 
     // Create minimal valid axes (4 points per axis for B-spline)
-    mango::PriceTableAxes<4> axes;
+    mango::PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.2, 0.25, 0.3, 0.35};
@@ -221,7 +221,7 @@ TEST(PriceTableBuilderTest, BuildRejectsInvalidConfig) {
 }
 
 TEST(PriceTableBuilderTest, FromVectorsRejectsInvalidMaxFailureRate) {
-    auto result = mango::PriceTableBuilder<4>::from_vectors(
+    auto result = mango::PriceTableBuilder::from_vectors(
         {std::log(0.9), std::log(1.0), std::log(1.1)},  // log-moneyness
         {0.25, 0.5},      // maturity
         {0.2, 0.3},       // volatility
@@ -243,7 +243,7 @@ TEST(PriceTableBuilderTest, FindNearestValidNeighborFindsAdjacent) {
     slice_valid[4] = false;  // Center (1,1) invalid
 
     mango::PriceTableConfig config;
-    mango::PriceTableBuilder<4> builder(config);
+    mango::PriceTableBuilder builder(config);
 
     auto result = Access::find_nearest_valid_neighbor(builder, 1, 1, 3, 3, slice_valid);
     ASSERT_TRUE(result.has_value());
@@ -258,7 +258,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesInterpolatesPartial) {
     // Then verify repair fills it via τ-interpolation
 
     // Use 2x3x2x2 tensor: Nm=2, Nt=3, Nσ=2, Nr=2
-    auto tensor_result = mango::PriceTensor<4>::create({2, 3, 2, 2});
+    auto tensor_result = mango::PriceTensor::create({2, 3, 2, 2});
     ASSERT_TRUE(tensor_result.has_value());
     auto& tensor = tensor_result.value();
 
@@ -278,7 +278,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesInterpolatesPartial) {
     tensor.view[1, 1, 0, 0] = std::numeric_limits<double>::quiet_NaN();
 
     // Create axes
-    mango::PriceTableAxes<4> axes;
+    mango::PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0)};
     axes.grids[1] = {0.25, 0.5, 0.75};
     axes.grids[2] = {0.2, 0.3};
@@ -286,7 +286,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesInterpolatesPartial) {
 
     // Build config and builder
     mango::PriceTableConfig config;
-    mango::PriceTableBuilder<4> builder(config);
+    mango::PriceTableBuilder builder(config);
 
     // Call repair with failed_spline indicating τ=1 failed
     std::vector<size_t> failed_pde;  // No PDE failures
@@ -309,7 +309,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesInterpolatesPartial) {
 
 TEST(PriceTableBuilderTest, RepairFailedSlicesCopiesFromNeighbor) {
     // Create tensor with full slice NaN, verify neighbor copy
-    auto tensor_result = mango::PriceTensor<4>::create({2, 2, 2, 2});
+    auto tensor_result = mango::PriceTensor::create({2, 2, 2, 2});
     ASSERT_TRUE(tensor_result.has_value());
     auto& tensor = tensor_result.value();
 
@@ -331,14 +331,14 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesCopiesFromNeighbor) {
         }
     }
 
-    mango::PriceTableAxes<4> axes;
+    mango::PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0)};
     axes.grids[1] = {0.25, 0.5};
     axes.grids[2] = {0.2, 0.3};
     axes.grids[3] = {0.05, 0.06};
 
     mango::PriceTableConfig config;
-    mango::PriceTableBuilder<4> builder(config);
+    mango::PriceTableBuilder builder(config);
 
     // PDE failed at flat index 0 (σ=0, r=0)
     std::vector<size_t> failed_pde = {0};
@@ -361,7 +361,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesCopiesFromNeighbor) {
 
 TEST(PriceTableBuilderTest, RepairFailedSlicesFailsWhenNoValidDonor) {
     // All slices invalid, verify returns error
-    auto tensor_result = mango::PriceTensor<4>::create({2, 2, 1, 1});
+    auto tensor_result = mango::PriceTensor::create({2, 2, 1, 1});
     ASSERT_TRUE(tensor_result.has_value());
     auto& tensor = tensor_result.value();
 
@@ -372,14 +372,14 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesFailsWhenNoValidDonor) {
         }
     }
 
-    mango::PriceTableAxes<4> axes;
+    mango::PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0)};
     axes.grids[1] = {0.25, 0.5};
     axes.grids[2] = {0.2};
     axes.grids[3] = {0.05};
 
     mango::PriceTableConfig config;
-    mango::PriceTableBuilder<4> builder(config);
+    mango::PriceTableBuilder builder(config);
 
     std::vector<size_t> failed_pde = {0};  // Only slice failed
     std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
@@ -392,7 +392,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesFailsWhenNoValidDonor) {
 }
 
 TEST(PriceTableBuilderTest, BuildPopulatesTotalSlicesAndPoints) {
-    auto result = mango::PriceTableBuilder<4>::from_vectors(
+    auto result = mango::PriceTableBuilder::from_vectors(
         {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)}, {0.25, 0.5, 0.75, 1.0}, {0.15, 0.2, 0.25, 0.3}, {0.02, 0.04, 0.06, 0.08},
         100.0,
         mango::PDEGridConfig{mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(), 500});
@@ -408,7 +408,7 @@ TEST(PriceTableBuilderTest, BuildPopulatesTotalSlicesAndPoints) {
 
 // Default mode always produces NormalizedPrice metadata
 TEST(PriceTableBuilderTest, DefaultModeProducesNormalizedPriceMetadata) {
-    auto setup = PriceTableBuilder<4>::from_vectors(
+    auto setup = PriceTableBuilder::from_vectors(
         {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)},
         {0.25, 0.5, 0.75, 1.0},
         {0.15, 0.20, 0.25, 0.30},

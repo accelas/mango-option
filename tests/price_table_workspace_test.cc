@@ -510,7 +510,7 @@ TEST(PriceTableWorkspaceTest, DefaultSurfaceContentIsZero) {
         log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
 
     ASSERT_TRUE(ws_result.has_value());
-    EXPECT_EQ(ws_result.value().surface_content(), 0);
+    EXPECT_EQ(ws_result.value().surface_content(), mango::SurfaceContent::NormalizedPrice);
 }
 
 TEST(PriceTableWorkspaceTest, DISABLED_RoundTripSurfaceContent) {
@@ -523,10 +523,10 @@ TEST(PriceTableWorkspaceTest, DISABLED_RoundTripSurfaceContent) {
     // Create workspace with surface_content=1 (EEP)
     auto ws_result = mango::PriceTableWorkspace::create(
         log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1,
-        /*surface_content=*/1);
+        mango::SurfaceContent::EarlyExercisePremium);
 
     ASSERT_TRUE(ws_result.has_value());
-    EXPECT_EQ(ws_result.value().surface_content(), 1);
+    EXPECT_EQ(ws_result.value().surface_content(), mango::SurfaceContent::EarlyExercisePremium);
 
     // Save to temp file
     const std::string filepath = "/tmp/test_surface_content_roundtrip.arrow";
@@ -538,7 +538,7 @@ TEST(PriceTableWorkspaceTest, DISABLED_RoundTripSurfaceContent) {
     ASSERT_TRUE(load_result.has_value()) << "Load failed";
 
     // Verify surface_content round-trips correctly
-    EXPECT_EQ(load_result.value().surface_content(), 1);
+    EXPECT_EQ(load_result.value().surface_content(), mango::SurfaceContent::EarlyExercisePremium);
 
     // Cleanup
     std::filesystem::remove(filepath);

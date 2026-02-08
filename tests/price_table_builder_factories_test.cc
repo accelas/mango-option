@@ -12,7 +12,7 @@ TEST(PriceTableFactoriesTest, FromVectorsCreatesBuilderAndAxes) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
-    auto result = mango::PriceTableBuilder<4>::from_vectors(
+    auto result = mango::PriceTableBuilder::from_vectors(
         log_moneyness, maturity, vol, rate,
         100.0,      // K_ref
         mango::PDEGridConfig{grid_spec, 100},
@@ -36,7 +36,7 @@ TEST(PriceTableFactoriesTest, FromVectorsSortsAndDedupes) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
-    auto result = mango::PriceTableBuilder<4>::from_vectors(
+    auto result = mango::PriceTableBuilder::from_vectors(
         log_moneyness, maturity, vol, rate,
         100.0, mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
@@ -83,7 +83,7 @@ TEST_P(FromVectorsRejectsNonPositive, ReturnsNonPositiveValueError) {
     }
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
-    auto result = mango::PriceTableBuilder<4>::from_vectors(
+    auto result = mango::PriceTableBuilder::from_vectors(
         log_moneyness, maturity, vol, rate,
         kref, mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
@@ -114,7 +114,7 @@ TEST(PriceTableFactoriesTest, FromVectorsAcceptsNegativeRates) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
-    auto result = mango::PriceTableBuilder<4>::from_vectors(
+    auto result = mango::PriceTableBuilder::from_vectors(
         log_moneyness, maturity, vol, rate,
         100.0, mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
@@ -131,7 +131,7 @@ TEST(PriceTableFactoriesTest, FromStrikesComputesLogMoneyness) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
-    auto result = mango::PriceTableBuilder<4>::from_strikes(
+    auto result = mango::PriceTableBuilder::from_strikes(
         spot, strikes, maturities, vols, rates,
         mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
@@ -159,7 +159,7 @@ TEST(PriceTableFactoriesTest, FromStrikesRejectsNegativeSpot) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
-    auto result = mango::PriceTableBuilder<4>::from_strikes(
+    auto result = mango::PriceTableBuilder::from_strikes(
         spot, strikes, maturities, vols, rates,
         mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
@@ -177,7 +177,7 @@ TEST(PriceTableFactoriesTest, FromStrikesRejectsNegativeStrikes) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
-    auto result = mango::PriceTableBuilder<4>::from_strikes(
+    auto result = mango::PriceTableBuilder::from_strikes(
         spot, strikes, maturities, vols, rates,
         mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
@@ -198,7 +198,7 @@ TEST(PriceTableFactoriesTest, FromChainExtractsFields) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
-    auto result = mango::PriceTableBuilder<4>::from_grid(
+    auto result = mango::PriceTableBuilder::from_grid(
         chain, mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
 
@@ -223,7 +223,7 @@ TEST(PriceTableFactoriesTest, FromChainUsesDividendYield) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
-    auto result = mango::PriceTableBuilder<4>::from_grid(
+    auto result = mango::PriceTableBuilder::from_grid(
         chain, mango::PDEGridConfig{grid_spec, 100}, mango::OptionType::PUT
     );
 

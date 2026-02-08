@@ -5,7 +5,7 @@ namespace mango {
 
 std::expected<StandardSurfaceWrapper, std::string>
 make_standard_wrapper(
-    std::shared_ptr<const PriceTableSurface<4>> surface,
+    std::shared_ptr<const PriceTableSurface> surface,
     OptionType type)
 {
     if (!surface) {

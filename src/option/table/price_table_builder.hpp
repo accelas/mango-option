@@ -30,7 +30,7 @@ template <size_t N> struct PriceTableBuilderAccess;
 /// Result from price table build with diagnostics
 template <size_t N>
 struct PriceTableResult {
-    std::shared_ptr<const PriceTableSurface<N>> surface = nullptr;  ///< Immutable surface
+    std::shared_ptr<const PriceTableSurfaceND<N>> surface = nullptr;  ///< Immutable surface
     size_t n_pde_solves = 0;                    ///< Number of PDE solves performed
     double precompute_time_seconds = 0.0;       ///< Wall-clock build time
     BSplineFittingStats<double, N> fitting_stats;  ///< B-spline fitting diagnostics
@@ -46,7 +46,7 @@ struct PriceTableResult {
 /// Result from tensor extraction with failure tracking
 template <size_t N>
 struct ExtractionResult {
-    PriceTensor<N> tensor;
+    PriceTensorND<N> tensor;
     size_t total_slices;
     std::vector<size_t> failed_pde;
     std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
@@ -61,21 +61,21 @@ struct RepairStats {
 /// Builder for N-dimensional price table surfaces
 ///
 /// Orchestrates PDE solves across grid points, fits B-spline coefficients,
-/// and constructs immutable PriceTableSurface.
+/// and constructs immutable PriceTableSurfaceND.
 ///
 /// @tparam N Number of dimensions
 template <size_t N>
-class PriceTableBuilder {
+class PriceTableBuilderND {
 public:
     /// Construct builder with configuration
     /// Result type for factory methods: builder + axes pair
-    using Setup = std::expected<std::pair<PriceTableBuilder, PriceTableAxes<N>>, PriceTableError>;
+    using Setup = std::expected<std::pair<PriceTableBuilderND, PriceTableAxesND<N>>, PriceTableError>;
 
-    explicit PriceTableBuilder(PriceTableConfig config);
+    explicit PriceTableBuilderND(PriceTableConfig config);
 
     /// Optional tensor transform applied between extraction and fitting.
     /// Used for EEP decomposition on the standard path.
-    using TensorTransformFn = std::function<void(PriceTensor<N>&, const PriceTableAxes<N>&)>;
+    using TensorTransformFn = std::function<void(PriceTensorND<N>&, const PriceTableAxesND<N>&)>;
 
     /// Build price table surface
     ///
@@ -84,7 +84,7 @@ public:
     /// @param transform Optional transform applied to tensor after extraction (e.g., EEP decompose)
     /// @return PriceTableResult with surface and diagnostics, or error
     [[nodiscard]] std::expected<PriceTableResult<N>, PriceTableError>
-    build(const PriceTableAxes<N>& axes,
+    build(const PriceTableAxesND<N>& axes,
           SurfaceContent content = SurfaceContent::NormalizedPrice,
           TensorTransformFn transform = nullptr);
 
@@ -93,7 +93,7 @@ public:
 
     /// Factory from vectors (returns builder AND axes)
     ///
-    /// Creates a PriceTableBuilder and axes from explicit vectors.
+    /// Creates a PriceTableBuilderND and axes from explicit vectors.
     /// Sorts and deduplicates each input vector.
     /// Validates positivity for maturity, volatility, K_ref.
     /// Rates may be negative.
@@ -122,7 +122,7 @@ public:
 
     /// Factory from strikes (auto-computes log-moneyness)
     ///
-    /// Creates a PriceTableBuilder and axes from spot and strike prices.
+    /// Creates a PriceTableBuilderND and axes from spot and strike prices.
     /// Computes log-moneyness = ln(spot/strike), sorts ascending.
     /// Sorts and deduplicates all input vectors.
     ///
@@ -150,7 +150,7 @@ public:
 
     /// Factory from option grid
     ///
-    /// Creates a PriceTableBuilder and axes from an OptionGrid.
+    /// Creates a PriceTableBuilderND and axes from an OptionGrid.
     /// Extracts spot, strikes, maturities, vols, rates from grid.
     /// Uses grid.dividend_yield.
     ///
@@ -168,7 +168,7 @@ public:
 
     /// Factory from option grid with automatic grid estimation
     ///
-    /// Creates a PriceTableBuilder with optimal grids estimated from target accuracy.
+    /// Creates a PriceTableBuilderND with optimal grids estimated from target accuracy.
     /// Uses curvature-based budget allocation to minimize PDE solves while achieving
     /// the specified IV error tolerance.
     ///
@@ -210,34 +210,34 @@ private:
     };
     /// Generate batch of PricingParams from axes
     [[nodiscard]] std::vector<PricingParams> make_batch(
-        const PriceTableAxes<N>& axes) const;
+        const PriceTableAxesND<N>& axes) const;
 
     /// Estimate PDE grid from batch parameters using pde_accuracy config
     [[nodiscard]] std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
         const std::vector<PricingParams>& batch,
-        const PriceTableAxes<N>& axes) const;
+        const PriceTableAxesND<N>& axes) const;
 
     /// Solve batch of options with snapshot registration
     [[nodiscard]] BatchAmericanOptionResult solve_batch(
         const std::vector<PricingParams>& batch,
-        const PriceTableAxes<N>& axes) const;
+        const PriceTableAxesND<N>& axes) const;
 
-    /// Extract PriceTensor from batch results using cubic spline interpolation
+    /// Extract PriceTensorND from batch results using cubic spline interpolation
     [[nodiscard]] std::expected<ExtractionResult<N>, PriceTableError> extract_tensor(
         const BatchAmericanOptionResult& batch,
-        const PriceTableAxes<N>& axes) const;
+        const PriceTableAxesND<N>& axes) const;
 
     /// Fit B-spline coefficients from tensor
     [[nodiscard]] std::expected<FitCoeffsResult, PriceTableError> fit_coeffs(
-        const PriceTensor<N>& tensor,
-        const PriceTableAxes<N>& axes) const;
+        const PriceTensorND<N>& tensor,
+        const PriceTableAxesND<N>& axes) const;
 
     /// Repair failed slices using neighbor interpolation
     [[nodiscard]] std::expected<RepairStats, PriceTableError> repair_failed_slices(
-        PriceTensor<N>& tensor,
+        PriceTensorND<N>& tensor,
         const std::vector<size_t>& failed_pde,
         const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
-        const PriceTableAxes<N>& axes) const;
+        const PriceTableAxesND<N>& axes) const;
 
     /// Find nearest valid neighbor in (σ,r) grid using Manhattan distance
     [[nodiscard]] std::optional<std::pair<size_t, size_t>> find_nearest_valid_neighbor(
@@ -253,5 +253,8 @@ private:
     PriceTableConfig config_;
     bool allow_tau_zero_ = false;
 };
+
+/// Convenience alias for the common 4D case.
+using PriceTableBuilder = PriceTableBuilderND<kPriceTableDim>;
 
 } // namespace mango

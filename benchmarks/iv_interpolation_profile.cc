@@ -50,7 +50,7 @@ struct AnalyticSurfaceFixture {
     std::vector<double> tau_grid;
     std::vector<double> sigma_grid;
     std::vector<double> rate_grid;
-    std::shared_ptr<const PriceTableSurface<4>> surface;
+    std::shared_ptr<const PriceTableSurface> surface;
 };
 
 const AnalyticSurfaceFixture& GetSurface() {
@@ -104,8 +104,8 @@ const AnalyticSurfaceFixture& GetSurface() {
             throw std::runtime_error("Failed to fit B-spline surface");
         }
 
-        // Create PriceTableAxes
-        PriceTableAxes<4> axes;
+        // Create PriceTableAxesND
+        PriceTableAxes axes;
         axes.grids = {
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
@@ -120,7 +120,7 @@ const AnalyticSurfaceFixture& GetSurface() {
         };
 
         // Create surface with coefficients directly
-        auto surface_result = PriceTableSurface<4>::build(axes, fit_result->coefficients, meta);
+        auto surface_result = PriceTableSurface::build(axes, fit_result->coefficients, meta);
         if (!surface_result.has_value()) {
             throw std::runtime_error("Failed to create surface");
         }

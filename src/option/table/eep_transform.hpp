@@ -7,11 +7,10 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/price_query.hpp"
 #include "mango/option/table/price_tensor.hpp"
 
 namespace mango {
-
-struct PriceQuery;  // Forward declare (defined in spliced_surface.hpp)
 
 /// Build-time helper: converts normalized American prices to EEP values.
 /// EEP = American - European, with debiased softplus floor.
@@ -25,7 +24,7 @@ struct EEPDecomposer {
     ///
     /// @param tensor In/out: tensor of normalized prices (V/K_ref), overwritten with EEP
     /// @param axes Grid axes (axis 0 = log-moneyness, 1 = tau, 2 = sigma, 3 = rate)
-    void decompose(PriceTensor<4>& tensor, const PriceTableAxes<4>& axes) const;
+    void decompose(PriceTensor& tensor, const PriceTableAxes& axes) const;
 };
 
 /// Query-time Inner adapter for EEP surfaces. Satisfies SplicedInner.
@@ -37,7 +36,7 @@ struct EEPDecomposer {
 /// Encapsulates all query-time EEP math for the SplicedSurface framework.
 class EEPPriceTableInner {
 public:
-    EEPPriceTableInner(std::shared_ptr<const PriceTableSurface<4>> surface,
+    EEPPriceTableInner(std::shared_ptr<const PriceTableSurface> surface,
                        OptionType type, double K_ref, double dividend_yield)
         : surface_(std::move(surface))
         , type_(type)
@@ -48,13 +47,13 @@ public:
     [[nodiscard]] double price(const PriceQuery& q) const;
     [[nodiscard]] double vega(const PriceQuery& q) const;
 
-    [[nodiscard]] const PriceTableSurface<4>& surface() const { return *surface_; }
+    [[nodiscard]] const PriceTableSurface& surface() const { return *surface_; }
     [[nodiscard]] double K_ref() const noexcept { return K_ref_; }
     [[nodiscard]] OptionType option_type() const noexcept { return type_; }
     [[nodiscard]] double dividend_yield() const noexcept { return dividend_yield_; }
 
 private:
-    std::shared_ptr<const PriceTableSurface<4>> surface_;
+    std::shared_ptr<const PriceTableSurface> surface_;
     OptionType type_;
     double K_ref_;
     double dividend_yield_;

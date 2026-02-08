@@ -227,7 +227,7 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 | `AdaptiveGridParams` | Adaptive grid refinement parameters |
 | `MultiKRefConfig` | Multi-reference-strike configuration for segmented paths |
 | `OptionGrid` | Container for chain data (spot, strikes, maturities, vols, rates) |
-| `PriceTableSurface4D` | 4D B-spline surface with `value(m, tau, sigma, r)` and `partial(axis, ...)` |
+| `PriceTableSurface` | 4D B-spline surface with `value(m, tau, sigma, r)` and `partial(axis, ...)` |
 | `PriceTableWorkspace` | Serializable price table data (save/load Arrow IPC) |
 | `SolverError` | Error detail with `code`, `iterations`, `residual` |
 

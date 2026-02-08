@@ -7,7 +7,7 @@ namespace mango {
 namespace {
 
 TEST(PriceTableAxesTest, Create4DAxes) {
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.7), std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2), std::log(1.3)};
     axes.grids[1] = {0.027, 0.1, 0.5, 1.0, 2.0};
     axes.grids[2] = {0.10, 0.20, 0.30};
@@ -23,7 +23,7 @@ TEST(PriceTableAxesTest, Create4DAxes) {
 }
 
 TEST(PriceTableAxesTest, TotalGridPoints) {
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.7), std::log(0.8), std::log(0.9), std::log(1.0)};  // 4 points
     axes.grids[1] = {0.1, 0.5};            // 2 points
     axes.grids[2] = {0.10, 0.20, 0.30};    // 3 points
@@ -34,7 +34,7 @@ TEST(PriceTableAxesTest, TotalGridPoints) {
 }
 
 TEST(PriceTableAxesTest, ValidateMonotonic) {
-    PriceTableAxes<2> axes;
+    PriceTableAxesND<2> axes;
     axes.grids[0] = {1.0, 2.0, 3.0};
     axes.grids[1] = {0.1, 0.2, 0.3};
 
@@ -43,7 +43,7 @@ TEST(PriceTableAxesTest, ValidateMonotonic) {
 }
 
 TEST(PriceTableAxesTest, RejectNonMonotonic) {
-    PriceTableAxes<2> axes;
+    PriceTableAxesND<2> axes;
     axes.grids[0] = {1.0, 3.0, 2.0};  // Non-monotonic
     axes.grids[1] = {0.1, 0.2, 0.3};
 
@@ -53,7 +53,7 @@ TEST(PriceTableAxesTest, RejectNonMonotonic) {
 }
 
 TEST(PriceTableAxesTest, RejectEmptyGrid) {
-    PriceTableAxes<2> axes;
+    PriceTableAxesND<2> axes;
     axes.grids[0] = {1.0, 2.0, 3.0};
     axes.grids[1] = {};  // Empty grid
 

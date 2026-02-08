@@ -38,8 +38,8 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
         .dividends = {.dividend_yield = 0.02}
     };
 
-    PriceTableBuilder<4> builder_narrow(config_narrow);
-    PriceTableAxes<4> axes;
+    PriceTableBuilder builder_narrow(config_narrow);
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0)};
     axes.grids[1] = {0.1, 0.5, 1.0};
     axes.grids[2] = {0.20};
@@ -67,7 +67,7 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
 
     // Test 2: Use the original wide grid
     std::cout << "\n=== Test 2: Wide grid (width=6.0 > 5.8) ===" << std::endl;
-    PriceTableBuilder<4> builder_wide(config);
+    PriceTableBuilder builder_wide(config);
     auto batch2 = Access::make_batch(builder_wide, axes);
     GridSpec<double> wide_grid = explicit_grid.grid_spec;
     auto time_domain2 = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), explicit_grid.n_time);
