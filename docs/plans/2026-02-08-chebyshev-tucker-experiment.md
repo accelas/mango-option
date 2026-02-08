@@ -109,9 +109,9 @@ Deterministic and reproducible across runs.
 - Tucker ranks per mode and truncation threshold (config 4 only)
 - Evaluation time per query (ns, median of 10k queries)
 
-**Tucker threshold sweep:** Log-spaced grid of ε values. Exact values
-determined during implementation based on the observed singular value spectrum
-of the EEP tensor.
+**Tucker threshold sweep:** ε ∈ {1e-2, 1e-4, 1e-6, 1e-8, 1e-10, 1e-12},
+log-spaced from loose to machine-precision. Rank capped at num_pts (full
+rank = no compression).
 
 **Expected outcome:**
 - B-spline error plateaus at some num_pts (the "wall")
