@@ -299,10 +299,9 @@ static const Dim3DEntry& get_3d_solver() {
     static Dim3DEntry entry = [] {
         auto t0 = std::chrono::steady_clock::now();
         DimensionlessAxes axes;
-        axes.log_moneyness = linspace_vec(-0.45, 0.35, 13);
-        axes.tau_prime = {0.005, 0.01, 0.02, 0.03, 0.05,
-                          0.07, 0.09, 0.11, 0.125};
-        axes.ln_kappa = linspace_vec(-2.0, 2.8, 10);
+        axes.log_moneyness = linspace_vec(-0.50, 0.40, 25);
+        axes.tau_prime = linspace_vec(0.005, 0.125, 20);
+        axes.ln_kappa = linspace_vec(-2.0, 2.8, 30);
 
         auto result = build_dimensionless_surface(
             axes, kSpot, OptionType::PUT, SurfaceContent::EarlyExercisePremium);

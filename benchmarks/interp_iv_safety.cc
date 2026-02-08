@@ -34,6 +34,13 @@
 using namespace mango;
 using namespace mango::bench;
 
+static std::vector<double> linspace(double lo, double hi, int n) {
+    std::vector<double> v(n);
+    for (int i = 0; i < n; ++i)
+        v[i] = lo + (hi - lo) * i / (n - 1);
+    return v;
+}
+
 // ============================================================================
 // Test parameters
 // ============================================================================
@@ -387,17 +394,13 @@ static PriceGrid generate_prices_q0() {
 static DimensionlessEEPInner build_3d_surface() {
     auto t0 = std::chrono::steady_clock::now();
     DimensionlessAxes axes;
-    // x: log-moneyness covering S/K from ~0.65 to ~1.5
-    axes.log_moneyness = {-0.40, -0.30, -0.20, -0.10, -0.05, 0.0,
-                          0.05, 0.10, 0.20, 0.30, 0.40};
+    // x: log-moneyness covering S/K from ~0.60 to ~1.5
+    axes.log_moneyness = linspace(-0.50, 0.40, 25);
     // tau' = sigma^2*tau/2: covers sigma=[0.10,0.50], tau=[30d,2y]
-    // Very short maturities (7d,14d) at low vol may extrapolate
-    axes.tau_prime = {0.005, 0.01, 0.02, 0.03, 0.05,
-                      0.07, 0.09, 0.11, 0.125};
+    axes.tau_prime = linspace(0.005, 0.125, 20);
     // ln(kappa) = ln(2r/sigma^2): r=0.05, sigma=[0.10,0.50]
     // kappa range ~[0.14, 16.4] → ln_kappa ~[-2.0, 2.8]
-    axes.ln_kappa = {-2.0, -1.2, -0.5, 0.0, 0.5, 1.0,
-                     1.5, 2.0, 2.5, 2.8};
+    axes.ln_kappa = linspace(-2.0, 2.8, 30);
 
     auto result = build_dimensionless_surface(
         axes, kSpot, OptionType::PUT, SurfaceContent::EarlyExercisePremium);
