@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/european_option.hpp"
 #include "mango/option/table/recursion_helpers.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
@@ -26,7 +25,9 @@ PriceTableBuilder<N>::PriceTableBuilder(PriceTableConfig config)
 
 template <size_t N>
 std::expected<PriceTableResult<N>, PriceTableError>
-PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
+PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes,
+                            SurfaceContent content,
+                            TensorTransformFn transform) {
     static_assert(N == 4, "PriceTableBuilder only supports N=4");
 
     // Validate config
@@ -117,6 +118,11 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     }
     auto repair_stats = repair_result.value();
 
+    // Step 4c: Apply optional tensor transform (e.g., EEP decomposition)
+    if (transform) {
+        transform(extraction->tensor, axes);
+    }
+
     // Step 5: Fit B-spline coefficients
     auto coeffs_result = fit_coeffs(extraction->tensor, axes);
     if (!coeffs_result.has_value()) {
@@ -131,7 +137,7 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     PriceTableMetadata metadata{
         .K_ref = config_.K_ref,
         .dividends = config_.dividends,
-        .content = surface_content_,
+        .content = content,
     };
 
     // Step 7: Build immutable surface
@@ -424,44 +430,12 @@ PriceTableBuilder<N>::extract_tensor(
                         continue;
                     }
 
-                    // Evaluate spline at each moneyness point and scale by K_ref
-                    // PDE solves are normalized (Spot=Strike=K_ref), so V_normalized
-                    // needs to be scaled back to actual prices: V_actual = K_ref * V_norm
-                    const double K_ref = config_.K_ref;
+                    // Evaluate spline at each moneyness point
+                    // PDE solves are normalized (Spot=Strike=K_ref), so V_normalized = V/K_ref.
+                    // Store normalized price directly; EEP decomposition (if needed) is
+                    // applied via the TensorTransformFn after extraction and repair.
                     for (size_t i = 0; i < Nm; ++i) {
-                        double normalized_price = spline.eval(axes.grids[0][i]);
-                        double american_price = K_ref * normalized_price;
-
-                        if (surface_content_ == SurfaceContent::NormalizedPrice) {
-                            // NormalizedPrice mode: store price as function of moneyness
-                            // Divide by K_ref so the surface is scale-invariant
-                            tensor.view[i, j, σ_idx, r_idx] = normalized_price;
-                        } else {
-                            // EEP mode: subtract European price
-                            double x = axes.grids[0][i];  // log-moneyness
-                            double tau = axes.grids[1][j];
-                            double sigma = axes.grids[2][σ_idx];
-                            double rate = axes.grids[3][r_idx];
-                            double spot = std::exp(x) * K_ref;
-
-                            auto eu = EuropeanOptionSolver(
-                                OptionSpec{.spot = spot, .strike = K_ref, .maturity = tau,
-                                    .rate = rate, .dividend_yield = config_.dividends.dividend_yield,
-                                    .option_type = config_.option_type}, sigma).solve().value();
-
-                            double eep_raw = american_price - eu.value();
-
-                            // Debiased softplus floor: smooth non-negativity with zero bias at eep_raw=0
-                            constexpr double kSharpness = 100.0;
-                            if (kSharpness * eep_raw > 500.0) {
-                                // Overflow protection: softplus ≈ x for large x
-                                tensor.view[i, j, σ_idx, r_idx] = eep_raw;
-                            } else {
-                                double softplus = std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
-                                double bias = std::log(2.0) / kSharpness;  // softplus(0) ≈ 0.00693
-                                tensor.view[i, j, σ_idx, r_idx] = std::max(0.0, softplus - bias);
-                            }
-                        }
+                        tensor.view[i, j, σ_idx, r_idx] = spline.eval(axes.grids[0][i]);
                     }
                 }
             }

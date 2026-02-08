@@ -12,6 +12,7 @@
 #include "mango/option/table/price_table_grid_estimator.hpp"
 #include "mango/support/error_types.hpp"
 #include <expected>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <tuple>
@@ -72,15 +73,20 @@ public:
 
     explicit PriceTableBuilder(PriceTableConfig config);
 
+    /// Optional tensor transform applied between extraction and fitting.
+    /// Used for EEP decomposition on the standard path.
+    using TensorTransformFn = std::function<void(PriceTensor<N>&, const PriceTableAxes<N>&)>;
+
     /// Build price table surface
     ///
     /// @param axes Grid points for each dimension
+    /// @param content Metadata tag for what the surface stores
+    /// @param transform Optional transform applied to tensor after extraction (e.g., EEP decompose)
     /// @return PriceTableResult with surface and diagnostics, or error
     [[nodiscard]] std::expected<PriceTableResult<N>, PriceTableError>
-    build(const PriceTableAxes<N>& axes);
-
-    /// Controls whether output surface stores EEP or raw American prices
-    void set_surface_content(SurfaceContent content) { surface_content_ = content; }
+    build(const PriceTableAxes<N>& axes,
+          SurfaceContent content = SurfaceContent::NormalizedPrice,
+          TensorTransformFn transform = nullptr);
 
     /// When true, bypasses the τ>0 validation to allow τ=0 in the maturity grid
     void set_allow_tau_zero(bool allow) { allow_tau_zero_ = allow; }
@@ -245,7 +251,6 @@ private:
 #endif
 
     PriceTableConfig config_;
-    SurfaceContent surface_content_ = SurfaceContent::EarlyExercisePremium;
     bool allow_tau_zero_ = false;
 };
 

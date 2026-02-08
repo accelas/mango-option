@@ -162,8 +162,19 @@ surface = mo.build_price_table_surface_from_grid(
     pde_profile=mo.GridAccuracyProfile.HIGH,
 )
 
-# 2. Create interpolated solver
-iv_solver = mo.InterpolatedIVSolver.create(surface)
+# 2. Create interpolated solver via factory
+config = mo.IVSolverFactoryConfig()
+config.option_type = mo.OptionType.PUT
+config.spot = 100.0
+config.grid.moneyness = [0.8, 0.9, 1.0, 1.1, 1.2]
+config.grid.vol = [0.10, 0.20, 0.30, 0.40]
+config.grid.rate = [0.01, 0.03, 0.05, 0.07]
+
+path = mo.StandardIVPath()
+path.maturity_grid = [0.1, 0.25, 0.5, 1.0]
+config.path = path
+
+iv_solver = mo.make_interpolated_iv_solver(config)
 
 # 3. Solve single query
 success, result, error = iv_solver.solve(query)
@@ -208,7 +219,13 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 | `IVQuery` | IV solver input (inherits OptionSpec + market_price) |
 | `IVSolverConfig` | IV solver config with `root_config`, `grid_accuracy`, manual grid overrides |
 | `IVSolver` | PDE-based IV solver |
-| `InterpolatedIVSolver` | Fast B-spline interpolation IV solver |
+| `InterpolatedIVSolver` | Fast B-spline interpolation IV solver (created via `make_interpolated_iv_solver`) |
+| `IVSolverFactoryConfig` | Configuration for IV solver factory (grid, path, solver params) |
+| `IVGrid` | Grid specification (moneyness, vol, rate arrays) |
+| `StandardIVPath` | Standard (continuous dividend) IV path with maturity grid |
+| `SegmentedIVPath` | Discrete dividend IV path with maturity and dividend schedule |
+| `AdaptiveGridParams` | Adaptive grid refinement parameters |
+| `MultiKRefConfig` | Multi-reference-strike configuration for segmented paths |
 | `OptionGrid` | Container for chain data (spot, strikes, maturities, vols, rates) |
 | `PriceTableSurface4D` | 4D B-spline surface with `value(m, tau, sigma, r)` and `partial(axis, ...)` |
 | `PriceTableWorkspace` | Serializable price table data (save/load Arrow IPC) |
@@ -219,5 +236,6 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 | Function | Description |
 |----------|-------------|
 | `american_option_price(params, accuracy=None)` | Price a single American option with auto-grid |
+| `make_interpolated_iv_solver(config)` | Create fast IV solver from `IVSolverFactoryConfig` |
 | `build_price_table_surface_from_grid(chain, ...)` | Build 4D B-spline surface from OptionGrid |
 | `build_price_table_surface_from_grid_auto_profile(spot, strikes, ...)` | Same, with positional args instead of OptionGrid |

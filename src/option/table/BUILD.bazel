@@ -71,6 +71,35 @@ cc_library(
 )
 
 cc_library(
+    name = "price_table_inner",
+    hdrs = ["price_table_inner.hpp"],
+    deps = [
+        ":price_table_surface",
+        ":spliced_surface",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
+    name = "eep_transform",
+    srcs = ["eep_transform.cpp"],
+    hdrs = ["eep_transform.hpp"],
+    deps = [
+        ":price_table_surface",
+        ":price_tensor",
+        ":price_table_axes",
+        ":spliced_surface",
+        "//src/option:european_option",
+        "//src/option:option_spec",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "price_table_config",
     hdrs = ["price_table_config.hpp"],
     deps = [
@@ -105,7 +134,6 @@ cc_library(
         "//src/option:option_grid",
         "//src/option:american_option",
         "//src/option:american_option_batch",
-        "//src/option:european_option",
         "//src/math:cubic_spline_solver",
         "//src/math:bspline_nd_separable",
         "//src/math:bspline_collocation_workspace",
@@ -172,21 +200,6 @@ cc_library(
     include_prefix = "mango/option/table",
 )
 
-cc_library(
-    name = "american_price_surface",
-    srcs = ["american_price_surface.cpp"],
-    hdrs = ["american_price_surface.hpp"],
-    deps = [
-        ":price_table_surface",
-        ":price_table_metadata",
-        "//src/option:european_option",
-        "//src/option:option_spec",
-        "//src/support:error_types",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
 
 cc_library(
     name = "segmented_price_table_builder",
@@ -195,7 +208,8 @@ cc_library(
     deps = [
         ":adaptive_grid_types",
         ":price_table_builder",
-        ":american_price_surface",
+        ":price_table_inner",
+        ":standard_surface",
         ":spliced_surface",
         ":spliced_surface_builder",
         "//src/option:american_option",
@@ -211,9 +225,23 @@ cc_library(
     name = "spliced_surface",
     hdrs = ["spliced_surface.hpp"],
     deps = [
-        ":american_price_surface",
         ":price_table_metadata",
         "//src/option:option_spec",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
+    name = "standard_surface",
+    srcs = ["standard_surface.cpp"],
+    hdrs = ["standard_surface.hpp"],
+    deps = [
+        ":eep_transform",
+        ":price_table_inner",
+        ":price_table_surface",
+        ":spliced_surface",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
@@ -225,7 +253,9 @@ cc_library(
     srcs = ["spliced_surface_builder.cpp"],
     hdrs = ["spliced_surface_builder.hpp"],
     deps = [
+        ":price_table_surface",
         ":spliced_surface",
+        ":standard_surface",
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
@@ -239,7 +269,7 @@ cc_library(
     deps = [
         ":price_table_axes",
         ":price_table_surface",
-        ":spliced_surface",
+        ":standard_surface",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
@@ -260,13 +290,13 @@ cc_library(
     ],
     deps = [
         ":adaptive_grid_types",
-        ":american_price_surface",
         ":error_attribution",
         ":price_table_builder",
         ":slice_cache",
         ":segmented_price_table_builder",
         ":spliced_surface",
         ":spliced_surface_builder",
+        ":standard_surface",
         "//src/math:black_scholes_analytics",
         "//src/math:latin_hypercube",
         "//src/option:option_grid",

@@ -269,7 +269,7 @@ auto result = solver.solve(query);
 
 ```cpp
 #include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 
 // Define 4D parameter grids
 std::vector<double> moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};  // m = S/K
@@ -301,21 +301,17 @@ if (!result.has_value()) {
     return;
 }
 
-// Wrap in AmericanPriceSurface for full price reconstruction
-auto aps = mango::AmericanPriceSurface::create(
+// Wrap surface for price reconstruction
+auto wrapper = mango::make_standard_wrapper(
     result->surface, mango::OptionType::PUT).value();
 
 // Query American option prices (~500ns)
-double price = aps.price(spot, strike, tau, sigma, rate);
-
-// Greeks via interpolation (see accuracy note below)
-double delta = aps.delta(spot, strike, tau, sigma, rate);
-double vega  = aps.vega(spot, strike, tau, sigma, rate);
+double price = wrapper.price(spot, strike, tau, sigma, rate);
 ```
 
 ### Interpolated Greek Accuracy
 
-`AmericanPriceSurface` computes Greeks by combining B-spline partial derivatives of the EEP surface with exact Black-Scholes Greeks for the European component:
+`StandardSurfaceWrapper` computes price by combining B-spline interpolation of the EEP surface with exact Black-Scholes pricing for the European component:
 
 | Greek | Method | Accuracy |
 |---|---|---|
@@ -415,8 +411,8 @@ surface = mo.build_price_table_surface_from_grid(
 ```cpp
 #include "mango/option/interpolated_iv_solver.hpp"
 
-// Create IV solver from AmericanPriceSurface
-auto iv_solver = mango::InterpolatedIVSolver::create(std::move(aps)).value();
+// Create IV solver from StandardSurfaceWrapper
+auto iv_solver = mango::DefaultInterpolatedIVSolver::create(std::move(wrapper)).value();
 
 // Solve IV — internally uses EEP reconstruction + Newton iteration
 auto iv_result = iv_solver.solve(iv_query);
@@ -779,7 +775,7 @@ Use FDM batch when you need exact PDE accuracy or have few queries. Use the pric
 | Single option with discrete dividends | `solve_american_option(params)` with `Dividend` list | ~5–20ms |
 | Batch (same parameters, varying strikes) | `BatchAmericanOptionSolver` with chain solving | ~5–20ms total (1 PDE) |
 | Batch (mixed parameters) | `BatchAmericanOptionSolver` | ~5–20ms per group |
-| Many queries, same parameter space | Pre-compute price table, query `AmericanPriceSurface` | ~500ns/query |
+| Many queries, same parameter space | Pre-compute price table, query `StandardSurfaceWrapper` | ~500ns/query |
 
 ### Implied Volatility
 

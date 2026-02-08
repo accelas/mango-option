@@ -29,12 +29,16 @@
  *     OptionType::PUT,
  *     dividend).value();
  *
- * // Step 2: Build price table (one-time precomputation)
- * auto result = builder.build(axes);
+ * // Step 2: Build price table with EEP decomposition (one-time precomputation)
+ * EEPDecomposer decomposer{OptionType::PUT, K_ref, dividend};
+ * auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+ *     [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+ *         decomposer.decompose(tensor, a);
+ *     });
  *
  * // Step 3: Create IV solver from surface
- * auto aps = AmericanPriceSurface::create(result.value().surface, OptionType::PUT);
- * auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
+ * auto wrapper = make_standard_wrapper(result.value().surface, OptionType::PUT);
+ * auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
  * const auto& iv_solver = solver_result.value();
  *
  * // Step 4: Solve for IV at any (S, K, T, r)
@@ -50,7 +54,8 @@
 
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>
@@ -251,7 +256,12 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
         return;
     }
     auto [builder, axes] = std::move(builder_axes_result.value());
-    auto price_table_result = builder.build(axes);
+
+    EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
+    auto price_table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
 
     if (!price_table_result) {
         state.SkipWithError("PriceTableBuilder::build failed");
@@ -275,12 +285,12 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
-    auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
-    if (!aps) {
-        state.SkipWithError("AmericanPriceSurface::create failed");
+    auto wrapper = make_standard_wrapper(surface, OptionType::PUT);
+    if (!wrapper) {
+        state.SkipWithError("make_standard_wrapper failed");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps), solver_config);
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper), solver_config);
     if (!iv_solver_result) {
         auto err = iv_solver_result.error();
         std::string error_msg = "Validation error code " + std::to_string(static_cast<int>(err.code));
@@ -365,7 +375,12 @@ static void BM_API_EndToEnd(benchmark::State& state) {
             return;
         }
         auto [builder, axes] = std::move(builder_axes_result.value());
-        auto price_table_result = builder.build(axes);
+
+        EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
+        auto price_table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
 
         if (!price_table_result) {
             state.SkipWithError("PriceTableBuilder::build failed");
@@ -381,12 +396,12 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         }
 
         // Step 3-4: Compute IVs
-        auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
-        if (!aps) {
-            state.SkipWithError("AmericanPriceSurface::create failed");
+        auto wrapper = make_standard_wrapper(surface, OptionType::PUT);
+        if (!wrapper) {
+            state.SkipWithError("make_standard_wrapper failed");
             return;
         }
-        auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
+        auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
         if (!iv_solver_result) {
             auto err = iv_solver_result.error();
             std::string error_msg = "Validation error code " + std::to_string(static_cast<int>(err.code));

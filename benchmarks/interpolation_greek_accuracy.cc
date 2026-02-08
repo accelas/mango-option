@@ -4,7 +4,7 @@
  * @brief Accuracy benchmark: interpolated Greeks vs PDE solver reference
  *
  * Builds an EEP price table, then compares interpolated Greeks from
- * AmericanPriceSurface against PDE-solver Greeks across a grid of
+ * EEP decomposition against PDE-solver Greeks across a grid of
  * (strike, maturity) combinations.
  *
  * Reports max/mean absolute error and basis points for each Greek.
@@ -14,9 +14,11 @@
  */
 
 #include "mango/option/american_option.hpp"
+#include "mango/option/european_option.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -36,9 +38,11 @@ namespace {
 // ---------------------------------------------------------------------------
 
 struct EEPFixture {
-    AmericanPriceSurface aps;
+    StandardSurfaceWrapper wrapper;
+    std::shared_ptr<const PriceTableSurface<4>> surface;
     double K_ref;
     double dividend_yield;
+    OptionType type;
 };
 
 const EEPFixture& GetEEPFixture() {
@@ -66,17 +70,21 @@ const EEPFixture& GetEEPFixture() {
             throw std::runtime_error("Failed to create PriceTableBuilder");
         }
         auto [builder, axes] = std::move(result.value());
-        auto table = builder.build(axes);
+        EEPDecomposer decomposer{OptionType::PUT, K_ref, q};
+        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
         if (!table) {
             throw std::runtime_error("Failed to build price table");
         }
 
-        auto aps = AmericanPriceSurface::create(table->surface, OptionType::PUT);
-        if (!aps) {
-            throw std::runtime_error("Failed to create AmericanPriceSurface");
+        auto wrapper = make_standard_wrapper(table->surface, OptionType::PUT);
+        if (!wrapper) {
+            throw std::runtime_error("Failed to create StandardSurfaceWrapper");
         }
 
-        return new EEPFixture{std::move(*aps), K_ref, q};
+        return new EEPFixture{std::move(*wrapper), table->surface, K_ref, q, OptionType::PUT};
     }();
 
     return *fixture;
@@ -180,6 +188,49 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
         }
     }
 
+    // EEP Greek helpers: inline the EEP decomposition formulas.
+    // The wrapper has price() but not delta/gamma/theta, so we compute
+    // those from the B-spline partials + European Greeks directly.
+    const auto& surf = *fix.surface;
+    const double K_ref = fix.K_ref;
+    const double q = fix.dividend_yield;
+    const OptionType type = fix.type;
+
+    auto make_european = [&](double S, double K, double tau_val,
+                             double sig, double r) {
+        return EuropeanOptionSolver(
+            OptionSpec{.spot = S, .strike = K, .maturity = tau_val,
+                       .rate = r, .dividend_yield = q,
+                       .option_type = type}, sig).solve().value();
+    };
+
+    auto eep_delta = [&](double S, double K, double tau_val,
+                         double sig, double r) -> double {
+        double x = std::log(S / K);
+        double dEdx = surf.partial(0, {x, tau_val, sig, r});
+        double d = (K / (K_ref * S)) * dEdx;
+        auto eu = make_european(S, K, tau_val, sig, r);
+        return d + eu.delta();
+    };
+
+    auto eep_gamma = [&](double S, double K, double tau_val,
+                         double sig, double r) -> double {
+        double x = std::log(S / K);
+        double dEdx = surf.partial(0, {x, tau_val, sig, r});
+        double d2Edx2 = surf.second_partial(0, {x, tau_val, sig, r});
+        double g = (K / K_ref) * (d2Edx2 - dEdx) / (S * S);
+        auto eu = make_european(S, K, tau_val, sig, r);
+        return g + eu.gamma();
+    };
+
+    auto eep_theta = [&](double S, double K, double tau_val,
+                         double sig, double r) -> double {
+        double x = std::log(S / K);
+        double dtau = (K / K_ref) * surf.partial(1, {x, tau_val, sig, r});
+        auto eu = make_european(S, K, tau_val, sig, r);
+        return -dtau + eu.theta();
+    };
+
     // Benchmark loop: compute interpolated Greeks and accumulate errors
     GreekErrors price_err, delta_err, gamma_err, theta_err;
 
@@ -194,10 +245,10 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
             for (double tau : maturities) {
                 const auto& ref = refs[idx++];
 
-                double i_price = fix.aps.price(spot, K, tau, sigma, rate);
-                double i_delta = fix.aps.delta(spot, K, tau, sigma, rate);
-                double i_gamma = fix.aps.gamma(spot, K, tau, sigma, rate);
-                double i_theta = fix.aps.theta(spot, K, tau, sigma, rate);
+                double i_price = fix.wrapper.price(spot, K, tau, sigma, rate);
+                double i_delta = eep_delta(spot, K, tau, sigma, rate);
+                double i_gamma = eep_gamma(spot, K, tau, sigma, rate);
+                double i_theta = eep_theta(spot, K, tau, sigma, rate);
 
                 benchmark::DoNotOptimize(i_price);
                 benchmark::DoNotOptimize(i_delta);

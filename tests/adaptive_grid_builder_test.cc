@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include "mango/option/table/adaptive_grid_builder.hpp"
 #include "mango/option/table/spliced_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include <algorithm>
 #include <iostream>
@@ -800,12 +801,12 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
     ASSERT_TRUE(result.has_value()) << "Adaptive build failed";
 
     // Wrap surface for price queries
-    auto aps = AmericanPriceSurface::create(result->surface, OptionType::PUT);
-    ASSERT_TRUE(aps.has_value());
+    auto wrapper = make_standard_wrapper(result->surface, OptionType::PUT);
+    ASSERT_TRUE(wrapper.has_value()) << wrapper.error();
 
     // Query at K=80, T=1y, σ=15% — this was 1574 bps error before the fix
     double spot = 100.0, strike = 80.0, tau = 1.0, sigma = 0.15, rate = 0.05;
-    double price = aps->price(spot, strike, tau, sigma, rate);
+    double price = wrapper->price(spot, strike, tau, sigma, rate);
     EXPECT_TRUE(std::isfinite(price));
     EXPECT_GT(price, 0.0);
 

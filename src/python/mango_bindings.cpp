@@ -17,7 +17,8 @@
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_workspace.hpp"
 #include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/spliced_surface.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
@@ -828,66 +829,6 @@ PYBIND11_MODULE(mango_option, m) {
         .def_property_readonly("metadata", &mango::PriceTableSurface<4>::metadata);
 
     // =========================================================================
-    // AmericanPriceSurface (EEP + European reconstruction)
-    // =========================================================================
-
-    py::class_<mango::AmericanPriceSurface>(m, "AmericanPriceSurface")
-        .def_static("create",
-            [](std::shared_ptr<const mango::PriceTableSurface<4>> eep_surface,
-               mango::OptionType type) {
-                auto result = mango::AmericanPriceSurface::create(
-                    std::move(eep_surface), type);
-                if (!result.has_value()) {
-                    throw py::value_error(
-                        "Failed to create AmericanPriceSurface: validation error code " +
-                        std::to_string(static_cast<int>(result.error().code)));
-                }
-                return std::move(result.value());
-            },
-            py::arg("eep_surface"), py::arg("option_type"),
-            R"pbdoc(
-                Create an AmericanPriceSurface from an EEP B-spline surface.
-
-                Reconstructs full American prices as:
-                  P = (K/K_ref) * EEP(m, tau, sigma, r) + P_European(S, K, tau, sigma, r, q)
-
-                Args:
-                    eep_surface: Pre-computed PriceTableSurface4D with EEP data
-                    option_type: OptionType.PUT or OptionType.CALL
-
-                Returns:
-                    AmericanPriceSurface instance
-
-                Raises:
-                    ValueError: If validation fails
-            )pbdoc")
-        .def("price", &mango::AmericanPriceSurface::price,
-            py::arg("spot"), py::arg("strike"), py::arg("tau"),
-            py::arg("sigma"), py::arg("rate"),
-            "Compute American option price")
-        .def("delta", &mango::AmericanPriceSurface::delta,
-            py::arg("spot"), py::arg("strike"), py::arg("tau"),
-            py::arg("sigma"), py::arg("rate"),
-            "Compute delta (dP/dS)")
-        .def("gamma", &mango::AmericanPriceSurface::gamma,
-            py::arg("spot"), py::arg("strike"), py::arg("tau"),
-            py::arg("sigma"), py::arg("rate"),
-            "Compute gamma (d²P/dS²)")
-        .def("vega", &mango::AmericanPriceSurface::vega,
-            py::arg("spot"), py::arg("strike"), py::arg("tau"),
-            py::arg("sigma"), py::arg("rate"),
-            "Compute vega (dP/dsigma)")
-        .def("theta", &mango::AmericanPriceSurface::theta,
-            py::arg("spot"), py::arg("strike"), py::arg("tau"),
-            py::arg("sigma"), py::arg("rate"),
-            "Compute theta (dV/dt, calendar time, negative for decay)")
-        .def_property_readonly("metadata", &mango::AmericanPriceSurface::metadata)
-        .def("__repr__", [](const mango::AmericanPriceSurface& self) {
-            return "<AmericanPriceSurface K_ref=" +
-                   std::to_string(self.metadata().K_ref) + ">";
-        });
-
-    // =========================================================================
     // Price table builder convenience wrapper (auto-grid profiles)
     // =========================================================================
     m.def("build_price_table_surface_from_grid_auto_profile",
@@ -1005,35 +946,76 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("sigma_min", &mango::InterpolatedIVSolverConfig::sigma_min)
         .def_readwrite("sigma_max", &mango::InterpolatedIVSolverConfig::sigma_max);
 
-    // InterpolatedIVSolver
-    py::class_<mango::DefaultInterpolatedIVSolver>(m, "InterpolatedIVSolver")
-        .def_static("create",
-            [](mango::AmericanPriceSurface american_surface,
-               const mango::InterpolatedIVSolverConfig& config) {
-                auto result = mango::DefaultInterpolatedIVSolver::create(
-                    std::move(american_surface), config);
-                if (!result.has_value()) {
-                    throw py::value_error("Failed to create solver: validation error");
-                }
-                return std::move(result.value());
+    // IVGrid config
+    py::class_<mango::IVGrid>(m, "IVGrid")
+        .def(py::init<>())
+        .def_readwrite("moneyness", &mango::IVGrid::moneyness)
+        .def_readwrite("vol", &mango::IVGrid::vol)
+        .def_readwrite("rate", &mango::IVGrid::rate);
+
+    // AdaptiveGridParams config
+    py::class_<mango::AdaptiveGridParams>(m, "AdaptiveGridParams")
+        .def(py::init<>())
+        .def_readwrite("target_iv_error", &mango::AdaptiveGridParams::target_iv_error)
+        .def_readwrite("max_iter", &mango::AdaptiveGridParams::max_iter)
+        .def_readwrite("max_points_per_dim", &mango::AdaptiveGridParams::max_points_per_dim)
+        .def_readwrite("min_moneyness_points", &mango::AdaptiveGridParams::min_moneyness_points);
+
+    // MultiKRefConfig
+    py::class_<mango::MultiKRefConfig>(m, "MultiKRefConfig")
+        .def(py::init<>())
+        .def_readwrite("K_refs", &mango::MultiKRefConfig::K_refs)
+        .def_readwrite("K_ref_count", &mango::MultiKRefConfig::K_ref_count)
+        .def_readwrite("K_ref_span", &mango::MultiKRefConfig::K_ref_span);
+
+    // StandardIVPath
+    py::class_<mango::StandardIVPath>(m, "StandardIVPath")
+        .def(py::init<>())
+        .def_readwrite("maturity_grid", &mango::StandardIVPath::maturity_grid);
+
+    // SegmentedIVPath
+    py::class_<mango::SegmentedIVPath>(m, "SegmentedIVPath")
+        .def(py::init<>())
+        .def_readwrite("maturity", &mango::SegmentedIVPath::maturity)
+        .def_readwrite("discrete_dividends", &mango::SegmentedIVPath::discrete_dividends)
+        .def_readwrite("kref_config", &mango::SegmentedIVPath::kref_config);
+
+    // IVSolverFactoryConfig
+    py::class_<mango::IVSolverFactoryConfig>(m, "IVSolverFactoryConfig")
+        .def(py::init<>())
+        .def_readwrite("option_type", &mango::IVSolverFactoryConfig::option_type)
+        .def_readwrite("spot", &mango::IVSolverFactoryConfig::spot)
+        .def_readwrite("dividend_yield", &mango::IVSolverFactoryConfig::dividend_yield)
+        .def_readwrite("grid", &mango::IVSolverFactoryConfig::grid)
+        .def_property("adaptive",
+            [](const mango::IVSolverFactoryConfig& c) -> py::object {
+                if (c.adaptive.has_value()) return py::cast(*c.adaptive);
+                return py::none();
             },
-            py::arg("american_surface"),
-            py::arg("config") = mango::InterpolatedIVSolverConfig{},
-            R"pbdoc(
-                Create an interpolation-based IV solver from an AmericanPriceSurface.
+            [](mango::IVSolverFactoryConfig& c, const py::object& obj) {
+                if (obj.is_none()) c.adaptive = std::nullopt;
+                else c.adaptive = obj.cast<mango::AdaptiveGridParams>();
+            })
+        .def_readwrite("solver_config", &mango::IVSolverFactoryConfig::solver_config)
+        .def_property("path",
+            [](const mango::IVSolverFactoryConfig& c) -> py::object {
+                return std::visit([](const auto& p) -> py::object {
+                    return py::cast(p);
+                }, c.path);
+            },
+            [](mango::IVSolverFactoryConfig& c, const py::object& obj) {
+                if (py::isinstance<mango::StandardIVPath>(obj))
+                    c.path = obj.cast<mango::StandardIVPath>();
+                else if (py::isinstance<mango::SegmentedIVPath>(obj))
+                    c.path = obj.cast<mango::SegmentedIVPath>();
+                else
+                    throw py::type_error("path must be StandardIVPath or SegmentedIVPath");
+            });
 
-                Args:
-                    american_surface: Pre-built AmericanPriceSurface
-                    config: Optional solver configuration
-
-                Returns:
-                    InterpolatedIVSolver instance
-
-                Raises:
-                    ValueError: If validation fails
-            )pbdoc")
+    // AnyIVSolver (exposed as InterpolatedIVSolver for Python)
+    py::class_<mango::AnyIVSolver>(m, "InterpolatedIVSolver")
         .def("solve",
-            [](const mango::DefaultInterpolatedIVSolver& solver, const mango::IVQuery& query) {
+            [](const mango::AnyIVSolver& solver, const mango::IVQuery& query) {
                 auto result = solver.solve(query);
                 if (result.has_value()) {
                     return py::make_tuple(true, result.value(), mango::IVError{});
@@ -1045,11 +1027,7 @@ PYBIND11_MODULE(mango_option, m) {
             R"pbdoc(
                 Solve for implied volatility (single query).
 
-                Uses Newton-Raphson with B-spline interpolation (~3.5µs vs ~19ms FDM).
-
-                Note: When a YieldCurve is provided, it is collapsed to zero rate: -ln(D(T))/T.
-                This provides a reasonable approximation but does not capture term structure
-                dynamics. For full yield curve support, use IVSolver instead.
+                Uses Newton-Raphson with B-spline interpolation (~3.5us per query).
 
                 Args:
                     query: IVQuery with option parameters and market price
@@ -1058,7 +1036,7 @@ PYBIND11_MODULE(mango_option, m) {
                     Tuple of (success: bool, result: IVSuccess, error: IVError)
             )pbdoc")
         .def("solve_batch",
-            [](const mango::DefaultInterpolatedIVSolver& solver, const std::vector<mango::IVQuery>& queries) {
+            [](const mango::AnyIVSolver& solver, const std::vector<mango::IVQuery>& queries) {
                 auto batch_result = solver.solve_batch(queries);
                 py::list results;
                 for (const auto& r : batch_result.results) {
@@ -1080,4 +1058,32 @@ PYBIND11_MODULE(mango_option, m) {
                 Returns:
                     Tuple of (results: list of (success, IVSuccess, IVError), failed_count: int)
             )pbdoc");
+
+    // Factory function
+    m.def("make_interpolated_iv_solver",
+        [](const mango::IVSolverFactoryConfig& config) {
+            auto result = mango::make_interpolated_iv_solver(config);
+            if (!result.has_value()) {
+                throw py::value_error(
+                    "Failed to create IV solver: validation error code " +
+                    std::to_string(static_cast<int>(result.error().code)));
+            }
+            return std::move(*result);
+        },
+        py::arg("config"),
+        R"pbdoc(
+            Create an interpolation-based IV solver from configuration.
+
+            Builds a price surface and wraps it in a solver. Supports both
+            standard (continuous dividend) and segmented (discrete dividend) paths.
+
+            Args:
+                config: IVSolverFactoryConfig with grid, path, and solver parameters
+
+            Returns:
+                InterpolatedIVSolver instance
+
+            Raises:
+                ValueError: If validation or surface building fails
+        )pbdoc");
 }

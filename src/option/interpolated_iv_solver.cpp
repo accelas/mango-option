@@ -10,6 +10,7 @@
 
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"
@@ -22,8 +23,8 @@ namespace mango {
 // Explicit template instantiations
 // =====================================================================
 
-template class InterpolatedIVSolver<AmericanPriceSurface>;
-template class InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>;
+template class InterpolatedIVSolver<StandardSurfaceWrapper>;
+template class InterpolatedIVSolver<MultiKRefSurfaceWrapperPI>;
 
 // =====================================================================
 // Factory internals
@@ -45,8 +46,8 @@ to_log_moneyness(const std::vector<double>& moneyness) {
     return log_m;
 }
 
-/// Build a MultiKRefSurface<> for manual grid path
-std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_manual(
+/// Build a MultiKRefSurfacePI for manual grid path
+std::expected<MultiKRefSurfacePI, PriceTableError> build_multi_kref_manual(
     double spot,
     OptionType option_type,
     const DividendSpec& dividends,
@@ -123,11 +124,11 @@ GridBounds extract_bounds(const IVGrid& grid) {
 // AnyIVSolver: type-erased wrapper
 // =====================================================================
 
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver)
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<StandardSurfaceWrapper> solver)
     : solver_(std::move(solver))
 {}
 
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver)
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapperPI> solver)
     : solver_(std::move(solver))
 {}
 
@@ -150,14 +151,16 @@ BatchIVResult AnyIVSolver::solve_batch(const std::vector<IVQuery>& queries) cons
 static std::expected<AnyIVSolver, ValidationError>
 wrap_surface(std::shared_ptr<const PriceTableSurface<4>> surface,
              OptionType option_type,
+             double dividend_yield,
              const InterpolatedIVSolverConfig& solver_config) {
-    auto aps = AmericanPriceSurface::create(surface, option_type);
-    if (!aps.has_value()) {
-        return std::unexpected(aps.error());
+    auto wrapper = build_standard_surface(surface, option_type, dividend_yield);
+    if (!wrapper.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    auto solver = InterpolatedIVSolver<AmericanPriceSurface>::create(
-        std::move(*aps), solver_config);
+    auto solver = InterpolatedIVSolver<StandardSurfaceWrapper>::create(
+        std::move(*wrapper), solver_config);
     if (!solver.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
@@ -197,7 +200,8 @@ build_standard_adaptive(const IVSolverFactoryConfig& config,
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    return wrap_surface(result->surface, config.option_type, config.solver_config);
+    return wrap_surface(result->surface, config.option_type,
+                        config.dividend_yield, config.solver_config);
 }
 
 // ---------------------------------------------------------------------------
@@ -225,37 +229,43 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
     }
 
     auto& [builder, axes] = *setup;
-    auto table_result = builder.build(axes);
+
+    // Standard path: decompose tensor to EEP before B-spline fitting
+    EEPDecomposer decomposer{config.option_type, config.spot, config.dividend_yield};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
     return wrap_surface(table_result->surface, config.option_type,
-                        config.solver_config);
+                        config.dividend_yield, config.solver_config);
 }
 
 // ---------------------------------------------------------------------------
 // Factory: segmented path helpers
 // ---------------------------------------------------------------------------
 
-/// Wrap a MultiKRefSurface into AnyIVSolver
+/// Wrap a MultiKRefSurfacePI into AnyIVSolver
 static std::expected<AnyIVSolver, ValidationError>
-wrap_multi_kref_surface(MultiKRefSurface<> surface,
+wrap_multi_kref_surface(MultiKRefSurfacePI surface,
                         const GridBounds& b, double maturity,
                         OptionType option_type, double dividend_yield,
                         const InterpolatedIVSolverConfig& solver_config) {
-    MultiKRefSurfaceWrapper<>::Bounds bounds{
+    MultiKRefSurfaceWrapperPI::Bounds bounds{
         .m_min = b.m_min, .m_max = b.m_max,
         .tau_min = 0.0, .tau_max = maturity,
         .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
         .rate_min = b.rate_min, .rate_max = b.rate_max,
     };
 
-    auto wrapper = MultiKRefSurfaceWrapper<>(
+    auto wrapper = MultiKRefSurfaceWrapperPI(
         std::move(surface), bounds, option_type, dividend_yield);
 
-    auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>::create(
+    auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapperPI>::create(
         std::move(wrapper), solver_config);
     if (!solver.has_value()) {
         return std::unexpected(ValidationError{

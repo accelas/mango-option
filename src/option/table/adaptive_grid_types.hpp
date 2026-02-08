@@ -3,7 +3,7 @@
 
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/spliced_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include <array>
 #include <limits>
 #include <memory>
@@ -109,7 +109,7 @@ struct AdaptiveResult {
 
 /// Result from adaptive segmented grid building (multi-K_ref path)
 struct SegmentedAdaptiveResult {
-    MultiKRefSurface<> surface;
+    MultiKRefSurfacePI surface;
     IVGrid grid;  ///< The grid sizes adaptive chose
     int tau_points_per_segment;
 };

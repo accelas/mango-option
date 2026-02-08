@@ -3,7 +3,7 @@
 #include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/latin_hypercube.hpp"
 #include "mango/option/american_option_batch.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"
@@ -568,12 +568,12 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
 
 /// Build a SegmentedSurface for each K_ref in the list.
 /// Takes a Config template with K_ref set per iteration.
-std::expected<std::vector<SegmentedSurface<>>, PriceTableError>
+std::expected<std::vector<SegmentedSurfacePI>, PriceTableError>
 build_segmented_surfaces(
     SegmentedPriceTableBuilder::Config base_config,
     const std::vector<double>& ref_values)
 {
-    std::vector<SegmentedSurface<>> surfaces;
+    std::vector<SegmentedSurfacePI> surfaces;
     surfaces.reserve(ref_values.size());
 
     for (double ref : ref_values) {
@@ -590,7 +590,7 @@ build_segmented_surfaces(
 
 /// Result of the shared segmented probe-and-build pipeline.
 struct SegmentedBuildResult {
-    std::vector<SegmentedSurface<>> surfaces;
+    std::vector<SegmentedSurfacePI> surfaces;
     SegmentedPriceTableBuilder::Config seg_template;
     MaxGridSizes gsz;
     // Domain bounds (needed for validation/retry)
@@ -670,7 +670,7 @@ probe_and_build(
             if (!surface.has_value()) {
                 return std::unexpected(surface.error());
             }
-            auto shared = std::make_shared<SegmentedSurface<>>(std::move(*surface));
+            auto shared = std::make_shared<SegmentedSurfacePI>(std::move(*surface));
             double spot = config.spot;
             return SurfaceHandle{
                 .price = [shared, spot](double /*spot_arg*/, double strike,
@@ -995,6 +995,10 @@ AdaptiveGridBuilder::build_cached_surface(
         }
     }
 
+    // EEP decomposition: convert normalized prices to early exercise premium
+    EEPDecomposer decomposer{type, K_ref, dividend_yield};
+    decomposer.decompose(extraction.tensor, axes);
+
     // Fit coefficients
     auto fit_result = builder.fit_coeffs(extraction.tensor, axes);
     if (!fit_result.has_value()) {
@@ -1025,15 +1029,15 @@ AdaptiveGridBuilder::build_cached_surface(
 
     // Return a handle that queries the surface (reconstruct full American price)
     auto surface_ptr = surface.value();
-    auto aps = AmericanPriceSurface::create(surface_ptr, type);
-    if (!aps.has_value()) {
+    auto wrapper = build_standard_surface(surface_ptr, type, dividend_yield);
+    if (!wrapper.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
     return SurfaceHandle{
-        .price = [aps = std::move(*aps)](double query_spot, double strike, double tau,
-                                         double sigma, double rate) -> double {
-            return aps.price(query_spot, strike, tau, sigma, rate);
+        .price = [w = std::move(*wrapper)](double query_spot, double strike, double tau,
+                                           double sigma, double rate) -> double {
+            return w.price(query_spot, strike, tau, sigma, rate);
         },
         .pde_solves = pde_solves
     };

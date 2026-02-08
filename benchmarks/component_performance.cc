@@ -16,9 +16,10 @@
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cmath>
@@ -73,7 +74,11 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to create PriceTableBuilder");
         }
         auto [builder, axes] = std::move(result.value());
-        auto table = builder.build(axes);
+        EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.0};
+        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
         if (!table) {
             throw std::runtime_error("Failed to build price table");
         }
@@ -280,12 +285,12 @@ BENCHMARK(BM_ImpliedVol_ITM_Put);
 static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    // Create AmericanPriceSurface wrapper and IV solver
-    auto aps = AmericanPriceSurface::create(surf.surface, OptionType::PUT);
-    if (!aps) {
-        throw std::runtime_error("Failed to create AmericanPriceSurface");
+    // Create StandardSurfaceWrapper and IV solver
+    auto wrapper = make_standard_wrapper(surf.surface, OptionType::PUT);
+    if (!wrapper) {
+        throw std::runtime_error("Failed to create StandardSurfaceWrapper");
     }
-    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
+    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
 
     if (!solver_result) {
         auto err = solver_result.error();

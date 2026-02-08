@@ -14,7 +14,8 @@
 #include "tests/quantlib_validation_framework.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -122,8 +123,12 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
     auto [builder, axes] = std::move(builder_axes_result.value());
 
-    // Pre-compute prices for PUT options
-    auto precompute_result = builder.build(axes);
+    // Pre-compute prices for PUT options with EEP decomposition
+    EEPDecomposer decomposer{OptionType::PUT, 100.0, dividend_yield};
+    auto precompute_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     ASSERT_TRUE(precompute_result.has_value())
         << "Price table precomputation failed: " << precompute_result.error();
 
@@ -136,9 +141,9 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
         .sigma_min = 0.05,
         .sigma_max = 2.0
     };
-    auto aps = AmericanPriceSurface::create(price_table_result.surface, OptionType::PUT);
-    ASSERT_TRUE(aps.has_value());
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps), iv_config);
+    auto wrapper = make_standard_wrapper(price_table_result.surface, OptionType::PUT);
+    ASSERT_TRUE(wrapper.has_value()) << "Failed to create wrapper: " << wrapper.error();
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper), iv_config);
     ASSERT_TRUE(iv_solver_result.has_value())
         << "Failed to create interpolated IV solver: " << iv_solver_result.error();
 
@@ -161,12 +166,12 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
             scenario.is_call, 201, 2000);
 
         // Solve for IV using interpolated solver
-        IVQuery query{
-            scenario.spot, scenario.strike, scenario.maturity,
-            scenario.rate, scenario.dividend_yield,
-            OptionType::PUT,
-            ql_result.price
-        };
+        IVQuery query(
+            OptionSpec{.spot = scenario.spot, .strike = scenario.strike,
+                .maturity = scenario.maturity, .rate = scenario.rate,
+                .dividend_yield = scenario.dividend_yield,
+                .option_type = OptionType::PUT},
+            ql_result.price);
 
         auto iv_result = iv_solver.solve(query);
 
@@ -215,7 +220,10 @@ TEST(QuantLibBatchTest, GridConvergence) {
         1001, 10000);
 
     PricingParams params(
-        100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02,
+            .option_type = OptionType::PUT},
+        0.20);
 
     // Use automatic grid estimation
     auto [grid_spec, time_domain] = estimate_pde_grid(params);
@@ -248,7 +256,10 @@ TEST(QuantLibBatchTest, GridConvergence) {
 
 TEST(QuantLibBatchTest, Greeks_ATM) {
     PricingParams params(
-        100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02,
+            .option_type = OptionType::PUT},
+        0.20);
 
     auto [grid_spec, time_domain] = estimate_pde_grid(params);
 

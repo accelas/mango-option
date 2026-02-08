@@ -3,7 +3,8 @@
 /// @brief End-to-end integration tests for EEP decomposition feature
 
 #include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
@@ -19,7 +20,7 @@ namespace {
 // ===========================================================================
 
 /// Build a price table and verify that the reconstructed
-/// American price from AmericanPriceSurface matches a direct PDE solve.
+/// American price from StandardSurfaceWrapper matches a direct PDE solve.
 TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     // Grid covering a modest range for the price table
     // Each axis needs >= 4 points for B-spline fitting
@@ -30,7 +31,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
 
     double K_ref = 100.0;
 
-    // Build with auto-estimated PDE grid (always produces EEP surface)
+    // Build with auto-estimated PDE grid, then apply EEP decomposition
     auto setup = PriceTableBuilder<4>::from_vectors(
         log_moneyness, maturity, vol, rate, K_ref,
         GridAccuracyParams{},   // auto-estimate PDE grid
@@ -42,7 +43,11 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
         << "from_vectors failed: code=" << static_cast<int>(setup.error().code);
 
     auto& [builder, axes] = *setup;
-    auto result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
+    auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     ASSERT_TRUE(result.has_value())
         << "build failed: code=" << static_cast<int>(result.error().code);
     ASSERT_NE(result->surface, nullptr);
@@ -51,10 +56,11 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     EXPECT_EQ(result->surface->metadata().content,
               SurfaceContent::EarlyExercisePremium);
 
-    // Wrap in AmericanPriceSurface for reconstruction
-    auto aps = AmericanPriceSurface::create(result->surface, OptionType::PUT);
-    ASSERT_TRUE(aps.has_value())
-        << "AmericanPriceSurface::create failed";
+    // Wrap in StandardSurfaceWrapper for reconstruction
+    auto wrapper_result = make_standard_wrapper(result->surface, OptionType::PUT);
+    ASSERT_TRUE(wrapper_result.has_value())
+        << "make_standard_wrapper failed: " << wrapper_result.error();
+    auto wrapper = std::move(*wrapper_result);
 
     // Test point: ATM put, 1-year, 20% vol, 5% rate
     double S     = 100.0;
@@ -63,7 +69,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     double sigma = 0.20;
     double r     = 0.05;
 
-    double reconstructed = aps->price(S, K, tau, sigma, r);
+    double reconstructed = wrapper.price(S, K, tau, sigma, r);
     EXPECT_GT(reconstructed, 0.0) << "Reconstructed price should be positive";
 
     // Direct PDE solve for comparison
@@ -117,7 +123,11 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
         << "from_vectors failed: code=" << static_cast<int>(setup.error().code);
 
     auto& [builder, axes] = *setup;
-    auto result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
+    auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     ASSERT_TRUE(result.has_value())
         << "build failed: code=" << static_cast<int>(result.error().code);
     ASSERT_NE(result->surface, nullptr);
@@ -152,6 +162,46 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
     EXPECT_EQ(negative_count, 0u)
         << "Found " << negative_count << " negative EEP values; "
         << "most negative = " << most_negative;
+}
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: make_standard_wrapper must reject NormalizedPrice content
+// Bug: Previously accepted NormalizedPrice but always used EEPPriceTableInner,
+// which adds the European component at query time — double-counting it for
+// surfaces that already contain full American prices.
+TEST(EEPIntegrationTest, MakeStandardWrapperRejectsNormalizedPrice) {
+    std::vector<double> log_moneyness = {std::log(0.90), std::log(0.95), std::log(1.00), std::log(1.10)};
+    std::vector<double> maturity  = {0.25, 0.50, 0.75, 1.00};
+    std::vector<double> vol       = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> rate      = {0.02, 0.03, 0.04, 0.05};
+
+    double K_ref = 100.0;
+
+    auto setup = PriceTableBuilder<4>::from_vectors(
+        log_moneyness, maturity, vol, rate, K_ref,
+        GridAccuracyParams{},
+        OptionType::PUT,
+        0.0,   // dividend_yield
+        0.0);  // max_failure_rate
+    ASSERT_TRUE(setup.has_value());
+
+    auto& [builder, axes] = *setup;
+
+    // Default build produces NormalizedPrice content
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->surface->metadata().content,
+              SurfaceContent::NormalizedPrice);
+
+    // make_standard_wrapper must reject this
+    auto wrapper_result = make_standard_wrapper(result->surface, OptionType::PUT);
+    EXPECT_FALSE(wrapper_result.has_value())
+        << "make_standard_wrapper should reject NormalizedPrice surfaces";
+    EXPECT_NE(wrapper_result.error().find("EEP"), std::string::npos)
+        << "Error message should mention EEP; got: " << wrapper_result.error();
 }
 
 }  // namespace

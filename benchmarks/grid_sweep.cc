@@ -5,10 +5,11 @@
 //
 // Sweeps PriceTableGridAccuracyParams.target_iv_error from coarse to fine,
 // measuring interpolated IV accuracy against FDM ground truth.
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/price_table_grid_estimator.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include <cstdio>
@@ -123,8 +124,12 @@ int main() {
         }
 
         auto& [builder, axes] = builder_result.value();
+        EEPDecomposer decomposer{OptionType::PUT, spot, div_yield};
         auto t0 = std::chrono::steady_clock::now();
-        auto table_result = builder.build(axes);
+        auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
         auto t1 = std::chrono::steady_clock::now();
         double build_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
@@ -133,12 +138,12 @@ int main() {
             continue;
         }
 
-        auto aps = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
-        if (!aps) {
-            printf("%-6zu APS CREATE FAILED\n", trial);
+        auto wrapper = make_standard_wrapper(table_result->surface, OptionType::PUT);
+        if (!wrapper) {
+            printf("%-6zu WRAPPER CREATE FAILED\n", trial);
             continue;
         }
-        auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
+        auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
         if (!iv_solver_result) {
             printf("%-6zu IV SOLVER FAILED\n", trial);
             continue;

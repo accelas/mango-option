@@ -16,9 +16,10 @@
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/option_grid.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_grid_estimator.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/option/table/price_table_surface.hpp"
@@ -154,7 +155,11 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to create PriceTableBuilder");
         }
         auto [builder, axes] = std::move(result.value());
-        auto table = builder.build(axes);
+        EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
         if (!table) {
             throw std::runtime_error("Failed to build price table");
         }
@@ -333,11 +338,11 @@ BENCHMARK(BM_RealData_IV_FDM)
 static void BM_RealData_IV_BSpline(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    auto aps = AmericanPriceSurface::create(surf.surface, OptionType::PUT);
-    if (!aps) {
-        throw std::runtime_error("Failed to create AmericanPriceSurface");
+    auto wrapper = make_standard_wrapper(surf.surface, OptionType::PUT);
+    if (!wrapper) {
+        throw std::runtime_error("Failed to create StandardSurfaceWrapper");
     }
-    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
+    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
     if (!solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -547,17 +552,21 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result) {
         throw std::runtime_error("Failed to build price table");
     }
 
     // Create IV solver
-    auto aps_query = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
-    if (!aps_query) {
-        throw std::runtime_error("Failed to create AmericanPriceSurface");
+    auto wrapper_query = make_standard_wrapper(table_result->surface, OptionType::PUT);
+    if (!wrapper_query) {
+        throw std::runtime_error("Failed to create StandardSurfaceWrapper");
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps_query));
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_query));
     if (!iv_solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -645,17 +654,21 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result) {
         throw std::runtime_error("Failed to build price table");
     }
 
     // Create interpolated IV solver
-    auto aps_acc = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
-    if (!aps_acc) {
-        throw std::runtime_error("Failed to create AmericanPriceSurface");
+    auto wrapper_acc = make_standard_wrapper(table_result->surface, OptionType::PUT);
+    if (!wrapper_acc) {
+        throw std::runtime_error("Failed to create StandardSurfaceWrapper");
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps_acc));
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_acc));
     if (!iv_solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -806,19 +819,23 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
         return;
     }
 
     // Create interpolated IV solver
-    auto aps_dense = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
-    if (!aps_dense) {
-        state.SkipWithError("Failed to create AmericanPriceSurface");
+    auto wrapper_dense = make_standard_wrapper(table_result->surface, OptionType::PUT);
+    if (!wrapper_dense) {
+        state.SkipWithError("Failed to create StandardSurfaceWrapper");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps_dense));
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_dense));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
@@ -913,19 +930,23 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
         return;
     }
 
     // Create interpolated IV solver
-    auto aps_est = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
-    if (!aps_est) {
-        state.SkipWithError("Failed to create AmericanPriceSurface");
+    auto wrapper_est = make_standard_wrapper(table_result->surface, OptionType::PUT);
+    if (!wrapper_est) {
+        state.SkipWithError("Failed to create StandardSurfaceWrapper");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps_est));
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_est));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
@@ -1031,18 +1052,22 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
         return;
     }
 
-    auto aps_prof = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
-    if (!aps_prof) {
-        state.SkipWithError("Failed to create AmericanPriceSurface");
+    auto wrapper_prof = make_standard_wrapper(table_result->surface, OptionType::PUT);
+    if (!wrapper_prof) {
+        state.SkipWithError("Failed to create StandardSurfaceWrapper");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps_prof));
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_prof));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;

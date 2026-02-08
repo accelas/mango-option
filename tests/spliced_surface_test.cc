@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include "mango/option/table/spliced_surface.hpp"
+#include "mango/option/table/price_table_inner.hpp"
+#include "mango/option/table/standard_surface.hpp"
 
 namespace mango {
 namespace {
@@ -45,8 +47,8 @@ TEST(SplicedSurfaceTest, ConceptsCompile) {
 // Surface adapter concept checks
 // ===========================================================================
 
-TEST(SurfaceAdapterTest, AmericanPriceSurfaceAdapterSatisfiesConcept) {
-    static_assert(SplicedInner<AmericanPriceSurfaceAdapter>);
+TEST(SurfaceAdapterTest, PriceTableInnerSatisfiesConcept) {
+    static_assert(SplicedInner<PriceTableInner>);
     SUCCEED();
 }
 
@@ -402,12 +404,11 @@ TEST(LinearBracketTest, HandlesEmptyGrid) {
 // Unified type alias tests
 // ===========================================================================
 
-// Verify SegmentedSurface type alias compiles with default template parameter
-TEST(UnifiedTypeAliasTest, SegmentedSurfaceDefaultCompiles) {
-    // Default Inner = AmericanPriceSurfaceAdapter
+// Verify SegmentedSurface type alias compiles with PriceTableInner
+TEST(UnifiedTypeAliasTest, SegmentedSurfaceWithPriceTableInnerCompiles) {
     static_assert(std::is_same_v<
-        SegmentedSurface<>,
-        SplicedSurface<AmericanPriceSurfaceAdapter, SegmentLookup, SegmentedTransform, WeightedSum>>);
+        SegmentedSurface<PriceTableInner>,
+        SplicedSurface<PriceTableInner, SegmentLookup, SegmentedTransform, WeightedSum>>);
     SUCCEED();
 }
 
@@ -419,12 +420,12 @@ TEST(UnifiedTypeAliasTest, SegmentedSurfaceWithMockCompiles) {
     SUCCEED();
 }
 
-// Verify MultiKRefSurface type alias compiles with default template parameter
-TEST(UnifiedTypeAliasTest, MultiKRefSurfaceDefaultCompiles) {
-    // Default Inner = SegmentedSurface<> = SegmentedSurface<AmericanPriceSurfaceAdapter>
+// Verify MultiKRefSurface type alias compiles with PriceTableInner
+TEST(UnifiedTypeAliasTest, MultiKRefSurfaceWithPriceTableInnerCompiles) {
+    using SegPI = SegmentedSurface<PriceTableInner>;
     static_assert(std::is_same_v<
-        MultiKRefSurface<>,
-        SplicedSurface<SegmentedSurface<>, KRefBracket, KRefTransform, WeightedSum>>);
+        MultiKRefSurface<SegPI>,
+        SplicedSurface<SegPI, KRefBracket, KRefTransform, WeightedSum>>);
     SUCCEED();
 }
 

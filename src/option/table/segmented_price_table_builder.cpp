@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/segmented_price_table_builder.hpp"
 #include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/price_table_inner.hpp"
 #include "mango/option/american_option.hpp"
 #include <algorithm>
 #include <cmath>
@@ -15,7 +15,7 @@ constexpr int kCubicSplineDegree = 3;
 
 /// Context for sampling a previous segment's surface as an initial condition.
 struct ChainedICContext {
-    const AmericanPriceSurface* prev;
+    std::shared_ptr<const PriceTableSurface<4>> prev_surface;
     double K_ref;
     double prev_tau_end;   ///< Previous segment's local τ at its far boundary
     double boundary_div;   ///< Discrete dividend amount at this boundary
@@ -121,7 +121,7 @@ void append_upper_tail_log_moneyness(std::vector<double>& log_grid,
 
 }  // namespace
 
-std::expected<SegmentedSurface<>, PriceTableError>
+std::expected<SegmentedSurfacePI, PriceTableError>
 SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Validate inputs
@@ -246,7 +246,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     segment_configs.reserve(n_segments);
 
     // The "previous" surface, used to generate chained ICs for earlier segments.
-    AmericanPriceSurface* prev_surface_ptr = nullptr;
+    std::shared_ptr<const PriceTableSurface<4>> prev_surface;
 
     for (size_t seg_idx = 0; seg_idx < n_segments; ++seg_idx) {
         double tau_start = boundaries[seg_idx];
@@ -257,9 +257,6 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         auto local_tau = make_segment_tau_grid(
             0.0, seg_width, config.tau_points_per_segment,
             config.tau_target_dt, config.tau_points_min, config.tau_points_max);
-
-        // All segments store V/K_ref uniformly
-        SurfaceContent content = SurfaceContent::NormalizedPrice;
 
         // Build PriceTableBuilder for this segment
         auto setup = PriceTableBuilder<4>::from_vectors(
@@ -272,7 +269,6 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         }
 
         auto& [builder, axes] = *setup;
-        builder.set_surface_content(content);
         builder.set_allow_tau_zero(true);
 
         // ------ Manual build path (used for all segments) ------
@@ -303,9 +299,8 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             // Dividend amount at this boundary.
             double boundary_div = dividends[dividends.size() - seg_idx].amount;
 
-            AmericanPriceSurface* prev = prev_surface_ptr;
             ChainedICContext ic_ctx{
-                .prev = prev,
+                .prev_surface = prev_surface,
                 .K_ref = K_ref,
                 .prev_tau_end = prev_seg_tau_local_end,
                 .boundary_div = boundary_div,
@@ -326,9 +321,9 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                         for (size_t i = 0; i < x.size(); ++i) {
                             double spot = ic_ctx.K_ref * std::exp(x[i]);
                             double spot_adj = std::max(spot - ic_ctx.boundary_div, 1e-8);
-                            double raw = ic_ctx.prev->price(
-                                spot_adj, ic_ctx.K_ref, ic_ctx.prev_tau_end,
-                                sigma, rate);
+                            double x_adj = std::log(spot_adj / ic_ctx.K_ref);
+                            double raw = ic_ctx.prev_surface->value(
+                                {x_adj, ic_ctx.prev_tau_end, sigma, rate});
                             u[i] = raw;
                         }
                     });
@@ -372,11 +367,11 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         }
         auto coeffs = std::move(fit_result->coefficients);
 
-        // 10. Build PriceTableSurface and AmericanPriceSurface
+        // 10. Build PriceTableSurface
         PriceTableMetadata metadata{
             .K_ref = K_ref,
             .dividends = {.dividend_yield = config.dividends.dividend_yield},
-            .content = content,
+            .content = SurfaceContent::NormalizedPrice,
         };
 
         auto surface = PriceTableSurface<4>::build(
@@ -385,17 +380,14 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
         }
 
-        auto aps = AmericanPriceSurface::create(*surface, config.option_type);
-        if (!aps.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-        }
+        auto surface_ptr = *surface;
 
         segment_configs.push_back(SegmentConfig{
-            .surface = std::move(*aps),
+            .surface = surface_ptr,
             .tau_start = tau_start,
             .tau_end = tau_end,
         });
-        prev_surface_ptr = &segment_configs.back().surface;
+        prev_surface = surface_ptr;
     }
 
     // =====================================================================

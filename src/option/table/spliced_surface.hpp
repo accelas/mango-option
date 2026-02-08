@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "mango/option/option_spec.hpp"
-#include "mango/option/table/american_price_surface.hpp"
 
 namespace mango {
 
@@ -309,6 +308,18 @@ private:
     std::vector<double> k_refs_;
 };
 
+/// Split strategy for single-surface queries. Always returns index 0 with weight 1.0.
+struct SingleBracket {
+    [[nodiscard]] double key(const PriceQuery&) const noexcept { return 0.0; }
+    [[nodiscard]] size_t num_slices() const noexcept { return 1; }
+    [[nodiscard]] Bracket bracket(double) const noexcept {
+        Bracket br;
+        br.items[0] = SliceWeight{0, 1.0};
+        br.size = 1;
+        return br;
+    }
+};
+
 struct WeightedSum {
     [[nodiscard]] double combine(std::span<const Sample> samples,
                                  const PriceQuery&) const noexcept {
@@ -374,34 +385,13 @@ struct KRefTransform {
     }
 };
 
-/// Adapter wrapping AmericanPriceSurface for SplicedSurface.
-class AmericanPriceSurfaceAdapter {
-public:
-    explicit AmericanPriceSurfaceAdapter(AmericanPriceSurface surface)
-        : surface_(std::move(surface)) {}
-
-    [[nodiscard]] double price(const PriceQuery& q) const {
-        return surface_.price(q.spot, q.strike, q.tau, q.sigma, q.rate);
-    }
-
-    [[nodiscard]] double vega(const PriceQuery& q) const {
-        return surface_.vega(q.spot, q.strike, q.tau, q.sigma, q.rate);
-    }
-
-    [[nodiscard]] const AmericanPriceSurface& surface() const { return surface_; }
-
-private:
-    AmericanPriceSurface surface_;
-};
-
-static_assert(SplicedInner<AmericanPriceSurfaceAdapter>);
-
 // ===========================================================================
 // Unified surface type aliases
 // ===========================================================================
 
 /// Segmented surface: dividend segment lookup with spot adjustment.
-template<SplicedInner Inner = AmericanPriceSurfaceAdapter>
+/// Inner type must satisfy SplicedInner (e.g., PriceTableInner, EEPPriceTableInner).
+template<SplicedInner Inner>
 using SegmentedSurface = SplicedSurface<
     Inner,
     SegmentLookup,
@@ -409,8 +399,7 @@ using SegmentedSurface = SplicedSurface<
     WeightedSum>;
 
 /// Multi-K_ref surface: strike bracket interpolation.
-/// Replaces SegmentedMultiKRefSurface.
-template<SplicedInner Inner = SegmentedSurface<>>
+template<SplicedInner Inner>
 using MultiKRefSurface = SplicedSurface<
     Inner,
     KRefBracket,
@@ -470,8 +459,5 @@ private:
     OptionType option_type_;
     double dividend_yield_;
 };
-
-template<SplicedInner Inner = SegmentedSurface<>>
-using MultiKRefSurfaceWrapper = SplicedSurfaceWrapper<MultiKRefSurface<Inner>>;
 
 }  // namespace mango

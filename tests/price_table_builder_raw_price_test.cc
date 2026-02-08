@@ -2,11 +2,11 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 
 using namespace mango;
 
-TEST(PriceTableBuilderTest, BuildWithNormalizedPriceMode) {
+TEST(PriceTableBuilderTest, DefaultBuildProducesNormalizedPrice) {
     std::vector<double> m_grid = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     std::vector<double> tau_grid = {0.1, 0.25, 0.5, 1.0};
     std::vector<double> vol_grid = {0.15, 0.20, 0.30, 0.40};
@@ -18,16 +18,14 @@ TEST(PriceTableBuilderTest, BuildWithNormalizedPriceMode) {
     ASSERT_TRUE(setup.has_value());
     auto& [builder, axes] = *setup;
 
-    builder.set_surface_content(SurfaceContent::NormalizedPrice);
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
 
-    // Verify metadata says NormalizedPrice
+    // Default build produces NormalizedPrice
     EXPECT_EQ(result->surface->metadata().content, SurfaceContent::NormalizedPrice);
 }
 
-TEST(PriceTableBuilderTest, DefaultBehaviorUnchanged) {
-    // Regression: default build (EEP mode, no custom IC) still works
+TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
     std::vector<double> m_grid = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     std::vector<double> tau_grid = {0.1, 0.25, 0.5, 1.0};
     std::vector<double> vol_grid = {0.15, 0.20, 0.30, 0.40};
@@ -39,7 +37,12 @@ TEST(PriceTableBuilderTest, DefaultBehaviorUnchanged) {
     ASSERT_TRUE(setup.has_value());
     auto& [builder, axes] = *setup;
 
-    auto result = builder.build(axes);
+    // Build with EEP decomposition
+    EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.0};
+    auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->surface->metadata().content, SurfaceContent::EarlyExercisePremium);
 }

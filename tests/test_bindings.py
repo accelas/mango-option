@@ -308,41 +308,24 @@ def test_price_table_surface():
 
 
 def test_iv_solver_interpolated():
-    """Test InterpolatedIVSolver"""
-    import math
+    """Test InterpolatedIVSolver via make_interpolated_iv_solver factory"""
     print("Testing InterpolatedIVSolver...")
 
-    # Build a surface first
-    axes = mango_option.PriceTableAxes4D()
-    axes.grids = [
-        np.array([math.log(0.8), math.log(0.9), math.log(1.0), math.log(1.1), math.log(1.2)]),
-        np.array([0.1, 0.25, 0.5, 1.0]),
-        np.array([0.1, 0.2, 0.3, 0.4]),
-        np.array([0.01, 0.03, 0.05, 0.07])
-    ]
+    config = mango_option.IVSolverFactoryConfig()
+    config.option_type = mango_option.OptionType.PUT
+    config.spot = 100.0
+    config.dividend_yield = 0.02
+    config.grid.moneyness = [0.8, 0.9, 1.0, 1.1, 1.2]
+    config.grid.vol = [0.10, 0.20, 0.30, 0.40]
+    config.grid.rate = [0.01, 0.03, 0.05, 0.07]
 
-    meta = mango_option.PriceTableMetadata()
-    meta.K_ref = 100.0
-    meta.dividends.dividend_yield = 0.02
-    meta.m_min = math.log(0.8)
-    meta.m_max = math.log(1.2)
+    path = mango_option.StandardIVPath()
+    path.maturity_grid = [0.1, 0.25, 0.5, 1.0]
+    config.path = path
 
-    shape = axes.shape()
-    coeffs = np.random.rand(shape[0] * shape[1] * shape[2] * shape[3]) * 10.0
+    solver = mango_option.make_interpolated_iv_solver(config)
+    print("✓ Created InterpolatedIVSolver via factory")
 
-    surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
-
-    # Create solver via AmericanPriceSurface
-    aps = mango_option.AmericanPriceSurface.create(surface, mango_option.OptionType.PUT)
-    config = mango_option.InterpolatedIVSolverConfig()
-    config.max_iter = 50
-    config.tolerance = 1e-6
-
-    solver = mango_option.InterpolatedIVSolver.create(aps, config)
-    print("✓ Created InterpolatedIVSolver via AmericanPriceSurface")
-
-    # Note: With random coefficients, the solver may not converge
-    # but we can verify the API works
     query = mango_option.IVQuery()
     query.spot = 100.0
     query.strike = 100.0
@@ -406,37 +389,32 @@ def test_error_handling():
         print("✓ Wrong number of grids raises ValueError")
 
 
-def test_surface_to_solver_integration():
-    """Verify PriceTableSurface correctly passes to InterpolatedIVSolver"""
-    import math
-    print("Testing surface to solver integration...")
+def test_iv_solver_config_defaults():
+    """Verify IVSolverFactoryConfig field defaults"""
+    print("Testing IVSolverFactoryConfig defaults...")
 
-    # Build surface
-    axes = mango_option.PriceTableAxes4D()
-    axes.grids = [
-        np.array([math.log(0.8), math.log(0.9), math.log(1.0), math.log(1.1), math.log(1.2)]),
-        np.array([0.1, 0.25, 0.5, 1.0]),
-        np.array([0.1, 0.2, 0.3, 0.4]),
-        np.array([0.01, 0.03, 0.05, 0.07])
-    ]
+    config = mango_option.IVSolverFactoryConfig()
+    assert config.option_type == mango_option.OptionType.PUT
+    assert config.spot == 100.0
+    assert config.dividend_yield == 0.0
+    assert config.adaptive is None
+    print("✓ Config defaults correct")
 
-    meta = mango_option.PriceTableMetadata()
-    meta.K_ref = 100.0
-    meta.dividends.dividend_yield = 0.02
-    meta.m_min = math.log(0.8)
-    meta.m_max = math.log(1.2)
+    # Setting adaptive
+    adaptive = mango_option.AdaptiveGridParams()
+    assert adaptive.target_iv_error > 0
+    config.adaptive = adaptive
+    assert config.adaptive is not None
+    config.adaptive = None
+    assert config.adaptive is None
+    print("✓ Adaptive optional works")
 
-    shape = axes.shape()
-    coeffs = np.random.rand(shape[0] * shape[1] * shape[2] * shape[3]) * 10.0
-
-    surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
-
-    # Verify surface can be passed to InterpolatedIVSolver via AmericanPriceSurface
-    aps = mango_option.AmericanPriceSurface.create(surface, mango_option.OptionType.PUT)
-    config = mango_option.InterpolatedIVSolverConfig()
-    solver = mango_option.InterpolatedIVSolver.create(aps, config)
-    assert solver is not None
-    print("✓ Surface correctly passes to InterpolatedIVSolver via AmericanPriceSurface")
+    # Path variant
+    std_path = mango_option.StandardIVPath()
+    config.path = std_path
+    seg_path = mango_option.SegmentedIVPath()
+    config.path = seg_path
+    print("✓ Path variant setter works")
 
 
 if __name__ == "__main__":
@@ -456,7 +434,7 @@ if __name__ == "__main__":
         test_iv_solver_interpolated,
         test_load_error_enum,
         test_error_handling,
-        test_surface_to_solver_integration,
+        test_iv_solver_config_defaults,
     ]
 
     failed = 0
