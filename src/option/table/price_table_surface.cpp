@@ -7,8 +7,8 @@
 namespace mango {
 
 template <size_t N>
-PriceTableSurface<N>::PriceTableSurface(
-    PriceTableAxes<N> axes,
+PriceTableSurfaceND<N>::PriceTableSurfaceND(
+    PriceTableAxesND<N> axes,
     PriceTableMetadata metadata,
     std::unique_ptr<BSplineND<double, N>> spline)
     : axes_(std::move(axes))
@@ -16,9 +16,9 @@ PriceTableSurface<N>::PriceTableSurface(
     , spline_(std::move(spline)) {}
 
 template <size_t N>
-std::expected<std::shared_ptr<const PriceTableSurface<N>>, PriceTableError>
-PriceTableSurface<N>::build(
-    PriceTableAxes<N> axes,
+std::expected<std::shared_ptr<const PriceTableSurfaceND<N>>, PriceTableError>
+PriceTableSurfaceND<N>::build(
+    PriceTableAxesND<N> axes,
     std::vector<double> coeffs,
     PriceTableMetadata metadata)
 {
@@ -66,31 +66,31 @@ PriceTableSurface<N>::build(
 
     auto spline = std::make_unique<BSplineND<double, N>>(std::move(spline_result.value()));
 
-    auto surface = std::shared_ptr<const PriceTableSurface<N>>(
-        new PriceTableSurface<N>(std::move(axes), std::move(metadata), std::move(spline)));
+    auto surface = std::shared_ptr<const PriceTableSurfaceND<N>>(
+        new PriceTableSurfaceND<N>(std::move(axes), std::move(metadata), std::move(spline)));
 
     return surface;
 }
 
 template <size_t N>
-double PriceTableSurface<N>::value(const std::array<double, N>& coords) const {
+double PriceTableSurfaceND<N>::value(const std::array<double, N>& coords) const {
     return spline_->eval(coords);
 }
 
 template <size_t N>
-double PriceTableSurface<N>::partial(size_t axis, const std::array<double, N>& coords) const {
+double PriceTableSurfaceND<N>::partial(size_t axis, const std::array<double, N>& coords) const {
     return spline_->eval_partial(axis, coords);
 }
 
 template <size_t N>
-double PriceTableSurface<N>::second_partial(size_t axis, const std::array<double, N>& coords) const {
+double PriceTableSurfaceND<N>::second_partial(size_t axis, const std::array<double, N>& coords) const {
     return spline_->eval_second_partial(axis, coords);
 }
 
 // Explicit template instantiations
-template class PriceTableSurface<2>;
-template class PriceTableSurface<3>;
-template class PriceTableSurface<4>;
-template class PriceTableSurface<5>;
+template class PriceTableSurfaceND<2>;
+template class PriceTableSurfaceND<3>;
+template class PriceTableSurfaceND<4>;
+template class PriceTableSurfaceND<5>;
 
 } // namespace mango

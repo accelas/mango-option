@@ -25,7 +25,7 @@ namespace mango {
 /// Full yield curve support is available in the FDM solver (AmericanOptionSolver,
 /// IVSolver) where the time-varying rate flows through the PDE discretization.
 ///
-/// Limitation: Interpolation-based solvers (InterpolatedIVSolver, PriceTableSurface)
+/// Limitation: Interpolation-based solvers (InterpolatedIVSolver, PriceTableSurfaceND)
 /// use a scalar rate axis. When a YieldCurve is provided, it is collapsed to a
 /// zero rate: -ln(D(T))/T. This provides a reasonable flat-rate approximation
 /// but does not capture the full term structure dynamics.

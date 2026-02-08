@@ -233,7 +233,7 @@ std::expected<PriceTableWorkspace, std::string> PriceTableWorkspace::create(
     double dividend_yield,
     double m_min,
     double m_max,
-    uint8_t surface_content)
+    SurfaceContent surface_content)
 {
     // Validate inputs first
     auto validation = validate_inputs(log_m_grid, tau_grid, sigma_grid, r_grid, coefficients);

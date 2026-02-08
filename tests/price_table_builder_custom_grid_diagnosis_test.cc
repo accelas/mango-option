@@ -20,9 +20,9 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
         .dividends = {.dividend_yield = 0.02}
     };
 
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0)};
     axes.grids[1] = {0.1, 0.5, 1.0};  // 3 maturity points
     axes.grids[2] = {0.20};           // 1 vol

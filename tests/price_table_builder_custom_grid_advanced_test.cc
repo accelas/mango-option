@@ -21,9 +21,9 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
         .dividends = {.dividend_yield = 0.02}
     };
 
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.20, 0.25};
@@ -90,10 +90,10 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
         .dividends = {.dividend_yield = 0.02}
     };
 
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
     // Include moneyness = 1.0 (ATM point, log(1.0) = 0.0)
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.95), std::log(1.0), std::log(1.05), std::log(1.10)};  // Includes exact ATM (log(1.0)=0.0)
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.20};
@@ -163,9 +163,9 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, SimulatePlanModification) {
         .dividends = {.dividend_yield = 0.02}
     };
 
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)};
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.15, 0.20, 0.25, 0.30};

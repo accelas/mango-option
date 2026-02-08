@@ -39,7 +39,7 @@ namespace {
 
 struct EEPFixture {
     StandardSurfaceWrapper wrapper;
-    std::shared_ptr<const PriceTableSurface<4>> surface;
+    std::shared_ptr<const PriceTableSurface> surface;
     double K_ref;
     double dividend_yield;
     OptionType type;
@@ -63,16 +63,16 @@ const EEPFixture& GetEEPFixture() {
         double K_ref = 100.0;
         double q = 0.02;
 
-        auto result = PriceTableBuilder<4>::from_vectors(
+        auto result = PriceTableBuilder::from_vectors(
             m_grid, tau_grid, vol_grid, rate_grid, K_ref,
             GridAccuracyParams{}, OptionType::PUT, q);
         if (!result) {
-            throw std::runtime_error("Failed to create PriceTableBuilder");
+            throw std::runtime_error("Failed to create PriceTableBuilderND");
         }
         auto [builder, axes] = std::move(result.value());
         EEPDecomposer decomposer{OptionType::PUT, K_ref, q};
         auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });
         if (!table) {

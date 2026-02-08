@@ -24,7 +24,7 @@ namespace mango {
 // =====================================================================
 
 template class InterpolatedIVSolver<StandardSurfaceWrapper>;
-template class InterpolatedIVSolver<MultiKRefSurfaceWrapperPI>;
+template class InterpolatedIVSolver<MultiKRefPriceWrapper>;
 
 // =====================================================================
 // Factory internals
@@ -46,8 +46,8 @@ to_log_moneyness(const std::vector<double>& moneyness) {
     return log_m;
 }
 
-/// Build a MultiKRefSurfacePI for manual grid path
-std::expected<MultiKRefSurfacePI, PriceTableError> build_multi_kref_manual(
+/// Build a MultiKRefPriceSurface for manual grid path
+std::expected<MultiKRefPriceSurface, PriceTableError> build_multi_kref_manual(
     double spot,
     OptionType option_type,
     const DividendSpec& dividends,
@@ -128,7 +128,7 @@ AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<StandardSurfaceWrapper> solver)
     : solver_(std::move(solver))
 {}
 
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapperPI> solver)
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefPriceWrapper> solver)
     : solver_(std::move(solver))
 {}
 
@@ -149,7 +149,7 @@ BatchIVResult AnyIVSolver::solve_batch(const std::vector<IVQuery>& queries) cons
 // ---------------------------------------------------------------------------
 
 static std::expected<AnyIVSolver, ValidationError>
-wrap_surface(std::shared_ptr<const PriceTableSurface<4>> surface,
+wrap_surface(std::shared_ptr<const PriceTableSurface> surface,
              OptionType option_type,
              const InterpolatedIVSolverConfig& solver_config) {
     auto wrapper = make_standard_wrapper(surface, option_type);
@@ -217,7 +217,7 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
     if (!log_m.has_value()) {
         return std::unexpected(log_m.error());
     }
-    auto setup = PriceTableBuilder<4>::from_vectors(
+    auto setup = PriceTableBuilder::from_vectors(
         std::move(*log_m), path.maturity_grid, config.grid.vol, config.grid.rate,
         config.spot, GridAccuracyParams{}, config.option_type,
         config.dividend_yield);
@@ -231,7 +231,7 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
     // Standard path: decompose tensor to EEP before B-spline fitting
     EEPDecomposer decomposer{config.option_type, config.spot, config.dividend_yield};
     auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     if (!table_result.has_value()) {
@@ -246,23 +246,23 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
 // Factory: segmented path helpers
 // ---------------------------------------------------------------------------
 
-/// Wrap a MultiKRefSurfacePI into AnyIVSolver
+/// Wrap a MultiKRefPriceSurface into AnyIVSolver
 static std::expected<AnyIVSolver, ValidationError>
-wrap_multi_kref_surface(MultiKRefSurfacePI surface,
+wrap_multi_kref_surface(MultiKRefPriceSurface surface,
                         const GridBounds& b, double maturity,
                         OptionType option_type, double dividend_yield,
                         const InterpolatedIVSolverConfig& solver_config) {
-    MultiKRefSurfaceWrapperPI::Bounds bounds{
+    MultiKRefPriceWrapper::Bounds bounds{
         .m_min = b.m_min, .m_max = b.m_max,
         .tau_min = 0.0, .tau_max = maturity,
         .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
         .rate_min = b.rate_min, .rate_max = b.rate_max,
     };
 
-    auto wrapper = MultiKRefSurfaceWrapperPI(
+    auto wrapper = MultiKRefPriceWrapper(
         std::move(surface), bounds, option_type, dividend_yield);
 
-    auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapperPI>::create(
+    auto solver = InterpolatedIVSolver<MultiKRefPriceWrapper>::create(
         std::move(wrapper), solver_config);
     if (!solver.has_value()) {
         return std::unexpected(ValidationError{

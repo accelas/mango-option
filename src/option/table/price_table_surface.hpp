@@ -17,7 +17,7 @@ namespace mango {
 ///
 /// @tparam N Number of dimensions
 template <size_t N>
-class PriceTableSurface {
+class PriceTableSurfaceND {
 public:
     /// Build surface from axes, coefficients, and metadata
     ///
@@ -25,11 +25,11 @@ public:
     /// @param coeffs Flattened B-spline coefficients (row-major)
     /// @param metadata Reference strike, dividends, etc.
     /// @return Shared pointer to surface or error
-    [[nodiscard]] static std::expected<std::shared_ptr<const PriceTableSurface<N>>, PriceTableError>
-    build(PriceTableAxes<N> axes, std::vector<double> coeffs, PriceTableMetadata metadata);
+    [[nodiscard]] static std::expected<std::shared_ptr<const PriceTableSurfaceND<N>>, PriceTableError>
+    build(PriceTableAxesND<N> axes, std::vector<double> coeffs, PriceTableMetadata metadata);
 
     /// Access axes
-    [[nodiscard]] const PriceTableAxes<N>& axes() const noexcept { return axes_; }
+    [[nodiscard]] const PriceTableAxesND<N>& axes() const noexcept { return axes_; }
 
     /// Access metadata
     [[nodiscard]] const PriceTableMetadata& metadata() const noexcept { return meta_; }
@@ -58,12 +58,15 @@ public:
     [[nodiscard]] double second_partial(size_t axis, const std::array<double, N>& coords) const;
 
 private:
-    PriceTableSurface(PriceTableAxes<N> axes, PriceTableMetadata metadata,
+    PriceTableSurfaceND(PriceTableAxesND<N> axes, PriceTableMetadata metadata,
                      std::unique_ptr<BSplineND<double, N>> spline);
 
-    PriceTableAxes<N> axes_;
+    PriceTableAxesND<N> axes_;
     PriceTableMetadata meta_;
     std::unique_ptr<BSplineND<double, N>> spline_;
 };
+
+/// Convenience alias for the common 4D case.
+using PriceTableSurface = PriceTableSurfaceND<kPriceTableDim>;
 
 } // namespace mango

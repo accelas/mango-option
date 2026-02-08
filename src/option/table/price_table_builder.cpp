@@ -20,15 +20,15 @@
 namespace mango {
 
 template <size_t N>
-PriceTableBuilder<N>::PriceTableBuilder(PriceTableConfig config)
+PriceTableBuilderND<N>::PriceTableBuilderND(PriceTableConfig config)
     : config_(std::move(config)) {}
 
 template <size_t N>
 std::expected<PriceTableResult<N>, PriceTableError>
-PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes,
+PriceTableBuilderND<N>::build(const PriceTableAxesND<N>& axes,
                             SurfaceContent content,
                             TensorTransformFn transform) {
-    static_assert(N == 4, "PriceTableBuilder only supports N=4");
+    static_assert(N == 4, "PriceTableBuilderND only supports N=4");
 
     // Validate config
     if (auto err = validate_config(config_); err.has_value()) {
@@ -141,7 +141,7 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes,
     };
 
     // Step 7: Build immutable surface
-    auto surface_result = PriceTableSurface<N>::build(axes, std::move(coefficients), metadata);
+    auto surface_result = PriceTableSurfaceND<N>::build(axes, std::move(coefficients), metadata);
     if (!surface_result.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
     }
@@ -168,8 +168,8 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes,
 
 template <size_t N>
 std::vector<PricingParams>
-PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
-    static_assert(N == 4, "PriceTableBuilder only supports N=4");
+PriceTableBuilderND<N>::make_batch(const PriceTableAxesND<N>& axes) const {
+    static_assert(N == 4, "PriceTableBuilderND only supports N=4");
 
     std::vector<PricingParams> batch;
 
@@ -208,7 +208,7 @@ template <size_t N>
 static void ensure_moneyness_coverage(
     GridAccuracyParams& accuracy,
     const std::vector<PricingParams>& batch,
-    const PriceTableAxes<N>& axes)
+    const PriceTableAxesND<N>& axes)
 {
     const double log_m_min = axes.grids[0].front();
     const double log_m_max = axes.grids[0].back();
@@ -229,9 +229,9 @@ static void ensure_moneyness_coverage(
 
 template <size_t N>
 std::pair<GridSpec<double>, TimeDomain>
-PriceTableBuilder<N>::estimate_pde_grid(
+PriceTableBuilderND<N>::estimate_pde_grid(
     const std::vector<PricingParams>& batch,
-    const PriceTableAxes<N>& axes) const
+    const PriceTableAxesND<N>& axes) const
 {
     auto accuracy = std::get<GridAccuracyParams>(config_.pde_grid);
     ensure_moneyness_coverage<N>(accuracy, batch, axes);
@@ -248,11 +248,11 @@ PriceTableBuilder<N>::estimate_pde_grid(
 
 template <size_t N>
 BatchAmericanOptionResult
-PriceTableBuilder<N>::solve_batch(
+PriceTableBuilderND<N>::solve_batch(
     const std::vector<PricingParams>& batch,
-    const PriceTableAxes<N>& axes) const
+    const PriceTableAxesND<N>& axes) const
 {
-    static_assert(N == 4, "PriceTableBuilder only supports N=4");
+    static_assert(N == 4, "PriceTableBuilderND only supports N=4");
 
     BatchAmericanOptionSolver solver;
 
@@ -344,11 +344,11 @@ PriceTableBuilder<N>::solve_batch(
 
 template <size_t N>
 std::expected<ExtractionResult<N>, PriceTableError>
-PriceTableBuilder<N>::extract_tensor(
+PriceTableBuilderND<N>::extract_tensor(
     const BatchAmericanOptionResult& batch,
-    const PriceTableAxes<N>& axes) const
+    const PriceTableAxesND<N>& axes) const
 {
-    static_assert(N == 4, "PriceTableBuilder only supports N=4");
+    static_assert(N == 4, "PriceTableBuilderND only supports N=4");
 
     const size_t Nm = axes.grids[0].size();  // moneyness
     const size_t Nt = axes.grids[1].size();  // maturity
@@ -366,7 +366,7 @@ PriceTableBuilder<N>::extract_tensor(
 
     // Create tensor
     std::array<size_t, N> shape = {Nm, Nt, Nσ, Nr};
-    auto tensor_result = PriceTensor<N>::create(shape);
+    auto tensor_result = PriceTensorND<N>::create(shape);
     if (!tensor_result.has_value()) {
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::TensorCreationFailed, 0, axes.total_points()});
@@ -451,15 +451,15 @@ PriceTableBuilder<N>::extract_tensor(
 }
 
 template <size_t N>
-std::expected<typename PriceTableBuilder<N>::FitCoeffsResult, PriceTableError>
-PriceTableBuilder<N>::fit_coeffs(
-    const PriceTensor<N>& tensor,
-    const PriceTableAxes<N>& axes) const
+std::expected<typename PriceTableBuilderND<N>::FitCoeffsResult, PriceTableError>
+PriceTableBuilderND<N>::fit_coeffs(
+    const PriceTensorND<N>& tensor,
+    const PriceTableAxesND<N>& axes) const
 {
-    static_assert(N == 4, "PriceTableBuilder only supports N=4");
+    static_assert(N == 4, "PriceTableBuilderND only supports N=4");
 
     // Extract grids for BSplineNDSeparable
-    // Axis 0 is already log-moneyness, matching PriceTableSurface's coordinate system.
+    // Axis 0 is already log-moneyness, matching PriceTableSurfaceND's coordinate system.
     std::array<std::vector<double>, N> grids;
     for (size_t i = 0; i < N; ++i) {
         grids[i] = axes.grids[i];
@@ -511,8 +511,8 @@ std::vector<double> sort_and_dedupe(std::vector<double> v) {
 
 // Factory method implementations (explicit specialization for N=4)
 template <>
-PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_vectors(
+PriceTableBuilderND<4>::Setup
+PriceTableBuilderND<4>::from_vectors(
     std::vector<double> log_moneyness,
     std::vector<double> maturity,
     std::vector<double> volatility,
@@ -541,7 +541,7 @@ PriceTableBuilder<4>::from_vectors(
     }
 
     // Build axes
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = std::move(log_moneyness);
     axes.grids[1] = std::move(maturity);
     axes.grids[2] = std::move(volatility);
@@ -561,12 +561,12 @@ PriceTableBuilder<4>::from_vectors(
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
-    return std::make_pair(PriceTableBuilder<4>(config), std::move(axes));
+    return std::make_pair(PriceTableBuilderND<4>(config), std::move(axes));
 }
 
 template <>
-PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_strikes(
+PriceTableBuilderND<4>::Setup
+PriceTableBuilderND<4>::from_strikes(
     double spot,
     std::vector<double> strikes,
     std::vector<double> maturities,
@@ -612,8 +612,8 @@ PriceTableBuilder<4>::from_strikes(
 }
 
 template <>
-PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_grid(
+PriceTableBuilderND<4>::Setup
+PriceTableBuilderND<4>::from_grid(
     const OptionGrid& chain,
     PDEGridSpec pde_grid,
     OptionType type,
@@ -633,8 +633,8 @@ PriceTableBuilder<4>::from_grid(
 }
 
 template <>
-PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_grid_auto(
+PriceTableBuilderND<4>::Setup
+PriceTableBuilderND<4>::from_grid_auto(
     const OptionGrid& chain,
     PDEGridSpec pde_grid,
     OptionType type,
@@ -687,8 +687,8 @@ PriceTableBuilder<4>::from_grid_auto(
 }
 
 template <>
-PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_grid_auto_profile(
+PriceTableBuilderND<4>::Setup
+PriceTableBuilderND<4>::from_grid_auto_profile(
     const OptionGrid& chain,
     PriceTableGridProfile grid_profile,
     GridAccuracyProfile pde_profile,
@@ -743,7 +743,7 @@ PriceTableBuilder<4>::from_grid_auto_profile(
 
 template <size_t N>
 std::optional<std::pair<size_t, size_t>>
-PriceTableBuilder<N>::find_nearest_valid_neighbor(
+PriceTableBuilderND<N>::find_nearest_valid_neighbor(
     size_t σ_idx, size_t r_idx, size_t Nσ, size_t Nr,
     const std::vector<bool>& slice_valid) const
 {
@@ -770,11 +770,11 @@ PriceTableBuilder<N>::find_nearest_valid_neighbor(
 
 template <size_t N>
 std::expected<RepairStats, PriceTableError>
-PriceTableBuilder<N>::repair_failed_slices(
-    PriceTensor<N>& tensor,
+PriceTableBuilderND<N>::repair_failed_slices(
+    PriceTensorND<N>& tensor,
     const std::vector<size_t>& failed_pde,
     const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
-    const PriceTableAxes<N>& axes) const
+    const PriceTableAxesND<N>& axes) const
 {
     const size_t Nm = axes.grids[0].size();
     const size_t Nt = axes.grids[1].size();
@@ -884,6 +884,6 @@ PriceTableBuilder<N>::repair_failed_slices(
 }
 
 // Explicit instantiation (only N=4 supported)
-template class PriceTableBuilder<4>;
+template class PriceTableBuilderND<4>;
 
 } // namespace mango

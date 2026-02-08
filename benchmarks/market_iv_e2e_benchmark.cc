@@ -19,7 +19,7 @@
  * ```cpp
  * // Step 1: Define option surface grid (from market data)
  * auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0).value();
- * auto [builder, axes] = PriceTableBuilder<4>::from_vectors(
+ * auto [builder, axes] = PriceTableBuilder::from_vectors(
  *     {0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2},  // moneyness
  *     {0.1, 0.25, 0.5, 1.0, 2.0},              // maturity
  *     {0.15, 0.20, 0.25, 0.30, 0.40},          // volatility
@@ -32,7 +32,7 @@
  * // Step 2: Build price table with EEP decomposition (one-time precomputation)
  * EEPDecomposer decomposer{OptionType::PUT, K_ref, dividend};
  * auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
- *     [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+ *     [&](PriceTensor& tensor, const PriceTableAxes& a) {
  *         decomposer.decompose(tensor, a);
  *     });
  *
@@ -188,7 +188,7 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
         }
         auto grid_spec = grid_spec_result.value();
 
-        auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+        auto builder_axes_result = PriceTableBuilder::from_vectors(
             grid.moneyness,
             grid.maturities,
             grid.volatilities,
@@ -199,7 +199,7 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
             grid.dividend);
 
         if (!builder_axes_result) {
-            state.SkipWithError("PriceTableBuilder::from_vectors failed");
+            state.SkipWithError("PriceTableBuilderND::from_vectors failed");
             return;
         }
         auto [builder, axes] = std::move(builder_axes_result.value());
@@ -208,7 +208,7 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
         auto result = builder.build(axes);
 
         if (!result) {
-            state.SkipWithError("PriceTableBuilder::build failed");
+            state.SkipWithError("PriceTableBuilderND::build failed");
             return;
         }
 
@@ -241,7 +241,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     }
     auto grid_spec = grid_spec_result.value();
 
-    auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_axes_result = PriceTableBuilder::from_vectors(
         grid.moneyness,
         grid.maturities,
         grid.volatilities,
@@ -252,19 +252,19 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
         grid.dividend);
 
     if (!builder_axes_result) {
-        state.SkipWithError("PriceTableBuilder::from_vectors failed");
+        state.SkipWithError("PriceTableBuilderND::from_vectors failed");
         return;
     }
     auto [builder, axes] = std::move(builder_axes_result.value());
 
     EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
     auto price_table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
 
     if (!price_table_result) {
-        state.SkipWithError("PriceTableBuilder::build failed");
+        state.SkipWithError("PriceTableBuilderND::build failed");
         return;
     }
 
@@ -360,7 +360,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         }
         auto grid_spec = grid_spec_result.value();
 
-        auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+        auto builder_axes_result = PriceTableBuilder::from_vectors(
             grid.moneyness,
             grid.maturities,
             grid.volatilities,
@@ -371,19 +371,19 @@ static void BM_API_EndToEnd(benchmark::State& state) {
             grid.dividend);
 
         if (!builder_axes_result) {
-            state.SkipWithError("PriceTableBuilder::from_vectors failed");
+            state.SkipWithError("PriceTableBuilderND::from_vectors failed");
             return;
         }
         auto [builder, axes] = std::move(builder_axes_result.value());
 
         EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
         auto price_table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });
 
         if (!price_table_result) {
-            state.SkipWithError("PriceTableBuilder::build failed");
+            state.SkipWithError("PriceTableBuilderND::build failed");
             return;
         }
         auto price_table = std::move(price_table_result.value());

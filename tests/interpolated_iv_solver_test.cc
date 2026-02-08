@@ -26,14 +26,14 @@ protected:
         std::vector<double> vol_grid = {0.10, 0.20, 0.30, 0.40};
         std::vector<double> rate_grid = {0.02, 0.04, 0.06, 0.08};
 
-        auto result = PriceTableBuilder<4>::from_vectors(
+        auto result = PriceTableBuilder::from_vectors(
             m_grid, tau_grid, vol_grid, rate_grid, K_ref_,
             GridAccuracyParams{}, OptionType::PUT, 0.0);
         ASSERT_TRUE(result.has_value()) << "Failed to build";
         auto [builder, axes] = std::move(result.value());
         EEPDecomposer decomposer{OptionType::PUT, K_ref_, 0.0};
         auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });
         ASSERT_TRUE(table.has_value()) << "Failed to build table";
@@ -46,7 +46,7 @@ protected:
         return std::move(*result);
     }
 
-    std::shared_ptr<const PriceTableSurface<4>> surface_;
+    std::shared_ptr<const PriceTableSurface> surface_;
     static constexpr double K_ref_ = 100.0;
 };
 
@@ -218,7 +218,7 @@ TEST_F(InterpolatedIVSolverTest, ConvergenceWithinIterations) {
 
 TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
     // Build an EEP surface (axis 0 is log-moneyness)
-    PriceTableAxes<4> eep_axes;
+    PriceTableAxes eep_axes;
     eep_axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     eep_axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
     eep_axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
@@ -232,7 +232,7 @@ TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
         .content = SurfaceContent::EarlyExercisePremium,
     };
 
-    auto eep_surface = PriceTableSurface<4>::build(eep_axes, eep_coeffs, eep_meta);
+    auto eep_surface = PriceTableSurface::build(eep_axes, eep_coeffs, eep_meta);
     ASSERT_TRUE(eep_surface.has_value());
 
     auto wrapper_result = make_standard_wrapper(eep_surface.value(), OptionType::PUT);
@@ -277,14 +277,14 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
     std::vector<double> rate_grid = {0.02, 0.04, 0.06, 0.08};
     constexpr double K_ref = 100.0;
 
-    auto result = PriceTableBuilder<4>::from_vectors(
+    auto result = PriceTableBuilder::from_vectors(
         m_grid, tau_grid, vol_grid, rate_grid, K_ref,
         GridAccuracyParams{}, OptionType::PUT, 0.0);
     ASSERT_TRUE(result.has_value());
     auto [builder, axes] = std::move(result.value());
     EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
     auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     ASSERT_TRUE(table.has_value());
@@ -317,14 +317,14 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
     constexpr double K_ref = 100.0;
     constexpr double div_yield = 0.02;
 
-    auto result = PriceTableBuilder<4>::from_vectors(
+    auto result = PriceTableBuilder::from_vectors(
         m_grid, tau_grid, vol_grid, rate_grid, K_ref,
         GridAccuracyParams{}, OptionType::PUT, div_yield);
     ASSERT_TRUE(result.has_value());
     auto [builder, axes] = std::move(result.value());
     EEPDecomposer decomposer2{OptionType::PUT, K_ref, div_yield};
     auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer2.decompose(tensor, a);
         });
     ASSERT_TRUE(table.has_value());

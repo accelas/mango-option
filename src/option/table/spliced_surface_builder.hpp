@@ -9,14 +9,12 @@
 
 namespace mango {
 
-template <size_t N> class PriceTableSurface;
-
 // ===========================================================================
 // Segmented surface builder
 // ===========================================================================
 
 struct SegmentConfig {
-    std::shared_ptr<const PriceTableSurface<4>> surface;
+    std::shared_ptr<const PriceTableSurface> surface;
     double tau_start;
     double tau_end;
 };
@@ -26,7 +24,7 @@ struct SegmentedConfig {
     double K_ref;
 };
 
-[[nodiscard]] std::expected<SegmentedSurfacePI, PriceTableError>
+[[nodiscard]] std::expected<SegmentedPriceSurface, PriceTableError>
 build_segmented_surface(SegmentedConfig config);
 
 // ===========================================================================
@@ -35,10 +33,10 @@ build_segmented_surface(SegmentedConfig config);
 
 struct MultiKRefEntry {
     double K_ref;
-    SegmentedSurfacePI surface;
+    SegmentedPriceSurface surface;
 };
 
-[[nodiscard]] std::expected<MultiKRefSurfacePI, PriceTableError>
+[[nodiscard]] std::expected<MultiKRefPriceSurface, PriceTableError>
 build_multi_kref_surface(std::vector<MultiKRefEntry> entries);
 
 }  // namespace mango

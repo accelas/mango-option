@@ -7,7 +7,7 @@
 
 TEST(PriceTableBuilderResultTest, BuildReturnsDiagnostics) {
     // Create minimal valid axes (4 points per axis for B-spline)
-    mango::PriceTableAxes<4> axes;
+    mango::PriceTableAxes axes;
     axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)};  // log-moneyness
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};  // maturity
     axes.grids[2] = {0.15, 0.20, 0.25, 0.30};  // volatility
@@ -19,7 +19,7 @@ TEST(PriceTableBuilderResultTest, BuildReturnsDiagnostics) {
     config.K_ref = 100.0;
     config.pde_grid = mango::PDEGridConfig{mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(), 100};
 
-    mango::PriceTableBuilder<4> builder(config);
+    mango::PriceTableBuilder builder(config);
     auto result = builder.build(axes);
 
     ASSERT_TRUE(result.has_value()) << "Build failed: " << result.error();

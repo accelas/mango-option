@@ -15,7 +15,7 @@ constexpr int kCubicSplineDegree = 3;
 
 /// Context for sampling a previous segment's surface as an initial condition.
 struct ChainedICContext {
-    std::shared_ptr<const PriceTableSurface<4>> prev_surface;
+    std::shared_ptr<const PriceTableSurface> prev_surface;
     double K_ref;
     double prev_tau_end;   ///< Previous segment's local τ at its far boundary
     double boundary_div;   ///< Discrete dividend amount at this boundary
@@ -121,7 +121,7 @@ void append_upper_tail_log_moneyness(std::vector<double>& log_grid,
 
 }  // namespace
 
-std::expected<SegmentedSurfacePI, PriceTableError>
+std::expected<SegmentedPriceSurface, PriceTableError>
 SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Validate inputs
@@ -246,7 +246,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     segment_configs.reserve(n_segments);
 
     // The "previous" surface, used to generate chained ICs for earlier segments.
-    std::shared_ptr<const PriceTableSurface<4>> prev_surface;
+    std::shared_ptr<const PriceTableSurface> prev_surface;
 
     for (size_t seg_idx = 0; seg_idx < n_segments; ++seg_idx) {
         double tau_start = boundaries[seg_idx];
@@ -258,8 +258,8 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             0.0, seg_width, config.tau_points_per_segment,
             config.tau_target_dt, config.tau_points_min, config.tau_points_max);
 
-        // Build PriceTableBuilder for this segment
-        auto setup = PriceTableBuilder<4>::from_vectors(
+        // Build PriceTableBuilderND for this segment
+        auto setup = PriceTableBuilder::from_vectors(
             expanded_log_m_grid, local_tau, config.grid.vol, config.grid.rate,
             K_ref, config.pde_accuracy, config.option_type,
             config.dividends.dividend_yield);
@@ -367,14 +367,14 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         }
         auto coeffs = std::move(fit_result->coefficients);
 
-        // 10. Build PriceTableSurface
+        // 10. Build PriceTableSurfaceND
         PriceTableMetadata metadata{
             .K_ref = K_ref,
             .dividends = {.dividend_yield = config.dividends.dividend_yield},
             .content = SurfaceContent::NormalizedPrice,
         };
 
-        auto surface = PriceTableSurface<4>::build(
+        auto surface = PriceTableSurface::build(
             axes, std::move(coeffs), metadata);
         if (!surface.has_value()) {
             return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});

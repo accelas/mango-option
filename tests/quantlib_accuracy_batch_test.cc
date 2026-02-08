@@ -110,7 +110,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
             << "Interpolated IV test expects a single dividend yield across scenarios";
     }
 
-    auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_axes_result = PriceTableBuilder::from_vectors(
         moneyness_grid,
         maturity_grid,
         vol_grid,
@@ -126,7 +126,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     // Pre-compute prices for PUT options with EEP decomposition
     EEPDecomposer decomposer{OptionType::PUT, 100.0, dividend_yield};
     auto precompute_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     ASSERT_TRUE(precompute_result.has_value())

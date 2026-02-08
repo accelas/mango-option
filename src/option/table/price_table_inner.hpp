@@ -9,11 +9,11 @@
 
 namespace mango {
 
-/// Universal adapter wrapping PriceTableSurface<4> for SplicedInner concept.
+/// Universal adapter wrapping PriceTableSurface for SplicedInner concept.
 /// Used by segmented paths (NormalizedPrice content; no EEP reconstruction).
 class PriceTableInner {
 public:
-    explicit PriceTableInner(std::shared_ptr<const PriceTableSurface<4>> surface)
+    explicit PriceTableInner(std::shared_ptr<const PriceTableSurface> surface)
         : surface_(std::move(surface)) {}
 
     [[nodiscard]] double price(const PriceQuery& q) const {
@@ -26,10 +26,10 @@ public:
         return surface_->partial(2, {x, q.tau, q.sigma, q.rate});
     }
 
-    [[nodiscard]] const PriceTableSurface<4>& surface() const { return *surface_; }
+    [[nodiscard]] const PriceTableSurface& surface() const { return *surface_; }
 
 private:
-    std::shared_ptr<const PriceTableSurface<4>> surface_;
+    std::shared_ptr<const PriceTableSurface> surface_;
 };
 
 static_assert(SplicedInner<PriceTableInner>);

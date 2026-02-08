@@ -12,7 +12,7 @@ TEST(PriceTableBuilderTest, DefaultBuildProducesNormalizedPrice) {
     std::vector<double> vol_grid = {0.15, 0.20, 0.30, 0.40};
     std::vector<double> rate_grid = {0.02, 0.03, 0.04, 0.05};
 
-    auto setup = PriceTableBuilder<4>::from_vectors(
+    auto setup = PriceTableBuilder::from_vectors(
         m_grid, tau_grid, vol_grid, rate_grid, 100.0,
         GridAccuracyParams{}, OptionType::PUT);
     ASSERT_TRUE(setup.has_value());
@@ -31,7 +31,7 @@ TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
     std::vector<double> vol_grid = {0.15, 0.20, 0.30, 0.40};
     std::vector<double> rate_grid = {0.02, 0.03, 0.04, 0.05};
 
-    auto setup = PriceTableBuilder<4>::from_vectors(
+    auto setup = PriceTableBuilder::from_vectors(
         m_grid, tau_grid, vol_grid, rate_grid, 100.0,
         GridAccuracyParams{}, OptionType::PUT);
     ASSERT_TRUE(setup.has_value());
@@ -40,7 +40,7 @@ TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
     // Build with EEP decomposition
     EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.0};
     auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     ASSERT_TRUE(result.has_value());

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * @file price_table_4d_integration_test.cc
- * @brief Integration tests for PriceTableBuilder<4> with routing
+ * @brief Integration tests for PriceTableBuilder with routing
  */
 
 #include "mango/option/table/price_table_builder.hpp"
@@ -19,7 +19,7 @@ TEST(PriceTable4DIntegrationTest, FastPathEligible) {
     ASSERT_TRUE(grid_spec_result.has_value());
     auto grid_spec = grid_spec_result.value();
 
-    auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_axes_result = PriceTableBuilder::from_vectors(
         {std::log(0.9), std::log(0.95), std::log(1.0), std::log(1.05), std::log(1.1)},  // Log-moneyness (5 points)
         {0.25, 0.5, 1.0, 2.0},           // Maturity (4 points)
         {0.15, 0.20, 0.25, 0.30},        // Volatility (4 points)
@@ -51,7 +51,7 @@ TEST(PriceTable4DIntegrationTest, FallbackWideRange) {
     ASSERT_TRUE(grid_spec_result.has_value());
     auto grid_spec = grid_spec_result.value();
 
-    auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_axes_result = PriceTableBuilder::from_vectors(
         {std::log(0.5), std::log(0.7), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.3), std::log(1.5)},  // Wide range (7 points)
         {0.25, 0.5, 1.0, 2.0},                // Maturity (4 points)
         {0.15, 0.20, 0.25, 0.30},             // Volatility (4 points)
@@ -87,7 +87,7 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackConsistency) {
     ASSERT_TRUE(grid_spec_fast_result.has_value());
     auto grid_spec_fast = grid_spec_fast_result.value();
 
-    auto builder_fast_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_fast_result = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, volatility, rate, 100.0,
         PDEGridConfig{grid_spec_fast, 1000}, OptionType::PUT, 0.02, 0.0);
     ASSERT_TRUE(builder_fast_result.has_value()) << "Failed to create builder: " << builder_fast_result.error();
@@ -99,7 +99,7 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackConsistency) {
     ASSERT_TRUE(grid_spec_fallback_result.has_value());
     auto grid_spec_fallback = grid_spec_fallback_result.value();
 
-    auto builder_fallback_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_fallback_result = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, volatility, rate, 100.0,
         PDEGridConfig{grid_spec_fallback, 1000}, OptionType::PUT, 0.02, 0.0);
     ASSERT_TRUE(builder_fallback_result.has_value()) << "Failed to create builder: " << builder_fallback_result.error();
@@ -152,7 +152,7 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackNormalizedPriceEquivalence) 
     ASSERT_TRUE(grid_spec_fast_result.has_value());
     auto grid_spec_fast = grid_spec_fast_result.value();
 
-    auto builder_fast_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_fast_result = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, volatility, rate, 100.0,
         PDEGridConfig{grid_spec_fast, 1000}, OptionType::PUT, 0.02, 0.0);
     ASSERT_TRUE(builder_fast_result.has_value()) << "Failed to create builder: " << builder_fast_result.error();
@@ -164,7 +164,7 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackNormalizedPriceEquivalence) 
     ASSERT_TRUE(grid_spec_fallback_result.has_value());
     auto grid_spec_fallback = grid_spec_fallback_result.value();
 
-    auto builder_fallback_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_fallback_result = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, volatility, rate, 100.0,
         PDEGridConfig{grid_spec_fallback, 1000}, OptionType::PUT, 0.02, 0.0);
     ASSERT_TRUE(builder_fallback_result.has_value()) << "Failed to create builder: " << builder_fallback_result.error();
@@ -235,7 +235,7 @@ TEST(PriceTable4DIntegrationTest, PerformanceFastPath) {
     ASSERT_TRUE(grid_spec_result.has_value());
     auto grid_spec = grid_spec_result.value();
 
-    auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_axes_result = PriceTableBuilder::from_vectors(
         {std::log(0.8), std::log(0.85), std::log(0.9), std::log(0.95), std::log(1.0), std::log(1.05), std::log(1.1), std::log(1.15), std::log(1.2)},  // 9 points
         {0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0},              // 7 points
         {0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40},         // 7 points
@@ -264,16 +264,16 @@ TEST(PriceTable4DIntegrationTest, PerformanceFastPath) {
     EXPECT_LT(duration_sec, 60.0);  // Complete within 1 minute
 }
 
-TEST(PriceTableSurface, ConstructsFromAxes) {
+TEST(PriceTableSurfaceND, ConstructsFromAxes) {
     std::vector<double> m = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)};
     std::vector<double> tau = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.04, 0.05};
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids = {m, tau, sigma, r};
 
-    PriceTensor<4> tensor(axes);
+    PriceTensor tensor(axes);
     // Fill with test data
     for (size_t i = 0; i < tensor.data().size(); ++i) {
         tensor.data()[i] = 10.0;
@@ -284,7 +284,7 @@ TEST(PriceTableSurface, ConstructsFromAxes) {
         .dividends = {.dividend_yield = 0.015},
     };
 
-    auto surface = PriceTableSurface<4>::create(axes, std::move(tensor), meta);
+    auto surface = PriceTableSurface::create(axes, std::move(tensor), meta);
     ASSERT_TRUE(surface.has_value());
 
     EXPECT_DOUBLE_EQ(surface->metadata().K_ref, 100.0);

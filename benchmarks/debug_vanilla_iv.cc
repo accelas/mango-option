@@ -60,30 +60,30 @@ int main() {
     std::printf("  European price: %.6f\n", eu_price);
     std::printf("  EEP = Am - Eu: %.6f\n", eep);
 
-    // Layer 3: Build price table with PriceTableBuilder directly
-    std::printf("\n--- Layer 3: PriceTableBuilder Surface ---\n");
+    // Layer 3: Build price table with PriceTableBuilderND directly
+    std::printf("\n--- Layer 3: PriceTableBuilderND Surface ---\n");
     // Need at least 4 points per axis for cubic B-spline
     std::vector<double> moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
     std::vector<double> maturities = {0.25, 0.5, 1.0, 1.5, 2.0};
     std::vector<double> vols = {0.10, 0.15, 0.20, 0.25, 0.30};
     std::vector<double> rates = {0.02, 0.04, 0.05, 0.06, 0.08};
 
-    auto setup = PriceTableBuilder<4>::from_vectors(
+    auto setup = PriceTableBuilder::from_vectors(
         moneyness, maturities, vols, rates,
         kSpot, GridAccuracyParams{}, OptionType::PUT, kDivYield);
     if (!setup.has_value()) {
-        std::fprintf(stderr, "PriceTableBuilder setup failed\n");
+        std::fprintf(stderr, "PriceTableBuilderND setup failed\n");
         return 1;
     }
 
     auto& [builder, axes] = *setup;
     EEPDecomposer decomposer{OptionType::PUT, kSpot, kDivYield};
     auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     if (!table_result.has_value()) {
-        std::fprintf(stderr, "PriceTableBuilder build failed: error code %d\n",
+        std::fprintf(stderr, "PriceTableBuilderND build failed: error code %d\n",
                      static_cast<int>(table_result.error().code));
         return 1;
     }
@@ -186,7 +186,7 @@ int main() {
     // Summary
     std::printf("\n=== Summary ===\n");
     std::printf("  FDM reference:       %.6f\n", fdm_price);
-    std::printf("  PriceTableBuilder:   %.6f (error: %.2f bps)\n",
+    std::printf("  PriceTableBuilderND:   %.6f (error: %.2f bps)\n",
                 wrapper_price, std::abs(wrapper_price - fdm_price) * 10000 / fdm_price);
     std::printf("  AdaptiveGridBuilder: %.6f (error: %.2f bps)\n",
                 adaptive_price, std::abs(adaptive_price - fdm_price) * 10000 / fdm_price);
@@ -194,21 +194,21 @@ int main() {
     // Layer 7: Check what GridAccuracyParams the builder uses
     std::printf("\n--- Layer 7: Grid Accuracy Investigation ---\n");
     std::printf("  Expected EEP (Am - Eu): %.6f\n", eep);
-    std::printf("  PriceTableBuilder raw EEP: %.6f\n", raw_value);
+    std::printf("  PriceTableBuilderND raw EEP: %.6f\n", raw_value);
     std::printf("  Difference: %.6f\n", std::abs(eep - raw_value));
     std::printf("  This IS a grid point, so error is from PDE solver accuracy\n");
 
     // Compare with default vs high-accuracy grid
     std::printf("\n--- Layer 8: High-Accuracy Grid Test ---\n");
     GridAccuracyParams high_acc{.tol = 1e-6};  // High accuracy mode
-    auto setup_hi = PriceTableBuilder<4>::from_vectors(
+    auto setup_hi = PriceTableBuilder::from_vectors(
         moneyness, maturities, vols, rates,
         kSpot, high_acc, OptionType::PUT, kDivYield);
     if (setup_hi.has_value()) {
         auto& [builder_hi, axes_hi] = *setup_hi;
         EEPDecomposer decomposer_hi{OptionType::PUT, kSpot, kDivYield};
         auto result_hi = builder_hi.build(axes_hi, SurfaceContent::EarlyExercisePremium,
-            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer_hi.decompose(tensor, a);
             });
         if (result_hi.has_value()) {
@@ -229,7 +229,7 @@ int main() {
 
     // Layer 9: Direct comparison - what does PDE compute at this point?
     std::printf("\n--- Layer 9: Direct PDE EEP Check ---\n");
-    // PriceTableBuilder computes EEP as: am_price - eu_price
+    // PriceTableBuilderND computes EEP as: am_price - eu_price
     // where am_price = K_ref * normalized_spline_value
     // Let's check what the raw PDE returns
 
@@ -367,7 +367,7 @@ int main() {
         auto x_grid = grid->x();
         auto snapshot = am_result.at_time(2);  // tau=1.0
 
-        // Build cubic spline just like PriceTableBuilder
+        // Build cubic spline just like PriceTableBuilderND
         CubicSpline<double> spline;
         auto build_err = spline.build(x_grid, snapshot);
         if (build_err.has_value()) {
@@ -394,9 +394,9 @@ int main() {
         }
     }
 
-    // Layer 13: Trace through PriceTableBuilder batch solve
-    std::printf("\n--- Layer 13: PriceTableBuilder Batch Solve Trace ---\n");
-    // Use the same parameters as PriceTableBuilder would
+    // Layer 13: Trace through PriceTableBuilderND batch solve
+    std::printf("\n--- Layer 13: PriceTableBuilderND Batch Solve Trace ---\n");
+    // Use the same parameters as PriceTableBuilderND would
     // For sigma=0.20, rate=0.05, it creates a batch entry with K_ref as strike
 
     PricingParams batch_params;
@@ -408,7 +408,7 @@ int main() {
     batch_params.option_type = OptionType::PUT;
     batch_params.volatility = kSigma;
 
-    // Create batch solver with snapshot times matching PriceTableBuilder
+    // Create batch solver with snapshot times matching PriceTableBuilderND
     BatchAmericanOptionSolver batch_solver2;
     batch_solver2.set_snapshot_times(maturities);
     batch_solver2.set_grid_accuracy({.tol = 1e-2});  // Same as default
@@ -470,7 +470,7 @@ int main() {
     std::printf("\n--- Layer 14: Tensor vs Surface Direct Comparison ---\n");
     // Re-run the build step by step to extract the tensor value
 
-    auto [builder2, axes2] = *PriceTableBuilder<4>::from_vectors(
+    auto [builder2, axes2] = *PriceTableBuilder::from_vectors(
         moneyness, maturities, vols, rates,
         kSpot, GridAccuracyParams{}, OptionType::PUT, kDivYield);
 

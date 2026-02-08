@@ -7,7 +7,7 @@ namespace mango {
 namespace {
 
 TEST(RecursionHelpersTest, ForEachAxisIndex2D) {
-    PriceTableAxes<2> axes;
+    PriceTableAxesND<2> axes;
     axes.grids[0] = {0.9, 1.0};       // 2 points
     axes.grids[1] = {0.1, 0.5, 1.0};  // 3 points
 
@@ -28,7 +28,7 @@ TEST(RecursionHelpersTest, ForEachAxisIndex2D) {
 }
 
 TEST(RecursionHelpersTest, ForEachAxisIndex4D) {
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {0.9, 1.0};       // 2
     axes.grids[1] = {0.1, 0.5};       // 2
     axes.grids[2] = {0.15, 0.25};     // 2

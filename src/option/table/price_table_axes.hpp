@@ -4,12 +4,18 @@
 #include <array>
 #include <vector>
 #include <string>
+#include <cstddef>
 #include <expected>
 #include <algorithm>
 #include "mango/support/error_types.hpp"
 #include "mango/math/safe_math.hpp"
 
 namespace mango {
+
+/// Number of B-spline interpolation axes.
+/// Currently 4: (log-moneyness, τ, σ, r).
+/// See issue #382 for planned 4D→3D reduction.
+inline constexpr size_t kPriceTableDim = 4;
 
 /// Metadata for N-dimensional price table axes
 ///
@@ -18,7 +24,7 @@ namespace mango {
 ///
 /// @tparam N Number of dimensions (axes)
 template <size_t N>
-struct PriceTableAxes {
+struct PriceTableAxesND {
     std::array<std::vector<double>, N> grids;  ///< Grid points per axis
     std::array<std::string, N> names;          ///< Optional names (e.g., "moneyness", "maturity")
 
@@ -80,5 +86,8 @@ struct PriceTableAxes {
         return s;
     }
 };
+
+/// Convenience alias for the common 4D case.
+using PriceTableAxes = PriceTableAxesND<kPriceTableDim>;
 
 } // namespace mango

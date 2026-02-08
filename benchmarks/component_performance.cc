@@ -54,7 +54,7 @@ double analytic_bs_price(double S, double K, double tau, double sigma, double r,
 
 struct AnalyticSurfaceFixture {
     double K_ref;
-    std::shared_ptr<const PriceTableSurface<4>> surface;
+    std::shared_ptr<const PriceTableSurface> surface;
 };
 
 const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
@@ -67,16 +67,16 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         std::vector<double> vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30};
         std::vector<double> rate_grid = {0.0, 0.025, 0.05, 0.10};
 
-        auto result = PriceTableBuilder<4>::from_vectors(
+        auto result = PriceTableBuilder::from_vectors(
             m_grid, tau_grid, vol_grid, rate_grid, 100.0,
             GridAccuracyParams{}, OptionType::PUT, 0.0);
         if (!result) {
-            throw std::runtime_error("Failed to create PriceTableBuilder");
+            throw std::runtime_error("Failed to create PriceTableBuilderND");
         }
         auto [builder, axes] = std::move(result.value());
         EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.0};
         auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
-            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });
         if (!table) {

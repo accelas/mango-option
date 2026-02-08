@@ -21,9 +21,9 @@ TEST(PriceTableBuilderCustomGridTest, CustomGridWithNormalizedCase) {
         .dividends = {.dividend_yield = 0.02}
     };
 
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};  // log-moneyness: 4 points
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};   // maturity: 4 points
     axes.grids[2] = {0.20, 0.25};             // volatility: 2 points
@@ -124,9 +124,9 @@ TEST(PriceTableBuilderCustomGridTest, VerifyNormalizedBatchConditions) {
         .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100}
     };
 
-    PriceTableBuilder<4> builder(config);
+    PriceTableBuilder builder(config);
 
-    PriceTableAxes<4> axes;
+    PriceTableAxes axes;
     axes.grids[0] = {std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
     axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
     axes.grids[2] = {0.20};
@@ -184,7 +184,7 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridCoversWideMoneyness) {
     GridAccuracyParams accuracy;
     accuracy.tol = 1e-2;  // Fast mode for test speed
 
-    auto setup = PriceTableBuilder<4>::from_vectors(
+    auto setup = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, volatility, rate,
         100.0,                    // K_ref
         accuracy,                 // auto-estimated PDE grid
@@ -236,7 +236,7 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
     coarse.min_spatial_points = 51;
     coarse.max_spatial_points = 51;
 
-    auto setup_coarse = PriceTableBuilder<4>::from_vectors(
+    auto setup_coarse = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, volatility, rate,
         100.0, coarse, OptionType::PUT, 0.02, 0.0);
 
@@ -251,7 +251,7 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
     fine.min_spatial_points = 401;
     fine.max_spatial_points = 401;
 
-    auto setup_fine = PriceTableBuilder<4>::from_vectors(
+    auto setup_fine = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, volatility, rate,
         100.0, fine, OptionType::PUT, 0.02, 0.0);
 
@@ -298,7 +298,7 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
     std::vector<double> volatility = {0.10, 0.12, 0.14, 0.15};
     std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
 
-    auto setup = PriceTableBuilder<4>::from_vectors(
+    auto setup = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, volatility, rate,
         100.0,
         explicit_pde,             // triggers fallback due to coarse spacing

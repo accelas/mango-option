@@ -55,7 +55,7 @@ public:
     ///   3. Build last segment (closest to expiry) with payoff IC.
     ///   4. Build earlier segments backward with chained IC.
     ///   5. Assemble into SegmentedSurface.
-    static std::expected<SegmentedSurfacePI, PriceTableError> build(const Config& config);
+    static std::expected<SegmentedPriceSurface, PriceTableError> build(const Config& config);
 };
 
 }  // namespace mango

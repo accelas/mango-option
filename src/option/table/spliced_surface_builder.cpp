@@ -10,7 +10,7 @@ namespace mango {
 // Segmented surface builder
 // ===========================================================================
 
-std::expected<SegmentedSurfacePI, PriceTableError>
+std::expected<SegmentedPriceSurface, PriceTableError>
 build_segmented_surface(SegmentedConfig config) {
     // Validate: non-empty segments
     if (config.segments.empty()) {
@@ -52,7 +52,7 @@ build_segmented_surface(SegmentedConfig config) {
 
     WeightedSum combiner;
 
-    return SegmentedSurfacePI(
+    return SegmentedPriceSurface(
         std::move(slices),
         std::move(lookup),
         std::move(xform),
@@ -63,7 +63,7 @@ build_segmented_surface(SegmentedConfig config) {
 // Multi-K_ref surface builder
 // ===========================================================================
 
-std::expected<MultiKRefSurfacePI, PriceTableError>
+std::expected<MultiKRefPriceSurface, PriceTableError>
 build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
     // Validate: non-empty
     if (entries.empty()) {
@@ -79,7 +79,7 @@ build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
 
     // Extract k_refs vector and slices
     std::vector<double> k_refs;
-    std::vector<SegmentedSurfacePI> slices;
+    std::vector<SegmentedPriceSurface> slices;
     k_refs.reserve(entries.size());
     slices.reserve(entries.size());
 
@@ -96,7 +96,7 @@ build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
 
     WeightedSum combiner;
 
-    return MultiKRefSurfacePI(
+    return MultiKRefPriceSurface(
         std::move(slices),
         std::move(bracket),
         std::move(xform),

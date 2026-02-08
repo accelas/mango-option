@@ -78,7 +78,7 @@ TEST_F(PriceTableEndToEndPerformanceTest, BandedSolverSpeedup) {
         ASSERT_TRUE(grid_spec_result.has_value());
         auto grid_spec = grid_spec_result.value();
 
-        auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+        auto builder_axes_result = PriceTableBuilder::from_vectors(
             moneyness, maturity, volatility, rate, 100.0,
             PDEGridConfig{grid_spec, 1000}, OptionType::PUT, 0.02, 0.0, false);
         ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
@@ -130,7 +130,7 @@ TEST_F(PriceTableEndToEndPerformanceTest, SmallerGridSanityCheck) {
     ASSERT_TRUE(grid_spec_result.has_value());
     auto grid_spec = grid_spec_result.value();
 
-    auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+    auto builder_axes_result = PriceTableBuilder::from_vectors(
         moneyness, maturity, volatility, rate, 100.0,
         PDEGridConfig{grid_spec, 1000}, OptionType::PUT, 0.02);
     ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
