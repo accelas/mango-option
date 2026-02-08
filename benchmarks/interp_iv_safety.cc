@@ -21,6 +21,7 @@
  *   bazel run //benchmarks:interp_iv_safety -- bspline-4d
  *   bazel run //benchmarks:interp_iv_safety -- cheb3d
  *   bazel run //benchmarks:interp_iv_safety -- cheb4d
+ *   bazel run //benchmarks:interp_iv_safety -- cheb4d-q
  *
  * Multiple:  ... -- cheb3d cheb4d
  */
@@ -46,6 +47,8 @@
 #include "mango/option/table/dimensionless/dimensionless_inner.hpp"
 #include "chebyshev_eep_inner.hpp"
 #include "chebyshev_4d_eep_inner.hpp"
+#include "chebyshev_4d_incremental_builder.hpp"
+#include "pde_slice_cache.hpp"
 
 using namespace mango;
 using namespace mango::bench;
@@ -800,6 +803,71 @@ static void print_heatmap(const char* title, const ErrorTable& errors) {
     std::printf("  Overall RMS: %.1f bps (%zu/%zu succeeded)\n", rms, n_valid, n_total);
 }
 
+/// Print stratified statistics: mean, p95, p99, success rate by regime.
+/// Buckets: tau < 60d, 60d <= tau < 180d, tau >= 180d
+///          sigma = 15%, sigma = 30%
+static void print_stratified_stats(const char* label,
+                                    const std::array<ErrorTable, kNV>& all_errors) {
+    struct Bucket {
+        const char* name;
+        size_t tau_lo, tau_hi;  // indices into kMaturities (inclusive)
+    };
+    // tau indices: 0=7d, 1=14d, 2=30d, 3=60d, 4=90d, 5=180d, 6=1y, 7=2y
+    Bucket buckets[] = {
+        {"T<60d",    0, 2},  // 7d, 14d, 30d
+        {"60d-180d", 3, 5},  // 60d, 90d, 180d
+        {"T>=1y",    6, 7},  // 1y, 2y
+    };
+
+    std::printf("\n--- Stratified stats: %s ---\n", label);
+    std::printf("  %-12s %-6s  %5s %5s %5s  %6s  %s\n",
+                "regime", "sigma", "mean", "p95", "p99", "ok/n", "remark");
+
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        for (const auto& b : buckets) {
+            std::vector<double> errs;
+            size_t n_total = 0, n_ok = 0;
+
+            for (size_t ti = b.tau_lo; ti <= b.tau_hi; ++ti) {
+                for (size_t si = 0; si < kNS; ++si) {
+                    n_total++;
+                    double e = all_errors[vi][ti][si];
+                    if (!std::isnan(e)) {
+                        errs.push_back(e);
+                        n_ok++;
+                    }
+                }
+            }
+
+            if (errs.empty()) {
+                std::printf("  %-12s σ=%2.0f%%  %5s %5s %5s  %3zu/%-3zu  no data\n",
+                            b.name, kVols[vi] * 100, "—", "—", "—", n_ok, n_total);
+                continue;
+            }
+
+            std::sort(errs.begin(), errs.end());
+            double mean = 0;
+            for (double e : errs) mean += e;
+            mean /= errs.size();
+
+            auto percentile = [&](double p) {
+                size_t idx = static_cast<size_t>(p * (errs.size() - 1));
+                return errs[std::min(idx, errs.size() - 1)];
+            };
+            double p95 = percentile(0.95);
+            double p99 = percentile(0.99);
+
+            const char* remark = "";
+            if (p95 > 50) remark = "!! poor";
+            else if (p95 > 10) remark = "! marginal";
+
+            std::printf("  %-12s σ=%2.0f%%  %5.1f %5.1f %5.1f  %3zu/%-3zu  %s\n",
+                        b.name, kVols[vi] * 100, mean, p95, p99,
+                        n_ok, n_total, remark);
+        }
+    }
+}
+
 // ============================================================================
 // Diagnostic: dual price + IV error computation
 // ============================================================================
@@ -953,6 +1021,15 @@ static const PriceGrid& get_q0_prices() {
     static PriceGrid prices = [] {
         std::printf("--- Generating q=0 reference prices...\n");
         return generate_prices_q0();
+    }();
+    return prices;
+}
+
+static const PriceGrid& get_q_prices() {
+    static PriceGrid prices = [] {
+        std::printf("--- Generating q=%.2f reference prices (no discrete divs)...\n",
+                    kDivYield);
+        return generate_prices(/*with_dividends=*/false);
     }();
     return prices;
 }
@@ -1163,13 +1240,358 @@ static void run_cheb4d_pw() {
     }
 }
 
+static Chebyshev4DEEPInner build_chebyshev_4d_surface_q() {
+    Chebyshev4DEEPConfig cfg;
+    cfg.num_x = 40;
+    cfg.num_tau = 15;
+    cfg.use_tucker = false;
+    cfg.dividend_yield = kDivYield;
+
+    auto t0 = std::chrono::steady_clock::now();
+    auto result = build_chebyshev_4d_eep(cfg, kSpot, OptionType::PUT);
+    auto t1 = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(t1 - t0).count();
+
+    auto ranks = result.interp.ranks();
+    std::printf("  Chebyshev 4D surface (q=%.2f): %d PDE solves, %.3fs build, "
+                "ranks=(%zu,%zu,%zu,%zu)\n",
+                kDivYield, result.n_pde_solves, elapsed,
+                ranks[0], ranks[1], ranks[2], ranks[3]);
+
+    return Chebyshev4DEEPInner(
+        std::move(result.interp), OptionType::PUT, kSpot, kDivYield,
+        result.transforms);
+}
+
+static void run_cheb4d_q() {
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev-Tucker 4D (Brent) — q=%.2f, no discrete dividends\n",
+                kDivYield);
+    std::printf("================================================================\n\n");
+
+    const auto& q_prices = get_q_prices();
+
+    std::printf("--- Building Chebyshev-Tucker 4D surface (q=%.2f)...\n", kDivYield);
+    auto inner = build_chebyshev_4d_surface_q();
+
+    std::printf("--- Computing Chebyshev 4D IV errors (Brent, q=%.2f)...\n", kDivYield);
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Chebyshev-Tucker 4D IV Error (bps, Brent) — σ=%.0f%%, q=%.0f%%",
+                      kVols[vi] * 100, kDivYield * 100);
+        auto errors = compute_errors_brent(q_prices,
+            [&](double S, double K, double tau, double sigma, double r) {
+                PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                             .sigma = sigma, .rate = r};
+                return inner.price(q);
+            }, vi, kDivYield);
+        print_heatmap(title, errors);
+    }
+}
+
+// ============================================================================
+// Chebyshev 4D Baseline: locked config 40×15×15×10, fixed domains
+// ============================================================================
+
+static void run_cheb4d_baseline() {
+    using namespace mango;
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev 4D Baseline — 40×15×15×10, fixed domains\n");
+    std::printf("================================================================\n\n");
+
+    // Fixed extended domain (headroom computed from Ns=15, Nr=10)
+    auto headroom = [](double lo, double hi, size_t n) {
+        return 3.0 * (hi - lo) / static_cast<double>(std::max(n, size_t{4}) - 1);
+    };
+
+    auto build_baseline = [&](double div_yield) {
+        Chebyshev4DEEPConfig cfg;
+        cfg.num_x = 40;  cfg.num_tau = 15;  cfg.num_sigma = 15;  cfg.num_rate = 10;
+        cfg.use_tucker = false;
+        cfg.dividend_yield = div_yield;
+        double hr = headroom(cfg.rate_min, cfg.rate_max, 10);
+        cfg.rate_ext_lo = std::max(cfg.rate_min - hr, -0.05);
+        cfg.rate_ext_hi = cfg.rate_max + hr;
+        return build_chebyshev_4d_eep(cfg, kSpot, OptionType::PUT);
+    };
+
+    // ---- q=0 ----
+    std::printf("=== q=0 ===\n\n");
+    const auto& q0_prices = get_q0_prices();
+
+    auto t0 = std::chrono::steady_clock::now();
+    auto result_q0 = build_baseline(0.0);
+    auto t1 = std::chrono::steady_clock::now();
+    std::printf("  %d PDE, %.1fs build\n\n",
+                result_q0.n_pde_solves,
+                std::chrono::duration<double>(t1 - t0).count());
+
+    Chebyshev4DEEPInner inner_q0(
+        std::move(result_q0.interp), OptionType::PUT, kSpot, 0.0,
+        result_q0.transforms);
+
+    std::array<ErrorTable, kNV> q0_errors;
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Baseline (40×15×15×10) q=0 — σ=%.0f%%",
+                      kVols[vi] * 100);
+        q0_errors[vi] = compute_errors_brent(q0_prices,
+            [&](double S, double K, double tau, double sigma, double r) {
+                PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                             .sigma = sigma, .rate = r};
+                return inner_q0.price(q);
+            }, vi);
+        print_heatmap(title, q0_errors[vi]);
+    }
+    print_stratified_stats("q=0", q0_errors);
+
+    // ---- q=kDivYield ----
+    std::printf("\n\n=== q=%.2f ===\n\n", kDivYield);
+    const auto& q_prices = get_q_prices();
+
+    auto t2 = std::chrono::steady_clock::now();
+    auto result_q = build_baseline(kDivYield);
+    auto t3 = std::chrono::steady_clock::now();
+    std::printf("  %d PDE, %.1fs build\n\n",
+                result_q.n_pde_solves,
+                std::chrono::duration<double>(t3 - t2).count());
+
+    Chebyshev4DEEPInner inner_q(
+        std::move(result_q.interp), OptionType::PUT, kSpot, kDivYield,
+        result_q.transforms);
+
+    std::array<ErrorTable, kNV> q_errors;
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Baseline (40×15×15×10) q=%.0f%% — σ=%.0f%%",
+                      kDivYield * 100, kVols[vi] * 100);
+        q_errors[vi] = compute_errors_brent(q_prices,
+            [&](double S, double K, double tau, double sigma, double r) {
+                PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                             .sigma = sigma, .rate = r};
+                return inner_q.price(q);
+            }, vi, kDivYield);
+        print_heatmap(title, q_errors[vi]);
+    }
+    print_stratified_stats("q=2%", q_errors);
+}
+
+static void run_cheb4d_adaptive() {
+    using namespace mango;
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev 4D Anisotropic Sweep — Nx=40, Ntau=15 fixed\n");
+    std::printf("Sweep (Nsigma, Nrate), fixed extended domains\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    SweepConfig cfg;  // defaults: Nx=40, Ntau=15
+
+    // Candidate levels for sigma and rate axes
+    std::array<size_t, 4> sigma_levels = {8, 10, 15, 20};
+    std::array<size_t, 4> rate_levels  = {6, 8, 10, 12};
+
+    std::printf("--- Running sweep: Ns={8,10,15,20} × Nr={6,8,10,12}\n");
+    std::printf("    Fixed: Nx=%zu, Ntau=%zu\n", cfg.num_x, cfg.num_tau);
+    std::printf("    Validation: 5σ × 4r × 6τ × 4x = 480 probes (T>=60d)\n\n");
+
+    auto entries = run_chebyshev_4d_sweep(
+        cfg,
+        std::span<const size_t>{sigma_levels},
+        std::span<const size_t>{rate_levels},
+        kSpot, OptionType::PUT);
+
+    // Print Pareto table
+    std::printf("  %5s %5s  %5s  %8s %8s  %6s\n",
+                "Nsig", "Nr", "PDE", "max_bps", "avg_bps", "build");
+    double pareto_best = 1e9;
+    for (const auto& e : entries) {
+        char marker = ' ';
+        if (e.max_error < pareto_best) {
+            marker = '*';  // Pareto-optimal
+            pareto_best = e.max_error;
+        }
+        std::printf("  %5zu %5zu  %5zu  %7.1f%c %7.1f   %5.1fs\n",
+                    e.num_sigma, e.num_rate, e.pde_solves,
+                    e.max_error * 10000, marker, e.avg_error * 10000,
+                    e.build_seconds);
+    }
+    std::printf("\n  * = Pareto-optimal (lowest max_err at that PDE budget)\n");
+
+    // Print heatmap for the best Pareto entry
+    const SweepEntry* best = nullptr;
+    for (const auto& e : entries) {
+        if (!best || e.max_error < best->max_error)
+            best = &e;
+    }
+    if (best) {
+        std::printf("\n--- Best config: Ns=%zu Nr=%zu (%zu PDE), "
+                    "max=%.1f bps, avg=%.1f bps\n",
+                    best->num_sigma, best->num_rate, best->pde_solves,
+                    best->max_error * 10000, best->avg_error * 10000);
+        std::printf("--- Computing full IV heatmap...\n");
+        for (size_t vi = 0; vi < kNV; ++vi) {
+            char title[128];
+            std::snprintf(title, sizeof(title),
+                          "Sweep Best (%zus×%zur) IV Error (bps) — σ=%.0f%%",
+                          best->num_sigma, best->num_rate, kVols[vi] * 100);
+            auto errors = compute_errors_brent(q0_prices,
+                [&](double S, double K, double tau, double sigma, double r) {
+                    PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                                 .sigma = sigma, .rate = r};
+                    return best->inner.price(q);
+                }, vi);
+            print_heatmap(title, errors);
+        }
+    }
+}
+
+// ============================================================================
+// Chebyshev 4D: rate-axis ablation (isolate degree vs domain effects)
+// ============================================================================
+
+static void run_cheb4d_rate_ablation() {
+    using namespace mango;
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev 4D Rate-Axis Ablation: degree vs domain\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    // Headroom with 6 nodes: 3 * 0.09 / 5 = 0.054
+    // Extended domain: [-0.044, 0.154], width=0.198
+    constexpr double kWideRateLo = -0.044;
+    constexpr double kWideRateHi =  0.154;
+
+    // Headroom with 10 nodes: 3 * 0.09 / 9 = 0.030
+    // Extended domain: [-0.020, 0.130], width=0.150
+    constexpr double kTightRateLo = -0.020;
+    constexpr double kTightRateHi =  0.130;
+
+    struct Variant {
+        const char* label;
+        size_t num_rate;
+        double rate_ext_lo, rate_ext_hi;
+    };
+    Variant variants[] = {
+        {"A: 6 nodes, wide domain [-0.044,0.154]",
+         6, kWideRateLo, kWideRateHi},
+        {"B: 10 nodes, wide domain [-0.044,0.154] (degree only)",
+         10, kWideRateLo, kWideRateHi},
+        {"C: 6 nodes, tight domain [-0.020,0.130] (domain only)",
+         6, kTightRateLo, kTightRateHi},
+        {"D: 10 nodes, tight domain [-0.020,0.130] (both)",
+         10, kTightRateLo, kTightRateHi},
+    };
+
+    for (const auto& v : variants) {
+        std::printf("\n--- %s ---\n", v.label);
+        Chebyshev4DEEPConfig cfg;
+        cfg.num_x = 40;  cfg.num_tau = 15;  cfg.num_sigma = 15;
+        cfg.num_rate = v.num_rate;
+        cfg.rate_ext_lo = v.rate_ext_lo;
+        cfg.rate_ext_hi = v.rate_ext_hi;
+        cfg.use_tucker = false;
+
+        auto result = build_chebyshev_4d_eep(cfg, kSpot, OptionType::PUT);
+        std::printf("    %d PDE, %.1fs\n", result.n_pde_solves, result.build_seconds);
+
+        Chebyshev4DEEPInner inner(
+            std::move(result.interp), OptionType::PUT, kSpot,
+            0.0, result.transforms);
+
+        // Only show σ=30% for brevity (T>=90d where rate matters)
+        size_t vi = 1;  // σ=30%
+        char title[128];
+        std::snprintf(title, sizeof(title), "%s — σ=30%%", v.label);
+        auto errors = compute_errors_brent(q0_prices,
+            [&](double S, double K, double tau, double sigma, double r) {
+                PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                             .sigma = sigma, .rate = r};
+                return inner.price(q);
+            }, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+static void run_cheb4d_incremental() {
+    using namespace mango;
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev 4D Incremental — CC levels, PDE slice cache\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    // Refinement schedule: (sigma_level, rate_level)
+    struct Level {
+        size_t sigma_level, rate_level;
+        const char* label;
+    };
+    Level schedule[] = {
+        {2, 1, "L(2,1): 5sig x 3rate"},
+        {3, 2, "L(3,2): 9sig x 5rate"},
+        {3, 3, "L(3,3): 9sig x 9rate"},
+    };
+
+    PDESliceCache cache;
+    IncrementalBuildConfig cfg;
+    cfg.num_x = 40;
+    cfg.num_tau = 15;
+    cfg.use_tucker = false;
+    cfg.dividend_yield = 0.0;
+
+    std::printf("%-25s  %6s  %6s  %8s\n",
+                "Level", "NewPDE", "TotPDE", "Build(s)");
+    std::printf("%-25s  %6s  %6s  %8s\n",
+                "-----", "------", "------", "--------");
+
+    for (const auto& level : schedule) {
+        cfg.sigma_level = level.sigma_level;
+        cfg.rate_level = level.rate_level;
+
+        auto result = build_chebyshev_4d_eep_incremental(
+            cfg, cache, kSpot, OptionType::PUT);
+
+        std::printf("%-25s  %6zu  %6zu  %8.2f\n",
+                    level.label, result.new_pde_solves,
+                    cache.total_pde_solves(), result.build_seconds);
+
+        // Only print heatmaps + stratified stats for the final level
+        if (&level == &schedule[2]) {
+            std::printf("\n");
+            Chebyshev4DEEPInner inner(
+                std::move(result.interp), OptionType::PUT, kSpot, 0.0);
+
+            std::array<ErrorTable, kNV> all_errors;
+            for (size_t vi = 0; vi < kNV; ++vi) {
+                char title[128];
+                std::snprintf(title, sizeof(title),
+                              "Incremental %s q=0 — σ=%.0f%%",
+                              level.label, kVols[vi] * 100);
+                all_errors[vi] = compute_errors_brent(q0_prices,
+                    [&](double S, double K, double tau, double sigma, double r) {
+                        PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                                     .sigma = sigma, .rate = r};
+                        return inner.price(q);
+                    }, vi);
+                print_heatmap(title, all_errors[vi]);
+            }
+            print_stratified_stats("incremental", all_errors);
+        }
+    }
+}
+
 // ============================================================================
 // Main
 // ============================================================================
 
 static constexpr const char* kSections[] = {
     "vanilla", "dividends", "bspline-3d", "bspline-4d", "cheb3d", "cheb4d",
-    "cheb4d-diag", "cheb4d-pw"
+    "cheb4d-diag", "cheb4d-pw", "cheb4d-q", "cheb4d-baseline",
+    "cheb4d-adaptive", "cheb4d-rate-ablation", "cheb4d-incremental"
 };
 
 int main(int argc, char* argv[]) {
@@ -1192,7 +1614,16 @@ int main(int argc, char* argv[]) {
 
     std::printf("Interpolation IV Safety Diagnostic\n");
     std::printf("===================================\n");
+    std::printf("Built: %s %s\n", __DATE__, __TIME__);
+    {
+        auto now = std::chrono::system_clock::now();
+        auto tt = std::chrono::system_clock::to_time_t(now);
+        std::printf("Run:   %s", std::ctime(&tt));
+    }
     std::printf("S=%.0f, r=%.2f, q=%.2f, PUT\n", kSpot, kRate, kDivYield);
+    std::printf("Sections:");
+    for (const auto& s : selected) std::printf(" %s", s.c_str());
+    std::printf("\n");
     std::printf("Error = |interp_iv - fdm_iv| in basis points\n\n");
 
     std::printf("Strikes: ");
@@ -1211,6 +1642,11 @@ int main(int argc, char* argv[]) {
     if (want("cheb4d"))      run_cheb4d();
     if (want("cheb4d-diag")) run_cheb4d_diag();
     if (want("cheb4d-pw"))   run_cheb4d_pw();
+    if (want("cheb4d-q"))    run_cheb4d_q();
+    if (want("cheb4d-baseline")) run_cheb4d_baseline();
+    if (want("cheb4d-adaptive")) run_cheb4d_adaptive();
+    if (want("cheb4d-rate-ablation")) run_cheb4d_rate_ablation();
+    if (want("cheb4d-incremental")) run_cheb4d_incremental();
 
     return 0;
 }
