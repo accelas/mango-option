@@ -20,6 +20,16 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_library(
+    name = "pde_slice_cache",
+    hdrs = ["pde_slice_cache.hpp"],
+    deps = [
+        "//src/math:cubic_spline_solver",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/benchmarks",
+)
+
 cc_binary(
     name = "component_performance",
     srcs = ["component_performance.cc"],
