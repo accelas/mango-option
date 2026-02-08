@@ -94,6 +94,18 @@ cc_library(
     include_prefix = "mango/option/table/dimensionless",
 )
 
+cc_library(
+    name = "chebyshev_tucker",
+    hdrs = ["chebyshev_tucker.hpp"],
+    deps = [
+        ":chebyshev_nodes",
+        ":tucker_decomposition",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
 cc_binary(
     name = "golden_surface_generator",
     srcs = ["golden_surface_generator.cpp"],
