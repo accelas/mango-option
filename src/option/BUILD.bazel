@@ -152,7 +152,6 @@ cc_library(
         ":iv_result",
         ":option_spec",
         "//src/option/table:price_table_surface",
-        "//src/option/table:american_price_surface",
         "//src/option/table:standard_surface",
         "//src/option/table:price_surface_concept",
         "//src/option/table:spliced_surface",

@@ -10,6 +10,7 @@ pybind_extension(
         "//src/option:american_option",
         "//src/option:american_option_batch",
         "//src/option:option_grid",
+        "//src/option/table:american_price_surface",
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_workspace",
         "//src/option/table:price_table_surface",

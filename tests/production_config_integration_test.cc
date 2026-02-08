@@ -18,6 +18,7 @@
 #include <cmath>
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/american_price_surface.hpp"
@@ -506,7 +507,11 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
-    auto table_result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
+    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     ASSERT_TRUE(table_result.has_value());
 
     // Create IV solver from surface via AmericanPriceSurface
@@ -517,7 +522,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     auto aps = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
     auto iv_solver_result = DefaultInterpolatedIVSolver::create(
-        std::move(*aps), solver_config);
+        std::move(*aps).take_wrapper(), solver_config);
 
     ASSERT_TRUE(iv_solver_result.has_value())
         << "DefaultInterpolatedIVSolver::create failed";
@@ -531,7 +536,6 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     double vol = 0.20;
 
     // Get reconstructed American price from APS
-    // Note: table surface stores EEP, not raw price — must use APS for full price
     auto aps_for_price = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(aps_for_price.has_value());
     double price = aps_for_price->price(spot, strike, maturity, vol, rate);

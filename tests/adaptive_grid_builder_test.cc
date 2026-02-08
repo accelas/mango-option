@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include "mango/option/table/adaptive_grid_builder.hpp"
 #include "mango/option/table/spliced_surface.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include <algorithm>
 #include <iostream>

@@ -1008,10 +1008,10 @@ PYBIND11_MODULE(mango_option, m) {
     // InterpolatedIVSolver
     py::class_<mango::DefaultInterpolatedIVSolver>(m, "InterpolatedIVSolver")
         .def_static("create",
-            [](mango::AmericanPriceSurface american_surface,
+            [](mango::AmericanPriceSurface& american_surface,
                const mango::InterpolatedIVSolverConfig& config) {
                 auto result = mango::DefaultInterpolatedIVSolver::create(
-                    std::move(american_surface), config);
+                    std::move(american_surface).take_wrapper(), config);
                 if (!result.has_value()) {
                     throw py::value_error("Failed to create solver: validation error");
                 }

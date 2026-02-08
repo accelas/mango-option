@@ -12,6 +12,8 @@
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
 #include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
+#include "mango/option/table/standard_surface.hpp"
 
 namespace mango {
 namespace {
@@ -30,26 +32,30 @@ protected:
             GridAccuracyParams{}, OptionType::PUT, 0.0);
         ASSERT_TRUE(result.has_value()) << "Failed to build";
         auto [builder, axes] = std::move(result.value());
-        auto table = builder.build(axes);
+        EEPDecomposer decomposer{OptionType::PUT, K_ref_, 0.0};
+        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+            [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+                decomposer.decompose(tensor, a);
+            });
         ASSERT_TRUE(table.has_value()) << "Failed to build table";
         surface_ = table->surface;
     }
 
-    /// Helper to create a fresh AmericanPriceSurface from the shared surface
-    AmericanPriceSurface make_aps() {
+    /// Helper to create a StandardSurfaceWrapper for IV solver tests
+    StandardSurfaceWrapper make_wrapper() {
         auto aps = AmericanPriceSurface::create(surface_, OptionType::PUT);
-        return std::move(*aps);
+        return std::move(*aps).take_wrapper();
     }
 
     std::shared_ptr<const PriceTableSurface<4>> surface_;
     static constexpr double K_ref_ = 100.0;
 };
 
-TEST_F(InterpolatedIVSolverTest, CreateFromAmericanPriceSurface) {
+TEST_F(InterpolatedIVSolverTest, CreateFromStandardSurfaceWrapper) {
     auto aps = AmericanPriceSurface::create(surface_, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
-    auto result = DefaultInterpolatedIVSolver::create(std::move(*aps));
+    auto result = DefaultInterpolatedIVSolver::create(std::move(*aps).take_wrapper());
     ASSERT_TRUE(result.has_value()) << "Failed to create solver";
 }
 
@@ -61,12 +67,12 @@ TEST_F(InterpolatedIVSolverTest, CreateWithConfig) {
         .sigma_max = 2.0
     };
 
-    auto result = DefaultInterpolatedIVSolver::create(make_aps(), config);
+    auto result = DefaultInterpolatedIVSolver::create(make_wrapper(), config);
     ASSERT_TRUE(result.has_value()) << "Failed to create solver with config";
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveATMPut) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -88,7 +94,7 @@ TEST_F(InterpolatedIVSolverTest, SolveATMPut) {
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveITMPut) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -105,7 +111,7 @@ TEST_F(InterpolatedIVSolverTest, SolveITMPut) {
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveOTMPut) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -122,7 +128,7 @@ TEST_F(InterpolatedIVSolverTest, SolveOTMPut) {
 }
 
 TEST_F(InterpolatedIVSolverTest, RejectsInvalidQuery) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -136,7 +142,7 @@ TEST_F(InterpolatedIVSolverTest, RejectsInvalidQuery) {
 }
 
 TEST_F(InterpolatedIVSolverTest, RejectsNegativeMarketPrice) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -149,7 +155,7 @@ TEST_F(InterpolatedIVSolverTest, RejectsNegativeMarketPrice) {
 }
 
 TEST_F(InterpolatedIVSolverTest, BatchSolve) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -175,7 +181,7 @@ TEST_F(InterpolatedIVSolverTest, BatchSolve) {
 }
 
 TEST_F(InterpolatedIVSolverTest, BatchSolveAllSucceed) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -198,7 +204,7 @@ TEST_F(InterpolatedIVSolverTest, ConvergenceWithinIterations) {
         .tolerance = 1e-6
     };
 
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps(), config);
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper(), config);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -233,7 +239,7 @@ TEST_F(InterpolatedIVSolverTest, SolveWithAmericanPriceSurface) {
     auto aps = AmericanPriceSurface::create(eep_surface.value(), OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps));
+    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps).take_wrapper());
     ASSERT_TRUE(solver.has_value());
 
     IVQuery query(
@@ -249,12 +255,12 @@ TEST_F(InterpolatedIVSolverTest, SolveWithAmericanPriceSurface) {
 
 // Verify that DefaultInterpolatedIVSolver alias works correctly
 TEST_F(InterpolatedIVSolverTest, StandardAliasMatchesExplicitTemplate) {
-    // DefaultInterpolatedIVSolver is InterpolatedIVSolver<AmericanPriceSurface>
+    // DefaultInterpolatedIVSolver is InterpolatedIVSolver<StandardSurfaceWrapper>
     static_assert(std::is_same_v<
         DefaultInterpolatedIVSolver,
-        InterpolatedIVSolver<AmericanPriceSurface>>);
+        InterpolatedIVSolver<StandardSurfaceWrapper>>);
 
-    auto solver = DefaultInterpolatedIVSolver::create(make_aps());
+    auto solver = DefaultInterpolatedIVSolver::create(make_wrapper());
     ASSERT_TRUE(solver.has_value());
 }
 
@@ -277,13 +283,17 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
         GridAccuracyParams{}, OptionType::PUT, 0.0);
     ASSERT_TRUE(result.has_value());
     auto [builder, axes] = std::move(result.value());
-    auto table = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
+    auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     ASSERT_TRUE(table.has_value());
 
     auto aps = AmericanPriceSurface::create(table->surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps));
+    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps).take_wrapper());
     ASSERT_TRUE(solver.has_value());
 
     // Query with CALL type against a PUT surface — must fail
@@ -313,14 +323,18 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
         GridAccuracyParams{}, OptionType::PUT, div_yield);
     ASSERT_TRUE(result.has_value());
     auto [builder, axes] = std::move(result.value());
-    auto table = builder.build(axes);
+    EEPDecomposer decomposer2{OptionType::PUT, K_ref, div_yield};
+    auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer2.decompose(tensor, a);
+        });
     ASSERT_TRUE(table.has_value());
 
     auto aps = AmericanPriceSurface::create(table->surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
     EXPECT_NEAR(aps->dividend_yield(), 0.02, 1e-12);
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps));
+    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps).take_wrapper());
     ASSERT_TRUE(solver.has_value());
 
     // Query with dividend_yield = 0.05 — must fail (surface was built with 0.02)

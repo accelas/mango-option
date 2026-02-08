@@ -87,6 +87,7 @@ cc_library(
     srcs = ["eep_transform.cpp"],
     hdrs = ["eep_transform.hpp"],
     deps = [
+        ":price_table_surface",
         ":price_tensor",
         ":price_table_axes",
         ":spliced_surface",
@@ -206,6 +207,7 @@ cc_library(
     deps = [
         ":price_table_surface",
         ":price_table_metadata",
+        ":standard_surface",
         "//src/option:european_option",
         "//src/option:option_spec",
         "//src/support:error_types",
@@ -239,7 +241,6 @@ cc_library(
     name = "spliced_surface",
     hdrs = ["spliced_surface.hpp"],
     deps = [
-        ":american_price_surface",
         ":price_table_metadata",
         "//src/option:option_spec",
     ],
@@ -303,7 +304,6 @@ cc_library(
     ],
     deps = [
         ":adaptive_grid_types",
-        ":american_price_surface",
         ":error_attribution",
         ":price_table_builder",
         ":slice_cache",

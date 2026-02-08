@@ -4,6 +4,7 @@
 
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/eep_transform.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
@@ -30,7 +31,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
 
     double K_ref = 100.0;
 
-    // Build with auto-estimated PDE grid (always produces EEP surface)
+    // Build with auto-estimated PDE grid, then apply EEP decomposition
     auto setup = PriceTableBuilder<4>::from_vectors(
         log_moneyness, maturity, vol, rate, K_ref,
         GridAccuracyParams{},   // auto-estimate PDE grid
@@ -42,7 +43,11 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
         << "from_vectors failed: code=" << static_cast<int>(setup.error().code);
 
     auto& [builder, axes] = *setup;
-    auto result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
+    auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     ASSERT_TRUE(result.has_value())
         << "build failed: code=" << static_cast<int>(result.error().code);
     ASSERT_NE(result->surface, nullptr);
@@ -117,7 +122,11 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
         << "from_vectors failed: code=" << static_cast<int>(setup.error().code);
 
     auto& [builder, axes] = *setup;
-    auto result = builder.build(axes);
+    EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
+    auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor<4>& tensor, const PriceTableAxes<4>& a) {
+            decomposer.decompose(tensor, a);
+        });
     ASSERT_TRUE(result.has_value())
         << "build failed: code=" << static_cast<int>(result.error().code);
     ASSERT_NE(result->surface, nullptr);
