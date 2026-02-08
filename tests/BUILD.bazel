@@ -1580,6 +1580,16 @@ cc_test(
 )
 
 cc_test(
+    name = "golden_surface_test",
+    size = "small",
+    srcs = ["golden_surface_test.cc"],
+    deps = [
+        "//src/option/table:golden_surface",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "dimensionless_adaptive_test",
     size = "large",
     srcs = ["dimensionless_adaptive_test.cc"],

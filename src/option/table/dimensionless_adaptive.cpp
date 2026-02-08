@@ -11,42 +11,6 @@
 
 namespace mango {
 
-// ===========================================================================
-// SegmentedDimensionlessSurface
-// ===========================================================================
-
-double SegmentedDimensionlessSurface::value(
-    const std::array<double, 3>& coords) const
-{
-    double lk = coords[2];
-
-    // Find the segment containing this ln κ value
-    // If between segments, blend linearly over a transition zone
-    for (size_t i = 0; i < segments_.size(); ++i) {
-        if (lk <= segments_[i].lk_max || i == segments_.size() - 1) {
-            double val = segments_[i].surface->value(coords);
-
-            // Blend with next segment near upper boundary
-            if (i + 1 < segments_.size()) {
-                double blend_lo = segments_[i].lk_max;
-                double blend_hi = segments_[i + 1].lk_min;
-                // Overlap region: [next.lk_min, this.lk_max]
-                // (segments overlap so blend_hi < blend_lo)
-                if (lk >= blend_hi && lk <= blend_lo) {
-                    double t = (lk - blend_hi) / (blend_lo - blend_hi);
-                    double val_next = segments_[i + 1].surface->value(coords);
-                    val = (1.0 - t) * val_next + t * val;
-                }
-            }
-
-            return std::max(val, 0.0);
-        }
-    }
-
-    // Fallback: last segment
-    return std::max(segments_.back().surface->value(coords), 0.0);
-}
-
 namespace {
 
 // ---------------------------------------------------------------------------

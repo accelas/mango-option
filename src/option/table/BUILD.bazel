@@ -348,6 +348,26 @@ cc_library(
     include_prefix = "mango/option/table",
 )
 
+cc_binary(
+    name = "golden_surface_generator",
+    srcs = ["golden_surface_generator.cpp"],
+    deps = [":dimensionless_adaptive"],
+)
+
+cc_library(
+    name = "golden_surface",
+    srcs = ["golden_surface.cpp"],
+    hdrs = ["golden_surface.hpp"],
+    textual_hdrs = ["golden_surface_data.inc"],
+    deps = [
+        ":dimensionless_builder",
+        ":price_table_surface",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
 cc_library(
     name = "dimensionless_inner",
     srcs = ["dimensionless_inner.cpp"],
