@@ -298,6 +298,33 @@ cc_library(
 )
 
 cc_library(
+    name = "dimensionless_builder",
+    srcs = ["dimensionless_builder.cpp"],
+    hdrs = ["dimensionless_builder.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    deps = [
+        ":dimensionless_european",
+        ":price_table_surface",
+        ":price_table_metadata",
+        ":price_tensor",
+        "//src/option:american_option_batch",
+        "//src/math:bspline_nd_separable",
+        "//src/math:cubic_spline_solver",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "adaptive_grid_builder",
     srcs = ["adaptive_grid_builder.cpp"],
     hdrs = ["adaptive_grid_builder.hpp"],
