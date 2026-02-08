@@ -30,6 +30,39 @@ cc_library(
     strip_include_prefix = "/benchmarks",
 )
 
+cc_library(
+    name = "chebyshev_4d_eep_inner",
+    hdrs = ["chebyshev_4d_eep_inner.hpp"],
+    deps = [
+        "//src/option/table/dimensionless:chebyshev_tucker_4d",
+        "//src/option/table/dimensionless:chebyshev_nodes",
+        "//src/option/table:price_query",
+        "//src/option:european_option",
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/math:cubic_spline_solver",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/benchmarks",
+)
+
+cc_library(
+    name = "chebyshev_4d_incremental_builder",
+    hdrs = ["chebyshev_4d_incremental_builder.hpp"],
+    deps = [
+        ":pde_slice_cache",
+        "//src/option/table/dimensionless:chebyshev_tucker_4d",
+        "//src/option/table/dimensionless:chebyshev_nodes",
+        "//src/option/table:price_query",
+        "//src/option:european_option",
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/math:cubic_spline_solver",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/benchmarks",
+)
+
 cc_binary(
     name = "component_performance",
     srcs = ["component_performance.cc"],

@@ -1669,6 +1669,28 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "chebyshev_4d_incremental_test",
+    size = "large",
+    srcs = ["chebyshev_4d_incremental_test.cc"],
+    copts = ["-fopenmp", "-pthread"],
+    linkopts = ["-fopenmp", "-pthread"],
+    deps = [
+        "//benchmarks:chebyshev_4d_incremental_builder",
+        "//benchmarks:chebyshev_4d_eep_inner",
+        "//benchmarks:pde_slice_cache",
+        "//src/option/table/dimensionless:chebyshev_tucker_4d",
+        "//src/option/table/dimensionless:chebyshev_nodes",
+        "//src/option:american_option_batch",
+        "//src/option:american_option",
+        "//src/option:european_option",
+        "//src/math:cubic_spline_solver",
+        "//src/option/table:price_query",
+        "@googletest//:gtest_main",
+    ],
+    timeout = "long",
+)
+
 py_test(
     name = "python_bindings_test",
     size = "medium",

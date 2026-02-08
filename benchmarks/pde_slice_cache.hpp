@@ -3,7 +3,9 @@
 
 #include "mango/math/cubic_spline_solver.hpp"
 
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <span>
 #include <utility>
@@ -11,33 +13,40 @@
 
 namespace mango {
 
-/// Cache of PDE solutions keyed by (sigma_index, rate_index, tau_index).
-/// Each slice is a CubicSpline over the spatial (x) grid at one snapshot time.
-/// Supports incremental population: solve new (sigma, rate) pairs and add them
-/// without re-solving existing pairs.
+/// Cache of PDE solutions keyed by quantized (sigma, rate) physical values
+/// and tau_index.  Each slice is a CubicSpline over the spatial (x) grid at
+/// one snapshot time.  Keys use quantized doubles (1e-12 precision) so that
+/// the same physical node always maps to the same key regardless of which
+/// CC level it appears at.
 class PDESliceCache {
 public:
-    using Key = std::pair<size_t, size_t>;  // (sigma_idx, rate_idx)
+    /// Quantize a double to a reproducible integer key.
+    static int64_t quantize(double v) {
+        return static_cast<int64_t>(std::round(v * 1e12));
+    }
 
-    /// Store a spline for (sigma_idx, rate_idx, tau_idx).
-    void store_slice(size_t sigma_idx, size_t rate_idx, size_t tau_idx,
+    using Key = std::pair<int64_t, int64_t>;  // quantized (sigma, rate)
+
+    /// Store a spline for (sigma, rate, tau_idx).
+    void store_slice(double sigma, double rate, size_t tau_idx,
                      std::span<const double> x_grid,
                      std::span<const double> values) {
-        auto& tau_map = slices_[{sigma_idx, rate_idx}];
+        auto key = make_key(sigma, rate);
+        auto& tau_map = slices_[key];
         auto& entry = tau_map[tau_idx];
         auto err = entry.spline.build(x_grid, values);
         entry.valid = !err.has_value();
     }
 
-    /// Check if any tau slices exist for (sigma_idx, rate_idx).
-    [[nodiscard]] bool has_slice(size_t sigma_idx, size_t rate_idx) const {
-        return slices_.contains({sigma_idx, rate_idx});
+    /// Check if any tau slices exist for (sigma, rate).
+    [[nodiscard]] bool has_slice(double sigma, double rate) const {
+        return slices_.contains(make_key(sigma, rate));
     }
 
-    /// Retrieve the spline for (sigma_idx, rate_idx, tau_idx), or nullptr.
+    /// Retrieve the spline for (sigma, rate, tau_idx), or nullptr.
     [[nodiscard]] const CubicSpline<double>*
-    get_slice(size_t sigma_idx, size_t rate_idx, size_t tau_idx) const {
-        auto it = slices_.find({sigma_idx, rate_idx});
+    get_slice(double sigma, double rate, size_t tau_idx) const {
+        auto it = slices_.find(make_key(sigma, rate));
         if (it == slices_.end()) return nullptr;
         auto jt = it->second.find(tau_idx);
         if (jt == it->second.end() || !jt->second.valid) return nullptr;
@@ -48,21 +57,21 @@ public:
     [[nodiscard]] size_t num_cached_pairs() const { return slices_.size(); }
 
     /// Number of tau slices stored for a given (sigma, rate) pair.
-    [[nodiscard]] size_t num_tau_slices(size_t sigma_idx, size_t rate_idx) const {
-        auto it = slices_.find({sigma_idx, rate_idx});
+    [[nodiscard]] size_t num_tau_slices(double sigma, double rate) const {
+        auto it = slices_.find(make_key(sigma, rate));
         if (it == slices_.end()) return 0;
         return it->second.size();
     }
 
-    /// Given wanted sigma indices and rate indices, return (sigma_idx, rate_idx)
-    /// pairs that are NOT yet cached.
-    [[nodiscard]] std::vector<Key>
-    missing_pairs(std::span<const size_t> sigma_indices,
-                  std::span<const size_t> rate_indices) const {
-        std::vector<Key> result;
-        for (size_t s : sigma_indices) {
-            for (size_t r : rate_indices) {
-                if (!slices_.contains({s, r})) {
+    /// Given wanted sigma values and rate values, return (sigma_idx, rate_idx)
+    /// pairs (indices into the input arrays) that are NOT yet cached.
+    [[nodiscard]] std::vector<std::pair<size_t, size_t>>
+    missing_pairs(std::span<const double> sigma_values,
+                  std::span<const double> rate_values) const {
+        std::vector<std::pair<size_t, size_t>> result;
+        for (size_t s = 0; s < sigma_values.size(); ++s) {
+            for (size_t r = 0; r < rate_values.size(); ++r) {
+                if (!slices_.contains(make_key(sigma_values[s], rate_values[r]))) {
                     result.push_back({s, r});
                 }
             }
@@ -83,6 +92,10 @@ public:
     }
 
 private:
+    static Key make_key(double sigma, double rate) {
+        return {quantize(sigma), quantize(rate)};
+    }
+
     struct SliceEntry {
         CubicSpline<double> spline;
         bool valid = false;
