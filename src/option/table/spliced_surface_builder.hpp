@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/option/table/spliced_surface.hpp"
 #include "mango/option/table/standard_surface.hpp"
 #include "mango/support/error_types.hpp"
 #include <expected>
@@ -35,7 +34,7 @@ build_standard_surface(std::shared_ptr<const PriceTableSurface<4>> surface,
 // ===========================================================================
 
 struct SegmentConfig {
-    AmericanPriceSurface surface;
+    std::shared_ptr<const PriceTableSurface<4>> surface;
     double tau_start;
     double tau_end;
 };
@@ -45,7 +44,7 @@ struct SegmentedConfig {
     double K_ref;
 };
 
-[[nodiscard]] std::expected<SegmentedSurface<>, PriceTableError>
+[[nodiscard]] std::expected<SegmentedSurfacePI, PriceTableError>
 build_segmented_surface(SegmentedConfig config);
 
 // ===========================================================================
@@ -54,10 +53,10 @@ build_segmented_surface(SegmentedConfig config);
 
 struct MultiKRefEntry {
     double K_ref;
-    SegmentedSurface<> surface;
+    SegmentedSurfacePI surface;
 };
 
-[[nodiscard]] std::expected<MultiKRefSurface<>, PriceTableError>
+[[nodiscard]] std::expected<MultiKRefSurfacePI, PriceTableError>
 build_multi_kref_surface(std::vector<MultiKRefEntry> entries);
 
 }  // namespace mango

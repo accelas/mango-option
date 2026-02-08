@@ -46,7 +46,7 @@ build_standard_surface(std::shared_ptr<const PriceTableSurface<4>> surface,
 // Segmented surface builder
 // ===========================================================================
 
-std::expected<SegmentedSurface<>, PriceTableError>
+std::expected<SegmentedSurfacePI, PriceTableError>
 build_segmented_surface(SegmentedConfig config) {
     // Validate: non-empty segments
     if (config.segments.empty()) {
@@ -59,7 +59,7 @@ build_segmented_surface(SegmentedConfig config) {
     std::vector<double> tau_end;
     std::vector<double> tau_min;
     std::vector<double> tau_max;
-    std::vector<AmericanPriceSurfaceAdapter> slices;
+    std::vector<PriceTableInner> slices;
 
     tau_start.reserve(config.segments.size());
     tau_end.reserve(config.segments.size());
@@ -70,9 +70,9 @@ build_segmented_surface(SegmentedConfig config) {
     for (auto& seg : config.segments) {
         tau_start.push_back(seg.tau_start);
         tau_end.push_back(seg.tau_end);
-        tau_min.push_back(seg.surface.tau_min());
-        tau_max.push_back(seg.surface.tau_max());
-        slices.emplace_back(std::move(seg.surface));
+        tau_min.push_back(seg.surface->axes().grids[1].front());
+        tau_max.push_back(seg.surface->axes().grids[1].back());
+        slices.emplace_back(seg.surface);
     }
 
     // Construct SegmentLookup
@@ -88,7 +88,7 @@ build_segmented_surface(SegmentedConfig config) {
 
     WeightedSum combiner;
 
-    return SegmentedSurface<>(
+    return SegmentedSurfacePI(
         std::move(slices),
         std::move(lookup),
         std::move(xform),
@@ -99,7 +99,7 @@ build_segmented_surface(SegmentedConfig config) {
 // Multi-K_ref surface builder
 // ===========================================================================
 
-std::expected<MultiKRefSurface<>, PriceTableError>
+std::expected<MultiKRefSurfacePI, PriceTableError>
 build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
     // Validate: non-empty
     if (entries.empty()) {
@@ -115,7 +115,7 @@ build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
 
     // Extract k_refs vector and slices
     std::vector<double> k_refs;
-    std::vector<SegmentedSurface<>> slices;
+    std::vector<SegmentedSurfacePI> slices;
     k_refs.reserve(entries.size());
     slices.reserve(entries.size());
 
@@ -132,7 +132,7 @@ build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
 
     WeightedSum combiner;
 
-    return MultiKRefSurface<>(
+    return MultiKRefSurfacePI(
         std::move(slices),
         std::move(bracket),
         std::move(xform),

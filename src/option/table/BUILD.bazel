@@ -223,7 +223,8 @@ cc_library(
     deps = [
         ":adaptive_grid_types",
         ":price_table_builder",
-        ":american_price_surface",
+        ":price_table_inner",
+        ":standard_surface",
         ":spliced_surface",
         ":spliced_surface_builder",
         "//src/option:american_option",
@@ -253,6 +254,7 @@ cc_library(
     hdrs = ["standard_surface.hpp"],
     deps = [
         ":eep_transform",
+        ":price_table_inner",
         ":spliced_surface",
     ],
     visibility = ["//visibility:public"],
@@ -281,7 +283,7 @@ cc_library(
     deps = [
         ":price_table_axes",
         ":price_table_surface",
-        ":spliced_surface",
+        ":standard_surface",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
@@ -309,6 +311,7 @@ cc_library(
         ":segmented_price_table_builder",
         ":spliced_surface",
         ":spliced_surface_builder",
+        ":standard_surface",
         "//src/math:black_scholes_analytics",
         "//src/math:latin_hypercube",
         "//src/option:option_grid",

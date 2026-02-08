@@ -23,7 +23,7 @@ namespace mango {
 // =====================================================================
 
 template class InterpolatedIVSolver<StandardSurfaceWrapper>;
-template class InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>;
+template class InterpolatedIVSolver<MultiKRefSurfaceWrapperPI>;
 
 // =====================================================================
 // Factory internals
@@ -45,8 +45,8 @@ to_log_moneyness(const std::vector<double>& moneyness) {
     return log_m;
 }
 
-/// Build a MultiKRefSurface<> for manual grid path
-std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_manual(
+/// Build a MultiKRefSurfacePI for manual grid path
+std::expected<MultiKRefSurfacePI, PriceTableError> build_multi_kref_manual(
     double spot,
     OptionType option_type,
     const DividendSpec& dividends,
@@ -127,7 +127,7 @@ AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<StandardSurfaceWrapper> solver)
     : solver_(std::move(solver))
 {}
 
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver)
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapperPI> solver)
     : solver_(std::move(solver))
 {}
 
@@ -242,23 +242,23 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
 // Factory: segmented path helpers
 // ---------------------------------------------------------------------------
 
-/// Wrap a MultiKRefSurface into AnyIVSolver
+/// Wrap a MultiKRefSurfacePI into AnyIVSolver
 static std::expected<AnyIVSolver, ValidationError>
-wrap_multi_kref_surface(MultiKRefSurface<> surface,
+wrap_multi_kref_surface(MultiKRefSurfacePI surface,
                         const GridBounds& b, double maturity,
                         OptionType option_type, double dividend_yield,
                         const InterpolatedIVSolverConfig& solver_config) {
-    MultiKRefSurfaceWrapper<>::Bounds bounds{
+    MultiKRefSurfaceWrapperPI::Bounds bounds{
         .m_min = b.m_min, .m_max = b.m_max,
         .tau_min = 0.0, .tau_max = maturity,
         .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
         .rate_min = b.rate_min, .rate_max = b.rate_max,
     };
 
-    auto wrapper = MultiKRefSurfaceWrapper<>(
+    auto wrapper = MultiKRefSurfaceWrapperPI(
         std::move(surface), bounds, option_type, dividend_yield);
 
-    auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>::create(
+    auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapperPI>::create(
         std::move(wrapper), solver_config);
     if (!solver.has_value()) {
         return std::unexpected(ValidationError{

@@ -4,7 +4,7 @@
 #include <vector>
 #include <expected>
 #include "mango/option/table/adaptive_grid_types.hpp"
-#include "mango/option/table/spliced_surface.hpp"
+#include "mango/option/table/standard_surface.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/grid_spec_types.hpp"
@@ -55,7 +55,7 @@ public:
     ///   3. Build last segment (closest to expiry) with payoff IC.
     ///   4. Build earlier segments backward with chained IC.
     ///   5. Assemble into SegmentedSurface.
-    static std::expected<SegmentedSurface<>, PriceTableError> build(const Config& config);
+    static std::expected<SegmentedSurfacePI, PriceTableError> build(const Config& config);
 };
 
 }  // namespace mango

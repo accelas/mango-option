@@ -186,12 +186,12 @@ public:
     explicit AnyIVSolver(InterpolatedIVSolver<StandardSurfaceWrapper> solver);
 
     /// Constructor from segmented solver (spliced surface)
-    explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver);
+    explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapperPI> solver);
 
 private:
     using SolverVariant = std::variant<
         InterpolatedIVSolver<StandardSurfaceWrapper>,
-        InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>
+        InterpolatedIVSolver<MultiKRefSurfaceWrapperPI>
     >;
     SolverVariant solver_;
 };
