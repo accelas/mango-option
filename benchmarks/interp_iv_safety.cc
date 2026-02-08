@@ -30,6 +30,8 @@
 
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/table/dimensionless/dimensionless_inner.hpp"
+#include "chebyshev_eep_inner.hpp"
+#include "chebyshev_4d_eep_inner.hpp"
 
 using namespace mango;
 using namespace mango::bench;
@@ -495,6 +497,149 @@ static ErrorTable compute_errors_3d(const PriceGrid& prices,
 }
 
 // ============================================================================
+// Step 4b: Chebyshev-Tucker 3D surface (same domain as B-spline 3D)
+// ============================================================================
+
+static ChebyshevEEPInner build_chebyshev_3d_surface() {
+    ChebyshevEEPConfig cfg;  // use wide defaults
+
+    auto t0 = std::chrono::steady_clock::now();
+    auto result = build_chebyshev_eep(cfg, kSpot, OptionType::PUT);
+    auto t1 = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(t1 - t0).count();
+
+    auto ranks = result.interp.ranks();
+    std::printf("  Chebyshev surface: %d PDE solves, %.3fs build, "
+                "ranks=(%zu,%zu,%zu)\n",
+                result.n_pde_solves, elapsed, ranks[0], ranks[1], ranks[2]);
+
+    return ChebyshevEEPInner(
+        std::move(result.interp), OptionType::PUT, kSpot, 0.0);
+}
+
+static ErrorTable compute_errors_chebyshev(const PriceGrid& prices,
+                                            const ChebyshevEEPInner& inner,
+                                            size_t vol_idx) {
+    ErrorTable errors{};
+    IVSolverConfig fdm_config;
+    IVSolver fdm_solver(fdm_config);
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            IVQuery fdm_q;
+            fdm_q.spot = kSpot;
+            fdm_q.strike = kStrikes[si];
+            fdm_q.maturity = kMaturities[ti];
+            fdm_q.rate = kRate;
+            fdm_q.dividend_yield = 0.0;
+            fdm_q.option_type = OptionType::PUT;
+            fdm_q.market_price = price;
+
+            auto fdm_result = fdm_solver.solve(fdm_q);
+            if (!fdm_result) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            double iv_cheb = brent_solve_iv(
+                [&](double vol) -> double {
+                    PriceQuery q{.spot = kSpot, .strike = kStrikes[si],
+                                 .tau = kMaturities[ti], .sigma = vol,
+                                 .rate = kRate};
+                    return inner.price(q);
+                },
+                price);
+
+            if (!std::isfinite(iv_cheb)) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            errors[ti][si] = std::abs(iv_cheb - fdm_result->implied_vol) * 10000.0;
+        }
+    }
+    return errors;
+}
+
+// ============================================================================
+// Step 4c: Chebyshev-Tucker 4D surface (ln(S/K), tau, sigma, rate)
+// ============================================================================
+
+static Chebyshev4DEEPInner build_chebyshev_4d_surface() {
+    Chebyshev4DEEPConfig cfg;  // use defaults: 10x10x15x6, epsilon=1e-8
+
+    auto t0 = std::chrono::steady_clock::now();
+    auto result = build_chebyshev_4d_eep(cfg, kSpot, OptionType::PUT);
+    auto t1 = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(t1 - t0).count();
+
+    auto ranks = result.interp.ranks();
+    std::printf("  Chebyshev 4D surface: %d PDE solves, %.3fs build, "
+                "ranks=(%zu,%zu,%zu,%zu)\n",
+                result.n_pde_solves, elapsed,
+                ranks[0], ranks[1], ranks[2], ranks[3]);
+
+    return Chebyshev4DEEPInner(
+        std::move(result.interp), OptionType::PUT, kSpot, 0.0);
+}
+
+static ErrorTable compute_errors_chebyshev_4d(const PriceGrid& prices,
+                                               const Chebyshev4DEEPInner& inner,
+                                               size_t vol_idx) {
+    ErrorTable errors{};
+    IVSolverConfig fdm_config;
+    IVSolver fdm_solver(fdm_config);
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            IVQuery fdm_q;
+            fdm_q.spot = kSpot;
+            fdm_q.strike = kStrikes[si];
+            fdm_q.maturity = kMaturities[ti];
+            fdm_q.rate = kRate;
+            fdm_q.dividend_yield = 0.0;
+            fdm_q.option_type = OptionType::PUT;
+            fdm_q.market_price = price;
+
+            auto fdm_result = fdm_solver.solve(fdm_q);
+            if (!fdm_result) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            double iv_cheb4d = brent_solve_iv(
+                [&](double vol) -> double {
+                    PriceQuery q{.spot = kSpot, .strike = kStrikes[si],
+                                 .tau = kMaturities[ti], .sigma = vol,
+                                 .rate = kRate};
+                    return inner.price(q);
+                },
+                price);
+
+            if (!std::isfinite(iv_cheb4d)) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            errors[ti][si] = std::abs(iv_cheb4d - fdm_result->implied_vol) * 10000.0;
+        }
+    }
+    return errors;
+}
+
+// ============================================================================
 // Step 5: Print heatmap
 // ============================================================================
 
@@ -625,6 +770,48 @@ int main() {
 
         print_heatmap(title_3d, errors_3d);
         print_heatmap(title_4d, errors_4d);
+    }
+
+    // ================================================================
+    // Chebyshev-Tucker 3D vs B-spline 3D (q=0)
+    // ================================================================
+    std::printf("\n\n================================================================\n");
+    std::printf("Chebyshev-Tucker 3D vs B-spline 3D — q=0, no dividends\n");
+    std::printf("================================================================\n\n");
+
+    std::printf("--- Building Chebyshev-Tucker 3D surface...\n");
+    auto inner_cheb = build_chebyshev_3d_surface();
+
+    std::printf("--- Computing Chebyshev IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title_cheb[128];
+        std::snprintf(title_cheb, sizeof(title_cheb),
+                      "Chebyshev-Tucker IV Error (bps) — σ=%.0f%%, q=0",
+                      kVols[vi] * 100);
+
+        auto errors_cheb = compute_errors_chebyshev(q0_prices, inner_cheb, vi);
+        print_heatmap(title_cheb, errors_cheb);
+    }
+
+    // ================================================================
+    // Chebyshev-Tucker 4D (ln(S/K), tau, sigma, rate)
+    // ================================================================
+    std::printf("\n\n================================================================\n");
+    std::printf("Chebyshev-Tucker 4D — q=0, no dividends\n");
+    std::printf("================================================================\n\n");
+
+    std::printf("--- Building Chebyshev-Tucker 4D surface...\n");
+    auto inner_cheb4d = build_chebyshev_4d_surface();
+
+    std::printf("--- Computing Chebyshev 4D IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title_cheb4d[128];
+        std::snprintf(title_cheb4d, sizeof(title_cheb4d),
+                      "Chebyshev-Tucker 4D IV Error (bps) — σ=%.0f%%, q=0",
+                      kVols[vi] * 100);
+
+        auto errors_cheb4d = compute_errors_chebyshev_4d(q0_prices, inner_cheb4d, vi);
+        print_heatmap(title_cheb4d, errors_cheb4d);
     }
 
     return 0;
