@@ -58,16 +58,31 @@ detect the exercise boundary x\*(τ, σ, r) for element break placement.
 
 ### Algorithm
 
-For each τ-band, sample representative (σ, r, τ) triples from the cache:
+For each τ-band, sample representative (σ, r, τ\_idx) triples from the
+cache. Use τ\_idx (not physical τ) to match the cache API
+(`cache.get_slice(σ, r, tau_idx)`). The builder holds the `tau_nodes`
+array, so physical τ = `tau_nodes[tau_idx]`.
+
+For each sampled triple:
 
 1. Evaluate EEP at 200 uniformly-spaced x-points across the domain.
-   EEP = spline.eval(x) · K\_ref − European(x, τ, σ, r).
-2. Find the rightmost x where EEP > ε (ε = 0.001 · K\_ref). This is x\*
-   for that slice.
-3. Collect all x\* values across the representative triples.
+   EEP(x) = spline.eval(x) · K\_ref − European(x, τ, σ, r).
+2. **Monotone preprocessing:** compute the monotone envelope of EEP
+   (running max from right to left for puts). This suppresses spurious
+   oscillations near zero that would confuse boundary detection.
+3. **Bracket the zero-crossing:** scan from OTM (right) toward ITM (left)
+   to find the first x where the monotone-enveloped EEP exceeds
+   ε = max(1e-6 · K\_ref, 1e-8). This brackets [x\_below, x\_above].
+4. **Interpolate root:** within the bracket, use linear interpolation
+   (or bisection on the spline) to find x\* where EEP ≈ ε. Precision:
+   |x\_bracket| < 1e-4.
+5. **Fallback:** if no valid crossing exists (EEP < ε everywhere, e.g.,
+   deep OTM or very short τ), exclude this triple from the median
+   computation. If fewer than 30% of triples produce a valid x\*, fall
+   back to a fixed x\* = 0.0 (ATM) for that τ-band.
 
 Boundary placement:
-- **Center:** median x\* across all sampled triples.
+- **Center:** median x\* across all valid sampled triples.
 - **Half-width δ:** max(0.10, (p90 − p10) / 2 + margin), where margin ≈ 0.05.
 
 Short-τ band: x\* closer to 0 (near ATM), smaller δ.
@@ -139,6 +154,25 @@ Both projections are per-element, run once at build time. The key benefit
 is Newton/Brent stability: negative or non-monotone EEP causes IV solver
 divergence (the `---` solve failures in heatmaps).
 
+### Overlap boundary freeze
+
+Projection can introduce interface bias even with blending. To prevent
+core-regime regression:
+
+1. **Freeze overlap nodes:** during projection (clip + refit), pin the
+   Chebyshev values at x-nodes falling inside overlap zones to their
+   original (unprojected) values. The least-squares refit is constrained
+   to match these pinned values exactly. This ensures the blended region
+   sees the same function from both sides.
+2. **Interface consistency gate:** after projection, evaluate both
+   adjacent elements at 50 x-points in each overlap zone. Check:
+   - Value mismatch: |f\_left(x) − f\_right(x)| < atol + rtol · |f|
+     with atol = 1e-6, rtol = 1e-3.
+   - First-derivative mismatch (central diff, h = 1e-6 · domain\_width):
+     |f'\_left(x) − f'\_right(x)| < atol + rtol · |f'|
+     with atol = 1e-4, rtol = 1e-2.
+   - If gate fails, skip projection for that element and log a warning.
+
 Constraints apply to the boundary and ITM elements. The OTM element has
 EEP ≈ 0 everywhere, so constraints are trivially satisfied.
 
@@ -161,7 +195,11 @@ PDE solves.
 
 3. **Build element tensors** — for each of the 6 elements, resample
    cached splines at that element's Chebyshev x-nodes via
-   `cache.get_slice(σ, r, τ)->eval(x)`. No new PDE solves. Each element
+   `cache.get_slice(σ, r, tau_idx)->eval(x)`. The builder maps each
+   element's τ-Chebyshev nodes to the nearest cached `tau_idx` (the
+   cache stores slices at discrete snapshot indices, not continuous τ).
+   For τ-nodes that fall between cached snapshots, interpolate between
+   the two nearest cached slices. No new PDE solves. Each element
    produces an independent `ChebyshevTucker4D`.
 
 4. **Apply shape constraints** — per-element projection (Section 4).
@@ -215,9 +253,10 @@ struct PiecewiseElementSet {
 | T<60d, σ=30% p95 | 168 bps | <80 bps |
 | T>=1y, σ=30% p95 | 1.8 bps | ≤2 bps (no regression) |
 | Solve success rate | 113/144 | ≥130/144 |
-| C1 at interfaces | — | central diff matches to 1e-4 rel |
+| C1 at interfaces | — | mixed tol: \|Δf\| < 1e-6 + 1e-3·\|f\|, \|Δf'\| < 1e-4 + 1e-2·\|f'\| |
 | EEP non-negativity | — | zero violations on dense check grid |
 | Put-monotonicity | — | zero violations > 0.1% of max EEP |
+| Interface consistency | — | post-projection value/deriv gate passes (Section 4) |
 
 ---
 
