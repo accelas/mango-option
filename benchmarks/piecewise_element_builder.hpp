@@ -180,9 +180,16 @@ inline PiecewiseElementSet build_piecewise_elements(
         double tau_lo_ext = std::max(b.tau_lo - htau, 1e-4);
         double tau_hi_ext = b.tau_hi + htau;
 
-        // x-element boundaries (physical)
-        double itm_hi = x_star - delta;     // ITM/boundary break
-        double otm_lo = x_star + delta;     // boundary/OTM break
+        // x-element boundaries (physical), clamped to domain
+        double itm_hi = std::max(x_star - delta, cfg.x_min + 0.05);
+        double otm_lo = std::min(x_star + delta, cfg.x_max - 0.05);
+
+        // Ensure boundary element has positive width
+        if (otm_lo <= itm_hi + 0.02) {
+            double mid = (itm_hi + otm_lo) / 2.0;
+            itm_hi = mid - 0.05;
+            otm_lo = mid + 0.05;
+        }
 
         // ITM element: [x_min, itm_hi] with outer headroom
         double hx_itm = headroom_fn(cfg.x_min, itm_hi, cfg.num_x_coarse);

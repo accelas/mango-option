@@ -25,7 +25,7 @@ public:
 
     [[nodiscard]] double price(const PriceQuery& q) const {
         double x = std::log(q.spot / q.strike);
-        double eep = eval_blended(x, q.tau, q.sigma, q.rate);
+        double eep = std::max(0.0, eval_blended(x, q.tau, q.sigma, q.rate));
 
         auto eu = EuropeanOptionSolver(
             OptionSpec{.spot = q.spot, .strike = q.strike, .maturity = q.tau,

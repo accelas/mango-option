@@ -1696,6 +1696,9 @@ static PiecewiseBlendedEvaluator build_cheb4d_piecewise() {
     PiecewiseElementBuildConfig pw_cfg;
     pw_cfg.sigma_level = 4;
     pw_cfg.rate_level = 3;
+    pw_cfg.num_tau = 15;            // match Phase A cache resolution
+    pw_cfg.num_x_dense = 30;        // denser boundary element
+    pw_cfg.num_x_coarse = 20;       // slightly denser ITM/OTM elements
     pw_cfg.sigma_headroom_ref = inc_cfg.sigma_headroom_ref;
     pw_cfg.rate_headroom_ref = inc_cfg.rate_headroom_ref;
     pw_cfg.K_ref = kSpot;

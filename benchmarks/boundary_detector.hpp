@@ -92,41 +92,31 @@ inline BoundaryResult detect_exercise_boundary(
                     eep[k] = am - eu->value();
                 }
 
-                // 2. Monotone envelope (running max from right to left for puts)
-                if (option_type == OptionType::PUT) {
-                    for (int k = static_cast<int>(cfg.n_scan_points) - 2; k >= 0; --k) {
-                        eep[k] = std::max(eep[k], eep[k + 1]);
+                // 2. Find the steepest EEP gradient (max |dEEP/dx|) as the
+                //    boundary location. This is robust even when EEP > 0
+                //    across the entire domain (long-dated puts).
+                //    For puts, the boundary is where EEP transitions from
+                //    large (ITM) to small (OTM), producing a large |gradient|.
+                double max_grad = 0.0;
+                int max_grad_idx = -1;
+                for (size_t k = 1; k < cfg.n_scan_points; ++k) {
+                    double dx = xs[k] - xs[k - 1];
+                    if (dx < 1e-15) continue;
+                    double grad = std::abs(eep[k] - eep[k - 1]) / dx;
+                    if (grad > max_grad) {
+                        max_grad = grad;
+                        max_grad_idx = static_cast<int>(k);
                     }
                 }
 
-                // 3. Bracket zero-crossing: scan from OTM (right) toward ITM (left)
-                //    Find the rightmost x where monotone-enveloped EEP exceeds ε
-                int bracket_left = -1;
-                for (int k = static_cast<int>(cfg.n_scan_points) - 1; k >= 0; --k) {
-                    if (eep[k] > eps) {
-                        bracket_left = k;
-                        break;
-                    }
-                }
-                if (bracket_left < 0) continue;  // EEP < eps everywhere
+                // Skip if no meaningful gradient (flat EEP, or EEP ≈ 0 everywhere)
+                double eep_range = *std::max_element(eep.begin(), eep.end()) -
+                                   *std::min_element(eep.begin(), eep.end());
+                if (max_grad_idx < 0 || eep_range < eps) continue;
 
-                // bracket_right: the point just right of bracket_left where eep <= eps
-                int bracket_right = -1;
-                if (bracket_left + 1 < static_cast<int>(cfg.n_scan_points)) {
-                    bracket_right = bracket_left + 1;
-                }
-
-                // 4. Linear interpolation for root
-                if (bracket_right >= 0 &&
-                    std::abs(eep[bracket_left] - eep[bracket_right]) > 1e-15) {
-                    double alpha = (eps - eep[bracket_right]) /
-                                   (eep[bracket_left] - eep[bracket_right]);
-                    double x_star = xs[bracket_right] +
-                                    alpha * (xs[bracket_left] - xs[bracket_right]);
-                    all_x_stars.push_back(x_star);
-                } else {
-                    all_x_stars.push_back(xs[bracket_left]);
-                }
+                // The boundary is between xs[max_grad_idx-1] and xs[max_grad_idx]
+                double x_star = (xs[max_grad_idx - 1] + xs[max_grad_idx]) / 2.0;
+                all_x_stars.push_back(x_star);
             }
         }
     }
