@@ -1534,6 +1534,9 @@ static void run_cheb4d_incremental() {
         {2, 1, "L(2,1): 5sig x 3rate"},
         {3, 2, "L(3,2): 9sig x 5rate"},
         {3, 3, "L(3,3): 9sig x 9rate"},
+        {4, 3, "L(4,3): 17sig x 9rate"},
+        {4, 4, "L(4,4): 17sig x 17rate"},
+        {5, 4, "L(5,4): 33sig x 17rate"},
     };
 
     PDESliceCache cache;
@@ -1541,6 +1544,7 @@ static void run_cheb4d_incremental() {
     cfg.num_x = 40;
     cfg.num_tau = 15;
     cfg.use_tucker = false;
+    cfg.num_x = 40;
     cfg.dividend_yield = 0.0;
 
     std::printf("%-25s  %6s  %6s  %8s\n",
@@ -1560,7 +1564,7 @@ static void run_cheb4d_incremental() {
                     cache.total_pde_solves(), result.build_seconds);
 
         // Only print heatmaps + stratified stats for the final level
-        if (&level == &schedule[2]) {
+        if (&level == &schedule[std::size(schedule) - 1]) {
             std::printf("\n");
             Chebyshev4DEEPInner inner(
                 std::move(result.interp), OptionType::PUT, kSpot, 0.0);
@@ -1585,13 +1589,85 @@ static void run_cheb4d_incremental() {
 }
 
 // ============================================================================
+// Noise-floor test: same Chebyshev config, varying PDE accuracy
+// ============================================================================
+
+static void run_cheb4d_noise_floor() {
+    using namespace mango;
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev 4D Noise Floor Test — L(4,3) at Ultra vs 2×Ultra\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    struct AccuracyLevel {
+        const char* label;
+        GridAccuracyParams params;
+    };
+
+    auto ultra = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    GridAccuracyParams ultra2x{
+        .n_sigma = ultra.n_sigma,
+        .alpha = ultra.alpha,
+        .tol = ultra.tol / 4.0,             // 4× tighter tolerance
+        .min_spatial_points = ultra.min_spatial_points * 2,
+        .max_spatial_points = ultra.max_spatial_points * 2,
+        .max_time_steps = ultra.max_time_steps * 2,
+    };
+
+    AccuracyLevel levels[] = {
+        {"Ultra (baseline)", ultra},
+        {"2×Ultra (4× tol)", ultra2x},
+    };
+
+    for (const auto& acc : levels) {
+        PDESliceCache cache;
+        IncrementalBuildConfig cfg;
+        cfg.num_x = 40;
+        cfg.num_tau = 15;
+        cfg.sigma_level = 4;
+        cfg.rate_level = 3;
+        cfg.use_tucker = false;
+        cfg.dividend_yield = 0.0;
+        cfg.grid_accuracy = acc.params;
+
+        auto result = build_chebyshev_4d_eep_incremental(
+            cfg, cache, kSpot, OptionType::PUT);
+
+        std::printf("--- %s: %zu PDE, %.1fs build ---\n",
+                    acc.label, result.new_pde_solves, result.build_seconds);
+
+        Chebyshev4DEEPInner inner(
+            std::move(result.interp), OptionType::PUT, kSpot, 0.0);
+
+        std::array<ErrorTable, kNV> all_errors;
+        for (size_t vi = 0; vi < kNV; ++vi) {
+            char title[128];
+            std::snprintf(title, sizeof(title),
+                          "L(4,3) %s — σ=%.0f%%",
+                          acc.label, kVols[vi] * 100);
+            all_errors[vi] = compute_errors_brent(q0_prices,
+                [&](double S, double K, double tau, double sigma, double r) {
+                    PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                                 .sigma = sigma, .rate = r};
+                    return inner.price(q);
+                }, vi);
+            print_heatmap(title, all_errors[vi]);
+        }
+        print_stratified_stats(acc.label, all_errors);
+        std::printf("\n");
+    }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
 static constexpr const char* kSections[] = {
     "vanilla", "dividends", "bspline-3d", "bspline-4d", "cheb3d", "cheb4d",
     "cheb4d-diag", "cheb4d-pw", "cheb4d-q", "cheb4d-baseline",
-    "cheb4d-adaptive", "cheb4d-rate-ablation", "cheb4d-incremental"
+    "cheb4d-adaptive", "cheb4d-rate-ablation", "cheb4d-incremental",
+    "cheb4d-noise-floor"
 };
 
 int main(int argc, char* argv[]) {
@@ -1647,6 +1723,7 @@ int main(int argc, char* argv[]) {
     if (want("cheb4d-adaptive")) run_cheb4d_adaptive();
     if (want("cheb4d-rate-ablation")) run_cheb4d_rate_ablation();
     if (want("cheb4d-incremental")) run_cheb4d_incremental();
+    if (want("cheb4d-noise-floor")) run_cheb4d_noise_floor();
 
     return 0;
 }

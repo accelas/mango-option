@@ -57,6 +57,7 @@ cc_library(
         "//src/option:european_option",
         "//src/option:american_option",
         "//src/option:american_option_batch",
+        "//src/option:grid_spec_types",
         "//src/math:cubic_spline_solver",
     ],
     visibility = ["//visibility:public"],

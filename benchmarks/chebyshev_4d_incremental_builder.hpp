@@ -11,6 +11,7 @@
 #include "mango/option/european_option.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/grid_spec_types.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 
 #include <algorithm>
@@ -44,6 +45,9 @@ struct IncrementalBuildConfig {
     // stays fixed, enabling cross-level PDE cache reuse.
     size_t sigma_headroom_ref = 15;
     size_t rate_headroom_ref = 9;
+
+    // PDE solver accuracy (default: Ultra)
+    GridAccuracyParams grid_accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
 };
 
 struct IncrementalBuildResult {
@@ -111,7 +115,7 @@ inline IncrementalBuildResult build_chebyshev_4d_eep_incremental(
         }
 
         BatchAmericanOptionSolver solver;
-        solver.set_grid_accuracy(make_grid_accuracy(GridAccuracyProfile::Ultra));
+        solver.set_grid_accuracy(cfg.grid_accuracy);
         solver.set_snapshot_times(std::span<const double>{tau_nodes});
         auto batch_result = solver.solve_batch(batch, /*use_shared_grid=*/true);
         new_solves = missing.size();
