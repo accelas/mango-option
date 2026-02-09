@@ -50,6 +50,8 @@
 #include "chebyshev_4d_incremental_builder.hpp"
 #include "pde_slice_cache.hpp"
 #include "piecewise_evaluator.hpp"
+#include "chebyshev_div_eep_inner.hpp"
+#include "piecewise_div_builder.hpp"
 
 using namespace mango;
 using namespace mango::bench;
@@ -989,14 +991,23 @@ static void run_vanilla() {
     std::printf("--- Building vanilla interpolated solver (adaptive)...\n");
     auto solver = build_vanilla_solver();
 
-    std::printf("--- Computing vanilla IV errors...\n");
+    std::printf("--- Computing vanilla IV errors (Newton vs Brent)...\n");
     for (size_t vi = 0; vi < kNV; ++vi) {
         char title[128];
         std::snprintf(title, sizeof(title),
-                      "Interpolation IV Error (bps) — σ=%.0f%%, no dividends",
+                      "B-spline Newton IV Error (bps) — σ=%.0f%%, no dividends",
                       kVols[vi] * 100);
-        auto errors = compute_errors_vanilla(prices, solver, vi);
-        print_heatmap(title, errors);
+        auto newton_errors = compute_errors_vanilla(prices, solver, vi);
+        print_heatmap(title, newton_errors);
+
+        std::snprintf(title, sizeof(title),
+                      "B-spline Brent IV Error (bps) — σ=%.0f%%, no dividends",
+                      kVols[vi] * 100);
+        auto brent_errors = compute_errors_brent(prices,
+            [&](double S, double K, double tau, double sigma, double r) {
+                return solver.price(S, K, tau, sigma, r);
+            }, vi, kDivYield);
+        print_heatmap(title, brent_errors);
     }
 }
 
@@ -1007,14 +1018,55 @@ static void run_dividends() {
     std::printf("--- Building dividend interpolated solvers (per-maturity)...\n");
     auto solvers = build_div_solvers();
 
-    std::printf("--- Computing dividend IV errors...\n");
+    // Build lookup: mat_idx → solver index
+    std::array<int, kNT> solver_idx{};
+    solver_idx.fill(-1);
+    for (size_t i = 0; i < solvers.size(); ++i)
+        solver_idx[solvers[i].first] = static_cast<int>(i);
+
+    std::printf("--- Computing dividend IV errors (Newton vs Brent)...\n");
     for (size_t vi = 0; vi < kNV; ++vi) {
+        // Newton (production solver)
         char title[128];
         std::snprintf(title, sizeof(title),
-                      "Interpolation IV Error (bps) — σ=%.0f%%, quarterly $0.50 div",
+                      "B-spline Newton IV Error (bps) — σ=%.0f%%, quarterly $0.50 div",
                       kVols[vi] * 100);
-        auto errors = compute_errors_div(prices, solvers, vi);
-        print_heatmap(title, errors);
+        auto newton_errors = compute_errors_div(prices, solvers, vi);
+        print_heatmap(title, newton_errors);
+
+        // Brent (using surface price function)
+        std::snprintf(title, sizeof(title),
+                      "B-spline Brent IV Error (bps) — σ=%.0f%%, quarterly $0.50 div",
+                      kVols[vi] * 100);
+
+        ErrorTable brent_errors{};
+        for (auto& row : brent_errors)
+            for (auto& v : row)
+                v = std::nan("");
+
+        for (size_t ti = 0; ti < kNT; ++ti) {
+            if (solver_idx[ti] < 0) continue;
+            double maturity = kMaturities[ti];
+            auto divs = make_div_schedule(maturity);
+            const auto& solver = solvers[static_cast<size_t>(solver_idx[ti])].second;
+
+            for (size_t si = 0; si < kNS; ++si) {
+                double price = prices[vi][ti][si];
+                if (std::isnan(price) || price <= 0) continue;
+
+                double fdm_iv = solve_fdm_iv_div(kStrikes[si], maturity, price, divs);
+                if (std::isnan(fdm_iv)) continue;
+
+                double interp_iv = brent_solve_iv(
+                    [&](double vol) {
+                        return solver.price(kSpot, kStrikes[si], maturity, vol, kRate);
+                    }, price);
+
+                if (std::isfinite(interp_iv))
+                    brent_errors[ti][si] = std::abs(interp_iv - fdm_iv) * 10000.0;
+            }
+        }
+        print_heatmap(title, brent_errors);
     }
 }
 
@@ -1763,6 +1815,286 @@ static void run_cheb4d_piecewise() {
 }
 
 // ============================================================================
+// Chebyshev 4D — discrete dividends
+// ============================================================================
+
+// ============================================================================
+// Chebyshev 4D — discrete dividends
+// ============================================================================
+
+// Fixed calendar-time dividend schedule for all maturities.
+// Quarterly $0.50: at 90d, 180d, 270d, 365d, 455d, 545d.
+// A single 4D tensor covers all maturities with this fixed schedule.
+static std::vector<Dividend> kFixedDivSchedule = {
+    {.calendar_time = 90.0 / 365.0,  .amount = 0.50},
+    {.calendar_time = 180.0 / 365.0, .amount = 0.50},
+    {.calendar_time = 270.0 / 365.0, .amount = 0.50},
+    {.calendar_time = 365.0 / 365.0, .amount = 0.50},
+    {.calendar_time = 455.0 / 365.0, .amount = 0.50},
+    {.calendar_time = 545.0 / 365.0, .amount = 0.50},
+};
+
+// Generate reference prices with the fixed dividend schedule.
+static PriceGrid generate_prices_fixed_divs() {
+    PriceGrid prices{};
+    BatchAmericanOptionSolver batch_solver;
+
+    std::vector<PricingParams> all_params;
+    all_params.reserve(kNV * kNT * kNS);
+
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        for (size_t ti = 0; ti < kNT; ++ti) {
+            // Filter dividends to those within this maturity
+            std::vector<Dividend> divs;
+            for (const auto& d : kFixedDivSchedule) {
+                if (d.calendar_time < kMaturities[ti])
+                    divs.push_back(d);
+            }
+
+            for (size_t si = 0; si < kNS; ++si) {
+                PricingParams p;
+                p.spot = kSpot;
+                p.strike = kStrikes[si];
+                p.maturity = kMaturities[ti];
+                p.rate = kRate;
+                p.dividend_yield = kDivYield;
+                p.option_type = OptionType::PUT;
+                p.volatility = kVols[vi];
+                p.discrete_dividends = divs;
+                all_params.push_back(std::move(p));
+            }
+        }
+    }
+
+    auto results = batch_solver.solve_batch(all_params);
+
+    size_t idx = 0;
+    for (size_t vi = 0; vi < kNV; ++vi)
+        for (size_t ti = 0; ti < kNT; ++ti)
+            for (size_t si = 0; si < kNS; ++si) {
+                if (results.results[idx].has_value())
+                    prices[vi][ti][si] = results.results[idx]->value();
+                else
+                    prices[vi][ti][si] = std::nan("");
+                idx++;
+            }
+    return prices;
+}
+
+static SegCheb4DDivInner build_cheb4d_div_inner() {
+    SegCheb4DDivConfig cfg;
+    cfg.num_x = 40;
+    cfg.num_tau_per_seg = 9;
+    cfg.num_sigma = 9;
+    cfg.num_rate = 5;
+    cfg.dividend_yield = kDivYield;
+    cfg.discrete_dividends = kFixedDivSchedule;
+    cfg.option_type = OptionType::PUT;
+    cfg.use_tucker = false;
+
+    // All test strikes as K_refs (matches B-spline benchmark)
+    cfg.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end());
+
+    std::fprintf(stderr, "  [cheb4d-div-seg] building multi-K_ref segmented PDEs...\n");
+
+    auto result = build_segmented_cheb_4d_div(cfg, kSpot);
+
+    std::printf("  Build: %d PDE solves, %zu K_refs × %zu segments, %.1fs\n",
+                result.n_pde_solves,
+                result.entries.size(),
+                result.entries.empty() ? 0 : result.entries[0].segments.size(),
+                result.build_seconds);
+
+    return SegCheb4DDivInner(
+        std::move(result.entries), OptionType::PUT);
+}
+
+static ErrorTable compute_errors_cheb4d_div(
+    const PriceGrid& prices,
+    const SegCheb4DDivInner& inner,
+    size_t vol_idx) {
+    ErrorTable errors{};
+
+    for (auto& row : errors)
+        for (auto& v : row)
+            v = std::nan("");
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        double maturity = kMaturities[ti];
+        // Filter fixed schedule to this maturity
+        std::vector<Dividend> divs;
+        for (const auto& d : kFixedDivSchedule) {
+            if (d.calendar_time < maturity)
+                divs.push_back(d);
+        }
+
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) continue;
+
+            // FDM reference IV (with same fixed dividends)
+            double fdm_iv = solve_fdm_iv_div(
+                kStrikes[si], maturity, price, divs);
+            if (std::isnan(fdm_iv)) continue;
+
+            // Chebyshev IV via Brent
+            double cheb_iv = brent_solve_iv(
+                [&](double vol) -> double {
+                    PriceQuery q{.spot = kSpot, .strike = kStrikes[si],
+                                 .tau = maturity, .sigma = vol, .rate = kRate};
+                    return inner.price(q);
+                },
+                price);
+
+            if (!std::isfinite(cheb_iv)) continue;
+
+            errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
+        }
+    }
+
+    return errors;
+}
+
+static void run_cheb_dividends() {
+    std::printf("\n================================================================\n");
+    std::printf("Segmented Chebyshev 4D — quarterly $0.50 dividends\n");
+    std::printf("================================================================\n\n");
+
+    std::printf("Dividend schedule: ");
+    for (const auto& d : kFixedDivSchedule)
+        std::printf("$%.2f@%.0fd ", d.amount, d.calendar_time * 365);
+    std::printf("\n\n");
+
+    std::printf("--- Generating reference prices (fixed dividend schedule)...\n");
+    auto prices = generate_prices_fixed_divs();
+
+    std::printf("--- Building segmented Chebyshev 4D (τ-split at div dates)...\n");
+    auto inner = build_cheb4d_div_inner();
+
+    std::printf("--- Computing segmented Chebyshev 4D dividend IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Seg Cheb 4D Div IV Error (bps) — σ=%.0f%%, quarterly $0.50",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_cheb4d_div(prices, inner, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+// ============================================================================
+// Piecewise Chebyshev 4D — discrete dividends
+// ============================================================================
+
+static PiecewiseDivEvaluator build_cheb4d_piecewise_div() {
+    PiecewiseDivConfig cfg;
+    cfg.num_x_coarse = 20;
+    cfg.num_x_dense = 30;
+    cfg.num_tau_per_seg = 9;
+    cfg.num_sigma = 9;
+    cfg.num_rate = 5;
+    cfg.dividend_yield = kDivYield;
+    cfg.discrete_dividends = kFixedDivSchedule;
+    cfg.option_type = OptionType::PUT;
+    cfg.use_tucker = false;
+
+    // All test strikes as K_refs (matches B-spline benchmark)
+    cfg.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end());
+
+    std::fprintf(stderr, "  [pw-div] building piecewise multi-K_ref segmented PDEs...\n");
+
+    auto result = build_piecewise_div(cfg, kSpot);
+
+    std::printf("  Build: %d PDE solves, %zu K_refs × %zu segments, %.1fs\n",
+                result.n_pde_solves,
+                result.entries.size(),
+                result.entries.empty() ? 0 : result.entries[0].segments.size(),
+                result.build_seconds);
+
+    auto evaluator = PiecewiseDivEvaluator(
+        std::move(result.entries), OptionType::PUT);
+
+    // Print boundary info for first K_ref
+    if (!evaluator.num_krefs()) return evaluator;
+    std::printf("  Total elements: %zu\n", evaluator.total_elements());
+
+    return evaluator;
+}
+
+static ErrorTable compute_errors_piecewise_div(
+    const PriceGrid& prices,
+    const PiecewiseDivEvaluator& evaluator,
+    size_t vol_idx) {
+    ErrorTable errors{};
+
+    for (auto& row : errors)
+        for (auto& v : row)
+            v = std::nan("");
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        double maturity = kMaturities[ti];
+        // Filter fixed schedule to this maturity
+        std::vector<Dividend> divs;
+        for (const auto& d : kFixedDivSchedule) {
+            if (d.calendar_time < maturity)
+                divs.push_back(d);
+        }
+
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) continue;
+
+            // FDM reference IV (with same fixed dividends)
+            double fdm_iv = solve_fdm_iv_div(
+                kStrikes[si], maturity, price, divs);
+            if (std::isnan(fdm_iv)) continue;
+
+            // Piecewise Chebyshev IV via Brent
+            double cheb_iv = brent_solve_iv(
+                [&](double vol) -> double {
+                    PriceQuery q{.spot = kSpot, .strike = kStrikes[si],
+                                 .tau = maturity, .sigma = vol, .rate = kRate};
+                    return evaluator.price(q);
+                },
+                price);
+
+            if (!std::isfinite(cheb_iv)) continue;
+
+            errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
+        }
+    }
+
+    return errors;
+}
+
+static void run_cheb4d_piecewise_div() {
+    std::printf("\n================================================================\n");
+    std::printf("Piecewise Chebyshev 4D — quarterly $0.50 dividends\n");
+    std::printf("================================================================\n\n");
+
+    std::printf("Dividend schedule: ");
+    for (const auto& d : kFixedDivSchedule)
+        std::printf("$%.2f@%.0fd ", d.amount, d.calendar_time * 365);
+    std::printf("\n\n");
+
+    std::printf("--- Generating reference prices (fixed dividend schedule)...\n");
+    auto prices = generate_prices_fixed_divs();
+
+    std::printf("--- Building piecewise Chebyshev 4D (multi-K_ref × τ-seg × 3 x-elem)...\n");
+    auto evaluator = build_cheb4d_piecewise_div();
+
+    std::printf("\n--- Computing piecewise Chebyshev 4D dividend IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "PW Cheb 4D Div IV Error (bps) — σ=%.0f%%, quarterly $0.50",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_piecewise_div(prices, evaluator, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -1770,7 +2102,8 @@ static constexpr const char* kSections[] = {
     "vanilla", "dividends", "bspline-3d", "bspline-4d", "cheb3d", "cheb4d",
     "cheb4d-diag", "cheb4d-pw", "cheb4d-q", "cheb4d-baseline",
     "cheb4d-adaptive", "cheb4d-rate-ablation", "cheb4d-incremental",
-    "cheb4d-noise-floor", "cheb4d-piecewise"
+    "cheb4d-noise-floor", "cheb4d-piecewise", "cheb-dividends",
+    "cheb4d-piecewise-div"
 };
 
 int main(int argc, char* argv[]) {
@@ -1828,6 +2161,8 @@ int main(int argc, char* argv[]) {
     if (want("cheb4d-incremental")) run_cheb4d_incremental();
     if (want("cheb4d-noise-floor")) run_cheb4d_noise_floor();
     if (want("cheb4d-piecewise")) run_cheb4d_piecewise();
+    if (want("cheb-dividends"))  run_cheb_dividends();
+    if (want("cheb4d-piecewise-div")) run_cheb4d_piecewise_div();
 
     return 0;
 }

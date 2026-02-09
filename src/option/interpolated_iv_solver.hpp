@@ -89,6 +89,12 @@ public:
     /// @return BatchIVResult with individual results and failure count
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const noexcept;
 
+    /// Evaluate interpolated price (for external Brent IV solvers)
+    double price(double spot, double strike, double maturity, double vol, double rate) const {
+        double m = spot / strike;
+        return eval_price(m, maturity, vol, rate, strike);
+    }
+
 private:
     /// Private constructor (use create() factory method)
     InterpolatedIVSolver(
@@ -181,6 +187,13 @@ public:
 
     /// Solve for implied volatility (batch with OpenMP)
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
+
+    /// Evaluate interpolated price (for external Brent IV solvers)
+    double price(double spot, double strike, double maturity, double vol, double rate) const {
+        return std::visit([&](const auto& s) {
+            return s.price(spot, strike, maturity, vol, rate);
+        }, solver_);
+    }
 
     /// Constructor from standard solver
     explicit AnyIVSolver(InterpolatedIVSolver<StandardSurfaceWrapper> solver);
