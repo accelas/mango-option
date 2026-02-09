@@ -560,7 +560,7 @@ cc_binary(
 
 cc_binary(
     name = "interp_iv_safety",
-    srcs = ["interp_iv_safety.cc", "iv_benchmark_common.hpp", "chebyshev_eep_inner.hpp", "chebyshev_4d_eep_inner.hpp", "chebyshev_div_eep_inner.hpp", "piecewise_div_builder.hpp"],
+    srcs = ["interp_iv_safety.cc", "iv_benchmark_common.hpp", "chebyshev_eep_inner.hpp", "chebyshev_4d_eep_inner.hpp", "chebyshev_div_eep_inner.hpp", "piecewise_div_builder.hpp", "chebyshev_3d_div_inner.hpp"],
     copts = [
         "-Wall",
         "-Wextra",

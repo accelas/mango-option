@@ -52,6 +52,7 @@
 #include "piecewise_evaluator.hpp"
 #include "chebyshev_div_eep_inner.hpp"
 #include "piecewise_div_builder.hpp"
+#include "chebyshev_3d_div_inner.hpp"
 
 using namespace mango;
 using namespace mango::bench;
@@ -868,6 +869,56 @@ static void print_stratified_stats(const char* label,
                         b.name, kVols[vi] * 100, mean, p95, p99,
                         n_ok, n_total, remark);
         }
+    }
+}
+
+// ============================================================================
+// TV/K filtered stats — filter out low-vega edge cases
+// ============================================================================
+
+/// Print RMS error filtered at several time-value / strike thresholds.
+/// TV = price - intrinsic; for puts, intrinsic = max(K - S, 0).
+/// Low TV/K means the option is deep ITM/OTM with near-zero vega,
+/// making IV recovery ill-conditioned regardless of interpolation quality.
+static void print_tvk_filtered_stats(const char* label,
+                                      const PriceGrid& prices,
+                                      const ErrorTable& errors,
+                                      size_t vol_idx) {
+    static constexpr double kThresholds[] = {0.0, 1e-6, 1e-4, 1e-3, 5e-3};
+    static constexpr const char* kThreshLabels[] = {
+        "none", "1e-6", "1e-4", "1e-3", "5e-3"};
+
+    std::printf("\n  TV/K filtered RMS (%s, σ=%.0f%%):\n", label, kVols[vol_idx] * 100);
+    std::printf("  %-12s  %6s  %5s  %s\n", "TV/K filter", "RMS", "n", "excluded");
+
+    for (size_t fi = 0; fi < 5; ++fi) {
+        double threshold = kThresholds[fi];
+        double sum_sq = 0;
+        size_t n_valid = 0, n_excluded = 0;
+
+        for (size_t ti = 0; ti < kNT; ++ti) {
+            for (size_t si = 0; si < kNS; ++si) {
+                double e = errors[ti][si];
+                if (std::isnan(e)) continue;
+
+                double price = prices[vol_idx][ti][si];
+                double K = kStrikes[si];
+                double intrinsic = std::max(K - kSpot, 0.0);  // put
+                double tv = price - intrinsic;
+                double tvk = tv / K;
+
+                if (tvk < threshold) {
+                    n_excluded++;
+                    continue;
+                }
+                sum_sq += e * e;
+                n_valid++;
+            }
+        }
+
+        double rms = n_valid > 0 ? std::sqrt(sum_sq / n_valid) : 0;
+        std::printf("  >= %-9s  %6.1f  %3zu    %zu filtered\n",
+                    kThreshLabels[fi], rms, n_valid, n_excluded);
     }
 }
 
@@ -2095,6 +2146,242 @@ static void run_cheb4d_piecewise_div() {
 }
 
 // ============================================================================
+// Per-maturity Chebyshev 3D — dividends
+//
+// Fair comparison to B-spline per-maturity segmented surface:
+//   - Same V/K_ref storage (no EEP decomposition)
+//   - Same per-maturity structure (no τ-interpolation)
+//   - Same multi-K_ref blending
+//   - Only difference: Chebyshev interpolation vs B-spline
+// ============================================================================
+
+static Cheb3DDivEvaluator build_cheb3d_div_evaluator() {
+    Cheb3DDivConfig cfg;
+    cfg.dividend_yield = kDivYield;
+    cfg.option_type = OptionType::PUT;
+    cfg.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end());
+
+    std::vector<double> mats(kMaturities.begin(), kMaturities.end());
+    std::vector<Dividend> divs(kFixedDivSchedule.begin(),
+                               kFixedDivSchedule.end());
+
+    auto result = build_cheb3d_div(cfg, kSpot, mats, divs);
+
+    auto evaluator = Cheb3DDivEvaluator(
+        std::move(result.maturities), OptionType::PUT);
+
+    std::printf("  Build: %d PDE solves, %zu maturities × %zu K_refs, "
+                "%zu elements, %.1fs\n",
+                result.n_pde_solves,
+                evaluator.num_maturities(),
+                evaluator.num_krefs(),
+                evaluator.total_elements(),
+                result.build_seconds);
+
+    return evaluator;
+}
+
+static ErrorTable compute_errors_cheb3d_div(
+    const PriceGrid& prices,
+    const Cheb3DDivEvaluator& evaluator,
+    size_t vol_idx) {
+    ErrorTable errors{};
+    for (auto& row : errors)
+        for (auto& v : row) v = std::nan("");
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        double maturity = kMaturities[ti];
+        std::vector<Dividend> divs;
+        for (const auto& d : kFixedDivSchedule) {
+            if (d.calendar_time < maturity)
+                divs.push_back(d);
+        }
+
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) continue;
+
+            double fdm_iv = solve_fdm_iv_div(
+                kStrikes[si], maturity, price, divs);
+            if (std::isnan(fdm_iv)) continue;
+
+            double cheb_iv = brent_solve_iv(
+                [&](double vol) -> double {
+                    PriceQuery q{.spot = kSpot, .strike = kStrikes[si],
+                                 .tau = maturity, .sigma = vol, .rate = kRate};
+                    return evaluator.price(q);
+                },
+                price);
+
+            if (std::isfinite(cheb_iv))
+                errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
+        }
+    }
+    return errors;
+}
+
+static void run_cheb3d_dividends() {
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev 3D per-maturity — quarterly $0.50 dividends\n");
+    std::printf("================================================================\n\n");
+
+    std::printf("Dividend schedule: ");
+    for (const auto& d : kFixedDivSchedule)
+        std::printf("$%.2f@%.0fd ", d.amount, d.calendar_time * 365);
+    std::printf("\n\n");
+
+    std::printf("--- Generating reference prices (fixed dividend schedule)...\n");
+    auto prices = generate_prices_fixed_divs();
+
+    std::printf("--- Building per-maturity Chebyshev 3D...\n");
+    auto evaluator = build_cheb3d_div_evaluator();
+
+    std::printf("\n--- Computing Chebyshev 3D dividend IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Cheb 3D per-mat IV Error (bps) — σ=%.0f%%, quarterly $0.50",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_cheb3d_div(prices, evaluator, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+// ============================================================================
+// Dividend head-to-head: B-spline vs Cheb3D with TV/K filter
+//
+// Uses the same fixed dividend schedule and reference prices for both.
+// Filters out low TV/K points (deep ITM/OTM where IV is indeterminate)
+// to isolate actual interpolation quality from IV ill-conditioning.
+// ============================================================================
+
+static std::vector<std::pair<size_t, AnyIVSolver>> build_div_solvers_fixed() {
+    std::vector<std::pair<size_t, AnyIVSolver>> solvers;
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        double mat = kMaturities[ti];
+        // Filter fixed schedule to this maturity
+        std::vector<Dividend> divs;
+        for (const auto& d : kFixedDivSchedule) {
+            if (d.calendar_time < mat)
+                divs.push_back(d);
+        }
+
+        IVSolverFactoryConfig config{
+            .option_type = OptionType::PUT,
+            .spot = kSpot,
+            .dividend_yield = kDivYield,
+            .grid = IVGrid{
+                .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
+                .vol = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50},
+                .rate = {0.01, 0.03, 0.05, 0.10},
+            },
+            .adaptive = AdaptiveGridParams{.target_iv_error = 2e-5},
+            .path = SegmentedIVPath{
+                .maturity = mat,
+                .discrete_dividends = divs,
+                .kref_config = {.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end())},
+            },
+        };
+
+        auto solver = make_interpolated_iv_solver(config);
+        if (!solver.has_value()) {
+            std::fprintf(stderr, "  [skip] T=%s — solver build failed\n",
+                         kMatLabels[ti]);
+            continue;
+        }
+        solvers.emplace_back(ti, std::move(*solver));
+    }
+    return solvers;
+}
+
+static ErrorTable compute_errors_div_fixed(
+    const PriceGrid& prices,
+    const std::vector<std::pair<size_t, AnyIVSolver>>& div_solvers,
+    size_t vol_idx) {
+    ErrorTable errors{};
+    for (auto& row : errors)
+        for (auto& v : row)
+            v = std::nan("");
+
+    std::array<int, kNT> solver_idx{};
+    solver_idx.fill(-1);
+    for (size_t i = 0; i < div_solvers.size(); ++i)
+        solver_idx[div_solvers[i].first] = static_cast<int>(i);
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        if (solver_idx[ti] < 0) continue;
+        double maturity = kMaturities[ti];
+        std::vector<Dividend> divs;
+        for (const auto& d : kFixedDivSchedule) {
+            if (d.calendar_time < maturity)
+                divs.push_back(d);
+        }
+        const auto& solver = div_solvers[static_cast<size_t>(solver_idx[ti])].second;
+
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) continue;
+
+            double fdm_iv = solve_fdm_iv_div(kStrikes[si], maturity, price, divs);
+            if (std::isnan(fdm_iv)) continue;
+
+            double interp_iv = brent_solve_iv(
+                [&](double vol) {
+                    return solver.price(kSpot, kStrikes[si], maturity, vol, kRate);
+                }, price);
+
+            if (std::isfinite(interp_iv))
+                errors[ti][si] = std::abs(interp_iv - fdm_iv) * 10000.0;
+        }
+    }
+    return errors;
+}
+
+static void run_div_compare() {
+    std::printf("\n================================================================\n");
+    std::printf("Dividend head-to-head: B-spline vs PW Cheb 4D (TV/K filtered)\n");
+    std::printf("================================================================\n\n");
+
+    std::printf("Dividend schedule: ");
+    for (const auto& d : kFixedDivSchedule)
+        std::printf("$%.2f@%.0fd ", d.amount, d.calendar_time * 365);
+    std::printf("\n\n");
+
+    std::printf("--- Generating reference prices (fixed dividend schedule)...\n");
+    auto prices = generate_prices_fixed_divs();
+
+    std::printf("--- Building B-spline per-maturity solvers (fixed divs)...\n");
+    auto t0 = std::chrono::steady_clock::now();
+    auto bspline_solvers = build_div_solvers_fixed();
+    auto t1 = std::chrono::steady_clock::now();
+    double bspline_secs = std::chrono::duration<double>(t1 - t0).count();
+    std::printf("  B-spline: %zu maturities built, %.1fs\n",
+                bspline_solvers.size(), bspline_secs);
+
+    std::printf("--- Building piecewise Cheb 4D segmented (fixed divs)...\n");
+    auto cheb_evaluator = build_cheb4d_piecewise_div();
+
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+
+        // B-spline heatmap + filter
+        std::snprintf(title, sizeof(title),
+                      "B-spline Div IV Error (bps) — σ=%.0f%%", kVols[vi] * 100);
+        auto bspline_errors = compute_errors_div_fixed(prices, bspline_solvers, vi);
+        print_heatmap(title, bspline_errors);
+        print_tvk_filtered_stats("B-spline", prices, bspline_errors, vi);
+
+        // PW Cheb 4D heatmap + filter
+        std::snprintf(title, sizeof(title),
+                      "PW Cheb 4D Div IV Error (bps) — σ=%.0f%%", kVols[vi] * 100);
+        auto cheb_errors = compute_errors_piecewise_div(prices, cheb_evaluator, vi);
+        print_heatmap(title, cheb_errors);
+        print_tvk_filtered_stats("PW Cheb4D", prices, cheb_errors, vi);
+    }
+}
+
+// ============================================================================
 // Vega diagnostic — correlate IV error with FDM vega
 //
 // Establishes that low vega is the root cause of IV failure, not a symptom.
@@ -2691,7 +2978,8 @@ static constexpr const char* kSections[] = {
     "cheb4d-diag", "cheb4d-pw", "cheb4d-q", "cheb4d-baseline",
     "cheb4d-adaptive", "cheb4d-rate-ablation", "cheb4d-incremental",
     "cheb4d-noise-floor", "cheb4d-piecewise", "cheb-dividends",
-    "cheb4d-piecewise-div", "vega-diagnostic", "brent-boundary"
+    "cheb4d-piecewise-div", "cheb3d-div", "div-compare",
+    "vega-diagnostic", "brent-boundary"
 };
 
 int main(int argc, char* argv[]) {
@@ -2751,6 +3039,8 @@ int main(int argc, char* argv[]) {
     if (want("cheb4d-piecewise")) run_cheb4d_piecewise();
     if (want("cheb-dividends"))  run_cheb_dividends();
     if (want("cheb4d-piecewise-div")) run_cheb4d_piecewise_div();
+    if (want("cheb3d-div")) run_cheb3d_dividends();
+    if (want("div-compare")) run_div_compare();
     if (want("vega-diagnostic")) run_vega_diagnostic();
     if (want("brent-boundary")) run_brent_boundary();
 
