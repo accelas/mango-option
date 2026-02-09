@@ -78,8 +78,11 @@ For each sampled triple:
    |x\_bracket| < 1e-4.
 5. **Fallback:** if no valid crossing exists (EEP < ε everywhere, e.g.,
    deep OTM or very short τ), exclude this triple from the median
-   computation. If fewer than 30% of triples produce a valid x\*, fall
-   back to a fixed x\* = 0.0 (ATM) for that τ-band.
+   computation. If fewer than 30% of triples produce a valid x\*:
+   - First, use the other τ-band's x\* if available (the long-τ band's
+     boundary is a reasonable prior for the short-τ band, shifted toward
+     ATM).
+   - If no other band has a valid x\*, fall back to x\* = 0.0 (ATM).
 
 Boundary placement:
 - **Center:** median x\* across all valid sampled triples.
@@ -159,11 +162,13 @@ divergence (the `---` solve failures in heatmaps).
 Projection can introduce interface bias even with blending. To prevent
 core-regime regression:
 
-1. **Freeze overlap nodes:** during projection (clip + refit), pin the
-   Chebyshev values at x-nodes falling inside overlap zones to their
-   original (unprojected) values. The least-squares refit is constrained
-   to match these pinned values exactly. This ensures the blended region
-   sees the same function from both sides.
+1. **Pin overlap nodes to shared target:** before projection, evaluate
+   both adjacent elements at x-nodes inside each overlap zone. Compute
+   the shared target as the average: `f_pin(x) = (f_left(x) + f_right(x)) / 2`.
+   During projection (clip + refit), constrain the least-squares refit
+   to match these shared pinned values exactly at overlap x-nodes. Both
+   sides are pinned to the same target, guaranteeing deterministic
+   consistency in the blended region.
 2. **Interface consistency gate:** after projection, evaluate both
    adjacent elements at 50 x-points in each overlap zone. Check:
    - Value mismatch: |f\_left(x) − f\_right(x)| < atol + rtol · |f|
@@ -196,11 +201,15 @@ PDE solves.
 3. **Build element tensors** — for each of the 6 elements, resample
    cached splines at that element's Chebyshev x-nodes via
    `cache.get_slice(σ, r, tau_idx)->eval(x)`. The builder maps each
-   element's τ-Chebyshev nodes to the nearest cached `tau_idx` (the
-   cache stores slices at discrete snapshot indices, not continuous τ).
-   For τ-nodes that fall between cached snapshots, interpolate between
-   the two nearest cached slices. No new PDE solves. Each element
-   produces an independent `ChebyshevTucker4D`.
+   element's τ-Chebyshev node to a cached snapshot using one rule:
+   - If the τ-node matches a cached snapshot exactly (within 1e-12),
+     use that snapshot directly.
+   - Otherwise, bracket between the two adjacent cached snapshots
+     (tau\_idx\_lo, tau\_idx\_hi) and linearly interpolate the spline
+     evaluations: `v = (1-α) * slice_lo.eval(x) + α * slice_hi.eval(x)`
+     where `α = (τ - τ_lo) / (τ_hi - τ_lo)`.
+   No new PDE solves. Each element produces an independent
+   `ChebyshevTucker4D`.
 
 4. **Apply shape constraints** — per-element projection (Section 4).
 
