@@ -2095,6 +2095,544 @@ static void run_cheb4d_piecewise_div() {
 }
 
 // ============================================================================
+// Vega diagnostic — correlate IV error with FDM vega
+// ============================================================================
+
+/// Compute FDM vega via central difference: (P(σ+dσ) - P(σ-dσ)) / (2*dσ)
+static ErrorTable compute_fdm_vega_div(size_t vol_idx) {
+    ErrorTable vegas{};
+    constexpr double dsig = 0.001;
+
+    for (auto& row : vegas)
+        for (auto& v : row)
+            v = std::nan("");
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        double maturity = kMaturities[ti];
+        std::vector<Dividend> divs;
+        for (const auto& d : kFixedDivSchedule) {
+            if (d.calendar_time < maturity)
+                divs.push_back(d);
+        }
+
+        for (size_t si = 0; si < kNS; ++si) {
+            double sigma = kVols[vol_idx];
+
+            auto solve = [&](double vol) -> double {
+                PricingParams p;
+                p.spot = kSpot;
+                p.strike = kStrikes[si];
+                p.maturity = maturity;
+                p.rate = kRate;
+                p.dividend_yield = kDivYield;
+                p.option_type = OptionType::PUT;
+                p.volatility = vol;
+                p.discrete_dividends = divs;
+                auto result = solve_american_option(p);
+                if (!result.has_value()) return std::nan("");
+                return result->value();
+            };
+
+            double p_up = solve(sigma + dsig);
+            double p_dn = solve(sigma - dsig);
+            if (std::isfinite(p_up) && std::isfinite(p_dn))
+                vegas[ti][si] = (p_up - p_dn) / (2.0 * dsig);
+        }
+    }
+    return vegas;
+}
+
+static void print_vega_heatmap(const char* title, const ErrorTable& vegas) {
+    std::printf("\n=== %s ===\n", title);
+    std::printf("          ");
+    for (size_t si = 0; si < kNS; ++si)
+        std::printf("  K=%-3.0f ", kStrikes[si]);
+    std::printf("\n");
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        std::printf("  T=%s  ", kMatLabels[ti]);
+        for (size_t si = 0; si < kNS; ++si) {
+            double v = vegas[ti][si];
+            if (std::isnan(v))
+                std::printf("   ---  ");
+            else if (std::abs(v) < 0.01)
+                std::printf(" %6.4f ", v);
+            else
+                std::printf(" %6.2f ", v);
+        }
+        std::printf("\n");
+    }
+}
+
+static void print_vega_error_scatter(const ErrorTable& errors,
+                                      const ErrorTable& vegas) {
+    // Collect (vega, error) pairs and sort by vega
+    struct Point { double vega, error; int ti, si; };
+    std::vector<Point> pts;
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        for (size_t si = 0; si < kNS; ++si) {
+            double e = errors[ti][si];
+            double v = vegas[ti][si];
+            if (std::isfinite(e) && std::isfinite(v)) {
+                pts.push_back({v, e, static_cast<int>(ti), static_cast<int>(si)});
+            }
+        }
+    }
+
+    std::sort(pts.begin(), pts.end(),
+              [](const auto& a, const auto& b) { return a.vega < b.vega; });
+
+    std::printf("\n  Vega vs IV Error (sorted by vega ascending):\n");
+    std::printf("  %10s %10s %8s %8s\n", "Vega", "Error(bps)", "T", "K");
+    std::printf("  %10s %10s %8s %8s\n", "----------", "----------", "--------", "--------");
+
+    for (const auto& p : pts) {
+        const char* marker = p.error > 200 ? " ***" :
+                             p.error > 50  ? " **" :
+                             p.error > 10  ? " *" : "";
+        std::printf("  %10.4f %9.1f%-3s %s    K=%.0f\n",
+                    p.vega, p.error, marker,
+                    kMatLabels[p.ti], kStrikes[p.si]);
+    }
+
+    // Bucket analysis: vega < 0.01, 0.01-0.1, 0.1-1, 1-10, >10
+    struct Bucket { double lo, hi; int count; double sum_err; double max_err; };
+    Bucket buckets[] = {
+        {0, 0.01, 0, 0, 0},
+        {0.01, 0.1, 0, 0, 0},
+        {0.1, 1.0, 0, 0, 0},
+        {1.0, 10.0, 0, 0, 0},
+        {10.0, 1e9, 0, 0, 0},
+    };
+
+    for (const auto& p : pts) {
+        double av = std::abs(p.vega);
+        for (auto& b : buckets) {
+            if (av >= b.lo && av < b.hi) {
+                b.count++;
+                b.sum_err += p.error;
+                b.max_err = std::max(b.max_err, p.error);
+                break;
+            }
+        }
+    }
+
+    std::printf("\n  Vega-bucketed error summary:\n");
+    std::printf("  %20s %6s %10s %10s\n", "Vega range", "N", "Mean(bps)", "Max(bps)");
+    const char* labels[] = {"[0, 0.01)", "[0.01, 0.1)", "[0.1, 1)", "[1, 10)", "[10, +∞)"};
+    for (int i = 0; i < 5; ++i) {
+        auto& b = buckets[i];
+        if (b.count > 0) {
+            std::printf("  %20s %6d %10.1f %10.1f\n",
+                        labels[i], b.count, b.sum_err / b.count, b.max_err);
+        } else {
+            std::printf("  %20s %6d %10s %10s\n", labels[i], 0, "---", "---");
+        }
+    }
+}
+
+/// Compute FDM IV error: |fdm_iv - true_σ| for each test point.
+/// The reference prices are generated at exactly kVols[vi], so this measures
+/// how well the FDM IV solver recovers the known truth.
+static ErrorTable compute_fdm_iv_error_div(const PriceGrid& prices,
+                                            size_t vol_idx) {
+    ErrorTable errors{};
+    for (auto& row : errors)
+        for (auto& v : row)
+            v = std::nan("");
+
+    double true_sigma = kVols[vol_idx];
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        double maturity = kMaturities[ti];
+        std::vector<Dividend> divs;
+        for (const auto& d : kFixedDivSchedule) {
+            if (d.calendar_time < maturity)
+                divs.push_back(d);
+        }
+
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) continue;
+
+            double fdm_iv = solve_fdm_iv_div(
+                kStrikes[si], maturity, price, divs);
+            if (std::isnan(fdm_iv)) continue;
+
+            errors[ti][si] = std::abs(fdm_iv - true_sigma) * 10000.0;
+        }
+    }
+    return errors;
+}
+
+static void run_vega_diagnostic() {
+    std::printf("\n================================================================\n");
+    std::printf("Vega Diagnostic — FDM vega vs IV error correlation\n");
+    std::printf("================================================================\n\n");
+
+    std::printf("--- Generating reference prices...\n");
+    auto prices = generate_prices_fixed_divs();
+
+    std::printf("--- Building piecewise Chebyshev 4D...\n");
+    auto evaluator = build_cheb4d_piecewise_div();
+
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        double true_sigma = kVols[vi];
+
+        std::printf("\n--- Computing FDM vega (σ=%.0f%%, central diff dσ=0.1%%)...\n",
+                    true_sigma * 100);
+        auto vegas = compute_fdm_vega_div(vi);
+
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "FDM Vega — σ=%.0f%%, quarterly $0.50 divs",
+                      true_sigma * 100);
+        print_vega_heatmap(title, vegas);
+
+        // FDM IV error against known truth
+        std::printf("\n--- Computing FDM IV error (|fdm_iv - true σ=%.0f%%|)...\n",
+                    true_sigma * 100);
+        auto fdm_errors = compute_fdm_iv_error_div(prices, vi);
+
+        std::snprintf(title, sizeof(title),
+                      "FDM IV Error vs True σ (bps) — σ=%.0f%%",
+                      true_sigma * 100);
+        print_heatmap(title, fdm_errors);
+
+        std::printf("\n=== FDM IV — σ=%.0f%% — Vega vs Error ===\n",
+                    true_sigma * 100);
+        print_vega_error_scatter(fdm_errors, vegas);
+
+        // Interpolation IV error
+        std::printf("\n--- Computing interpolation IV errors...\n");
+        auto interp_errors = compute_errors_piecewise_div(prices, evaluator, vi);
+
+        std::snprintf(title, sizeof(title),
+                      "PW Cheb 4D Div — σ=%.0f%% — Vega vs Error",
+                      true_sigma * 100);
+        std::printf("\n=== %s ===\n", title);
+        print_vega_error_scatter(interp_errors, vegas);
+    }
+}
+
+// ============================================================================
+// Brent boundary diagnostic — bracket-boundary flag vs vega threshold
+// ============================================================================
+
+static void run_brent_boundary() {
+    std::printf("\n================================================================\n");
+    std::printf("Brent Boundary Diagnostic — bracket-bound flag vs vega threshold\n");
+    std::printf("================================================================\n\n");
+
+    std::printf("--- Generating reference prices...\n");
+    auto prices = generate_prices_fixed_divs();
+
+    std::printf("--- Building piecewise Chebyshev 4D...\n");
+    auto evaluator = build_cheb4d_piecewise_div();
+
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        double true_sigma = kVols[vi];
+
+        std::printf("\n--- Computing FDM vega (σ=%.0f%%)...\n", true_sigma * 100);
+        auto vegas = compute_fdm_vega_div(vi);
+
+        // Collect full Brent results for both FDM and interpolation
+        struct DiagPoint {
+            int ti, si;
+            double vega;
+            // FDM Brent
+            double fdm_iv;
+            bool fdm_at_boundary;
+            size_t fdm_iters;
+            double fdm_residual;
+            // Interpolation Brent
+            double interp_iv;
+            bool interp_at_boundary;
+            size_t interp_iters;
+            double interp_residual;
+            // Errors
+            double fdm_error_bps;     // |fdm_iv - true_σ|
+            double interp_error_bps;  // |interp_iv - fdm_iv|
+        };
+        std::vector<DiagPoint> pts;
+
+        for (size_t ti = 0; ti < kNT; ++ti) {
+            double maturity = kMaturities[ti];
+            std::vector<Dividend> divs;
+            for (const auto& d : kFixedDivSchedule) {
+                if (d.calendar_time < maturity)
+                    divs.push_back(d);
+            }
+
+            for (size_t si = 0; si < kNS; ++si) {
+                double price = prices[vi][ti][si];
+                double vega = vegas[ti][si];
+                if (std::isnan(price) || price <= 0 || std::isnan(vega)) continue;
+
+                // FDM Brent
+                auto fdm_r = brent_solve_iv_full(
+                    [&](double vol) -> double {
+                        PricingParams p;
+                        p.spot = kSpot;
+                        p.strike = kStrikes[si];
+                        p.maturity = maturity;
+                        p.rate = kRate;
+                        p.dividend_yield = kDivYield;
+                        p.option_type = OptionType::PUT;
+                        p.volatility = vol;
+                        p.discrete_dividends = divs;
+                        auto res = solve_american_option(p);
+                        if (!res.has_value()) return std::nan("");
+                        return res->value();
+                    }, price);
+
+                if (!fdm_r.converged) continue;
+
+                // Interpolation Brent
+                auto interp_r = brent_solve_iv_full(
+                    [&](double vol) -> double {
+                        PriceQuery q{.spot = kSpot, .strike = kStrikes[si],
+                                     .tau = maturity, .sigma = vol, .rate = kRate};
+                        return evaluator.price(q);
+                    }, price);
+
+                DiagPoint dp;
+                dp.ti = static_cast<int>(ti);
+                dp.si = static_cast<int>(si);
+                dp.vega = vega;
+                dp.fdm_iv = fdm_r.iv;
+                dp.fdm_at_boundary = fdm_r.at_boundary;
+                dp.fdm_iters = fdm_r.iterations;
+                dp.fdm_residual = fdm_r.residual;
+                dp.interp_iv = interp_r.converged ? interp_r.iv : std::nan("");
+                dp.interp_at_boundary = interp_r.at_boundary;
+                dp.interp_iters = interp_r.iterations;
+                dp.interp_residual = interp_r.residual;
+                dp.fdm_error_bps = std::abs(fdm_r.iv - true_sigma) * 10000.0;
+                dp.interp_error_bps = (interp_r.converged && std::isfinite(interp_r.iv))
+                    ? std::abs(interp_r.iv - fdm_r.iv) * 10000.0
+                    : std::nan("");
+
+                pts.push_back(dp);
+            }
+        }
+
+        std::sort(pts.begin(), pts.end(),
+                  [](const auto& a, const auto& b) { return a.vega < b.vega; });
+
+        std::printf("\n=== σ=%.0f%% — Full Brent diagnostic (sorted by vega) ===\n",
+                    true_sigma * 100);
+        std::printf("  %8s %6s  %8s %3s %3s %8s  %8s %3s %3s %8s  %8s %8s\n",
+                    "Vega", "T/K", "FDM_IV", "Bd", "It", "Resid",
+                    "Interp_IV", "Bd", "It", "Resid",
+                    "FDMerr", "InterpErr");
+        std::printf("  %8s %6s  %8s %3s %3s %8s  %8s %3s %3s %8s  %8s %8s\n",
+                    "--------", "------", "--------", "---", "---", "--------",
+                    "--------", "---", "---", "--------",
+                    "--------", "---------");
+
+        for (const auto& p : pts) {
+            char tk[16];
+            std::snprintf(tk, sizeof(tk), "%s/%.0f",
+                          kMatLabels[p.ti], kStrikes[p.si]);
+            std::printf("  %8.4f %6s  %8.4f  %s %3zu %8.1e  ",
+                        p.vega, tk, p.fdm_iv,
+                        p.fdm_at_boundary ? "Y" : " ",
+                        p.fdm_iters, p.fdm_residual);
+            if (std::isfinite(p.interp_iv))
+                std::printf("%8.4f  %s %3zu %8.1e  ",
+                            p.interp_iv,
+                            p.interp_at_boundary ? "Y" : " ",
+                            p.interp_iters, p.interp_residual);
+            else
+                std::printf("     ---  %s %3zu %8.1e  ",
+                            p.interp_at_boundary ? "Y" : " ",
+                            p.interp_iters, p.interp_residual);
+            std::printf("%7.1f  ", p.fdm_error_bps);
+            if (std::isfinite(p.interp_error_bps))
+                std::printf("%7.1f", p.interp_error_bps);
+            else
+                std::printf("    ---");
+            std::printf("\n");
+        }
+
+        // Boundary-distance analysis: sorted by interp error descending
+        struct BdPoint {
+            int ti, si;
+            double tv_over_K;
+            double vega;
+            double fdm_error_bps;
+            double interp_error_bps;
+            bool fdm_at_boundary;
+            bool interp_at_boundary;
+            // Exercise boundary diagnostics
+            double x;         // ln(S/K_ref)
+            double x_star;    // exercise boundary
+            double dist;      // |x - x_star|
+            bool in_overlap;
+        };
+        std::vector<BdPoint> bd_pts;
+
+        for (const auto& p : pts) {
+            double K = kStrikes[p.si];
+            double intrinsic = std::max(K - kSpot, 0.0);
+            double price = prices[vi][p.ti][p.si];
+            double tv = price - intrinsic;
+
+            PriceQuery q{.spot = kSpot, .strike = K,
+                         .tau = kMaturities[p.ti],
+                         .sigma = true_sigma, .rate = kRate};
+            auto bd = evaluator.boundary_diag(q);
+
+            bd_pts.push_back({p.ti, p.si, tv / K, p.vega,
+                              p.fdm_error_bps, p.interp_error_bps,
+                              p.fdm_at_boundary, p.interp_at_boundary,
+                              bd.x, bd.x_star, bd.dist, bd.in_overlap});
+        }
+
+        // Print sorted by interp error descending (worst first)
+        auto bd_by_err = bd_pts;
+        std::sort(bd_by_err.begin(), bd_by_err.end(),
+                  [](const auto& a, const auto& b) {
+                      double ea = std::isfinite(a.interp_error_bps) ? a.interp_error_bps : -1;
+                      double eb = std::isfinite(b.interp_error_bps) ? b.interp_error_bps : -1;
+                      return ea > eb;
+                  });
+
+        std::printf("\n=== σ=%.0f%% — Exercise boundary distance vs interp error ===\n",
+                    true_sigma * 100);
+        std::printf("  %8s %8s %7s %7s %7s %7s %3s %12s\n",
+                    "T/K", "IntErr", "x", "x*", "|x-x*|", "delta", "OZ", "TV/K");
+        std::printf("  %8s %8s %7s %7s %7s %7s %3s %12s\n",
+                    "--------", "--------", "-------", "-------", "-------",
+                    "-------", "---", "------------");
+
+        for (const auto& p : bd_by_err) {
+            char tk[16];
+            std::snprintf(tk, sizeof(tk), "%s/%.0f",
+                          kMatLabels[p.ti], kStrikes[p.si]);
+            std::printf("  %8s ", tk);
+            if (std::isfinite(p.interp_error_bps))
+                std::printf("%7.1f ", p.interp_error_bps);
+            else
+                std::printf("    --- ");
+            std::printf("%7.3f %7.3f %7.3f %7.3f  %s  %12.6f\n",
+                        p.x, p.x_star, p.dist, 0.0 /*unused*/,
+                        p.in_overlap ? "Y" : " ", p.tv_over_K);
+        }
+
+        // Correlation: bucket by |x - x*| and compute mean interp error
+        struct DistBucket { double lo, hi; int count; double sum_err, max_err; };
+        DistBucket dist_buckets[] = {
+            {0,    0.02, 0, 0, 0},  // within 2% of boundary
+            {0.02, 0.05, 0, 0, 0},
+            {0.05, 0.10, 0, 0, 0},
+            {0.10, 0.20, 0, 0, 0},
+            {0.20, 1.00, 0, 0, 0},
+        };
+        for (const auto& p : bd_pts) {
+            if (!std::isfinite(p.interp_error_bps)) continue;
+            if (p.fdm_at_boundary) continue;  // skip vega≈0 points
+            for (auto& b : dist_buckets) {
+                if (p.dist >= b.lo && p.dist < b.hi) {
+                    b.count++;
+                    b.sum_err += p.interp_error_bps;
+                    b.max_err = std::max(b.max_err, p.interp_error_bps);
+                    break;
+                }
+            }
+        }
+
+        std::printf("\n  Interp error by distance to exercise boundary"
+                    " (excl. vega≈0 points):\n");
+        std::printf("  %20s %6s %10s %10s\n",
+                    "|x - x*| range", "N", "Mean(bps)", "Max(bps)");
+        const char* dist_labels[] = {
+            "[0, 0.02)", "[0.02, 0.05)", "[0.05, 0.10)",
+            "[0.10, 0.20)", "[0.20, 1.00)"
+        };
+        for (int i = 0; i < 5; ++i) {
+            auto& b = dist_buckets[i];
+            if (b.count > 0)
+                std::printf("  %20s %6d %10.1f %10.1f\n",
+                            dist_labels[i], b.count, b.sum_err / b.count, b.max_err);
+            else
+                std::printf("  %20s %6d %10s %10s\n",
+                            dist_labels[i], 0, "---", "---");
+        }
+
+        // Classification accuracy tables for both FDM and interp ground truths
+        constexpr double kErrorThresh = 50.0;  // bps
+        constexpr double kVegaThresh = 0.01;
+        constexpr double kTVThresholds[] = {1e-6, 1e-5, 1e-4, 1e-3};
+        constexpr double kDistThresholds[] = {0.02, 0.05, 0.10};
+
+        struct Counts { int tp=0, fp=0, fn=0, tn=0; };
+
+        auto do_classify = [](Counts& c, bool flagged, bool bad) {
+            if (flagged && bad)   c.tp++;
+            if (flagged && !bad)  c.fp++;
+            if (!flagged && bad)  c.fn++;
+            if (!flagged && !bad) c.tn++;
+        };
+
+        auto print_table = [&](const char* gt_label,
+                               auto is_bad_fn) {
+            Counts c_boundary{}, c_vega{};
+            Counts c_tv[4]{};
+            Counts c_dist[3]{};
+
+            int n_bad = 0, n_total = 0;
+            for (const auto& p : bd_pts) {
+                bool bad = is_bad_fn(p);
+                n_total++;
+                if (bad) n_bad++;
+
+                do_classify(c_boundary, p.fdm_at_boundary || p.interp_at_boundary, bad);
+                do_classify(c_vega, std::abs(p.vega) < kVegaThresh, bad);
+                for (int i = 0; i < 4; ++i)
+                    do_classify(c_tv[i], p.tv_over_K < kTVThresholds[i], bad);
+                for (int i = 0; i < 3; ++i)
+                    do_classify(c_dist[i], p.dist < kDistThresholds[i], bad);
+            }
+
+            std::printf("\n  Detection accuracy (ground truth: %s, %d/%d bad):\n",
+                        gt_label, n_bad, n_total);
+            std::printf("  %-25s %6s %6s %6s %6s %8s %8s\n",
+                        "Detector", "TP", "FP", "FN", "TN", "Precis", "Recall");
+            auto print_row = [](const char* name, const Counts& c) {
+                double prec = (c.tp + c.fp) > 0 ? 100.0 * c.tp / (c.tp + c.fp) : 0;
+                double rec  = (c.tp + c.fn) > 0 ? 100.0 * c.tp / (c.tp + c.fn) : 0;
+                std::printf("  %-25s %6d %6d %6d %6d %7.1f%% %7.1f%%\n",
+                            name, c.tp, c.fp, c.fn, c.tn, prec, rec);
+            };
+            print_row("Brent boundary (either)", c_boundary);
+            print_row("Vega < 0.01", c_vega);
+            for (int i = 0; i < 4; ++i) {
+                char label[32];
+                std::snprintf(label, sizeof(label), "TV/K < %.0e", kTVThresholds[i]);
+                print_row(label, c_tv[i]);
+            }
+            for (int i = 0; i < 3; ++i) {
+                char label[32];
+                std::snprintf(label, sizeof(label), "|x-x*| < %.2f", kDistThresholds[i]);
+                print_row(label, c_dist[i]);
+            }
+        };
+
+        print_table("FDM IV error > 50 bps",
+            [](const BdPoint& p) { return p.fdm_error_bps > 50.0; });
+
+        print_table("Interp IV error > 50 bps",
+            [](const BdPoint& p) {
+                return std::isfinite(p.interp_error_bps) &&
+                       p.interp_error_bps > 50.0;
+            });
+    }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -2103,7 +2641,7 @@ static constexpr const char* kSections[] = {
     "cheb4d-diag", "cheb4d-pw", "cheb4d-q", "cheb4d-baseline",
     "cheb4d-adaptive", "cheb4d-rate-ablation", "cheb4d-incremental",
     "cheb4d-noise-floor", "cheb4d-piecewise", "cheb-dividends",
-    "cheb4d-piecewise-div"
+    "cheb4d-piecewise-div", "vega-diagnostic", "brent-boundary"
 };
 
 int main(int argc, char* argv[]) {
@@ -2163,6 +2701,8 @@ int main(int argc, char* argv[]) {
     if (want("cheb4d-piecewise")) run_cheb4d_piecewise();
     if (want("cheb-dividends"))  run_cheb_dividends();
     if (want("cheb4d-piecewise-div")) run_cheb4d_piecewise_div();
+    if (want("vega-diagnostic")) run_vega_diagnostic();
+    if (want("brent-boundary")) run_brent_boundary();
 
     return 0;
 }

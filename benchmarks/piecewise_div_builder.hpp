@@ -139,6 +139,35 @@ public:
         return count;
     }
 
+    /// Diagnostic: return exercise boundary info for the bracketing K_refs.
+    struct BoundaryDiag {
+        double x;           // ln(S/K_ref) for the primary K_ref
+        double x_star;      // detected exercise boundary
+        double delta;        // boundary half-width
+        double dist;         // |x - x_star|
+        bool in_overlap;     // x is in an overlap zone
+        size_t n_valid;      // boundary detection confidence
+        size_t n_sampled;
+    };
+
+    [[nodiscard]] BoundaryDiag boundary_diag(const PriceQuery& q) const {
+        auto [lo, hi, w] = bracket(q.strike);
+        size_t idx = (w < 0.5) ? lo : hi;  // primary K_ref
+        double K_ref = entries_[idx].K_ref;
+        double x = std::log(q.spot / K_ref);
+        size_t seg = find_segment(entries_[idx].segments, q.tau);
+        const auto& s = entries_[idx].segments[seg];
+
+        bool in_oz = false;
+        for (const auto& oz : s.overlaps) {
+            if (x >= oz.x_lo && x <= oz.x_hi) { in_oz = true; break; }
+        }
+
+        return {x, s.boundary.x_star, s.boundary.delta,
+                std::abs(x - s.boundary.x_star), in_oz,
+                s.boundary.n_valid, s.boundary.n_sampled};
+    }
+
 private:
     [[nodiscard]] double eval_kref(size_t idx, const PriceQuery& q) const {
         double K_ref = entries_[idx].K_ref;
