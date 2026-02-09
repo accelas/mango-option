@@ -49,6 +49,7 @@
 #include "chebyshev_4d_eep_inner.hpp"
 #include "chebyshev_4d_incremental_builder.hpp"
 #include "pde_slice_cache.hpp"
+#include "piecewise_evaluator.hpp"
 
 using namespace mango;
 using namespace mango::bench;
@@ -1660,6 +1661,105 @@ static void run_cheb4d_noise_floor() {
 }
 
 // ============================================================================
+// Chebyshev 4D Piecewise (Phase C)
+// ============================================================================
+
+static PiecewiseBlendedEvaluator build_cheb4d_piecewise() {
+    using namespace mango;
+
+    // 1. Populate PDE cache with L(4,3): 17σ × 9r = 153 PDE
+    PDESliceCache cache;
+    IncrementalBuildConfig inc_cfg;
+    inc_cfg.num_x = 40;
+    inc_cfg.num_tau = 15;
+    inc_cfg.sigma_level = 4;
+    inc_cfg.rate_level = 3;
+    inc_cfg.use_tucker = false;
+    inc_cfg.dividend_yield = 0.0;
+
+    auto inc_result = build_chebyshev_4d_eep_incremental(
+        inc_cfg, cache, kSpot, OptionType::PUT);
+
+    std::printf("  Phase A: %zu PDE solves, %.1fs\n",
+                inc_result.new_pde_solves, inc_result.build_seconds);
+
+    // Reconstruct tau_nodes (must match what incremental builder used)
+    auto headroom_fn = [](double lo, double hi, size_t n) {
+        return 3.0 * (hi - lo) / static_cast<double>(std::max(n, size_t{4}) - 1);
+    };
+    double htau = headroom_fn(inc_cfg.tau_min, inc_cfg.tau_max, inc_cfg.num_tau);
+    double tau_lo = std::max(inc_cfg.tau_min - htau, 1e-4);
+    double tau_hi = inc_cfg.tau_max + htau;
+    auto tau_nodes = chebyshev_nodes(inc_cfg.num_tau, tau_lo, tau_hi);
+
+    // 2. Build piecewise elements
+    PiecewiseElementBuildConfig pw_cfg;
+    pw_cfg.sigma_level = 4;
+    pw_cfg.rate_level = 3;
+    pw_cfg.sigma_headroom_ref = inc_cfg.sigma_headroom_ref;
+    pw_cfg.rate_headroom_ref = inc_cfg.rate_headroom_ref;
+    pw_cfg.K_ref = kSpot;
+    pw_cfg.option_type = OptionType::PUT;
+    pw_cfg.dividend_yield = 0.0;
+
+    auto element_set = build_piecewise_elements(pw_cfg, cache, tau_nodes);
+
+    std::printf("  Phase C: %zu elements, %.1fs build\n",
+                element_set.elements.size(), element_set.build_seconds);
+    std::printf("  Short boundary: x*=%.3f, delta=%.3f (%zu/%zu valid)\n",
+                element_set.short_boundary.x_star,
+                element_set.short_boundary.delta,
+                element_set.short_boundary.n_valid,
+                element_set.short_boundary.n_sampled);
+    std::printf("  Long boundary:  x*=%.3f, delta=%.3f (%zu/%zu valid)\n",
+                element_set.long_boundary.x_star,
+                element_set.long_boundary.delta,
+                element_set.long_boundary.n_valid,
+                element_set.long_boundary.n_sampled);
+
+    for (size_t i = 0; i < element_set.specs.size(); ++i) {
+        const auto& spec = element_set.specs[i];
+        auto ranks = element_set.elements[i].ranks();
+        std::printf("    elem %zu [band=%zu]: x=[%.3f, %.3f] tau=[%.4f, %.4f] "
+                    "nx=%zu ntau=%zu ranks=(%zu,%zu,%zu,%zu)\n",
+                    i, spec.tau_band, spec.x_lo, spec.x_hi,
+                    spec.tau_lo, spec.tau_hi, spec.num_x, spec.num_tau,
+                    ranks[0], ranks[1], ranks[2], ranks[3]);
+    }
+
+    return PiecewiseBlendedEvaluator(
+        std::move(element_set), OptionType::PUT, kSpot, 0.0);
+}
+
+static void run_cheb4d_piecewise() {
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev 4D Piecewise (Phase C) — 2 τ-bands × 3 x-elements\n");
+    std::printf("================================================================\n\n");
+
+    const auto& q0_prices = get_q0_prices();
+
+    std::printf("--- Building piecewise Chebyshev 4D...\n");
+    auto evaluator = build_cheb4d_piecewise();
+
+    std::printf("\n--- Computing IV errors (Brent)...\n");
+    std::array<ErrorTable, kNV> all_errors;
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Piecewise Cheb 4D (Phase C) IV Error — σ=%.0f%%",
+                      kVols[vi] * 100);
+        all_errors[vi] = compute_errors_brent(q0_prices,
+            [&](double S, double K, double tau, double sigma, double r) {
+                PriceQuery q{.spot = S, .strike = K, .tau = tau,
+                             .sigma = sigma, .rate = r};
+                return evaluator.price(q);
+            }, vi);
+        print_heatmap(title, all_errors[vi]);
+    }
+    print_stratified_stats("piecewise", all_errors);
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -1667,7 +1767,7 @@ static constexpr const char* kSections[] = {
     "vanilla", "dividends", "bspline-3d", "bspline-4d", "cheb3d", "cheb4d",
     "cheb4d-diag", "cheb4d-pw", "cheb4d-q", "cheb4d-baseline",
     "cheb4d-adaptive", "cheb4d-rate-ablation", "cheb4d-incremental",
-    "cheb4d-noise-floor"
+    "cheb4d-noise-floor", "cheb4d-piecewise"
 };
 
 int main(int argc, char* argv[]) {
@@ -1724,6 +1824,7 @@ int main(int argc, char* argv[]) {
     if (want("cheb4d-rate-ablation")) run_cheb4d_rate_ablation();
     if (want("cheb4d-incremental")) run_cheb4d_incremental();
     if (want("cheb4d-noise-floor")) run_cheb4d_noise_floor();
+    if (want("cheb4d-piecewise")) run_cheb4d_piecewise();
 
     return 0;
 }
