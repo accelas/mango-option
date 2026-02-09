@@ -1691,6 +1691,15 @@ cc_test(
     timeout = "long",
 )
 
+cc_test(
+    name = "bump_blend_test",
+    srcs = ["bump_blend_test.cc"],
+    deps = [
+        "//benchmarks:bump_blend",
+        "@googletest//:gtest_main",
+    ],
+)
+
 py_test(
     name = "python_bindings_test",
     size = "medium",

@@ -21,6 +21,13 @@ cc_library(
 )
 
 cc_library(
+    name = "bump_blend",
+    hdrs = ["bump_blend.hpp"],
+    strip_include_prefix = "/benchmarks",
+    visibility = ["//tests:__pkg__"],
+)
+
+cc_library(
     name = "pde_slice_cache",
     hdrs = ["pde_slice_cache.hpp"],
     deps = [
