@@ -38,6 +38,18 @@ cc_library(
 )
 
 cc_library(
+    name = "boundary_detector",
+    hdrs = ["boundary_detector.hpp"],
+    strip_include_prefix = "/benchmarks",
+    deps = [
+        ":pde_slice_cache",
+        "//src/option:european_option",
+        "//src/option:option_spec",
+    ],
+    visibility = ["//tests:__pkg__"],
+)
+
+cc_library(
     name = "chebyshev_4d_eep_inner",
     hdrs = ["chebyshev_4d_eep_inner.hpp"],
     deps = [
