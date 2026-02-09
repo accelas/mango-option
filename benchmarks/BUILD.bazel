@@ -50,6 +50,21 @@ cc_library(
 )
 
 cc_library(
+    name = "piecewise_element_builder",
+    hdrs = ["piecewise_element_builder.hpp"],
+    strip_include_prefix = "/benchmarks",
+    deps = [
+        ":pde_slice_cache",
+        ":boundary_detector",
+        "//src/option/table/dimensionless:chebyshev_tucker_4d",
+        "//src/option/table/dimensionless:chebyshev_nodes",
+        "//src/option:european_option",
+        "//src/option:option_spec",
+    ],
+    visibility = ["//tests:__pkg__"],
+)
+
+cc_library(
     name = "chebyshev_4d_eep_inner",
     hdrs = ["chebyshev_4d_eep_inner.hpp"],
     deps = [
