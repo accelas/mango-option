@@ -140,13 +140,20 @@ public:
     }
 
     /// Diagnostic: return exercise boundary info for the bracketing K_refs.
+    ///
+    /// Used to test whether proximity to the early exercise boundary
+    /// correlates with interpolation error. Result: it does NOT.
+    /// For dividend cases, the V/K_ref surface has no sharp kink at the
+    /// exercise boundary (unlike the EEP surface in vanilla), so the
+    /// boundary detector returns delta=0 and x* is a meaningless default.
+    /// Distance-based rejection (|x - x*| < threshold) has ~0% precision.
     struct BoundaryDiag {
         double x;           // ln(S/K_ref) for the primary K_ref
-        double x_star;      // detected exercise boundary
-        double delta;        // boundary half-width
+        double x_star;      // detected exercise boundary (may be default if delta=0)
+        double delta;        // boundary half-width (0 = no boundary found)
         double dist;         // |x - x_star|
-        bool in_overlap;     // x is in an overlap zone
-        size_t n_valid;      // boundary detection confidence
+        bool in_overlap;     // x is in an overlap zone between elements
+        size_t n_valid;      // boundary detection confidence (of n_sampled)
         size_t n_sampled;
     };
 

@@ -2096,6 +2096,24 @@ static void run_cheb4d_piecewise_div() {
 
 // ============================================================================
 // Vega diagnostic — correlate IV error with FDM vega
+//
+// Establishes that low vega is the root cause of IV failure, not a symptom.
+// When vega ≈ 0, option price is insensitive to vol → the mapping
+// price → σ is ill-conditioned → Brent converges to an arbitrary σ.
+//
+// Key result: vega-bucketed error is monotonically decreasing:
+//   vega < 0.01:    ~1500 bps mean (catastrophic — σ at bracket bound)
+//   vega 0.01-0.1:     ~0 bps (FDM recovers truth exactly)
+//   vega 0.1-1:         ~0 bps
+//   vega 1-10:        ~5-50 bps (interpolation surface error starts)
+//   vega > 10:        ~2-20 bps (excellent)
+//
+// The FDM IV solver itself has 1400 bps error at vega < 0.01, recovering
+// σ = 0.01 (bracket lower bound) instead of the true σ = 0.15 or 0.30.
+// This means the "interpolation errors" measured against FDM reference
+// at those points conflate two issues: FDM reference is wrong AND interp
+// surface is wrong. For vega ≥ 0.01, FDM IV is essentially perfect (0 bps),
+// confirming it as a reliable reference in that range.
 // ============================================================================
 
 /// Compute FDM vega via central difference: (P(σ+dσ) - P(σ-dσ)) / (2*dσ)
@@ -2318,6 +2336,38 @@ static void run_vega_diagnostic() {
 
 // ============================================================================
 // Brent boundary diagnostic — bracket-boundary flag vs vega threshold
+//
+// This section tests four candidate detectors for unreliable IV solves:
+//
+//   1. Bracket-boundary check: solved σ near bracket bound [a, b].
+//      Post-solve, zero cost. PERFECT for FDM failures (100%/100%).
+//      Partial for interp failures (~64%/~41% at σ=15%).
+//
+//   2. Vega < threshold: requires 2 FDM solves per point to compute.
+//      Good recall but false positives at σ=30% (deep ITM with low vega
+//      but Brent still recovers correct IV). Too expensive for production.
+//
+//   3. Time-value / K < threshold: pre-solve, no Brent needed.
+//      time_value = price - intrinsic.  When TV/K ≈ 0, the option trades
+//      at intrinsic and σ is indeterminate. 100% recall at TV/K < 1e-6
+//      but false positives on deep ITM puts where Brent works fine.
+//
+//   4. |x - x*| (distance to exercise boundary): DOES NOT WORK.
+//      Tested hypothesis that interpolation errors cluster near the early
+//      exercise boundary. Result: no correlation. The boundary detector
+//      found delta=0 for all dividend segments (no clear kink in V/K_ref),
+//      and the default x* values are meaningless. Precision/recall ≈ 0%.
+//
+// Key findings:
+//   - FDM and interpolation have DIFFERENT failure thresholds.
+//     FDM fails only at vega ≈ 0. Interpolation fails at slightly higher
+//     vega due to surface noise amplifying the ill-conditioning.
+//   - Two-layer API design:
+//     (a) IV solver layer: reject at_boundary (universal, scheme-independent)
+//     (b) Surface layer: reject based on confidence region (scheme-specific)
+//   - Brent ALWAYS reports convergence success at low-vega points. The
+//     residual is tiny because price(σ) ≈ target for all σ. The convergence
+//     flag alone does not detect these failures.
 // ============================================================================
 
 static void run_brent_boundary() {
