@@ -319,3 +319,20 @@ cc_library(
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
 )
+
+cc_library(
+    name = "surface_concepts",
+    hdrs = ["surface_concepts.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
+    name = "bspline_interpolant",
+    hdrs = ["bspline/bspline_interpolant.hpp"],
+    deps = [":price_table_surface"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)

@@ -1530,3 +1530,14 @@ py_test(
     deps = [requirement("numpy")],
 )
 
+cc_test(
+    name = "surface_concepts_test",
+    size = "small",
+    srcs = ["surface_concepts_test.cc"],
+    deps = [
+        "//src/option/table:surface_concepts",
+        "//src/option/table:bspline_interpolant",
+        "@googletest//:gtest_main",
+    ],
+)
+
