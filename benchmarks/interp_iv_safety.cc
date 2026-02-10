@@ -25,6 +25,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -382,6 +383,79 @@ static void print_heatmap(const char* title, const ErrorTable& errors) {
 }
 
 // ============================================================================
+// TV/K filtered stats — filter out low-vega edge cases
+// ============================================================================
+
+/// TV/K mask: which (maturity, strike) points survive a given threshold.
+/// Based purely on reference prices so all algorithms share the same mask.
+using TVKMask = std::array<std::array<bool, kNS>, kNT>;
+
+static TVKMask compute_tvk_mask(const PriceGrid& prices, size_t vol_idx,
+                                 double threshold) {
+    TVKMask mask{};
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) {
+                mask[ti][si] = false;
+                continue;
+            }
+            double K = kStrikes[si];
+            double intrinsic = std::max(K - kSpot, 0.0);  // put
+            double tv = price - intrinsic;
+            mask[ti][si] = (tv / K) >= threshold;
+        }
+    }
+    return mask;
+}
+
+/// Print RMS error for multiple algorithms at a given TV/K threshold.
+/// All algorithms are filtered by the SAME mask (from reference prices).
+struct AlgoErrors {
+    const char* label;
+    const ErrorTable* errors;
+};
+
+static void print_tvk_comparison(const PriceGrid& prices, size_t vol_idx,
+                                  std::span<const AlgoErrors> algos) {
+    static constexpr double kThresholds[] = {0.0, 1e-4, 1e-3, 5e-3};
+    static constexpr const char* kThreshLabels[] = {
+        "none", "1e-4", "1e-3", "5e-3"};
+
+    std::printf("\n  TV/K filtered RMS (σ=%.0f%%):\n", kVols[vol_idx] * 100);
+
+    // Header
+    std::printf("  %-12s", "TV/K >=");
+    for (const auto& a : algos)
+        std::printf("  %14s", a.label);
+    std::printf("\n");
+
+    for (size_t fi = 0; fi < 4; ++fi) {
+        auto mask = compute_tvk_mask(prices, vol_idx, kThresholds[fi]);
+
+        std::printf("  %-12s", kThreshLabels[fi]);
+        for (const auto& a : algos) {
+            double sum_sq = 0;
+            size_t n = 0;
+            for (size_t ti = 0; ti < kNT; ++ti) {
+                for (size_t si = 0; si < kNS; ++si) {
+                    if (!mask[ti][si]) continue;
+                    double e = (*a.errors)[ti][si];
+                    if (std::isnan(e)) continue;
+                    sum_sq += e * e;
+                    n++;
+                }
+            }
+            double rms = n > 0 ? std::sqrt(sum_sq / n) : 0;
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.1f (%zu)", rms, n);
+            std::printf("  %14s", buf);
+        }
+        std::printf("\n");
+    }
+}
+
+// ============================================================================
 // Chebyshev 4D
 // ============================================================================
 
@@ -476,25 +550,26 @@ static ErrorTable compute_errors_chebyshev(
     return errors;
 }
 
-static void run_chebyshev_4d() {
+static std::array<ErrorTable, kNV>
+run_chebyshev_4d(const PriceGrid& prices) {
     std::printf("\n================================================================\n");
     std::printf("Chebyshev 4D Tucker — vanilla (no dividends)\n");
     std::printf("================================================================\n\n");
 
-    auto prices = generate_prices(/*with_dividends=*/false);
-
     std::printf("--- Building Chebyshev 4D surface...\n");
     auto surface = build_chebyshev_surface();
 
+    std::array<ErrorTable, kNV> all_errors{};
     std::printf("--- Computing Chebyshev IV errors...\n");
     for (size_t vi = 0; vi < kNV; ++vi) {
         char title[128];
         std::snprintf(title, sizeof(title),
                       "Chebyshev 4D IV Error (bps) — σ=%.0f%%",
                       kVols[vi] * 100);
-        auto errors = compute_errors_chebyshev(prices, surface, vi);
-        print_heatmap(title, errors);
+        all_errors[vi] = compute_errors_chebyshev(prices, surface, vi);
+        print_heatmap(title, all_errors[vi]);
     }
+    return all_errors;
 }
 
 // ============================================================================
@@ -533,14 +608,17 @@ int main() {
     auto div_solvers = build_div_solvers();
 
     // Step 3 & 4: Compute errors and print heatmaps
+    std::array<ErrorTable, kNV> vanilla_errors{};
+    std::array<ErrorTable, kNV> div_errors{};
+
     std::printf("--- Computing vanilla IV errors...\n");
     for (size_t vi = 0; vi < kNV; ++vi) {
         char title[128];
         std::snprintf(title, sizeof(title),
                       "Interpolation IV Error (bps) — σ=%.0f%%, no dividends",
                       kVols[vi] * 100);
-        auto errors = compute_errors_vanilla(vanilla_prices, vanilla_solver, vi);
-        print_heatmap(title, errors);
+        vanilla_errors[vi] = compute_errors_vanilla(vanilla_prices, vanilla_solver, vi);
+        print_heatmap(title, vanilla_errors[vi]);
     }
 
     std::printf("\n--- Computing dividend IV errors...\n");
@@ -549,12 +627,25 @@ int main() {
         std::snprintf(title, sizeof(title),
                       "Interpolation IV Error (bps) — σ=%.0f%%, quarterly $0.50 div",
                       kVols[vi] * 100);
-        auto errors = compute_errors_div(div_prices, div_solvers, vi);
-        print_heatmap(title, errors);
+        div_errors[vi] = compute_errors_div(div_prices, div_solvers, vi);
+        print_heatmap(title, div_errors[vi]);
     }
 
     // Chebyshev 4D
-    run_chebyshev_4d();
+    auto cheb_errors = run_chebyshev_4d(vanilla_prices);
+
+    // TV/K filtered comparison: same mask for all algorithms
+    std::printf("\n================================================================\n");
+    std::printf("TV/K Filtered Comparison — vanilla (no dividends)\n");
+    std::printf("================================================================\n");
+
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        AlgoErrors algos[] = {
+            {"B-spline", &vanilla_errors[vi]},
+            {"Chebyshev", &cheb_errors[vi]},
+        };
+        print_tvk_comparison(vanilla_prices, vi, algos);
+    }
 
     return 0;
 }
