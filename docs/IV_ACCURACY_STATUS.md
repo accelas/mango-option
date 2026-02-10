@@ -58,7 +58,7 @@ double compute_error_metric(double price_error, double vega) const;
 ### 4. Per-Strike Segmented Surfaces for Discrete Dividends (Implemented)
 
 **Files:**
-- `src/option/table/spliced_surface.hpp`
+- `src/option/table/split_surface.hpp`
 - `src/option/table/spliced_surface_builder.hpp/.cpp`
 - `src/option/iv_solver_factory.hpp/.cpp`
 - `src/option/table/adaptive_grid_builder.hpp/.cpp`

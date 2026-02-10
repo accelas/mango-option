@@ -27,7 +27,7 @@ concept SplitPolicy = requires(const S& s, double spot, double strike,
 
 /// Composable surface split. Routes queries to pieces via SplitPolicy,
 /// with per-slice remapping and value normalization.
-template <typename Inner, typename Split>
+template <typename Inner, SplitPolicy Split>
 class SplitSurface {
 public:
     SplitSurface(std::vector<Inner> pieces, Split split)

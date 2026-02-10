@@ -12,7 +12,8 @@ namespace mango {
 /// Replaces EEPPriceTableInner (with AnalyticalEEP) and PriceTableInner
 /// (with IdentityEEP). Any combination of interpolant, transform, and
 /// EEP strategy works without code duplication.
-template <typename Interp, typename Xform, typename EEP>
+template <typename Interp, CoordinateTransform Xform, EEPStrategy EEP>
+    requires SurfaceInterpolant<Interp, Xform::kDim>
 class EEPSurfaceAdapter {
 public:
     EEPSurfaceAdapter(Interp interp, Xform xform, EEP eep, double K_ref)
