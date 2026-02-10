@@ -2023,4 +2023,205 @@ AdaptiveGridBuilder::build_chebyshev(
     return result;
 }
 
+std::expected<AdaptiveResult, PriceTableError>
+AdaptiveGridBuilder::build_segmented_chebyshev(
+    const SegmentedAdaptiveConfig& config,
+    const IVGrid& domain)
+{
+    // 1. Determine K_refs
+    std::vector<double> K_refs = config.kref_config.K_refs;
+    if (K_refs.empty()) {
+        const int count = config.kref_config.K_ref_count;
+        const double span = config.kref_config.K_ref_span;
+        if (count < 1 || span <= 0.0) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+        const double log_lo = std::log(1.0 - span);
+        const double log_hi = std::log(1.0 + span);
+        K_refs.reserve(static_cast<size_t>(count));
+        if (count == 1) {
+            K_refs.push_back(config.spot);
+        } else {
+            for (int i = 0; i < count; ++i) {
+                double t = static_cast<double>(i) / static_cast<double>(count - 1);
+                K_refs.push_back(config.spot * std::exp(log_lo + t * (log_hi - log_lo)));
+            }
+        }
+    }
+    std::sort(K_refs.begin(), K_refs.end());
+
+    // 2. Domain setup
+    if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    double min_m = domain.moneyness.front();
+    double max_m = domain.moneyness.back();
+
+    double total_div = total_discrete_dividends(config.discrete_dividends, config.maturity);
+    double ref_min = K_refs.front();
+    double expansion = (ref_min > 0.0) ? total_div / ref_min : 0.0;
+    if (expansion > 0.0) {
+        double m_min_money = std::exp(min_m);
+        double expanded = std::max(m_min_money - expansion, 0.01);
+        min_m = std::log(expanded);
+    }
+
+    double min_vol = domain.vol.front();
+    double max_vol = domain.vol.back();
+    double min_rate = domain.rate.front();
+    double max_rate = domain.rate.back();
+
+    expand_domain_bounds(min_m, max_m, 0.10);
+    expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
+    expand_domain_bounds(min_rate, max_rate, 0.04);
+
+    double min_tau = std::min(0.01, config.maturity * 0.5);
+    double max_tau = config.maturity;
+    expand_domain_bounds(min_tau, max_tau, 0.1, kMinPositive);
+    max_tau = std::min(max_tau, config.maturity);
+
+    // Chebyshev headroom
+    auto hfn = [](double lo, double hi, size_t n) {
+        return 3.0 * (hi - lo)
+             / static_cast<double>(std::max(n, size_t{4}) - 1);
+    };
+    double hm = hfn(min_m, max_m, 40);
+    double ht = hfn(min_tau, max_tau, 15);
+    double hs = hfn(min_vol, max_vol, 15);
+    double hr = hfn(min_rate, max_rate, 9);
+
+    // 3. Compute segment boundaries
+    auto seg_bounds = compute_segment_boundaries(
+        config.discrete_dividends, config.maturity, min_tau, max_tau);
+
+    // 4. Adaptive refinement at probe K_ref = spot
+    ChebyshevRefinementState state{
+        .sigma_level = 2, .rate_level = 1,
+        .num_m = 40, .num_tau = 10,
+        .max_level = 6,
+        .m_lo = min_m - hm,
+        .m_hi = max_m + hm,
+        .tau_lo = std::max(min_tau - ht, 1e-4),
+        .tau_hi = max_tau + ht,
+        .sigma_lo = std::max(min_vol - hs, 0.01),
+        .sigma_hi = max_vol + hs,
+        .rate_lo = std::max(min_rate - hr, -0.05),
+        .rate_hi = max_rate + hr,
+        .seg_boundaries = seg_bounds,
+    };
+
+    PDESliceCache pde_cache;
+    SegmentedChebyshevBuildConfig build_cfg{
+        .K_ref = config.spot,
+        .option_type = config.option_type,
+        .dividend_yield = config.dividend_yield,
+        .discrete_dividends = config.discrete_dividends,
+        .seg_boundaries = seg_bounds,
+    };
+
+    auto build_fn = make_segmented_chebyshev_build_fn(pde_cache, build_cfg, state);
+    auto refine_fn = make_segmented_chebyshev_refine_fn(state);
+    auto validate_fn = make_validate_fn(
+        config.dividend_yield, config.option_type, config.discrete_dividends);
+    auto compute_error_fn = make_bs_vega_error_fn(params_);
+
+    // Seed initial tau: union of per-segment CGL nodes
+    InitialGrids initial;
+    initial.moneyness = chebyshev_nodes(state.num_m, state.m_lo, state.m_hi);
+    initial.tau.clear();
+    for (size_t s = 0; s + 1 < seg_bounds.size(); ++s) {
+        for (double t : chebyshev_nodes(state.num_tau, seg_bounds[s], seg_bounds[s + 1]))
+            initial.tau.push_back(t);
+    }
+    std::sort(initial.tau.begin(), initial.tau.end());
+    initial.tau.erase(std::unique(initial.tau.begin(), initial.tau.end(),
+        [](double a, double b) { return std::abs(a - b) < 1e-10; }),
+        initial.tau.end());
+    initial.vol = cc_level_nodes(state.sigma_level, state.sigma_lo, state.sigma_hi);
+    initial.rate = cc_level_nodes(state.rate_level, state.rate_lo, state.rate_hi);
+    initial.exact = true;
+
+    RefinementContext ctx{
+        .spot = config.spot,
+        .dividend_yield = config.dividend_yield,
+        .option_type = config.option_type,
+        .min_moneyness = min_m, .max_moneyness = max_m,
+        .min_tau = min_tau, .max_tau = max_tau,
+        .min_vol = min_vol, .max_vol = max_vol,
+        .min_rate = min_rate, .max_rate = max_rate,
+    };
+
+    auto grid_result = run_refinement(
+        params_, build_fn, validate_fn, refine_fn, ctx,
+        compute_error_fn, initial);
+    if (!grid_result.has_value()) {
+        return std::unexpected(grid_result.error());
+    }
+    auto& grids = grid_result.value();
+
+    // 5. Build all K_refs with final grid sizes
+    std::vector<std::function<double(double, double, double, double, double)>> kref_fns;
+    size_t total_solves = pde_cache.total_pde_solves();
+    kref_fns.reserve(K_refs.size());
+
+    for (double k_ref : K_refs) {
+        PDESliceCache kref_cache;
+        SegmentedChebyshevBuildConfig kref_cfg{
+            .K_ref = k_ref,
+            .option_type = config.option_type,
+            .dividend_yield = config.dividend_yield,
+            .discrete_dividends = config.discrete_dividends,
+            .seg_boundaries = seg_bounds,
+        };
+
+        auto kref_build_fn = make_segmented_chebyshev_build_fn(
+            kref_cache, kref_cfg, state);
+        auto surface = kref_build_fn(grids.moneyness, grids.tau,
+                                     grids.vol, grids.rate);
+        if (!surface.has_value()) {
+            return std::unexpected(surface.error());
+        }
+        total_solves += kref_cache.total_pde_solves();
+        kref_fns.push_back(std::move(surface->price));
+    }
+
+    // 6. Assemble multi-K_ref
+    AdaptiveResult result;
+
+    if (K_refs.size() == 1) {
+        result.price_fn = std::move(kref_fns[0]);
+    } else {
+        auto fns = std::make_shared<std::vector<
+            std::function<double(double, double, double, double, double)>>>(
+            std::move(kref_fns));
+        auto split = std::make_shared<MultiKRefSplit>(K_refs);
+
+        result.price_fn = [fns, split](
+            double spot, double strike, double tau,
+            double sigma, double rate) -> double
+        {
+            auto br = split->bracket(spot, strike, tau, sigma, rate);
+            double combined = 0.0;
+            for (size_t i = 0; i < br.count; ++i) {
+                auto idx = br.entries[i].index;
+                auto [ls, lk, lt, lv, lr] = split->to_local(
+                    idx, spot, strike, tau, sigma, rate);
+                double raw = (*fns)[idx](ls, lk, lt, lv, lr);
+                double norm = split->normalize(idx, strike, raw);
+                combined += br.entries[i].weight * norm;
+            }
+            return split->denormalize(combined, spot, strike, tau, sigma, rate);
+        };
+    }
+
+    result.iterations = std::move(grids.iterations);
+    result.achieved_max_error = grids.achieved_max_error;
+    result.achieved_avg_error = grids.achieved_avg_error;
+    result.target_met = grids.target_met;
+    result.total_pde_solves = total_solves;
+
+    return result;
+}
+
 }  // namespace mango

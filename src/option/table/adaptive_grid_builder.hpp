@@ -96,6 +96,18 @@ public:
     build_chebyshev(const OptionGrid& chain,
                     OptionType type = OptionType::PUT);
 
+    /// Build segmented Chebyshev surface with discrete dividend support.
+    /// Uses TauSegmentSplit for tau segmentation at dividend dates and
+    /// MultiKRefSplit for multi-K_ref interpolation.
+    /// Stores V/K_ref directly (no EEP decomposition).
+    ///
+    /// @param config Segmented config with spot, dividends, maturity, K_refs
+    /// @param domain IV grid providing domain bounds (moneyness in log S/K)
+    /// @return AdaptiveResult with price_fn, or error
+    [[nodiscard]] std::expected<AdaptiveResult, PriceTableError>
+    build_segmented_chebyshev(const SegmentedAdaptiveConfig& config,
+                              const IVGrid& domain);
+
 private:
     AdaptiveGridParams params_;
     SliceCache cache_;
