@@ -152,7 +152,7 @@ static std::expected<AnyIVSolver, ValidationError>
 wrap_surface(std::shared_ptr<const PriceTableSurface> surface,
              OptionType option_type,
              const InterpolatedIVSolverConfig& solver_config) {
-    auto wrapper = make_standard_surface(surface, option_type);
+    auto wrapper = make_bspline_surface(surface, option_type);
     if (!wrapper.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});

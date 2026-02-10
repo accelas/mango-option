@@ -302,7 +302,7 @@ if (!result.has_value()) {
 }
 
 // Wrap surface for price reconstruction
-auto wrapper = mango::make_standard_surface(
+auto wrapper = mango::make_bspline_surface(
     result->surface, mango::OptionType::PUT).value();
 
 // Query American option prices (~500ns)

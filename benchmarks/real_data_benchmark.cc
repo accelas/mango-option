@@ -338,7 +338,7 @@ BENCHMARK(BM_RealData_IV_FDM)
 static void BM_RealData_IV_BSpline(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    auto wrapper = make_standard_surface(surf.surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(surf.surface, OptionType::PUT);
     if (!wrapper) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
@@ -562,7 +562,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     }
 
     // Create IV solver
-    auto wrapper_query = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_query = make_bspline_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_query) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
@@ -664,7 +664,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     }
 
     // Create interpolated IV solver
-    auto wrapper_acc = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_acc = make_bspline_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_acc) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
@@ -830,7 +830,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     }
 
     // Create interpolated IV solver
-    auto wrapper_dense = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_dense = make_bspline_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_dense) {
         state.SkipWithError("Failed to create BSplinePriceTable");
         return;
@@ -941,7 +941,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     }
 
     // Create interpolated IV solver
-    auto wrapper_est = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_est = make_bspline_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_est) {
         state.SkipWithError("Failed to create BSplinePriceTable");
         return;
@@ -1062,7 +1062,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
         return;
     }
 
-    auto wrapper_prof = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_prof = make_bspline_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_prof) {
         state.SkipWithError("Failed to create BSplinePriceTable");
         return;

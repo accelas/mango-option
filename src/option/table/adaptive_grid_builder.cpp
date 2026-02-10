@@ -1694,7 +1694,7 @@ AdaptiveGridBuilder::build_cached_surface(
 
     // Return a handle that queries the surface (reconstruct full American price)
     auto surface_ptr = surface.value();
-    auto wrapper = make_standard_surface(surface_ptr, type);
+    auto wrapper = make_bspline_surface(surface_ptr, type);
     if (!wrapper.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }

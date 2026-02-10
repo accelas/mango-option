@@ -116,9 +116,9 @@ git commit -m "Rename Standard*/Segmented* aliases to BSpline* prefix"
 
 | Old | New |
 |-----|-----|
-| `make_standard_surface` | `make_bspline_surface` |
+| `make_bspline_surface` | `make_bspline_surface` |
 
-Note: `make_standard_wrapper` does not exist in current code — the only factory is `make_standard_surface`.
+Note: `make_standard_wrapper` does not exist in current code — the only factory is `make_bspline_surface`.
 
 **Step 2: Apply rename across repo with replace_all**
 
@@ -130,7 +130,7 @@ Heavy usage in: interpolated_iv_solver_test.cc (5 refs), eep_integration_test.cc
 
 ```bash
 git add -A
-git commit -m "Rename make_standard_surface to make_bspline_surface"
+git commit -m "Rename make_bspline_surface to make_bspline_surface"
 ```
 
 ---
@@ -706,5 +706,5 @@ ls src/option/table/dividend_utils.hpp         # should not exist
 grep -r "PriceTable" src/ tests/ benchmarks/  # should be zero
 grep -r "StandardLeaf" src/ tests/ benchmarks/     # should be zero
 grep -r "StandardSurface" src/ tests/ benchmarks/  # should be zero
-grep -r "make_standard_surface" src/ tests/ benchmarks/  # should be zero
+grep -r "make_bspline_surface" src/ tests/ benchmarks/  # should be zero
 ```

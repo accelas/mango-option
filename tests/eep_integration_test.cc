@@ -57,9 +57,9 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
               SurfaceContent::EarlyExercisePremium);
 
     // Wrap in BSplinePriceTable for reconstruction
-    auto wrapper_result = make_standard_surface(result->surface, OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value())
-        << "make_standard_surface failed: " << wrapper_result.error();
+        << "make_bspline_surface failed: " << wrapper_result.error();
     auto wrapper = std::move(*wrapper_result);
 
     // Test point: ATM put, 1-year, 20% vol, 5% rate
@@ -168,7 +168,7 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
 // Regression tests for bugs found during code review
 // ===========================================================================
 
-// Regression: make_standard_surface must reject NormalizedPrice content
+// Regression: make_bspline_surface must reject NormalizedPrice content
 // Bug: Previously accepted NormalizedPrice but always used EEPPriceTableInner,
 // which adds the European component at query time — double-counting it for
 // surfaces that already contain full American prices.
@@ -196,10 +196,10 @@ TEST(EEPIntegrationTest, MakeStandardWrapperRejectsNormalizedPrice) {
     ASSERT_EQ(result->surface->metadata().content,
               SurfaceContent::NormalizedPrice);
 
-    // make_standard_surface must reject this
-    auto wrapper_result = make_standard_surface(result->surface, OptionType::PUT);
+    // make_bspline_surface must reject this
+    auto wrapper_result = make_bspline_surface(result->surface, OptionType::PUT);
     EXPECT_FALSE(wrapper_result.has_value())
-        << "make_standard_surface should reject NormalizedPrice surfaces";
+        << "make_bspline_surface should reject NormalizedPrice surfaces";
     EXPECT_NE(wrapper_result.error().find("EEP"), std::string::npos)
         << "Error message should mention EEP; got: " << wrapper_result.error();
 }

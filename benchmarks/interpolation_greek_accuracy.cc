@@ -79,7 +79,7 @@ const EEPFixture& GetEEPFixture() {
             throw std::runtime_error("Failed to build price table");
         }
 
-        auto wrapper = make_standard_surface(table->surface, OptionType::PUT);
+        auto wrapper = make_bspline_surface(table->surface, OptionType::PUT);
         if (!wrapper) {
             throw std::runtime_error("Failed to create BSplinePriceTable");
         }

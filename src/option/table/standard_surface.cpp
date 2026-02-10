@@ -4,7 +4,7 @@
 namespace mango {
 
 std::expected<BSplinePriceTable, std::string>
-make_standard_surface(
+make_bspline_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type)
 {
@@ -15,7 +15,7 @@ make_standard_surface(
     const auto& meta = surface->metadata();
     if (meta.content != SurfaceContent::EarlyExercisePremium) {
         return std::unexpected(std::string(
-            "make_standard_surface requires EEP content; got NormalizedPrice. "
+            "make_bspline_surface requires EEP content; got NormalizedPrice. "
             "Build with SurfaceContent::EarlyExercisePremium + EEPDecomposer, "
             "or use make_interpolated_iv_solver() which handles this internally."));
     }

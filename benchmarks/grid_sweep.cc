@@ -138,7 +138,7 @@ int main() {
             continue;
         }
 
-        auto wrapper = make_standard_surface(table_result->surface, OptionType::PUT);
+        auto wrapper = make_bspline_surface(table_result->surface, OptionType::PUT);
         if (!wrapper) {
             printf("%-6zu WRAPPER CREATE FAILED\n", trial);
             continue;

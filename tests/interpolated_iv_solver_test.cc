@@ -42,7 +42,7 @@ protected:
 
     /// Helper to create a BSplinePriceTable for IV solver tests
     BSplinePriceTable make_wrapper() {
-        auto result = make_standard_surface(surface_, OptionType::PUT);
+        auto result = make_bspline_surface(surface_, OptionType::PUT);
         return std::move(*result);
     }
 
@@ -51,7 +51,7 @@ protected:
 };
 
 TEST_F(InterpolatedIVSolverTest, CreateFromBSplinePriceTable) {
-    auto wrapper_result = make_standard_surface(surface_, OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(surface_, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
@@ -235,7 +235,7 @@ TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
     auto eep_surface = PriceTableSurface::build(eep_axes, eep_coeffs, eep_meta);
     ASSERT_TRUE(eep_surface.has_value());
 
-    auto wrapper_result = make_standard_surface(eep_surface.value(), OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(eep_surface.value(), OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
@@ -289,7 +289,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
         });
     ASSERT_TRUE(table.has_value());
 
-    auto wrapper_result = make_standard_surface(table->surface, OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(table->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
@@ -329,7 +329,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
         });
     ASSERT_TRUE(table.has_value());
 
-    auto wrapper_result = make_standard_surface(table->surface, OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(table->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));

@@ -45,7 +45,7 @@ using BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>;
 /// Reads K_ref and dividend_yield from surface metadata.
 /// Requires SurfaceContent::EarlyExercisePremium; rejects NormalizedPrice.
 [[nodiscard]] std::expected<BSplinePriceTable, std::string>
-make_standard_surface(
+make_bspline_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type);
 

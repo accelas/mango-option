@@ -1142,7 +1142,7 @@ using StandardSurface = StandardLeaf;
 
 /// Create a StandardSurface from a pre-built EEP surface.
 [[nodiscard]] std::expected<StandardSurface, std::string>
-make_standard_surface(
+make_bspline_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type);
 
@@ -1154,11 +1154,11 @@ using DefaultInterpolatedIVSolver = InterpolatedIVSolver<StandardSurface>;
 
 Wait — `DefaultInterpolatedIVSolver` is defined in `interpolated_iv_solver.hpp`, not here. Don't move it. Just update the aliases.
 
-**Step 2: Rewrite make_standard_surface in standard_surface.cpp**
+**Step 2: Rewrite make_bspline_surface in standard_surface.cpp**
 
 ```cpp
 std::expected<StandardSurface, std::string>
-make_standard_surface(
+make_bspline_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type)
 {
@@ -1245,14 +1245,14 @@ In `interpolated_iv_solver.hpp`:
 - Template instantiations stay the same
 
 In `interpolated_iv_solver.cpp`:
-- `wrap_surface()` uses `make_standard_surface()` (already updated)
+- `wrap_surface()` uses `make_bspline_surface()` (already updated)
 - `wrap_multi_kref_surface()` constructs `MultiKRefPriceSurface` using new types
 - `build_multi_kref_manual()` uses new `SegmentedLeaf` + `TauSegmentSplit`
 
 **Step 2: Update adaptive_grid_builder**
 
 - `adaptive_grid_types.hpp`: `AdaptiveResult.surface` stays as `shared_ptr<const PriceTableSurface>` (the B-spline surface is still built by the builder)
-- `adaptive_grid_builder.cpp`: surface wrapping at the end uses `make_standard_surface()`
+- `adaptive_grid_builder.cpp`: surface wrapping at the end uses `make_bspline_surface()`
 
 **Step 3: Update segmented_price_table_builder**
 

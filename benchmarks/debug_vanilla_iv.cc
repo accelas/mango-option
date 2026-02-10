@@ -102,9 +102,9 @@ int main() {
 
     // Layer 4: BSplinePriceTable reconstruction
     std::printf("\n--- Layer 4: BSplinePriceTable Reconstruction ---\n");
-    auto wrapper = make_standard_surface(surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(surface, OptionType::PUT);
     if (!wrapper.has_value()) {
-        std::fprintf(stderr, "make_standard_surface failed\n");
+        std::fprintf(stderr, "make_bspline_surface failed\n");
         return 1;
     }
 
@@ -171,9 +171,9 @@ int main() {
     double adaptive_raw = adaptive_surface->value({m, kTau, kSigma, kRate});
     std::printf("  Raw surface value: %.6f\n", adaptive_raw);
 
-    auto adaptive_wrapper = make_standard_surface(adaptive_surface, OptionType::PUT);
+    auto adaptive_wrapper = make_bspline_surface(adaptive_surface, OptionType::PUT);
     if (!adaptive_wrapper.has_value()) {
-        std::fprintf(stderr, "make_standard_surface failed for adaptive\n");
+        std::fprintf(stderr, "make_bspline_surface failed for adaptive\n");
         return 1;
     }
 
@@ -216,7 +216,7 @@ int main() {
             std::printf("  High-accuracy raw EEP (tol=1e-6): %.6f\n", raw_hi);
             std::printf("  Error vs expected: %.6f\n", std::abs(eep - raw_hi));
 
-            auto wrapper_hi = make_standard_surface(result_hi->surface, OptionType::PUT);
+            auto wrapper_hi = make_bspline_surface(result_hi->surface, OptionType::PUT);
             if (wrapper_hi.has_value()) {
                 double price_hi = wrapper_hi->price(kSpot, kStrike, kTau, kSigma, kRate);
                 std::printf("  High-accuracy price: %.6f\n", price_hi);

@@ -123,7 +123,7 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
     // Create BSplinePriceTable and IV solver
-    auto wrapper = make_standard_surface(surf.surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(surf.surface, OptionType::PUT);
     if (!wrapper) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
