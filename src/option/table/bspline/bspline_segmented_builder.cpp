@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
-#include "mango/option/table/dividend_utils.hpp"
+#include "mango/option/dividend_utils.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/american_option.hpp"
 #include <algorithm>

@@ -1,20 +1,22 @@
 # SPDX-License-Identifier: MIT
 cc_library(
-    name = "bspline_interpolant",
-    hdrs = ["bspline_interpolant.hpp"],
-    deps = [":bspline_surface"],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table/bspline",
-    include_prefix = "mango/option/table/bspline",
-)
-
-cc_library(
     name = "bspline_surface",
     srcs = ["bspline_surface.cpp"],
-    hdrs = ["bspline_surface.hpp"],
+    hdrs = [
+        "bspline_surface.hpp",
+        "bspline_interpolant.hpp",
+    ],
     deps = [
         "//src/option/table:price_table_axes",
         "//src/option/table:price_table_metadata",
+        "//src/option/table:price_table",
+        "//src/option/table:eep_surface_adapter",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:identity_eep",
+        "//src/option/table:split_surface",
+        "//src/option/table:tau_segment_split",
+        "//src/option/table:multi_kref_split",
+        "//src/option/table:standard_transform_4d",
         "//src/math:bspline_nd",
         "//src/math:bspline_basis",
     ],
@@ -81,8 +83,8 @@ cc_library(
     deps = [
         ":bspline_builder",
         "//src/option/table:adaptive_grid_types",
-        "//src/option/table:dividend_utils",
-        "//src/option/table:standard_surface",
+        "//src/option:dividend_utils",
+        ":bspline_surface",
         "//src/option/table:spliced_surface_builder",
         "//src/option:american_option",
         "//src/option:grid_spec_types",

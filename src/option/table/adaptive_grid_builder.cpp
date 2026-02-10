@@ -12,7 +12,7 @@
 #include "mango/option/table/eep/identity_eep.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/split_surface.hpp"
-#include "mango/option/table/dividend_utils.hpp"
+#include "mango/option/dividend_utils.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"

@@ -153,7 +153,6 @@ cc_library(
         ":option_spec",
         "//src/option/table:eep_decomposer",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table:standard_surface",
         "//src/option/table:price_surface_concept",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:adaptive_grid_builder",
@@ -210,6 +209,17 @@ cc_library(
     hdrs = ["option_concepts.hpp"],
     deps = [
         ":option_spec",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option",
+    include_prefix = "mango/option",
+)
+
+cc_library(
+    name = "dividend_utils",
+    hdrs = ["dividend_utils.hpp"],
+    deps = [
+        "//src/option:option_spec",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option",
