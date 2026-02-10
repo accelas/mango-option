@@ -21,6 +21,7 @@
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/option_spec.hpp"
+#include "mango/option/table/adaptive_grid_builder.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include <array>
 #include <cmath>
@@ -573,6 +574,133 @@ run_chebyshev_4d(const PriceGrid& prices) {
 }
 
 // ============================================================================
+// Chebyshev Adaptive — CC-level refinement via AdaptiveGridBuilder
+// ============================================================================
+
+static ErrorTable compute_errors_from_price_fn(
+    const PriceGrid& prices,
+    const std::function<double(double, double, double, double, double)>& price_fn,
+    size_t vol_idx) {
+    ErrorTable errors{};
+    IVSolverConfig fdm_config;
+    IVSolver fdm_solver(fdm_config);
+
+    std::vector<IVQuery> queries;
+    std::vector<std::pair<size_t, size_t>> query_map;
+    queries.reserve(kNT * kNS);
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            IVQuery q;
+            q.spot = kSpot;
+            q.strike = kStrikes[si];
+            q.maturity = kMaturities[ti];
+            q.rate = kRate;
+            q.dividend_yield = kDivYield;
+            q.option_type = OptionType::PUT;
+            q.market_price = price;
+            queries.push_back(q);
+            query_map.emplace_back(ti, si);
+        }
+    }
+
+    auto fdm_results = fdm_solver.solve_batch(queries);
+
+    for (size_t i = 0; i < queries.size(); ++i) {
+        auto [ti, si] = query_map[i];
+
+        if (!fdm_results.results[i].has_value()) {
+            errors[ti][si] = std::nan("");
+            continue;
+        }
+
+        double fdm_iv = fdm_results.results[i]->implied_vol;
+        double strike = kStrikes[si];
+        double maturity = kMaturities[ti];
+
+        double cheb_iv = brent_solve_iv(
+            [&](double vol) {
+                return price_fn(kSpot, strike, maturity, vol, kRate);
+            },
+            queries[i].market_price);
+
+        if (std::isnan(cheb_iv)) {
+            errors[ti][si] = std::nan("");
+            continue;
+        }
+
+        errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
+    }
+
+    return errors;
+}
+
+static std::array<ErrorTable, kNV>
+run_chebyshev_adaptive(const PriceGrid& prices) {
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev Adaptive — CC-level refinement\n");
+    std::printf("================================================================\n\n");
+
+    // Build OptionGrid from benchmark constants
+    OptionGrid chain;
+    chain.spot = kSpot;
+    chain.dividend_yield = kDivYield;
+    chain.strikes = std::vector<double>(kStrikes.begin(), kStrikes.end());
+    chain.maturities = std::vector<double>(kMaturities.begin(), kMaturities.end());
+    chain.implied_vols = std::vector<double>(kVols.begin(), kVols.end());
+    chain.rates = {kRate};
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 5e-4;  // 5 bps
+    params.max_iter = 6;
+
+    std::printf("--- Building adaptive Chebyshev surface (target=%.1f bps)...\n",
+                params.target_iv_error * 1e4);
+
+    AdaptiveGridBuilder builder(params);
+    auto result = builder.build_chebyshev(chain, OptionType::PUT);
+    if (!result.has_value()) {
+        std::fprintf(stderr, "Chebyshev adaptive build failed\n");
+        std::array<ErrorTable, kNV> empty{};
+        return empty;
+    }
+
+    // Print iteration stats
+    std::printf("  Iterations: %zu, PDE solves: %zu, target_met: %s\n",
+                result->iterations.size(),
+                result->total_pde_solves,
+                result->target_met ? "yes" : "no");
+    for (const auto& it : result->iterations) {
+        std::printf("  iter %zu: grid [%zu, %zu, %zu, %zu] "
+                    "max_err=%.1f bps avg_err=%.1f bps PDE=%zu\n",
+                    it.iteration,
+                    it.grid_sizes[0], it.grid_sizes[1],
+                    it.grid_sizes[2], it.grid_sizes[3],
+                    it.max_error * 1e4, it.avg_error * 1e4,
+                    it.pde_solves_table);
+    }
+
+    std::array<ErrorTable, kNV> all_errors{};
+    std::printf("--- Computing adaptive Chebyshev IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Chebyshev Adaptive IV Error (bps) — σ=%.0f%%",
+                      kVols[vi] * 100);
+        all_errors[vi] = compute_errors_from_price_fn(
+            prices, result->price_fn, vi);
+        print_heatmap(title, all_errors[vi]);
+    }
+    return all_errors;
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -631,8 +759,11 @@ int main() {
         print_heatmap(title, div_errors[vi]);
     }
 
-    // Chebyshev 4D
+    // Chebyshev 4D (fixed grid)
     auto cheb_errors = run_chebyshev_4d(vanilla_prices);
+
+    // Chebyshev adaptive (CC-level refinement)
+    auto cheb_adaptive_errors = run_chebyshev_adaptive(vanilla_prices);
 
     // TV/K filtered comparison: same mask for all algorithms
     std::printf("\n================================================================\n");
@@ -642,7 +773,8 @@ int main() {
     for (size_t vi = 0; vi < kNV; ++vi) {
         AlgoErrors algos[] = {
             {"B-spline", &vanilla_errors[vi]},
-            {"Chebyshev", &cheb_errors[vi]},
+            {"Cheb(fixed)", &cheb_errors[vi]},
+            {"Cheb(adapt)", &cheb_adaptive_errors[vi]},
         };
         print_tvk_comparison(vanilla_prices, vi, algos);
     }

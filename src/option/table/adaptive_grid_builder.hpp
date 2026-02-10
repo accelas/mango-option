@@ -86,6 +86,16 @@ public:
     build_segmented(const SegmentedAdaptiveConfig& config,
                     const IVGrid& domain);
 
+    /// Build Chebyshev surface with adaptive CC-level refinement.
+    /// Uses PDESliceCache for incremental PDE reuse across CC levels.
+    ///
+    /// @param chain Option grid providing domain bounds
+    /// @param type Option type (default: PUT)
+    /// @return AdaptiveResult with surface and diagnostics, or error
+    [[nodiscard]] std::expected<AdaptiveResult, PriceTableError>
+    build_chebyshev(const OptionGrid& chain,
+                    OptionType type = OptionType::PUT);
+
 private:
     AdaptiveGridParams params_;
     SliceCache cache_;

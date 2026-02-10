@@ -5,6 +5,7 @@
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/standard_surface.hpp"
 #include <array>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -90,6 +91,10 @@ struct AdaptiveResult {
 
     /// Final axes used for the surface
     PriceTableAxes axes;
+
+    /// Type-erased price function (set by Chebyshev path)
+    std::function<double(double spot, double strike, double tau,
+                         double sigma, double rate)> price_fn;
 
     /// Query price from the surface
     /// Returns NaN if no surface is available (build failure or not yet built)

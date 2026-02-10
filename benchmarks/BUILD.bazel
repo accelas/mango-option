@@ -475,6 +475,7 @@ cc_binary(
         "//src/option:american_option_batch",
         "//src/option:iv_solver",
         "//src/option:interpolated_iv_solver",
+        "//src/option/table:adaptive_grid_builder",
         "//src/option/table/chebyshev:chebyshev_table_builder",
     ],
     tags = ["manual"],
