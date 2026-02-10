@@ -2200,6 +2200,10 @@ AdaptiveGridBuilder::build_segmented_chebyshev(
         for (double t : chebyshev_nodes(state.num_tau, lo, hi))
             initial.tau.push_back(t);
     }
+    if (initial.tau.empty()) {
+        return std::unexpected(
+            PriceTableError(PriceTableErrorCode::InvalidConfig));
+    }
     std::sort(initial.tau.begin(), initial.tau.end());
     initial.tau.erase(std::unique(initial.tau.begin(), initial.tau.end(),
         [](double a, double b) { return std::abs(a - b) < 1e-10; }),

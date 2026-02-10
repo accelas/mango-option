@@ -858,23 +858,45 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
         << "build_segmented_chebyshev failed";
 
     // Dividend at cal_time=0.5 → tau_split=0.5.
-    // Gap is [0.5-ε, 0.5+ε]. Query both sides of gap midpoint.
-    double tau_left = 0.4999;   // left of gap mid → should use pre-dividend segment
-    double tau_right = 0.5001;  // right of gap mid → should use post-dividend segment
+    // Gap is [0.5-ε, 0.5+ε] with ε=5e-4.
+    //
+    // With nearest-side routing:
+    //   tau=0.4999 (left of gap mid) → clamps to RIGHT edge of left segment
+    //   tau=0.5001 (right of gap mid) → clamps to LEFT edge of right segment
+    //   These are different segment edges with different values.
+    //
+    // If routing were always-right (the old bug):
+    //   Both would clamp to LEFT edge of right segment → identical prices.
+    double tau_left  = 0.4999;   // left of gap mid
+    double tau_right = 0.5001;   // right of gap mid
 
-    double p_left = result->price_fn(100.0, 100.0, tau_left, 0.20, 0.05);
-    double p_right = result->price_fn(100.0, 100.0, tau_right, 0.20, 0.05);
+    auto pf = [&](double tau) {
+        return result->price_fn(100.0, 100.0, tau, 0.20, 0.05);
+    };
 
-    EXPECT_TRUE(std::isfinite(p_left)) << "Left-of-gap price is not finite";
-    EXPECT_TRUE(std::isfinite(p_right)) << "Right-of-gap price is not finite";
+    double p_left  = pf(tau_left);
+    double p_right = pf(tau_right);
+
+    EXPECT_TRUE(std::isfinite(p_left));
+    EXPECT_TRUE(std::isfinite(p_right));
     EXPECT_GT(p_left, 0.0);
     EXPECT_GT(p_right, 0.0);
 
-    // Prices on opposite sides of a dividend gap should differ (discontinuity)
-    // but both should be reasonable (within 50% of each other for ATM put)
-    double ratio = p_left / p_right;
-    EXPECT_GT(ratio, 0.5) << "Left/right gap prices too different";
-    EXPECT_LT(ratio, 2.0) << "Left/right gap prices too different";
+    // If nearest-side routing works, these route to different segments
+    // and thus produce different prices. If both route to the same
+    // segment (the old bug), they clamp to the same local_tau=0 and
+    // produce identical prices.
+    EXPECT_NE(p_left, p_right)
+        << "Gap queries on both sides of midpoint gave identical prices ("
+        << p_left << ") — both likely routed to same segment";
+
+    // Additionally verify the prices differ by a meaningful amount
+    // (not just floating-point noise), since there's a $2 dividend
+    // discontinuity between segments.
+    double diff = std::abs(p_left - p_right);
+    EXPECT_GT(diff, 0.001)
+        << "Gap queries differ by only " << diff
+        << " — routing may not be splitting correctly";
 }
 
 // Regression: duplicate dividend dates must be merged to avoid non-monotonic
@@ -954,6 +976,41 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
     double p = result->price_fn(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(p));
     EXPECT_GT(p, 0.0);
+}
+
+// Regression: empty tau grid must return error, not crash
+// Bug: Very short maturity with mid-tau dividend made all segments narrower
+// than kMinSegmentWidth. The tau grid was empty, causing UB when
+// build callback dereferenced tau_nodes.back().
+TEST(AdaptiveGridBuilderTest, SegmentedChebyshevEmptyTauReturnsError) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;
+    params.max_iter = 1;
+    params.validation_samples = 4;
+
+    AdaptiveGridBuilder builder(params);
+    // Maturity=0.02 (~7 days) with dividend at mid-point.
+    // Gap ε=5e-4 on each side of tau_split=0.01 creates segments
+    // [0.005, 0.0095] and [0.0105, 0.015] — both < kMinSegmentWidth=0.01.
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {Dividend{.calendar_time = 0.01, .amount = 0.50}},
+        .maturity = 0.02,
+        .kref_config = {.K_refs = {100.0}},
+    };
+
+    auto m_domain = to_log_m({0.9, 1.0, 1.1});
+    std::vector<double> v_domain = {0.15, 0.25};
+    std::vector<double> r_domain = {0.05};
+
+    auto result = builder.build_segmented_chebyshev(
+        seg_config, {m_domain, v_domain, r_domain});
+
+    // Should return an error, not crash
+    EXPECT_FALSE(result.has_value())
+        << "Expected error for maturity too short for dividend schedule";
 }
 
 }  // namespace
