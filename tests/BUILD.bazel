@@ -1552,6 +1552,7 @@ cc_test(
     srcs = ["chebyshev_interpolant_test.cc"],
     deps = [
         "//src/math/chebyshev:raw_tensor",
+        "//src/math/chebyshev:tucker_tensor",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

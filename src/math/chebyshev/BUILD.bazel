@@ -14,3 +14,12 @@ cc_library(
     strip_include_prefix = "/src/math/chebyshev",
     include_prefix = "mango/math/chebyshev",
 )
+
+cc_library(
+    name = "tucker_tensor",
+    hdrs = ["tucker_tensor.hpp"],
+    deps = ["@eigen//:eigen"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/chebyshev",
+    include_prefix = "mango/math/chebyshev",
+)
