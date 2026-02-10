@@ -5,6 +5,11 @@
 #include "mango/option/table/transforms/standard_4d.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
 #include "mango/option/table/eep/identity_eep.hpp"
+#include "mango/option/table/eep_surface_adapter.hpp"
+#include "mango/option/table/bounded_surface.hpp"
+#include "mango/option/table/price_surface_concept.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/eep_transform.hpp"
 
 using namespace mango;
 
@@ -71,4 +76,65 @@ TEST(AnalyticalEEPTest, EuropeanVegaIsPositive) {
     AnalyticalEEP eep(OptionType::PUT, 0.02);
     double v = eep.european_vega(100.0, 100.0, 1.0, 0.20, 0.05);
     EXPECT_GT(v, 0.0);
+}
+
+// Build a small test surface for comparison tests.
+static std::shared_ptr<const mango::PriceTableSurface> make_test_surface() {
+    using namespace mango;
+    auto setup = PriceTableBuilder::from_vectors(
+        {-0.2, -0.1, 0.0, 0.1, 0.2},     // log-moneyness
+        {0.1, 0.5, 1.0},                   // maturities
+        {0.15, 0.20, 0.30},                // vols
+        {0.03, 0.05},                      // rates
+        100.0,                              // K_ref
+        GridAccuracyParams{},
+        OptionType::PUT, 0.02);
+    auto& [builder, axes] = *setup;
+    EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.02};
+    auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        [&](PriceTensor& t, const PriceTableAxes& a) { decomposer.decompose(t, a); });
+    return result->surface;
+}
+
+TEST(EEPSurfaceAdapterTest, MatchesOldEEPPriceTableInner) {
+    auto surface = make_test_surface();
+    double K_ref = surface->metadata().K_ref;
+
+    // Old path
+    EEPPriceTableInner old_inner(surface, OptionType::PUT, K_ref, 0.02);
+
+    // New path
+    SharedBSplineInterp<4> interp(surface);
+    StandardTransform4D xform;
+    AnalyticalEEP eep(OptionType::PUT, 0.02);
+    EEPSurfaceAdapter adapter(std::move(interp), xform, eep, K_ref);
+
+    // Compare at several query points
+    struct TestPoint { double spot, strike, tau, sigma, rate; };
+    TestPoint points[] = {
+        {100, 100, 0.5, 0.20, 0.05},  // ATM
+        {110, 100, 0.5, 0.20, 0.05},  // ITM put
+        {90,  100, 0.5, 0.20, 0.05},  // OTM put
+        {100, 100, 0.1, 0.30, 0.03},  // Short maturity
+        {100, 100, 1.0, 0.15, 0.05},  // Long maturity
+    };
+
+    for (const auto& p : points) {
+        PriceQuery q{p.spot, p.strike, p.tau, p.sigma, p.rate};
+        double old_price = old_inner.price(q);
+        double new_price = adapter.price(p.spot, p.strike, p.tau, p.sigma, p.rate);
+        EXPECT_NEAR(old_price, new_price, 1e-12)
+            << "Mismatch at S=" << p.spot << " K=" << p.strike;
+
+        double old_vega = old_inner.vega(q);
+        double new_vega = adapter.vega(p.spot, p.strike, p.tau, p.sigma, p.rate);
+        EXPECT_NEAR(old_vega, new_vega, 1e-12)
+            << "Vega mismatch at S=" << p.spot << " K=" << p.strike;
+    }
+}
+
+TEST(BoundedSurfaceTest, SatisfiesPriceSurfaceConcept) {
+    using StandardAdapter = EEPSurfaceAdapter<SharedBSplineInterp<4>,
+                                               StandardTransform4D, AnalyticalEEP>;
+    static_assert(PriceSurface<BoundedSurface<StandardAdapter>>);
 }

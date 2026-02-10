@@ -1532,14 +1532,21 @@ py_test(
 
 cc_test(
     name = "surface_concepts_test",
-    size = "small",
+    size = "medium",
     srcs = ["surface_concepts_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
     deps = [
         "//src/option/table:surface_concepts",
         "//src/option/table:bspline_interpolant",
         "//src/option/table:standard_transform_4d",
         "//src/option/table:analytical_eep",
         "//src/option/table:identity_eep",
+        "//src/option/table:eep_surface_adapter",
+        "//src/option/table:bounded_surface",
+        "//src/option/table:price_surface_concept",
+        "//src/option/table:price_table_builder",
+        "//src/option/table:eep_transform",
         "@googletest//:gtest_main",
     ],
 )
