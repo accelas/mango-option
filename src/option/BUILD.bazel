@@ -151,7 +151,7 @@ cc_library(
         ":american_option",
         ":iv_result",
         ":option_spec",
-        "//src/option/table:eep_decomposer",
+        "//src/option/table/bspline:eep_decomposer",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table:price_surface_concept",
         "//src/option/table:adaptive_grid_types",

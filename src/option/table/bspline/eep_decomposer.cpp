@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "mango/option/table/eep/eep_decomposer.hpp"
+#include "mango/option/table/bspline/eep_decomposer.hpp"
 #include "mango/option/european_option.hpp"
 #include <algorithm>
 #include <cmath>

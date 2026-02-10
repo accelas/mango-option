@@ -57,7 +57,7 @@ cc_library(
     deps = [
         ":adaptive_grid_types",
         "//src/option:dividend_utils",
-        ":eep_decomposer",
+        "//src/option/table/bspline:eep_decomposer",
         ":identity_eep",
         ":multi_kref_split",
         "//src/option/table/bspline:bspline_builder",
@@ -121,20 +121,6 @@ cc_library(
 cc_library(
     name = "identity_eep",
     hdrs = ["eep/identity_eep.hpp"],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "eep_decomposer",
-    srcs = ["eep/eep_decomposer.cpp"],
-    hdrs = ["eep/eep_decomposer.hpp"],
-    deps = [
-        "//src/option/table/bspline:bspline_builder",
-        "//src/option:european_option",
-        "//src/option:option_spec",
-    ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",

@@ -8,7 +8,7 @@
 #include "mango/option/european_option.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/pde_slice_cache.hpp"
-#include "mango/option/table/eep/eep_decomposer.hpp"
+#include "mango/option/table/bspline/eep_decomposer.hpp"
 #include "mango/option/table/eep/identity_eep.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/split_surface.hpp"

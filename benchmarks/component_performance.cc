@@ -16,7 +16,7 @@
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/eep/eep_decomposer.hpp"
+#include "mango/option/table/bspline/eep_decomposer.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include <benchmark/benchmark.h>
