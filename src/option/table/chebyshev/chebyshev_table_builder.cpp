@@ -84,16 +84,15 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
 
                 for (size_t mi = 0; mi < n_m; ++mi) {
                     double m = m_nodes[mi];
-
-                    // American price: spline returns V/K_ref (normalized)
-                    double am_normalized = spline.eval(m);
-
-                    // European price
                     double spot_node = config.K_ref * std::exp(m);
                     double tau = tau_nodes[ti];
                     double sigma = sigma_nodes[si];
                     double rate = rate_nodes[ri];
 
+                    // American price in dollars (spline returns V/K_ref)
+                    double am_price = spline.eval(m) * config.K_ref;
+
+                    // European price in dollars
                     EuropeanOptionSolver eu_solver(
                         OptionSpec{
                             .spot = spot_node,
@@ -105,15 +104,21 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
                         sigma);
                     auto eu = eu_solver.solve();
 
-                    double eep = 0.0;
+                    double eep_raw = 0.0;
                     if (eu.has_value()) {
-                        double eu_normalized = eu->value() / config.K_ref;
-                        eep = am_normalized - eu_normalized;
+                        eep_raw = am_price - eu->value();
                     }
 
-                    // Softplus floor for non-negativity
-                    constexpr double kScale = 200.0;
-                    eep = std::log1p(std::exp(eep * kScale)) / kScale;
+                    // Debiased softplus floor (matches EEPDecomposer)
+                    constexpr double kSharpness = 100.0;
+                    double eep;
+                    if (kSharpness * eep_raw > 500.0) {
+                        eep = eep_raw;
+                    } else {
+                        double sp = std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
+                        double bias = std::log(2.0) / kSharpness;
+                        eep = std::max(0.0, sp - bias);
+                    }
 
                     size_t flat = mi * (n_tau * n_sigma * n_rate)
                                 + ti * (n_sigma * n_rate)

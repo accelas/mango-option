@@ -553,8 +553,5 @@ int main() {
         print_heatmap(title, errors);
     }
 
-    // Chebyshev 4D
-    run_chebyshev_4d();
-
     return 0;
 }
