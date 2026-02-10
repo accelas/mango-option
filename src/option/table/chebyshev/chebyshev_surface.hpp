@@ -6,6 +6,7 @@
 #include "mango/math/chebyshev/tucker_tensor.hpp"
 #include "mango/option/table/bounded_surface.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
+#include "mango/option/table/eep/identity_eep.hpp"
 #include "mango/option/table/eep_surface_adapter.hpp"
 #include "mango/option/table/transforms/standard_4d.hpp"
 
@@ -22,5 +23,11 @@ using ChebyshevRawLeaf = EEPSurfaceAdapter<
     StandardTransform4D, AnalyticalEEP>;
 
 using ChebyshevRawSurface = BoundedSurface<ChebyshevRawLeaf>;
+
+/// Leaf for segmented Chebyshev surfaces (V/K_ref, no EEP decomposition).
+/// Used with TauSegmentSplit for discrete dividend support.
+using ChebyshevSegmentedLeaf = EEPSurfaceAdapter<
+    ChebyshevInterpolant<4, RawTensor<4>>,
+    StandardTransform4D, IdentityEEP>;
 
 }  // namespace mango

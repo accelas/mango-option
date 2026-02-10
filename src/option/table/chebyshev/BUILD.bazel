@@ -8,6 +8,7 @@ cc_library(
         "//src/math/chebyshev:tucker_tensor",
         "//src/option/table:bounded_surface",
         "//src/option/table:analytical_eep",
+        "//src/option/table:identity_eep",
         "//src/option/table:eep_surface_adapter",
         "//src/option/table:standard_transform_4d",
     ],
