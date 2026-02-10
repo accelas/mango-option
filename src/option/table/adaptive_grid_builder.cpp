@@ -109,10 +109,11 @@ double total_discrete_dividends(const std::vector<Dividend>& dividends,
     return total;
 }
 
-/// Minimum segment width for CGL node placement. Segments narrower than
-/// this are "gap" segments around dividend dates — they don't get CGL nodes
-/// or tensors, and queries landing in gaps are routed to adjacent real segments.
-static constexpr double kMinSegmentWidth = 0.01;
+/// Result of compute_segment_boundaries: boundaries + gap metadata.
+struct SegmentBoundaries {
+    std::vector<double> bounds;        ///< Sorted segment boundaries
+    std::vector<bool> is_gap;          ///< is_gap[s] = true for synthetic dividend gaps
+};
 
 /// Compute tau-space segment boundaries from dividend schedule.
 /// Returns sorted boundaries: {tau_min, split-ε, split+ε, ..., tau_max}
@@ -122,7 +123,7 @@ static constexpr double kMinSegmentWidth = 0.01;
 /// a value discontinuity between pre- and post-dividend snapshots.
 /// Dividends outside (tau_min, tau_max) are ignored.
 /// If no dividends fall inside range, returns {tau_min, tau_max} (single segment).
-static std::vector<double> compute_segment_boundaries(
+static SegmentBoundaries compute_segment_boundaries(
     const std::vector<Dividend>& dividends, double maturity,
     double tau_min, double tau_max)
 {
@@ -153,16 +154,22 @@ static std::vector<double> compute_segment_boundaries(
         }
     }
 
-    // Build boundaries: tau_min, (split-inset, split+inset)..., tau_max
+    // Build boundaries and gap flags.
+    // Pattern per dividend: real, GAP, real, GAP, real, ...
+    // Odd-indexed segments (1, 3, 5, ...) are gaps.
     std::vector<double> bounds;
+    std::vector<bool> is_gap;
     bounds.push_back(tau_min);
     for (double sp : unique_splits) {
+        is_gap.push_back(false);  // real segment before this gap
         bounds.push_back(sp - kInset);
+        is_gap.push_back(true);   // gap segment around dividend
         bounds.push_back(sp + kInset);
     }
+    is_gap.push_back(false);  // final real segment after last gap
     bounds.push_back(tau_max);
 
-    return bounds;
+    return {std::move(bounds), std::move(is_gap)};
 }
 
 // ============================================================================
@@ -447,6 +454,7 @@ struct ChebyshevRefinementState {
     double m_lo, m_hi, tau_lo, tau_hi;
     double sigma_lo, sigma_hi, rate_lo, rate_hi;
     std::vector<double> seg_boundaries;  // empty = vanilla (no segmentation)
+    std::vector<bool> seg_is_gap;        // true for synthetic dividend gap segments
 };
 
 /// Config for segmented Chebyshev build (discrete dividends, no EEP)
@@ -456,6 +464,7 @@ struct SegmentedChebyshevBuildConfig {
     double dividend_yield;
     std::vector<Dividend> discrete_dividends;
     std::vector<double> seg_boundaries;
+    std::vector<bool> seg_is_gap;  ///< true for synthetic dividend gap segments
 };
 
 /// Create a BuildFn for the adaptive refinement loop that builds Chebyshev surfaces.
@@ -687,7 +696,7 @@ static BuildFn make_segmented_chebyshev_build_fn(
             for (size_t k = 0; k < n_seg; ++k) {
                 // Skip gap segments — CGL nodes at boundaries belong
                 // to the adjacent real segment, not the narrow gap.
-                if (seg[k + 1] - seg[k] < kMinSegmentWidth) continue;
+                if (config.seg_is_gap[k]) continue;
                 if (t >= seg[k] && t <= seg[k + 1]) {
                     s = k;
                     break;
@@ -773,14 +782,17 @@ static BuildFn make_segmented_chebyshev_build_fn(
                 std::move(leaves));
         auto seg_copy = std::make_shared<std::vector<double>>(
             seg.begin(), seg.end());
+        auto gap_copy = std::make_shared<std::vector<bool>>(
+            config.seg_is_gap.begin(), config.seg_is_gap.end());
         double K_ref = config.K_ref;
 
         return SurfaceHandle{
-            .price = [leaves_shared, seg_copy, K_ref, n_seg](
+            .price = [leaves_shared, seg_copy, gap_copy, K_ref, n_seg](
                 double spot, double strike, double tau,
                 double sigma, double rate) {
                 // Find segment for tau (reverse scan for proper boundary handling)
                 const auto& bounds = *seg_copy;
+                const auto& is_gap = *gap_copy;
                 size_t seg_idx = 0;
                 for (size_t i = n_seg; i > 0; --i) {
                     size_t j = i - 1;
@@ -795,19 +807,22 @@ static BuildFn make_segmented_chebyshev_build_fn(
 
                 // If tau lands in a gap segment, route to nearest real
                 // segment by distance from the gap midpoint.
-                double seg_width = bounds[seg_idx + 1] - bounds[seg_idx];
-                if (seg_width < kMinSegmentWidth) {
+                if (is_gap[seg_idx]) {
                     double gap_mid = (bounds[seg_idx] + bounds[seg_idx + 1]) * 0.5;
-                    bool can_left = seg_idx > 0 &&
-                        (bounds[seg_idx] - bounds[seg_idx - 1]) >= kMinSegmentWidth;
-                    bool can_right = seg_idx + 1 < n_seg &&
-                        (bounds[seg_idx + 2] - bounds[seg_idx + 1]) >= kMinSegmentWidth;
-                    if (can_left && can_right) {
-                        seg_idx = (tau <= gap_mid) ? seg_idx - 1 : seg_idx + 1;
-                    } else if (can_left) {
-                        seg_idx = seg_idx - 1;
-                    } else if (can_right) {
-                        seg_idx = seg_idx + 1;
+                    // Search outward for nearest non-gap segment
+                    size_t left = seg_idx, right = seg_idx;
+                    while (left > 0 && is_gap[left - 1]) --left;
+                    if (left > 0) left = left - 1;  // non-gap to the left
+                    else left = n_seg;               // sentinel: no left
+                    while (right + 1 < n_seg && is_gap[right + 1]) ++right;
+                    if (right + 1 < n_seg) right = right + 1;  // non-gap to the right
+                    else right = n_seg;                         // sentinel: no right
+                    if (left < n_seg && right < n_seg) {
+                        seg_idx = (tau <= gap_mid) ? left : right;
+                    } else if (left < n_seg) {
+                        seg_idx = left;
+                    } else if (right < n_seg) {
+                        seg_idx = right;
                     }
                 }
 
@@ -907,9 +922,9 @@ static RefineFn make_segmented_chebyshev_refine_fn(
                 state.num_tau = new_n;
                 tau.clear();
                 for (size_t s = 0; s + 1 < state.seg_boundaries.size(); ++s) {
+                    if (state.seg_is_gap[s]) continue;
                     double lo = state.seg_boundaries[s];
                     double hi = state.seg_boundaries[s + 1];
-                    if (hi - lo < kMinSegmentWidth) continue;
                     for (double t : chebyshev_nodes(new_n, lo, hi))
                         tau.push_back(t);
                 }
@@ -2155,7 +2170,7 @@ AdaptiveGridBuilder::build_segmented_chebyshev(
     double hr = hfn(min_rate, max_rate, 9);
 
     // 3. Compute segment boundaries
-    auto seg_bounds = compute_segment_boundaries(
+    auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(
         config.discrete_dividends, config.maturity, min_tau, max_tau);
 
     // 4. Adaptive refinement at probe K_ref = spot
@@ -2172,6 +2187,7 @@ AdaptiveGridBuilder::build_segmented_chebyshev(
         .rate_lo = std::max(min_rate - hr, -0.05),
         .rate_hi = max_rate + hr,
         .seg_boundaries = seg_bounds,
+        .seg_is_gap = seg_is_gap,
     };
 
     PDESliceCache pde_cache;
@@ -2181,6 +2197,7 @@ AdaptiveGridBuilder::build_segmented_chebyshev(
         .dividend_yield = config.dividend_yield,
         .discrete_dividends = config.discrete_dividends,
         .seg_boundaries = seg_bounds,
+        .seg_is_gap = seg_is_gap,
     };
 
     auto build_fn = make_segmented_chebyshev_build_fn(pde_cache, build_cfg, state);
@@ -2194,9 +2211,9 @@ AdaptiveGridBuilder::build_segmented_chebyshev(
     initial.moneyness = chebyshev_nodes(state.num_m, state.m_lo, state.m_hi);
     initial.tau.clear();
     for (size_t s = 0; s + 1 < seg_bounds.size(); ++s) {
+        if (seg_is_gap[s]) continue;
         double lo = seg_bounds[s];
         double hi = seg_bounds[s + 1];
-        if (hi - lo < kMinSegmentWidth) continue;
         for (double t : chebyshev_nodes(state.num_tau, lo, hi))
             initial.tau.push_back(t);
     }
@@ -2243,6 +2260,7 @@ AdaptiveGridBuilder::build_segmented_chebyshev(
             .dividend_yield = config.dividend_yield,
             .discrete_dividends = config.discrete_dividends,
             .seg_boundaries = seg_bounds,
+            .seg_is_gap = seg_is_gap,
         };
 
         auto kref_build_fn = make_segmented_chebyshev_build_fn(

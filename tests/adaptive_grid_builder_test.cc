@@ -982,7 +982,10 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
 // Bug: Very short maturity with mid-tau dividend made all segments narrower
 // than kMinSegmentWidth. The tau grid was empty, causing UB when
 // build callback dereferenced tau_nodes.back().
-TEST(AdaptiveGridBuilderTest, SegmentedChebyshevEmptyTauReturnsError) {
+// Regression: narrow real segments must not be treated as gaps.
+// Bug: width-based gap detection (hi - lo < kMinSegmentWidth) misclassified
+// narrow real segments as gaps, producing zero prices or errors.
+TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
@@ -991,7 +994,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevEmptyTauReturnsError) {
     AdaptiveGridBuilder builder(params);
     // Maturity=0.02 (~7 days) with dividend at mid-point.
     // Gap ε=5e-4 on each side of tau_split=0.01 creates segments
-    // [0.005, 0.0095] and [0.0105, 0.015] — both < kMinSegmentWidth=0.01.
+    // [0.005, 0.0095] and [0.0105, 0.015] — narrow but real.
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
@@ -1008,9 +1011,77 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevEmptyTauReturnsError) {
     auto result = builder.build_segmented_chebyshev(
         seg_config, {m_domain, v_domain, r_domain});
 
-    // Should return an error, not crash
-    EXPECT_FALSE(result.has_value())
-        << "Expected error for maturity too short for dividend schedule";
+    // Narrow real segments should build successfully, not be rejected as gaps
+    ASSERT_TRUE(result.has_value())
+        << "Narrow real segments should produce valid prices, not errors";
+
+    // Price at ATM should be positive
+    double p = result->price_fn(100.0, 100.0, 0.01, 0.20, 0.05);
+    EXPECT_GT(p, 0.0) << "ATM put price should be positive";
+}
+
+// Regression: narrow real segment between two close dividends must not
+// produce zero prices.
+// Bug: Width-based gap detection treated narrow real segments as gaps,
+// giving them zero tensors. Queries inside the narrow real interval
+// got stuck on the zero leaf because both neighbors were also gaps.
+TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;
+    params.max_iter = 1;
+    params.validation_samples = 4;
+
+    AdaptiveGridBuilder builder(params);
+    // Two dividends 5 days apart. With ε=5e-4 gap half-width:
+    //   div1 at cal_time=0.48 → tau_split=0.52, gap [0.5195, 0.5205]
+    //   div2 at cal_time=0.50 → tau_split=0.50, gap [0.4995, 0.5005]
+    // Real segment between gaps: [0.5005, 0.5195] — width 0.019 > kMinSegmentWidth
+    // But with closer dividends (2 days apart):
+    //   div1 at cal_time=0.494 → tau_split=0.506, gap [0.5055, 0.5065]
+    //   div2 at cal_time=0.500 → tau_split=0.500, gap [0.4995, 0.5005]
+    // Real segment between gaps: [0.5005, 0.5055] — width 0.005 < kMinSegmentWidth
+    // This narrow real segment would be misclassified as a gap.
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {
+            Dividend{.calendar_time = 0.494, .amount = 1.0},
+            Dividend{.calendar_time = 0.500, .amount = 1.0},
+        },
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {100.0}},
+    };
+
+    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    std::vector<double> v_domain = {0.10, 0.20, 0.30};
+    std::vector<double> r_domain = {0.03, 0.05};
+
+    auto result = builder.build_segmented_chebyshev(
+        seg_config, {m_domain, v_domain, r_domain});
+    ASSERT_TRUE(result.has_value())
+        << "build_segmented_chebyshev failed";
+
+    // Query inside the narrow real segment between the two gaps.
+    // tau=0.503 is between the two gap bands.
+    double p = result->price_fn(100.0, 100.0, 0.503, 0.20, 0.05);
+    EXPECT_TRUE(std::isfinite(p)) << "Price not finite in narrow real segment";
+    EXPECT_GT(p, 0.5)
+        << "Price " << p << " is near-zero in narrow real segment — "
+        << "likely hitting a zero-tensor leaf";
+
+    // Also verify prices at tau values in the wide segments on either
+    // side are reasonable for comparison.
+    double p_before = result->price_fn(100.0, 100.0, 0.40, 0.20, 0.05);
+    double p_after  = result->price_fn(100.0, 100.0, 0.60, 0.20, 0.05);
+    EXPECT_GT(p_before, 0.5);
+    EXPECT_GT(p_after, 0.5);
+
+    // The narrow segment price should be in the same order of magnitude
+    // as the wide segment prices (within 5x).
+    EXPECT_GT(p, p_before * 0.2)
+        << "Narrow segment price " << p << " is far too low vs "
+        << "left-side price " << p_before;
 }
 
 }  // namespace
