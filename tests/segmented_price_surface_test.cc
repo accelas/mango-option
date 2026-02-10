@@ -46,14 +46,12 @@ TEST(SegmentedSurfaceTest, FindsCorrectSegment) {
     ASSERT_TRUE(result.has_value()) << "Build should succeed";
 
     // Query in segment 0 (closest to expiry): τ = 0.3
-    PriceQuery q0{.spot = 100.0, .strike = 100.0, .tau = 0.3, .sigma = 0.25, .rate = 0.05};
-    double p0 = result->price(q0);
+    double p0 = result->price(100.0, 100.0, 0.3, 0.25, 0.05);
     EXPECT_GT(p0, 0.0);
     EXPECT_FALSE(std::isnan(p0));
 
     // Query in segment 1 (earlier): τ = 0.8
-    PriceQuery q1{.spot = 100.0, .strike = 100.0, .tau = 0.8, .sigma = 0.25, .rate = 0.05};
-    double p1 = result->price(q1);
+    double p1 = result->price(100.0, 100.0, 0.8, 0.25, 0.05);
     EXPECT_GT(p1, 0.0);
     EXPECT_FALSE(std::isnan(p1));
 
@@ -81,8 +79,7 @@ TEST(SegmentedSurfaceTest, BoundaryTauGoesToCorrectSegment) {
     ASSERT_TRUE(result.has_value());
 
     // Query exactly at boundary τ = 0.5 (at the dividend date)
-    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.25, .rate = 0.05};
-    double p_boundary = result->price(q);
+    double p_boundary = result->price(100.0, 100.0, 0.5, 0.25, 0.05);
     EXPECT_GT(p_boundary, 0.0);
     EXPECT_FALSE(std::isnan(p_boundary));
 }
@@ -111,8 +108,7 @@ TEST(SegmentedSurfaceTest, VegaIsPositive) {
     ASSERT_TRUE(result.has_value());
 
     // Vega should be positive for ATM put
-    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.8, .sigma = 0.25, .rate = 0.05};
-    double vega = result->vega(q);
+    double vega = result->vega(100.0, 100.0, 0.8, 0.25, 0.05);
     EXPECT_GT(vega, 0.0);
     EXPECT_TRUE(std::isfinite(vega));
 }
@@ -141,12 +137,10 @@ TEST(SegmentedSurfaceTest, BoundsSpanFullMaturityRange) {
     ASSERT_TRUE(result.has_value());
 
     // Should be able to query at near-expiry and full maturity
-    PriceQuery q_near{.spot = 100.0, .strike = 100.0, .tau = 0.05, .sigma = 0.25, .rate = 0.05};
-    double p_near = result->price(q_near);
+    double p_near = result->price(100.0, 100.0, 0.05, 0.25, 0.05);
     EXPECT_GT(p_near, 0.0);
 
-    PriceQuery q_far{.spot = 100.0, .strike = 100.0, .tau = 0.95, .sigma = 0.25, .rate = 0.05};
-    double p_far = result->price(q_far);
+    double p_far = result->price(100.0, 100.0, 0.95, 0.25, 0.05);
     EXPECT_GT(p_far, 0.0);
 }
 
@@ -178,16 +172,13 @@ TEST(SegmentedSurfaceTest, MultipleDividendsCreateMultipleSegments) {
     ASSERT_TRUE(result.has_value());
 
     // Query in each segment
-    PriceQuery q1{.spot = 100.0, .strike = 100.0, .tau = 0.1, .sigma = 0.25, .rate = 0.05};
-    double p1 = result->price(q1);
+    double p1 = result->price(100.0, 100.0, 0.1, 0.25, 0.05);
     EXPECT_GT(p1, 0.0);
 
-    PriceQuery q2{.spot = 100.0, .strike = 100.0, .tau = 0.4, .sigma = 0.25, .rate = 0.05};
-    double p2 = result->price(q2);
+    double p2 = result->price(100.0, 100.0, 0.4, 0.25, 0.05);
     EXPECT_GT(p2, 0.0);
 
-    PriceQuery q3{.spot = 100.0, .strike = 100.0, .tau = 0.9, .sigma = 0.25, .rate = 0.05};
-    double p3 = result->price(q3);
+    double p3 = result->price(100.0, 100.0, 0.9, 0.25, 0.05);
     EXPECT_GT(p3, 0.0);
 }
 
@@ -212,8 +203,7 @@ TEST(SegmentedSurfaceTest, NoDividendsProducesSingleSegment) {
     ASSERT_TRUE(result.has_value());
 
     // Should work across full maturity range
-    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.25, .rate = 0.05};
-    double p = result->price(q);
+    double p = result->price(100.0, 100.0, 0.5, 0.25, 0.05);
     EXPECT_GT(p, 0.0);
     EXPECT_TRUE(std::isfinite(p));
 }

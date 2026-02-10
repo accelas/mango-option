@@ -674,7 +674,7 @@ probe_and_build(
             return SurfaceHandle{
                 .price = [shared](double spot, double strike,
                                   double tau, double sigma, double rate) -> double {
-                    return shared->price(PriceQuery{spot, strike, tau, sigma, rate});
+                    return shared->price(spot, strike, tau, sigma, rate);
                 },
                 .pde_solves = 0
             };
@@ -1267,14 +1267,7 @@ AdaptiveGridBuilder::build_segmented(
         double m = sample[0], tau = sample[1], sigma = sample[2], rate = sample[3];
         double strike = config.spot * std::exp(-m);
 
-        PriceQuery query{
-            .spot = config.spot,
-            .strike = strike,
-            .tau = tau,
-            .sigma = sigma,
-            .rate = rate,
-        };
-        double interp = surface->price(query);
+        double interp = surface->price(config.spot, strike, tau, sigma, rate);
 
         PricingParams params;
         params.spot = config.spot;

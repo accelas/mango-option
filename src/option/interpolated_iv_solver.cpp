@@ -252,7 +252,7 @@ wrap_multi_kref_surface(MultiKRefPriceSurface surface,
                         const GridBounds& b, double maturity,
                         OptionType option_type, double dividend_yield,
                         const InterpolatedIVSolverConfig& solver_config) {
-    MultiKRefPriceWrapper::Bounds bounds{
+    SurfaceBounds bounds{
         .m_min = b.m_min, .m_max = b.m_max,
         .tau_min = 0.0, .tau_max = maturity,
         .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,

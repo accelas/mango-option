@@ -32,10 +32,12 @@ make_standard_wrapper(
     double dividend_yield = meta.dividends.dividend_yield;
     const auto& axes = surface->axes();
 
-    EEPPriceTableInner inner(surface, type, K_ref, dividend_yield);
-    StandardSurface std_surface({std::move(inner)}, SingleBracket{}, IdentityTransform{}, WeightedSum{});
+    SharedBSplineInterp<4> interp(surface);
+    StandardTransform4D xform;
+    AnalyticalEEP eep(type, dividend_yield);
+    StandardLeaf leaf(std::move(interp), xform, eep, K_ref);
 
-    SplicedSurfaceWrapper<StandardSurface>::Bounds bounds{
+    SurfaceBounds bounds{
         .m_min = meta.m_min,
         .m_max = meta.m_max,
         .tau_min = axes.grids[1].front(),
@@ -46,7 +48,7 @@ make_standard_wrapper(
         .rate_max = axes.grids[3].back(),
     };
 
-    return StandardSurfaceWrapper(std::move(std_surface), bounds, type, dividend_yield);
+    return StandardSurfaceWrapper(std::move(leaf), bounds, type, dividend_yield);
 }
 
 }  // namespace mango
