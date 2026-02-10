@@ -1,5 +1,16 @@
 # SPDX-License-Identifier: MIT
 cc_library(
+    name = "bspline_slice_cache",
+    hdrs = ["bspline_slice_cache.hpp"],
+    deps = [
+        "//src/option:american_option_result",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
     name = "bspline_surface",
     srcs = ["bspline_surface.cpp"],
     hdrs = [

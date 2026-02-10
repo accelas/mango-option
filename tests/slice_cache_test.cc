@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/slice_cache.hpp"
+#include "mango/option/table/bspline/bspline_slice_cache.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include "mango/option/option_spec.hpp"

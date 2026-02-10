@@ -1223,7 +1223,7 @@ cc_test(
     size = "small",
     srcs = ["error_attribution_test.cc"],
     deps = [
-        "//src/option/table:error_attribution",
+        "//src/option/table/bspline:bspline_slice_cache",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -1234,7 +1234,7 @@ cc_test(
     size = "small",
     srcs = ["slice_cache_test.cc"],
     deps = [
-        "//src/option/table:slice_cache",
+        "//src/option/table/bspline:bspline_slice_cache",
         "//src/option:american_option_result",
         "//src/pde/core:grid",
         "//src/pde/core:time_domain",

@@ -56,24 +56,6 @@ cc_library(
     include_prefix = "mango/option/table",
 )
 
-cc_library(
-    name = "error_attribution",
-    hdrs = ["error_attribution.hpp"],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "slice_cache",
-    hdrs = ["slice_cache.hpp"],
-    deps = [
-        "//src/option:american_option_result",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
 
 cc_library(
     name = "adaptive_grid_types",
@@ -103,11 +85,10 @@ cc_library(
         ":adaptive_grid_types",
         "//src/option:dividend_utils",
         ":eep_decomposer",
-        ":error_attribution",
         ":identity_eep",
         ":multi_kref_split",
         "//src/option/table/bspline:bspline_builder",
-        ":slice_cache",
+        "//src/option/table/bspline:bspline_slice_cache",
         "//src/option/table/bspline:bspline_segmented_builder",
         ":split_surface",
         "//src/option/table/bspline:spliced_surface_builder",

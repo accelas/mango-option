@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/error_attribution.hpp"
+#include "mango/option/table/bspline/bspline_slice_cache.hpp"
 
 namespace mango {
 namespace {
