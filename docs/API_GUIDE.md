@@ -268,7 +268,7 @@ auto result = solver.solve(query);
 **Pre-compute American option prices across parameter space:**
 
 ```cpp
-#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/standard_surface.hpp"
 
 // Define 4D parameter grids

@@ -57,21 +57,6 @@ cc_library(
 )
 
 cc_library(
-    name = "price_table_surface",
-    srcs = ["price_table_surface.cpp"],
-    hdrs = ["price_table_surface.hpp"],
-    deps = [
-        ":price_table_axes",
-        ":price_table_metadata",
-        "//src/math:bspline_nd",
-        "//src/math:bspline_basis",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
     name = "price_table_config",
     hdrs = ["price_table_config.hpp"],
     deps = [
@@ -85,61 +70,10 @@ cc_library(
 )
 
 cc_library(
-    name = "price_table_builder",
-    srcs = ["price_table_builder.cpp"],
-    hdrs = ["price_table_builder.hpp"],
-    copts = [
-        "-fopenmp",
-        "-pthread",
-    ],
-    linkopts = [
-        "-fopenmp",
-        "-pthread",
-    ],
-    deps = [
-        ":price_table_config",
-        ":price_table_axes",
-        ":price_table_surface",
-        ":price_tensor",
-        ":price_table_grid_estimator",
-        ":recursion_helpers",
-        "//src/option:option_grid",
-        "//src/option:american_option",
-        "//src/option:american_option_batch",
-        "//src/math:cubic_spline_solver",
-        "//src/math:bspline_nd_separable",
-        "//src/math:bspline_collocation_workspace",
-        "//src/support:thread_workspace",
-        "//src/support:ivcalc_trace_hdr",
-        "//src/support:parallel",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
     name = "recursion_helpers",
     hdrs = ["recursion_helpers.hpp"],
     deps = [
         ":price_table_axes",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "price_table_workspace",
-    srcs = ["price_table_workspace.cpp"],
-    hdrs = ["price_table_workspace.hpp"],
-    deps = [
-        ":price_table_metadata",
-        "//src/support:error_types",
-        "//src/math:bspline_basis",
-        "//src/support:crc64",
-        "//third_party/arrow",
-        "@mdspan//:mdspan",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
@@ -186,30 +120,11 @@ cc_library(
 )
 
 cc_library(
-    name = "segmented_price_table_builder",
-    srcs = ["segmented_price_table_builder.cpp"],
-    hdrs = ["segmented_price_table_builder.hpp"],
-    deps = [
-        ":adaptive_grid_types",
-        ":dividend_utils",
-        ":price_table_builder",
-        ":standard_surface",
-        ":spliced_surface_builder",
-        "//src/option:american_option",
-        "//src/option:grid_spec_types",
-        "//src/support:error_types",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
     name = "standard_surface",
     srcs = ["standard_surface.cpp"],
     hdrs = ["standard_surface.hpp"],
     deps = [
-        ":bspline_interpolant",
+        "//src/option/table/bspline:bspline_interpolant",
         ":bounded_surface",
         ":eep_surface_adapter",
         ":analytical_eep",
@@ -218,7 +133,7 @@ cc_library(
         ":tau_segment_split",
         ":multi_kref_split",
         ":standard_transform_4d",
-        ":price_table_surface",
+        "//src/option/table/bspline:bspline_surface",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
@@ -231,7 +146,7 @@ cc_library(
     hdrs = ["spliced_surface_builder.hpp"],
     deps = [
         ":standard_surface",
-        ":price_table_surface",
+        "//src/option/table/bspline:bspline_surface",
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
@@ -244,7 +159,7 @@ cc_library(
     hdrs = ["adaptive_grid_types.hpp"],
     deps = [
         ":price_table_axes",
-        ":price_table_surface",
+        "//src/option/table/bspline:bspline_surface",
         ":standard_surface",
     ],
     visibility = ["//visibility:public"],
@@ -271,9 +186,9 @@ cc_library(
         ":error_attribution",
         ":identity_eep",
         ":multi_kref_split",
-        ":price_table_builder",
+        "//src/option/table/bspline:bspline_builder",
         ":slice_cache",
-        ":segmented_price_table_builder",
+        "//src/option/table/bspline:bspline_segmented_builder",
         ":split_surface",
         ":spliced_surface_builder",
         ":standard_surface",
@@ -311,14 +226,6 @@ cc_library(
     include_prefix = "mango/option/table",
 )
 
-cc_library(
-    name = "bspline_interpolant",
-    hdrs = ["bspline/bspline_interpolant.hpp"],
-    deps = [":price_table_surface"],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
 
 cc_library(
     name = "standard_transform_4d",

@@ -2,7 +2,7 @@
 /// @file eep_integration_test.cc
 /// @brief End-to-end integration tests for EEP decomposition feature
 
-#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/standard_surface.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/price_table_metadata.hpp"

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/recursion_helpers.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/math/bspline_nd_separable.hpp"

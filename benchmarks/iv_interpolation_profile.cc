@@ -13,7 +13,7 @@
  */
 
 #include "mango/math/bspline_nd_separable.hpp"
-#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
 #include <benchmark/benchmark.h>

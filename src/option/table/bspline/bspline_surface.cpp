@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/math/bspline_nd.hpp"
 #include "mango/math/bspline_basis.hpp"
 #include <algorithm>

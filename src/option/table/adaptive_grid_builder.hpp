@@ -2,7 +2,7 @@
 #pragma once
 
 #include "mango/option/table/adaptive_grid_types.hpp"
-#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/slice_cache.hpp"
 #include "mango/option/table/error_attribution.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"

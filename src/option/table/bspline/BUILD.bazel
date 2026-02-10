@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "bspline_interpolant",
+    hdrs = ["bspline_interpolant.hpp"],
+    deps = [":bspline_surface"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
+    name = "bspline_surface",
+    srcs = ["bspline_surface.cpp"],
+    hdrs = ["bspline_surface.hpp"],
+    deps = [
+        "//src/option/table:price_table_axes",
+        "//src/option/table:price_table_metadata",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
+    name = "bspline_builder",
+    srcs = ["bspline_builder.cpp"],
+    hdrs = ["bspline_builder.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    deps = [
+        ":bspline_surface",
+        "//src/option/table:price_table_config",
+        "//src/option/table:price_table_axes",
+        "//src/option/table:price_tensor",
+        "//src/option/table:price_table_grid_estimator",
+        "//src/option/table:recursion_helpers",
+        "//src/option:option_grid",
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/math:cubic_spline_solver",
+        "//src/math:bspline_nd_separable",
+        "//src/math:bspline_collocation_workspace",
+        "//src/support:thread_workspace",
+        "//src/support:ivcalc_trace_hdr",
+        "//src/support:parallel",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
+    name = "bspline_workspace",
+    srcs = ["bspline_workspace.cpp"],
+    hdrs = ["bspline_workspace.hpp"],
+    deps = [
+        "//src/option/table:price_table_metadata",
+        "//src/support:error_types",
+        "//src/math:bspline_basis",
+        "//src/support:crc64",
+        "//third_party/arrow",
+        "@mdspan//:mdspan",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
+    name = "bspline_segmented_builder",
+    srcs = ["bspline_segmented_builder.cpp"],
+    hdrs = ["bspline_segmented_builder.hpp"],
+    deps = [
+        ":bspline_builder",
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table:dividend_utils",
+        "//src/option/table:standard_surface",
+        "//src/option/table:spliced_surface_builder",
+        "//src/option:american_option",
+        "//src/option:grid_spec_types",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
