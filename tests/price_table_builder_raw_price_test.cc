@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/eep_transform.hpp"
+#include "mango/option/table/eep/eep_decomposer.hpp"
 
 using namespace mango;
 

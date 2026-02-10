@@ -18,7 +18,7 @@
 #include <cmath>
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/eep_transform.hpp"
+#include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/standard_surface.hpp"

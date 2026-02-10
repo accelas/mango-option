@@ -13,6 +13,14 @@
 
 namespace mango {
 
+/// Configuration for multi-K_ref surface construction.
+/// Used by both manual and adaptive grid builders.
+struct MultiKRefConfig {
+    std::vector<double> K_refs;   ///< explicit list; if empty, use auto selection
+    int K_ref_count = 11;         ///< used when K_refs is empty
+    double K_ref_span = 0.3;      ///< +/-span around spot for auto mode (log-spaced)
+};
+
 /// Grid specification for IV solver: explicit grid points for each axis.
 /// Requires >= 4 points per axis (B-spline minimum).
 ///

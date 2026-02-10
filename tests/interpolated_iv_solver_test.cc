@@ -11,7 +11,7 @@
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
-#include "mango/option/table/eep_transform.hpp"
+#include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/standard_surface.hpp"
 
 namespace mango {

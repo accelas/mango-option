@@ -10,10 +10,6 @@
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/table/transforms/standard_4d.hpp"
-// Keep old includes for transition (consumers may still use them)
-#include "mango/option/table/eep_transform.hpp"
-#include "mango/option/table/price_table_inner.hpp"
-#include "mango/option/table/spliced_surface.hpp"
 #include <expected>
 #include <memory>
 #include <string>

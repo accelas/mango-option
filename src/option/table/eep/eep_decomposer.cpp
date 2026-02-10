@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: MIT
-#include "mango/option/table/eep_transform.hpp"
+#include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/european_option.hpp"
 #include <algorithm>
 #include <cmath>
 
 namespace mango {
-
-// ===========================================================================
-// EEPDecomposer: build-time
-// ===========================================================================
 
 void EEPDecomposer::decompose(PriceTensor& tensor, const PriceTableAxes& axes) const {
     const size_t Nm = axes.grids[0].size();
@@ -51,30 +47,6 @@ void EEPDecomposer::decompose(PriceTensor& tensor, const PriceTableAxes& axes) c
             }
         }
     }
-}
-
-// ===========================================================================
-// EEPPriceTableInner: query-time
-// ===========================================================================
-
-double EEPPriceTableInner::price(const PriceQuery& q) const {
-    double x = std::log(q.spot / q.strike);
-    double eep = surface_->value({x, q.tau, q.sigma, q.rate});
-    auto eu = EuropeanOptionSolver(
-        OptionSpec{.spot = q.spot, .strike = q.strike, .maturity = q.tau,
-            .rate = q.rate, .dividend_yield = dividend_yield_,
-            .option_type = type_}, q.sigma).solve().value();
-    return eep * (q.strike / K_ref_) + eu.value();
-}
-
-double EEPPriceTableInner::vega(const PriceQuery& q) const {
-    double x = std::log(q.spot / q.strike);
-    double eep_vega = (q.strike / K_ref_) * surface_->partial(2, {x, q.tau, q.sigma, q.rate});
-    auto eu = EuropeanOptionSolver(
-        OptionSpec{.spot = q.spot, .strike = q.strike, .maturity = q.tau,
-            .rate = q.rate, .dividend_yield = dividend_yield_,
-            .option_type = type_}, q.sigma).solve().value();
-    return eep_vega + eu.vega();
 }
 
 }  // namespace mango

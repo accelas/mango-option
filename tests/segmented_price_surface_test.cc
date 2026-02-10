@@ -2,7 +2,6 @@
 // Tests for SegmentedSurface<> created via SegmentedPriceTableBuilder
 #include <gtest/gtest.h>
 #include "mango/option/table/segmented_price_table_builder.hpp"
-#include "mango/option/table/spliced_surface.hpp"
 #include <cmath>
 #include <vector>
 

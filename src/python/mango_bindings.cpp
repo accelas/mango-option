@@ -18,7 +18,6 @@
 #include "mango/option/table/price_table_workspace.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
-#include "mango/option/table/spliced_surface.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/pde/core/pde_workspace.hpp"

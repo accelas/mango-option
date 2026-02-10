@@ -72,36 +72,6 @@ cc_library(
 )
 
 cc_library(
-    name = "price_table_inner",
-    hdrs = ["price_table_inner.hpp"],
-    deps = [
-        ":price_table_surface",
-        ":spliced_surface",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "eep_transform",
-    srcs = ["eep_transform.cpp"],
-    hdrs = ["eep_transform.hpp"],
-    deps = [
-        ":price_query",
-        ":price_table_surface",
-        ":price_tensor",
-        ":price_table_axes",
-        ":spliced_surface",
-        "//src/option:european_option",
-        "//src/option:option_spec",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
     name = "price_table_config",
     hdrs = ["price_table_config.hpp"],
     deps = [
@@ -211,34 +181,11 @@ cc_library(
     deps = [
         ":adaptive_grid_types",
         ":price_table_builder",
-        ":price_table_inner",
         ":standard_surface",
-        ":spliced_surface",
         ":spliced_surface_builder",
         "//src/option:american_option",
         "//src/option:grid_spec_types",
         "//src/support:error_types",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "price_query",
-    hdrs = ["price_query.hpp"],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "spliced_surface",
-    hdrs = ["spliced_surface.hpp"],
-    deps = [
-        ":price_query",
-        ":price_table_metadata",
-        "//src/option:option_spec",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
@@ -260,10 +207,6 @@ cc_library(
         ":multi_kref_split",
         ":standard_transform_4d",
         ":price_table_surface",
-        # Old deps kept for transition includes
-        ":eep_transform",
-        ":price_table_inner",
-        ":spliced_surface",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
@@ -311,11 +254,11 @@ cc_library(
     ],
     deps = [
         ":adaptive_grid_types",
+        ":eep_decomposer",
         ":error_attribution",
         ":price_table_builder",
         ":slice_cache",
         ":segmented_price_table_builder",
-        ":spliced_surface",
         ":spliced_surface_builder",
         ":standard_surface",
         "//src/math:black_scholes_analytics",
@@ -375,6 +318,21 @@ cc_library(
 cc_library(
     name = "identity_eep",
     hdrs = ["eep/identity_eep.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
+    name = "eep_decomposer",
+    srcs = ["eep/eep_decomposer.cpp"],
+    hdrs = ["eep/eep_decomposer.hpp"],
+    deps = [
+        ":price_table_axes",
+        ":price_tensor",
+        "//src/option:european_option",
+        "//src/option:option_spec",
+    ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",

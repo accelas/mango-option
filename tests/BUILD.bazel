@@ -183,18 +183,6 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "spliced_surface_test",
-    size = "small",
-    srcs = ["spliced_surface_test.cc"],
-    deps = [
-        "//src/option/table:spliced_surface",
-        "//src/option/table:price_table_inner",
-        "//src/option/table:standard_surface",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
 
 cc_test(
     name = "price_table_config_test",
@@ -922,7 +910,7 @@ cc_test(
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
         "//src/option/table:standard_surface",
-        "//src/option/table:eep_transform",
+        "//src/option/table:eep_decomposer",
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],
@@ -1147,7 +1135,7 @@ cc_test(
         "//src/option/table:price_table_surface",
         "//src/option/table:price_table_axes",
         "//src/option/table:price_table_metadata",
-        "//src/option/table:eep_transform",
+        "//src/option/table:eep_decomposer",
         "//src/option/table:standard_surface",
         "@googletest//:gtest_main",
     ],
@@ -1278,7 +1266,6 @@ cc_test(
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_builder",
-        "//src/option/table:spliced_surface",
         "//src/option/table:standard_surface",
         "//src/option:american_option_batch",
         "//src/option:option_grid",
@@ -1315,7 +1302,7 @@ cc_test(
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
         "//src/option/table:standard_surface",
-        "//src/option/table:eep_transform",
+        "//src/option/table:eep_decomposer",
         "//src/option:american_option_batch",
         "//src/option:interpolated_iv_solver",
         "//src/pde/core:grid",
@@ -1402,7 +1389,7 @@ cc_test(
     deps = [
         "//src/option/table:price_table_builder",
         "//src/option/table:standard_surface",
-        "//src/option/table:eep_transform",
+        "//src/option/table:eep_decomposer",
         "//src/option:american_option",
         "//src/pde/core:pde_workspace",
         "@googletest//:gtest",
@@ -1417,7 +1404,6 @@ cc_test(
     srcs = ["segmented_price_surface_test.cc"],
     deps = [
         "//src/option/table:segmented_price_table_builder",
-        "//src/option/table:spliced_surface",
         "@googletest//:gtest_main",
     ],
 )
@@ -1449,7 +1435,7 @@ cc_test(
     srcs = ["price_table_builder_raw_price_test.cc"],
     deps = [
         "//src/option/table:price_table_builder",
-        "//src/option/table:eep_transform",
+        "//src/option/table:eep_decomposer",
         "@googletest//:gtest_main",
     ],
 )
@@ -1545,8 +1531,6 @@ cc_test(
         "//src/option/table:eep_surface_adapter",
         "//src/option/table:bounded_surface",
         "//src/option/table:price_surface_concept",
-        "//src/option/table:price_table_builder",
-        "//src/option/table:eep_transform",
         "@googletest//:gtest_main",
     ],
 )

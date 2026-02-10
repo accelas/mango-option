@@ -23,7 +23,6 @@
 #include "mango/option/iv_result.hpp"
 #include "mango/option/table/price_surface_concept.hpp"
 #include "mango/option/table/standard_surface.hpp"
-#include "mango/option/table/spliced_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"

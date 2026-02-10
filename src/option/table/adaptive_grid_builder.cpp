@@ -3,7 +3,7 @@
 #include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/latin_hypercube.hpp"
 #include "mango/option/american_option_batch.hpp"
-#include "mango/option/table/eep_transform.hpp"
+#include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"
