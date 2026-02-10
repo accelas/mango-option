@@ -426,7 +426,7 @@ static void print_tvk_comparison(const PriceGrid& prices, size_t vol_idx,
     std::printf("\n  TV/K filtered RMS (σ=%.0f%%):\n", kVols[vol_idx] * 100);
 
     // Header
-    std::printf("  %-12s", "TV/K >=");
+    std::printf("  %-20s", "TV/K >=");
     for (const auto& a : algos)
         std::printf("  %14s", a.label);
     std::printf("\n");
@@ -434,7 +434,14 @@ static void print_tvk_comparison(const PriceGrid& prices, size_t vol_idx,
     for (size_t fi = 0; fi < 4; ++fi) {
         auto mask = compute_tvk_mask(prices, vol_idx, kThresholds[fi]);
 
-        std::printf("  %-12s", kThreshLabels[fi]);
+        // Count cells passing the TV/K filter
+        size_t mask_count = 0;
+        for (size_t ti = 0; ti < kNT; ++ti)
+            for (size_t si = 0; si < kNS; ++si)
+                if (mask[ti][si]) mask_count++;
+
+        std::printf("  %-12s [%2zu/%zu]", kThreshLabels[fi],
+                    mask_count, kNT * kNS);
         for (const auto& a : algos) {
             double sum_sq = 0;
             size_t n = 0;
@@ -720,7 +727,7 @@ run_chebyshev_dividends(const PriceGrid& prices) {
         .dividend_yield = kDivYield,
         .discrete_dividends = make_div_schedule(1.0),
         .maturity = 1.0,
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        .kref_config = {.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end())},
     };
 
     IVGrid domain{
@@ -757,15 +764,87 @@ run_chebyshev_dividends(const PriceGrid& prices) {
                     it.max_error * 1e4, it.avg_error * 1e4);
     }
 
+    // Point diagnostic at T=1y (the surface's maturity) for both σ values
+    auto diag_divs = make_div_schedule(1.0);
+    std::printf("--- Diagnostic: surface vs FDM at T=1y (same dividends) ---\n");
+    for (double sigma : {0.15, 0.30}) {
+        std::printf("  σ=%.2f:\n", sigma);
+        for (double K : {80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0}) {
+            double surf = result->price_fn(kSpot, K, 1.0, sigma, kRate);
+            PricingParams pp;
+            pp.spot = kSpot; pp.strike = K; pp.maturity = 1.0;
+            pp.rate = kRate; pp.dividend_yield = kDivYield;
+            pp.option_type = OptionType::PUT; pp.volatility = sigma;
+            pp.discrete_dividends = diag_divs;
+            auto fdm = solve_american_option(pp);
+            double ref = fdm.has_value() ? fdm->value() : -1.0;
+            double pct_err = ref > 0.001 ? 100.0 * (surf - ref) / ref : 0.0;
+            std::printf("    K=%3.0f: surf=%8.4f fdm=%8.4f diff=%+.4f (%.1f%%)\n",
+                        K, surf, ref, surf - ref, pct_err);
+        }
+    }
+
+    // Compute IV errors at each maturity using dividend-aware FDM reference.
+    // The surface was built for maturity=1.0 with make_div_schedule(1.0).
+    // At tau=T, the surface gives the value of the 1-year option with T time
+    // remaining. For the reference, we solve the FDM with the same dividends.
+    // Only dividends with calendar_time ≤ (maturity - tau_query) have been
+    // "applied" at the query point, so the FDM reference with maturity=tau
+    // needs the dividends that are still in the option's future.
+    auto all_divs = make_div_schedule(1.0);
+    double surface_maturity = 1.0;
+
     std::array<ErrorTable, kNV> all_errors{};
     std::printf("--- Computing Chebyshev dividend IV errors...\n");
     for (size_t vi = 0; vi < kNV; ++vi) {
+        auto& errors = all_errors[vi];
+        for (auto& row : errors)
+            for (auto& v : row)
+                v = std::nan("");
+
+        for (size_t ti = 0; ti < kNT; ++ti) {
+            double tau = kMaturities[ti];
+            if (tau > surface_maturity + 0.01) continue;
+
+            // Filter dividends: keep those still in the future at this tau.
+            // In the 1-year option at tau remaining, a dividend at cal_time t
+            // is in the future if t > (surface_maturity - tau), i.e., the
+            // calendar time hasn't passed yet.
+            double cal_now = surface_maturity - tau;
+            std::vector<Dividend> future_divs;
+            for (const auto& d : all_divs) {
+                if (d.calendar_time > cal_now)
+                    future_divs.push_back(
+                        Dividend{.calendar_time = d.calendar_time - cal_now,
+                                 .amount = d.amount});
+            }
+
+            for (size_t si = 0; si < kNS; ++si) {
+                double price = prices[vi][ti][si];
+                if (std::isnan(price) || price <= 0) continue;
+
+                // FDM reference with the same dividends
+                double fdm_iv = solve_fdm_iv_div(
+                    kStrikes[si], tau, price, future_divs);
+                if (std::isnan(fdm_iv)) continue;
+
+                // Surface IV via Brent inversion
+                double cheb_iv = brent_solve_iv(
+                    [&](double vol) {
+                        return result->price_fn(
+                            kSpot, kStrikes[si], tau, vol, kRate);
+                    },
+                    price);
+                if (std::isnan(cheb_iv)) continue;
+
+                errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
+            }
+        }
+
         char title[128];
         std::snprintf(title, sizeof(title),
                       "Cheb Dividend IV Error (bps) — σ=%.0f%%",
                       kVols[vi] * 100);
-        all_errors[vi] = compute_errors_from_price_fn(
-            prices, result->price_fn, vi);
         print_heatmap(title, all_errors[vi]);
     }
     return all_errors;
