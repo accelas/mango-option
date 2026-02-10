@@ -175,11 +175,23 @@ cc_library(
 
 
 cc_library(
+    name = "dividend_utils",
+    hdrs = ["dividend_utils.hpp"],
+    deps = [
+        "//src/option:option_spec",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "segmented_price_table_builder",
     srcs = ["segmented_price_table_builder.cpp"],
     hdrs = ["segmented_price_table_builder.hpp"],
     deps = [
         ":adaptive_grid_types",
+        ":dividend_utils",
         ":price_table_builder",
         ":standard_surface",
         ":spliced_surface_builder",
@@ -254,6 +266,7 @@ cc_library(
     ],
     deps = [
         ":adaptive_grid_types",
+        ":dividend_utils",
         ":eep_decomposer",
         ":error_attribution",
         ":identity_eep",

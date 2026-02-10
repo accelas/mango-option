@@ -12,6 +12,7 @@
 #include "mango/option/table/eep/identity_eep.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/split_surface.hpp"
+#include "mango/option/table/dividend_utils.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
@@ -127,10 +128,12 @@ static std::vector<double> compute_segment_boundaries(
 {
     constexpr double kInset = 5e-4;  // gap half-width around dividend in tau-space
 
-    // Collect tau-space split points from dividends, merging same-date
+    // Filter and merge same-date dividends (shared with legacy builder)
+    auto merged = filter_and_merge_dividends(dividends, maturity);
+
+    // Collect tau-space split points
     std::vector<double> splits;
-    for (const auto& div : dividends) {
-        if (div.amount <= 0.0) continue;
+    for (const auto& div : merged) {
         double tau_split = maturity - div.calendar_time;
         if (tau_split > tau_min + 2 * kInset && tau_split < tau_max - 2 * kInset) {
             splits.push_back(tau_split);

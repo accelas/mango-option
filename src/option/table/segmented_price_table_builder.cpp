@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/table/dividend_utils.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/american_option.hpp"
 #include <algorithm>
@@ -50,30 +51,11 @@ std::vector<double> make_segment_tau_grid(
     return grid;
 }
 
-/// Filter dividends: keep only those strictly inside (0, T).  Sort by
-/// calendar time.  Merge any duplicates at the same date.
+/// Filter dividends: delegates to shared filter_and_merge_dividends().
 std::vector<Dividend> filter_dividends(
     const std::vector<Dividend>& divs, double T)
 {
-    std::vector<Dividend> filtered;
-    for (const auto& div : divs) {
-        if (div.calendar_time > 0.0 && div.calendar_time < T && div.amount > 0.0) {
-            filtered.push_back(div);
-        }
-    }
-    std::sort(filtered.begin(), filtered.end(),
-              [](const Dividend& a, const Dividend& b) { return a.calendar_time < b.calendar_time; });
-
-    // Merge same-date dividends
-    std::vector<Dividend> merged;
-    for (const auto& div : filtered) {
-        if (!merged.empty() && std::abs(merged.back().calendar_time - div.calendar_time) < 1e-12) {
-            merged.back().amount += div.amount;
-        } else {
-            merged.push_back(div);
-        }
-    }
-    return merged;
+    return filter_and_merge_dividends(divs, T);
 }
 
 /// Append an upper guard band sized by cubic-spline support in log-moneyness.
