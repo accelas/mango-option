@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "chebyshev_nodes",
+    hdrs = ["chebyshev_nodes.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/chebyshev",
+    include_prefix = "mango/math/chebyshev",
+)
