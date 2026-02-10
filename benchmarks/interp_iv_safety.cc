@@ -21,6 +21,7 @@
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/option_spec.hpp"
+#include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -381,6 +382,122 @@ static void print_heatmap(const char* title, const ErrorTable& errors) {
 }
 
 // ============================================================================
+// Chebyshev 4D
+// ============================================================================
+
+static ChebyshevSurface build_chebyshev_surface() {
+    ChebyshevTableConfig config{
+        .num_pts = {20, 12, 12, 8},
+        .domain = Domain<4>{
+            .lo = {-0.50, 0.01, 0.05, 0.01},
+            .hi = { 0.40, 2.50, 0.50, 0.10},
+        },
+        .K_ref = kSpot,
+        .option_type = OptionType::PUT,
+        .dividend_yield = kDivYield,
+        .tucker_epsilon = 1e-8,
+    };
+
+    auto result = build_chebyshev_table(config);
+    if (!result.has_value()) {
+        std::fprintf(stderr, "Chebyshev build failed\n");
+        std::exit(1);
+    }
+
+    std::printf("  PDE solves: %zu\n", result->n_pde_solves);
+    std::printf("  Build time: %.2f s\n", result->build_seconds);
+
+    return std::move(result->surface);
+}
+
+static ErrorTable compute_errors_chebyshev(
+    const PriceGrid& prices,
+    const ChebyshevSurface& surface,
+    size_t vol_idx) {
+    ErrorTable errors{};
+    IVSolverConfig fdm_config;
+    IVSolver fdm_solver(fdm_config);
+
+    // Batch FDM IV
+    std::vector<IVQuery> queries;
+    std::vector<std::pair<size_t, size_t>> query_map;
+    queries.reserve(kNT * kNS);
+
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        for (size_t si = 0; si < kNS; ++si) {
+            double price = prices[vol_idx][ti][si];
+            if (std::isnan(price) || price <= 0) {
+                errors[ti][si] = std::nan("");
+                continue;
+            }
+
+            IVQuery q;
+            q.spot = kSpot;
+            q.strike = kStrikes[si];
+            q.maturity = kMaturities[ti];
+            q.rate = kRate;
+            q.dividend_yield = kDivYield;
+            q.option_type = OptionType::PUT;
+            q.market_price = price;
+            queries.push_back(q);
+            query_map.emplace_back(ti, si);
+        }
+    }
+
+    auto fdm_results = fdm_solver.solve_batch(queries);
+
+    // Chebyshev IV via Brent
+    for (size_t i = 0; i < queries.size(); ++i) {
+        auto [ti, si] = query_map[i];
+
+        if (!fdm_results.results[i].has_value()) {
+            errors[ti][si] = std::nan("");
+            continue;
+        }
+
+        double fdm_iv = fdm_results.results[i]->implied_vol;
+        double strike = kStrikes[si];
+        double maturity = kMaturities[ti];
+
+        double cheb_iv = brent_solve_iv(
+            [&](double vol) {
+                return surface.price(kSpot, strike, maturity, vol, kRate);
+            },
+            queries[i].market_price);
+
+        if (std::isnan(cheb_iv)) {
+            errors[ti][si] = std::nan("");
+            continue;
+        }
+
+        errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
+    }
+
+    return errors;
+}
+
+static void run_chebyshev_4d() {
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev 4D Tucker — vanilla (no dividends)\n");
+    std::printf("================================================================\n\n");
+
+    auto prices = generate_prices(/*with_dividends=*/false);
+
+    std::printf("--- Building Chebyshev 4D surface...\n");
+    auto surface = build_chebyshev_surface();
+
+    std::printf("--- Computing Chebyshev IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Chebyshev 4D IV Error (bps) — σ=%.0f%%",
+                      kVols[vi] * 100);
+        auto errors = compute_errors_chebyshev(prices, surface, vi);
+        print_heatmap(title, errors);
+    }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -435,6 +552,9 @@ int main() {
         auto errors = compute_errors_div(div_prices, div_solvers, vi);
         print_heatmap(title, errors);
     }
+
+    // Chebyshev 4D
+    run_chebyshev_4d();
 
     return 0;
 }
