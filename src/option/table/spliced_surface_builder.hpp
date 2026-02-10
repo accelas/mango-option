@@ -24,7 +24,7 @@ struct SegmentedConfig {
     double K_ref;
 };
 
-[[nodiscard]] std::expected<SegmentedPriceSurface, PriceTableError>
+[[nodiscard]] std::expected<BSplineSegmentedSurface, PriceTableError>
 build_segmented_surface(SegmentedConfig config);
 
 // ===========================================================================
@@ -33,10 +33,10 @@ build_segmented_surface(SegmentedConfig config);
 
 struct MultiKRefEntry {
     double K_ref;
-    SegmentedPriceSurface surface;
+    BSplineSegmentedSurface surface;
 };
 
-[[nodiscard]] std::expected<MultiKRefInner, PriceTableError>
+[[nodiscard]] std::expected<BSplineMultiKRefInner, PriceTableError>
 build_multi_kref_surface(std::vector<MultiKRefEntry> entries);
 
 }  // namespace mango

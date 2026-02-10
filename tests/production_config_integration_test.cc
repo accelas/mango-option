@@ -514,7 +514,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
         });
     ASSERT_TRUE(table_result.has_value());
 
-    // Create IV solver from surface via StandardSurface
+    // Create IV solver from surface via BSplinePriceTable
     InterpolatedIVSolverConfig solver_config;
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
@@ -535,7 +535,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     double rate = 0.04;
     double vol = 0.20;
 
-    // Get reconstructed American price from StandardSurface
+    // Get reconstructed American price from BSplinePriceTable
     auto wrapper_for_price = make_standard_surface(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_for_price.has_value()) << wrapper_for_price.error();
     double price = wrapper_for_price->price(spot, strike, maturity, vol, rate);

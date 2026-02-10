@@ -265,7 +265,7 @@ The library handles discrete dividends by splitting the time axis at each divide
 ```
 InterpolatedIVSolver<SegmentedMultiKRefSurface>
   └── SegmentedMultiKRefSurface
-        └── SegmentedPriceSurface (one per K_ref)
+        └── BSplineSegmentedSurface (one per K_ref)
               └── AmericanPriceSurface segments (one per time segment)
 ```
 

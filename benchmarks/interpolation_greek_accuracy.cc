@@ -38,7 +38,7 @@ namespace {
 // ---------------------------------------------------------------------------
 
 struct EEPFixture {
-    StandardSurface wrapper;
+    BSplinePriceTable wrapper;
     std::shared_ptr<const PriceTableSurface> surface;
     double K_ref;
     double dividend_yield;
@@ -81,7 +81,7 @@ const EEPFixture& GetEEPFixture() {
 
         auto wrapper = make_standard_surface(table->surface, OptionType::PUT);
         if (!wrapper) {
-            throw std::runtime_error("Failed to create StandardSurface");
+            throw std::runtime_error("Failed to create BSplinePriceTable");
         }
 
         return new EEPFixture{std::move(*wrapper), table->surface, K_ref, q, OptionType::PUT};

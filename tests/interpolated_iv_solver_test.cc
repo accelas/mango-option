@@ -40,8 +40,8 @@ protected:
         surface_ = table->surface;
     }
 
-    /// Helper to create a StandardSurface for IV solver tests
-    StandardSurface make_wrapper() {
+    /// Helper to create a BSplinePriceTable for IV solver tests
+    BSplinePriceTable make_wrapper() {
         auto result = make_standard_surface(surface_, OptionType::PUT);
         return std::move(*result);
     }
@@ -50,7 +50,7 @@ protected:
     static constexpr double K_ref_ = 100.0;
 };
 
-TEST_F(InterpolatedIVSolverTest, CreateFromStandardSurface) {
+TEST_F(InterpolatedIVSolverTest, CreateFromBSplinePriceTable) {
     auto wrapper_result = make_standard_surface(surface_, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
@@ -254,10 +254,10 @@ TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
 
 // Verify that DefaultInterpolatedIVSolver alias works correctly
 TEST_F(InterpolatedIVSolverTest, StandardAliasMatchesExplicitTemplate) {
-    // DefaultInterpolatedIVSolver is InterpolatedIVSolver<StandardSurface>
+    // DefaultInterpolatedIVSolver is InterpolatedIVSolver<BSplinePriceTable>
     static_assert(std::is_same_v<
         DefaultInterpolatedIVSolver,
-        InterpolatedIVSolver<StandardSurface>>);
+        InterpolatedIVSolver<BSplinePriceTable>>);
 
     auto solver = DefaultInterpolatedIVSolver::create(make_wrapper());
     ASSERT_TRUE(solver.has_value());
@@ -306,7 +306,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
 }
 
 // Regression: InterpolatedIVSolver must reject queries with wrong dividend_yield
-// Bug: StandardSurface bakes in dividend_yield at construction; callers
+// Bug: BSplinePriceTable bakes in dividend_yield at construction; callers
 // with a different yield get wrong prices silently
 TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
     // Build surface with dividend_yield = 0.02 (log-moneyness)

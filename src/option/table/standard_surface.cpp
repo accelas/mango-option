@@ -3,7 +3,7 @@
 
 namespace mango {
 
-std::expected<StandardSurface, std::string>
+std::expected<BSplinePriceTable, std::string>
 make_standard_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type)
@@ -35,7 +35,7 @@ make_standard_surface(
     SharedBSplineInterp<4> interp(surface);
     StandardTransform4D xform;
     AnalyticalEEP eep(type, dividend_yield);
-    StandardLeaf leaf(std::move(interp), xform, eep, K_ref);
+    BSplineLeaf leaf(std::move(interp), xform, eep, K_ref);
 
     SurfaceBounds bounds{
         .m_min = meta.m_min,
@@ -48,7 +48,7 @@ make_standard_surface(
         .rate_max = axes.grids[3].back(),
     };
 
-    return StandardSurface(std::move(leaf), bounds, type, dividend_yield);
+    return BSplinePriceTable(std::move(leaf), bounds, type, dividend_yield);
 }
 
 }  // namespace mango

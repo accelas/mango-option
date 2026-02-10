@@ -20,7 +20,7 @@ namespace {
 // ===========================================================================
 
 /// Build a price table and verify that the reconstructed
-/// American price from StandardSurface matches a direct PDE solve.
+/// American price from BSplinePriceTable matches a direct PDE solve.
 TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     // Grid covering a modest range for the price table
     // Each axis needs >= 4 points for B-spline fitting
@@ -56,7 +56,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     EXPECT_EQ(result->surface->metadata().content,
               SurfaceContent::EarlyExercisePremium);
 
-    // Wrap in StandardSurface for reconstruction
+    // Wrap in BSplinePriceTable for reconstruction
     auto wrapper_result = make_standard_surface(result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value())
         << "make_standard_surface failed: " << wrapper_result.error();

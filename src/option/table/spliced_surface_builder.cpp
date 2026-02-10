@@ -10,7 +10,7 @@ namespace mango {
 // Segmented surface builder
 // ===========================================================================
 
-std::expected<SegmentedPriceSurface, PriceTableError>
+std::expected<BSplineSegmentedSurface, PriceTableError>
 build_segmented_surface(SegmentedConfig config) {
     if (config.segments.empty()) {
         return std::unexpected(PriceTableError{
@@ -21,7 +21,7 @@ build_segmented_surface(SegmentedConfig config) {
     std::vector<double> tau_end;
     std::vector<double> tau_min;
     std::vector<double> tau_max;
-    std::vector<SegmentedLeaf> leaves;
+    std::vector<BSplineSegmentedLeaf> leaves;
 
     tau_start.reserve(config.segments.size());
     tau_end.reserve(config.segments.size());
@@ -46,14 +46,14 @@ build_segmented_surface(SegmentedConfig config) {
         std::move(tau_min), std::move(tau_max),
         config.K_ref);
 
-    return SegmentedPriceSurface(std::move(leaves), std::move(split));
+    return BSplineSegmentedSurface(std::move(leaves), std::move(split));
 }
 
 // ===========================================================================
 // Multi-K_ref surface builder
 // ===========================================================================
 
-std::expected<MultiKRefInner, PriceTableError>
+std::expected<BSplineMultiKRefInner, PriceTableError>
 build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
     if (entries.empty()) {
         return std::unexpected(PriceTableError{
@@ -67,7 +67,7 @@ build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
               });
 
     std::vector<double> k_refs;
-    std::vector<SegmentedPriceSurface> slices;
+    std::vector<BSplineSegmentedSurface> slices;
     k_refs.reserve(entries.size());
     slices.reserve(entries.size());
 
@@ -78,7 +78,7 @@ build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
 
     MultiKRefSplit split(std::move(k_refs));
 
-    return MultiKRefInner(std::move(slices), std::move(split));
+    return BSplineMultiKRefInner(std::move(slices), std::move(split));
 }
 
 }  // namespace mango

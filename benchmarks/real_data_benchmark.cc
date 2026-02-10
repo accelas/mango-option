@@ -340,7 +340,7 @@ static void BM_RealData_IV_BSpline(benchmark::State& state) {
 
     auto wrapper = make_standard_surface(surf.surface, OptionType::PUT);
     if (!wrapper) {
-        throw std::runtime_error("Failed to create StandardSurface");
+        throw std::runtime_error("Failed to create BSplinePriceTable");
     }
     auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
     if (!solver_result) {
@@ -564,7 +564,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     // Create IV solver
     auto wrapper_query = make_standard_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_query) {
-        throw std::runtime_error("Failed to create StandardSurface");
+        throw std::runtime_error("Failed to create BSplinePriceTable");
     }
     auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_query));
     if (!iv_solver_result) {
@@ -666,7 +666,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     // Create interpolated IV solver
     auto wrapper_acc = make_standard_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_acc) {
-        throw std::runtime_error("Failed to create StandardSurface");
+        throw std::runtime_error("Failed to create BSplinePriceTable");
     }
     auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_acc));
     if (!iv_solver_result) {
@@ -832,7 +832,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     // Create interpolated IV solver
     auto wrapper_dense = make_standard_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_dense) {
-        state.SkipWithError("Failed to create StandardSurface");
+        state.SkipWithError("Failed to create BSplinePriceTable");
         return;
     }
     auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_dense));
@@ -943,7 +943,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     // Create interpolated IV solver
     auto wrapper_est = make_standard_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_est) {
-        state.SkipWithError("Failed to create StandardSurface");
+        state.SkipWithError("Failed to create BSplinePriceTable");
         return;
     }
     auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_est));
@@ -1064,7 +1064,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
 
     auto wrapper_prof = make_standard_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_prof) {
-        state.SkipWithError("Failed to create StandardSurface");
+        state.SkipWithError("Failed to create BSplinePriceTable");
         return;
     }
     auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_prof));

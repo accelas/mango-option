@@ -285,10 +285,10 @@ BENCHMARK(BM_ImpliedVol_ITM_Put);
 static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    // Create StandardSurface and IV solver
+    // Create BSplinePriceTable and IV solver
     auto wrapper = make_standard_surface(surf.surface, OptionType::PUT);
     if (!wrapper) {
-        throw std::runtime_error("Failed to create StandardSurface");
+        throw std::runtime_error("Failed to create BSplinePriceTable");
     }
     auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
 

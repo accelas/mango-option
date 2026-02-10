@@ -102,7 +102,7 @@ void append_upper_tail_log_moneyness(std::vector<double>& log_grid,
 
 }  // namespace
 
-std::expected<SegmentedPriceSurface, PriceTableError>
+std::expected<BSplineSegmentedSurface, PriceTableError>
 SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Validate inputs

@@ -122,7 +122,7 @@ struct AdaptiveResult {
 
 /// Result from adaptive segmented grid building (multi-K_ref path)
 struct SegmentedAdaptiveResult {
-    MultiKRefInner surface;
+    BSplineMultiKRefInner surface;
     IVGrid grid;  ///< The grid sizes adaptive chose
     int tau_points_per_segment;
 };

@@ -142,8 +142,8 @@ private:
     std::pair<double, double> adaptive_bounds(const IVQuery& query) const;
 };
 
-/// Type alias for backward compatibility: InterpolatedIVSolver with StandardSurface
-using DefaultInterpolatedIVSolver = InterpolatedIVSolver<StandardSurface>;
+/// Type alias for backward compatibility: InterpolatedIVSolver with BSplinePriceTable
+using DefaultInterpolatedIVSolver = InterpolatedIVSolver<BSplinePriceTable>;
 
 // =====================================================================
 // Factory: config types, type-erased solver, and factory function
@@ -182,22 +182,22 @@ public:
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
     /// Constructor from standard solver
-    explicit AnyIVSolver(InterpolatedIVSolver<StandardSurface> solver);
+    explicit AnyIVSolver(InterpolatedIVSolver<BSplinePriceTable> solver);
 
     /// Constructor from segmented solver (spliced surface)
-    explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefPriceSurface> solver);
+    explicit AnyIVSolver(InterpolatedIVSolver<BSplineMultiKRefSurface> solver);
 
 private:
     using SolverVariant = std::variant<
-        InterpolatedIVSolver<StandardSurface>,
-        InterpolatedIVSolver<MultiKRefPriceSurface>
+        InterpolatedIVSolver<BSplinePriceTable>,
+        InterpolatedIVSolver<BSplineMultiKRefSurface>
     >;
     SolverVariant solver_;
 };
 
 /// Factory function: build price surface and IV solver from config
 ///
-/// If path holds StandardIVPath, uses the StandardSurface path.
+/// If path holds StandardIVPath, uses the BSplinePriceTable path.
 /// If path holds SegmentedIVPath, uses the MultiKRefSurface path.
 /// If adaptive is set, uses AdaptiveGridBuilder
 /// to automatically refine grid density until the target IV error is met.

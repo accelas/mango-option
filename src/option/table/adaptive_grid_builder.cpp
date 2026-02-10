@@ -1229,12 +1229,12 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
 
 /// Build a SegmentedSurface for each K_ref in the list.
 /// Takes a Config template with K_ref set per iteration.
-std::expected<std::vector<SegmentedPriceSurface>, PriceTableError>
+std::expected<std::vector<BSplineSegmentedSurface>, PriceTableError>
 build_segmented_surfaces(
     SegmentedPriceTableBuilder::Config base_config,
     const std::vector<double>& ref_values)
 {
-    std::vector<SegmentedPriceSurface> surfaces;
+    std::vector<BSplineSegmentedSurface> surfaces;
     surfaces.reserve(ref_values.size());
 
     for (double ref : ref_values) {
@@ -1251,7 +1251,7 @@ build_segmented_surfaces(
 
 /// Result of the shared segmented probe-and-build pipeline.
 struct SegmentedBuildResult {
-    std::vector<SegmentedPriceSurface> surfaces;
+    std::vector<BSplineSegmentedSurface> surfaces;
     SegmentedPriceTableBuilder::Config seg_template;
     MaxGridSizes gsz;
     // Domain bounds (needed for validation/retry)
@@ -1334,7 +1334,7 @@ probe_and_build(
             if (!surface.has_value()) {
                 return std::unexpected(surface.error());
             }
-            auto shared = std::make_shared<SegmentedPriceSurface>(std::move(*surface));
+            auto shared = std::make_shared<BSplineSegmentedSurface>(std::move(*surface));
             return SurfaceHandle{
                 .price = [shared](double spot, double strike,
                                   double tau, double sigma, double rate) -> double {

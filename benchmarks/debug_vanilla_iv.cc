@@ -100,8 +100,8 @@ int main() {
     std::printf("  Raw surface value at (m=%.2f, tau=%.2f, sigma=%.2f, rate=%.2f): %.6f\n",
                 m, kTau, kSigma, kRate, raw_value);
 
-    // Layer 4: StandardSurface reconstruction
-    std::printf("\n--- Layer 4: StandardSurface Reconstruction ---\n");
+    // Layer 4: BSplinePriceTable reconstruction
+    std::printf("\n--- Layer 4: BSplinePriceTable Reconstruction ---\n");
     auto wrapper = make_standard_surface(surface, OptionType::PUT);
     if (!wrapper.has_value()) {
         std::fprintf(stderr, "make_standard_surface failed\n");
@@ -109,7 +109,7 @@ int main() {
     }
 
     double wrapper_price = wrapper->price(kSpot, kStrike, kTau, kSigma, kRate);
-    std::printf("  StandardSurface::price(): %.6f\n", wrapper_price);
+    std::printf("  BSplinePriceTable::price(): %.6f\n", wrapper_price);
     std::printf("  Error vs FDM: %.6f (%.2f bps in price)\n",
                 std::abs(wrapper_price - fdm_price),
                 std::abs(wrapper_price - fdm_price) * 10000 / fdm_price);
@@ -178,7 +178,7 @@ int main() {
     }
 
     double adaptive_price = adaptive_wrapper->price(kSpot, kStrike, kTau, kSigma, kRate);
-    std::printf("  StandardSurface::price(): %.6f\n", adaptive_price);
+    std::printf("  BSplinePriceTable::price(): %.6f\n", adaptive_price);
     std::printf("  Error vs FDM: %.6f (%.2f bps in price)\n",
                 std::abs(adaptive_price - fdm_price),
                 std::abs(adaptive_price - fdm_price) * 10000 / fdm_price);
