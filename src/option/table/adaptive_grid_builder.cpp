@@ -5,7 +5,7 @@
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/math/latin_hypercube.hpp"
 #include "mango/option/american_option_batch.hpp"
-#include "mango/option/european_option.hpp"
+#include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/pde_slice_cache.hpp"
 #include "mango/option/table/bspline/eep_decomposer.hpp"
@@ -550,28 +550,9 @@ static BuildFn make_chebyshev_build_fn(
                         double am = spline->eval(m) * config.K_ref;
                         double spot_node = config.K_ref * std::exp(m);
 
-                        EuropeanOptionSolver eu_solver(
-                            OptionSpec{.spot = spot_node,
-                                       .strike = config.K_ref,
-                                       .maturity = tau, .rate = rate,
-                                       .dividend_yield = config.dividend_yield,
-                                       .option_type = config.option_type},
-                            sigma);
-                        auto eu = eu_solver.solve();
-
-                        double eep_raw = eu.has_value()
-                            ? am - eu->value() : 0.0;
-
-                        // Debiased softplus floor (matches EEPDecomposer)
-                        constexpr double kS = 100.0;
-                        double eep;
-                        if (kS * eep_raw > 500.0) {
-                            eep = eep_raw;
-                        } else {
-                            double sp = std::log1p(std::exp(kS * eep_raw)) / kS;
-                            double bias = std::log(2.0) / kS;
-                            eep = std::max(0.0, sp - bias);
-                        }
+                        double eep = compute_eep(
+                            am, spot_node, config.K_ref, tau, sigma, rate,
+                            config.dividend_yield, config.option_type);
 
                         size_t flat = mi * (Nt*Ns*Nr)
                                     + ti * (Ns*Nr)

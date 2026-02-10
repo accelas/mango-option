@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/option/european_option.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
@@ -10,6 +9,58 @@
 
 namespace mango {
 
+/// EEP accessor for a B-spline tensor + axes.
+///
+/// Linearizes the 4D (m, tau, sigma, rate) iteration in cache-friendly
+/// order matching the row-major mdspan layout: m outermost, rate innermost.
+class BSplineTensorAccessor {
+public:
+    BSplineTensorAccessor(PriceTensor& tensor, const PriceTableAxes& axes,
+                          double K_ref)
+        : tensor_(tensor), axes_(axes), K_ref_(K_ref),
+          Nm_(axes.grids[0].size()), Nt_(axes.grids[1].size()),
+          Nv_(axes.grids[2].size()), Nr_(axes.grids[3].size()) {}
+
+    size_t size() const { return Nm_ * Nt_ * Nv_ * Nr_; }
+    double strike() const { return K_ref_; }
+
+    // Flat index layout: [m][tau][sigma][rate] (row-major, rate innermost)
+    double american_price(size_t i) const {
+        auto [mi, ti, vi, ri] = to_4d(i);
+        return K_ref_ * tensor_.view[mi, ti, vi, ri];
+    }
+
+    double spot(size_t i) const {
+        return std::exp(axes_.grids[0][to_4d(i).mi]) * K_ref_;
+    }
+
+    double tau(size_t i) const { return axes_.grids[1][to_4d(i).ti]; }
+    double sigma(size_t i) const { return axes_.grids[2][to_4d(i).vi]; }
+    double rate(size_t i) const { return axes_.grids[3][to_4d(i).ri]; }
+
+    void set_value(size_t i, double v) {
+        auto [mi, ti, vi, ri] = to_4d(i);
+        tensor_.view[mi, ti, vi, ri] = v;
+    }
+
+private:
+    struct Idx4D { size_t mi, ti, vi, ri; };
+
+    // Row-major: rate varies fastest
+    Idx4D to_4d(size_t flat) const {
+        size_t ri = flat % Nr_;  flat /= Nr_;
+        size_t vi = flat % Nv_;  flat /= Nv_;
+        size_t ti = flat % Nt_;
+        size_t mi = flat / Nt_;
+        return {mi, ti, vi, ri};
+    }
+
+    PriceTensor& tensor_;
+    const PriceTableAxes& axes_;
+    double K_ref_;
+    size_t Nm_, Nt_, Nv_, Nr_;
+};
+
 /// Build-time helper: converts a B-spline tensor of normalized American prices to EEP values.
 struct EEPDecomposer {
     OptionType option_type;
@@ -17,38 +68,9 @@ struct EEPDecomposer {
     double dividend_yield;
 
     /// Transform tensor from V/K_ref (normalized American prices) to EEP values.
-    ///
-    /// @param tensor In/out: tensor of normalized prices (V/K_ref), overwritten with EEP
-    /// @param axes Grid axes (axis 0 = log-moneyness, 1 = tau, 2 = sigma, 3 = rate)
     void decompose(PriceTensor& tensor, const PriceTableAxes& axes) const {
-        const size_t Nm = axes.grids[0].size();
-        const size_t Nt = axes.grids[1].size();
-        const size_t Nv = axes.grids[2].size();
-        const size_t Nr = axes.grids[3].size();
-
-        for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
-            double rate = axes.grids[3][r_idx];
-            for (size_t v_idx = 0; v_idx < Nv; ++v_idx) {
-                double sigma = axes.grids[2][v_idx];
-                for (size_t j = 0; j < Nt; ++j) {
-                    double tau = axes.grids[1][j];
-                    for (size_t i = 0; i < Nm; ++i) {
-                        double x = axes.grids[0][i];  // log-moneyness
-                        double spot = std::exp(x) * K_ref;
-                        double american_price = K_ref * tensor.view[i, j, v_idx, r_idx];
-
-                        auto eu = EuropeanOptionSolver(
-                            OptionSpec{.spot = spot, .strike = K_ref, .maturity = tau,
-                                .rate = rate, .dividend_yield = dividend_yield,
-                                .option_type = option_type}, sigma).solve();
-
-                        double eep_raw = eu.has_value()
-                            ? american_price - eu->value() : 0.0;
-                        tensor.view[i, j, v_idx, r_idx] = eep_floor(eep_raw);
-                    }
-                }
-            }
-        }
+        BSplineTensorAccessor accessor(tensor, axes, K_ref);
+        analytical_eep_decompose(accessor, option_type, dividend_yield);
     }
 };
 
