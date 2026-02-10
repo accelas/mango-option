@@ -6,3 +6,11 @@ cc_library(
     strip_include_prefix = "/src/math/chebyshev",
     include_prefix = "mango/math/chebyshev",
 )
+
+cc_library(
+    name = "raw_tensor",
+    hdrs = ["raw_tensor.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/chebyshev",
+    include_prefix = "mango/math/chebyshev",
+)
