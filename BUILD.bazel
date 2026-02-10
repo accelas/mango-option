@@ -17,7 +17,6 @@ cc_library(
         # Price tables
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table:price_table_axes",
         # Data source integration (mango::simple namespace)
         "//src/simple",
         # Supporting utilities

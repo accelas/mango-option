@@ -144,7 +144,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_axes_test.cc"],
     deps = [
-        "//src/option/table:price_table_axes",
+        "//src/option/table/bspline:bspline_surface",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -329,7 +329,7 @@ cc_test(
     srcs = ["price_table_builder_result_test.cc"],
     deps = [
         "//src/option/table/bspline:bspline_builder",
-        "//src/option/table:price_table_axes",
+        "//src/option/table/bspline:bspline_surface",
         "@googletest//:gtest_main",
     ],
 )
@@ -340,7 +340,7 @@ cc_test(
     srcs = ["price_table_builder_grid_test.cc"],
     deps = [
         "//src/option/table/bspline:bspline_builder",
-        "//src/option/table:price_table_axes",
+        "//src/option/table/bspline:bspline_surface",
         "@googletest//:gtest_main",
     ],
 )
@@ -1130,7 +1130,6 @@ cc_test(
         "//src/option:interpolated_iv_solver",
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table:price_table_axes",
         "//src/option/table:price_table_metadata",
         "//src/option/table:eep_decomposer",
         "@googletest//:gtest_main",

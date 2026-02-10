@@ -4,7 +4,6 @@
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/option/option_spec.hpp"
-#include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/price_tensor.hpp"
 #include "mango/option/american_option.hpp"

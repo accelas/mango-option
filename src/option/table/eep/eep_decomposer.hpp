@@ -2,7 +2,7 @@
 #pragma once
 
 #include "mango/option/option_spec.hpp"
-#include "mango/option/table/price_table_axes.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/price_tensor.hpp"
 
 namespace mango {

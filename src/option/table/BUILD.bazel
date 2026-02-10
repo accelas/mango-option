@@ -20,22 +20,10 @@ cc_library(
 )
 
 cc_library(
-    name = "price_table_axes",
-    hdrs = ["price_table_axes.hpp"],
-    deps = [
-        "//src/support:error_types",
-        "//src/math:safe_math",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
     name = "price_tensor",
     hdrs = ["price_tensor.hpp"],
     deps = [
-        ":price_table_axes",
+        "//src/option/table/bspline:bspline_surface",
         "//src/support:aligned_allocator",
         "//src/math:safe_math",
         "@mdspan//:mdspan",
@@ -61,7 +49,6 @@ cc_library(
     name = "adaptive_grid_types",
     hdrs = ["adaptive_grid_types.hpp"],
     deps = [
-        ":price_table_axes",
         "//src/option/table/bspline:bspline_surface",
     ],
     visibility = ["//visibility:public"],
@@ -158,7 +145,7 @@ cc_library(
     srcs = ["eep/eep_decomposer.cpp"],
     hdrs = ["eep/eep_decomposer.hpp"],
     deps = [
-        ":price_table_axes",
+        "//src/option/table/bspline:bspline_surface",
         ":price_tensor",
         "//src/option:european_option",
         "//src/option:option_spec",

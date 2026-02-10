@@ -9,7 +9,6 @@
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
 

@@ -19,7 +19,6 @@
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
-#include "mango/option/table/price_table_axes.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
 #include "mango/math/yield_curve.hpp"
 #include "mango/option/american_option_batch.hpp"

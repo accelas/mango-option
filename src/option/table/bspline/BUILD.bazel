@@ -18,7 +18,6 @@ cc_library(
         "bspline_interpolant.hpp",
     ],
     deps = [
-        "//src/option/table:price_table_axes",
         "//src/option/table:price_table_metadata",
         "//src/option/table:price_table",
         "//src/option/table:eep_surface_adapter",
@@ -30,6 +29,8 @@ cc_library(
         "//src/option/table:standard_transform_4d",
         "//src/math:bspline_nd",
         "//src/math:bspline_basis",
+        "//src/math:safe_math",
+        "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table/bspline",
@@ -50,7 +51,6 @@ cc_library(
     ],
     deps = [
         ":bspline_surface",
-        "//src/option/table:price_table_axes",
         "//src/option/table:price_tensor",
         "//src/option:grid_spec_types",
         "//src/option:option_spec",

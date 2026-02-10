@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include <array>
 #include <functional>
