@@ -113,7 +113,7 @@ double total_discrete_dividends(const std::vector<Dividend>& dividends,
 /// where splits occur at tau_split = maturity - dividend.calendar_time.
 /// Dividends outside (tau_min, tau_max) are ignored.
 /// If no dividends fall inside range, returns {tau_min, tau_max} (single segment).
-[[maybe_unused]] static std::vector<double> compute_segment_boundaries(
+static std::vector<double> compute_segment_boundaries(
     const std::vector<Dividend>& dividends, double maturity,
     double tau_min, double tau_max)
 {
@@ -593,7 +593,7 @@ static BuildFn make_chebyshev_build_fn(
 /// Create a BuildFn for segmented Chebyshev surfaces (discrete dividends).
 /// Stores V/K_ref directly (no EEP decomposition); segments are joined
 /// via TauSegmentSplit with local tau coordinates per segment.
-[[maybe_unused]] static BuildFn make_segmented_chebyshev_build_fn(
+static BuildFn make_segmented_chebyshev_build_fn(
     PDESliceCache& cache,
     const SegmentedChebyshevBuildConfig& config,
     const ChebyshevRefinementState& state)
@@ -818,7 +818,7 @@ static RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state) {
 
 /// Create a RefineFn for segmented Chebyshev CC-level refinement.
 /// Tau refinement generates per-segment CGL nodes instead of a single range.
-[[maybe_unused]] static RefineFn make_segmented_chebyshev_refine_fn(
+static RefineFn make_segmented_chebyshev_refine_fn(
     ChebyshevRefinementState& state)
 {
     return [&state](size_t worst_dim, const ErrorBins&,

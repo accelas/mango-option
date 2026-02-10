@@ -701,6 +701,77 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
 }
 
 // ============================================================================
+// Chebyshev Adaptive — Discrete Dividends (segmented, no EEP)
+// ============================================================================
+
+static std::array<ErrorTable, kNV>
+run_chebyshev_dividends(const PriceGrid& prices) {
+    std::printf("\n================================================================\n");
+    std::printf("Chebyshev Adaptive — Discrete Dividends (segmented)\n");
+    std::printf("================================================================\n\n");
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 5e-4;  // 5 bps
+    params.max_iter = 6;
+
+    SegmentedAdaptiveConfig config{
+        .spot = kSpot,
+        .option_type = OptionType::PUT,
+        .dividend_yield = kDivYield,
+        .discrete_dividends = make_div_schedule(1.0),
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    };
+
+    IVGrid domain{
+        .moneyness = {std::log(kSpot / 120.0), std::log(kSpot / 115.0),
+                      std::log(kSpot / 110.0), std::log(kSpot / 105.0),
+                      std::log(kSpot / 100.0), std::log(kSpot / 95.0),
+                      std::log(kSpot / 90.0), std::log(kSpot / 85.0),
+                      std::log(kSpot / 80.0)},
+        .vol = {0.10, 0.15, 0.20, 0.30, 0.50},
+        .rate = {0.03, 0.05, 0.07},
+    };
+
+    std::printf("--- Building segmented Chebyshev surface (target=%.1f bps)...\n",
+                params.target_iv_error * 1e4);
+
+    AdaptiveGridBuilder builder(params);
+    auto result = builder.build_segmented_chebyshev(config, domain);
+    if (!result.has_value()) {
+        std::fprintf(stderr, "Chebyshev dividend build failed\n");
+        std::array<ErrorTable, kNV> empty{};
+        return empty;
+    }
+
+    std::printf("  Iterations: %zu, PDE solves: %zu, target_met: %s\n",
+                result->iterations.size(),
+                result->total_pde_solves,
+                result->target_met ? "yes" : "no");
+    for (const auto& it : result->iterations) {
+        std::printf("  iter %zu: grid [%zu, %zu, %zu, %zu] "
+                    "max_err=%.1f bps avg_err=%.1f bps\n",
+                    it.iteration,
+                    it.grid_sizes[0], it.grid_sizes[1],
+                    it.grid_sizes[2], it.grid_sizes[3],
+                    it.max_error * 1e4, it.avg_error * 1e4);
+    }
+
+    std::array<ErrorTable, kNV> all_errors{};
+    std::printf("--- Computing Chebyshev dividend IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Cheb Dividend IV Error (bps) — σ=%.0f%%",
+                      kVols[vi] * 100);
+        all_errors[vi] = compute_errors_from_price_fn(
+            prices, result->price_fn, vi);
+        print_heatmap(title, all_errors[vi]);
+    }
+    return all_errors;
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -765,6 +836,9 @@ int main() {
     // Chebyshev adaptive (CC-level refinement)
     auto cheb_adaptive_errors = run_chebyshev_adaptive(vanilla_prices);
 
+    // Chebyshev adaptive dividends (segmented)
+    auto cheb_div_errors = run_chebyshev_dividends(div_prices);
+
     // TV/K filtered comparison: same mask for all algorithms
     std::printf("\n================================================================\n");
     std::printf("TV/K Filtered Comparison — vanilla (no dividends)\n");
@@ -777,6 +851,18 @@ int main() {
             {"Cheb(adapt)", &cheb_adaptive_errors[vi]},
         };
         print_tvk_comparison(vanilla_prices, vi, algos);
+    }
+
+    std::printf("\n================================================================\n");
+    std::printf("TV/K Filtered Comparison — discrete dividends\n");
+    std::printf("================================================================\n");
+
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        AlgoErrors algos[] = {
+            {"B-spline(div)", &div_errors[vi]},
+            {"Cheb(div)", &cheb_div_errors[vi]},
+        };
+        print_tvk_comparison(div_prices, vi, algos);
     }
 
     return 0;
