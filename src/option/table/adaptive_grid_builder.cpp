@@ -127,7 +127,7 @@ static std::vector<double> compute_segment_boundaries(
 {
     constexpr double kInset = 5e-4;  // gap half-width around dividend in tau-space
 
-    // Collect tau-space split points from dividends
+    // Collect tau-space split points from dividends, merging same-date
     std::vector<double> splits;
     for (const auto& div : dividends) {
         if (div.amount <= 0.0) continue;
@@ -138,10 +138,22 @@ static std::vector<double> compute_segment_boundaries(
     }
     std::sort(splits.begin(), splits.end());
 
+    // Deduplicate splits that are too close (would create overlapping gaps)
+    std::vector<double> unique_splits;
+    for (double sp : splits) {
+        if (!unique_splits.empty() &&
+            sp - unique_splits.back() < 4 * kInset) {
+            // Merge: keep midpoint of the cluster
+            unique_splits.back() = (unique_splits.back() + sp) * 0.5;
+        } else {
+            unique_splits.push_back(sp);
+        }
+    }
+
     // Build boundaries: tau_min, (split-inset, split+inset)..., tau_max
     std::vector<double> bounds;
     bounds.push_back(tau_min);
-    for (double sp : splits) {
+    for (double sp : unique_splits) {
         bounds.push_back(sp - kInset);
         bounds.push_back(sp + kInset);
     }
@@ -778,13 +790,21 @@ static BuildFn make_segmented_chebyshev_build_fn(
                 if (tau <= bounds.front()) seg_idx = 0;
                 else if (tau >= bounds.back()) seg_idx = n_seg - 1;
 
-                // If tau lands in a gap segment, route to nearest real segment
+                // If tau lands in a gap segment, route to nearest real
+                // segment by distance from the gap midpoint.
                 double seg_width = bounds[seg_idx + 1] - bounds[seg_idx];
                 if (seg_width < kMinSegmentWidth) {
-                    if (seg_idx + 1 < n_seg) {
-                        seg_idx = seg_idx + 1;
-                    } else if (seg_idx > 0) {
+                    double gap_mid = (bounds[seg_idx] + bounds[seg_idx + 1]) * 0.5;
+                    bool can_left = seg_idx > 0 &&
+                        (bounds[seg_idx] - bounds[seg_idx - 1]) >= kMinSegmentWidth;
+                    bool can_right = seg_idx + 1 < n_seg &&
+                        (bounds[seg_idx + 2] - bounds[seg_idx + 1]) >= kMinSegmentWidth;
+                    if (can_left && can_right) {
+                        seg_idx = (tau <= gap_mid) ? seg_idx - 1 : seg_idx + 1;
+                    } else if (can_left) {
                         seg_idx = seg_idx - 1;
+                    } else if (can_right) {
+                        seg_idx = seg_idx + 1;
                     }
                 }
 

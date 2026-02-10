@@ -825,5 +825,136 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
         << " (error $" << price_error << ")";
 }
 
+// ===========================================================================
+// Regression tests for segmented Chebyshev dividend edge cases
+// ===========================================================================
+
+// Regression: gap queries must route to nearest real segment by distance
+// Bug: Always routed to seg_idx+1 (right), so queries in left half of gap
+// mapped to post-dividend segment instead of pre-dividend segment.
+TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;  // 100 bps — relaxed for test speed
+    params.max_iter = 1;
+    params.validation_samples = 4;
+
+    AdaptiveGridBuilder builder(params);
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {100.0}},
+    };
+
+    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    std::vector<double> v_domain = {0.10, 0.20, 0.30};
+    std::vector<double> r_domain = {0.03, 0.05};
+
+    auto result = builder.build_segmented_chebyshev(
+        seg_config, {m_domain, v_domain, r_domain});
+    ASSERT_TRUE(result.has_value())
+        << "build_segmented_chebyshev failed";
+
+    // Dividend at cal_time=0.5 → tau_split=0.5.
+    // Gap is [0.5-ε, 0.5+ε]. Query both sides of gap midpoint.
+    double tau_left = 0.4999;   // left of gap mid → should use pre-dividend segment
+    double tau_right = 0.5001;  // right of gap mid → should use post-dividend segment
+
+    double p_left = result->price_fn(100.0, 100.0, tau_left, 0.20, 0.05);
+    double p_right = result->price_fn(100.0, 100.0, tau_right, 0.20, 0.05);
+
+    EXPECT_TRUE(std::isfinite(p_left)) << "Left-of-gap price is not finite";
+    EXPECT_TRUE(std::isfinite(p_right)) << "Right-of-gap price is not finite";
+    EXPECT_GT(p_left, 0.0);
+    EXPECT_GT(p_right, 0.0);
+
+    // Prices on opposite sides of a dividend gap should differ (discontinuity)
+    // but both should be reasonable (within 50% of each other for ATM put)
+    double ratio = p_left / p_right;
+    EXPECT_GT(ratio, 0.5) << "Left/right gap prices too different";
+    EXPECT_LT(ratio, 2.0) << "Left/right gap prices too different";
+}
+
+// Regression: duplicate dividend dates must be merged to avoid non-monotonic
+// segment boundaries
+// Bug: compute_segment_boundaries pushed split-ε/split+ε for every dividend
+// without merging same-date entries, causing overlapping gaps.
+TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;
+    params.max_iter = 1;
+    params.validation_samples = 4;
+
+    AdaptiveGridBuilder builder(params);
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        // Two dividends at the exact same date
+        .discrete_dividends = {
+            Dividend{.calendar_time = 0.5, .amount = 1.0},
+            Dividend{.calendar_time = 0.5, .amount = 1.5},
+        },
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {100.0}},
+    };
+
+    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    std::vector<double> v_domain = {0.10, 0.20, 0.30};
+    std::vector<double> r_domain = {0.03, 0.05};
+
+    auto result = builder.build_segmented_chebyshev(
+        seg_config, {m_domain, v_domain, r_domain});
+    ASSERT_TRUE(result.has_value())
+        << "build_segmented_chebyshev failed with duplicate dividends";
+
+    // Should be able to query across the entire tau range
+    for (double tau : {0.1, 0.3, 0.5, 0.7, 0.9}) {
+        double p = result->price_fn(100.0, 100.0, tau, 0.20, 0.05);
+        EXPECT_TRUE(std::isfinite(p))
+            << "Price not finite at tau=" << tau;
+        EXPECT_GT(p, 0.0) << "Price not positive at tau=" << tau;
+    }
+}
+
+// Regression: nearly-coincident dividend dates must not create overlapping gaps
+// Bug: Two dividends 1 day apart produce gaps that overlap, making boundaries
+// non-monotonic.
+TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;
+    params.max_iter = 1;
+    params.validation_samples = 4;
+
+    AdaptiveGridBuilder builder(params);
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        // Two dividends ~1 day apart
+        .discrete_dividends = {
+            Dividend{.calendar_time = 0.500, .amount = 1.0},
+            Dividend{.calendar_time = 0.503, .amount = 1.0},  // ~1 day later
+        },
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {100.0}},
+    };
+
+    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    std::vector<double> v_domain = {0.10, 0.20, 0.30};
+    std::vector<double> r_domain = {0.03, 0.05};
+
+    auto result = builder.build_segmented_chebyshev(
+        seg_config, {m_domain, v_domain, r_domain});
+    ASSERT_TRUE(result.has_value())
+        << "build_segmented_chebyshev failed with nearly-coincident dividends";
+
+    double p = result->price_fn(100.0, 100.0, 0.5, 0.20, 0.05);
+    EXPECT_TRUE(std::isfinite(p));
+    EXPECT_GT(p, 0.0);
+}
+
 }  // namespace
 }  // namespace mango
