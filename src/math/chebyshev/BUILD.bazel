@@ -23,3 +23,26 @@ cc_library(
     strip_include_prefix = "/src/math/chebyshev",
     include_prefix = "mango/math/chebyshev",
 )
+
+cc_library(
+    name = "chebyshev_interpolant",
+    hdrs = ["chebyshev_interpolant.hpp"],
+    deps = [":chebyshev_nodes"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/chebyshev",
+    include_prefix = "mango/math/chebyshev",
+)
+
+# Convenience: interpolant + raw storage (no Eigen dep)
+cc_library(
+    name = "chebyshev_tensor",
+    deps = [":chebyshev_interpolant", ":raw_tensor"],
+    visibility = ["//visibility:public"],
+)
+
+# Convenience: interpolant + Tucker storage (pulls Eigen)
+cc_library(
+    name = "chebyshev_tucker",
+    deps = [":chebyshev_interpolant", ":tucker_tensor"],
+    visibility = ["//visibility:public"],
+)

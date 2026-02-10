@@ -1551,8 +1551,11 @@ cc_test(
     size = "small",
     srcs = ["chebyshev_interpolant_test.cc"],
     deps = [
+        "//src/math/chebyshev:chebyshev_interpolant",
+        "//src/math/chebyshev:chebyshev_nodes",
         "//src/math/chebyshev:raw_tensor",
         "//src/math/chebyshev:tucker_tensor",
+        "//src/option/table:surface_concepts",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
