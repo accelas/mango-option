@@ -104,6 +104,40 @@ double total_discrete_dividends(const std::vector<Dividend>& dividends,
     return total;
 }
 
+/// Compute tau-space segment boundaries from dividend schedule.
+/// Returns sorted boundaries: {tau_min, tau_split_1 - kInset, tau_split_1 + kInset, ...}
+/// where splits occur at tau_split = maturity - dividend.calendar_time.
+/// Dividends outside (tau_min, tau_max) are ignored.
+/// If no dividends fall inside range, returns {tau_min, tau_max} (single segment).
+[[maybe_unused]] static std::vector<double> compute_segment_boundaries(
+    const std::vector<Dividend>& dividends, double maturity,
+    double tau_min, double tau_max)
+{
+    constexpr double kInset = 5e-4;  // gap around dividend in tau-space
+
+    // Collect tau-space split points from dividends
+    std::vector<double> splits;
+    for (const auto& div : dividends) {
+        if (div.amount <= 0.0) continue;
+        double tau_split = maturity - div.calendar_time;
+        if (tau_split > tau_min + 2 * kInset && tau_split < tau_max - 2 * kInset) {
+            splits.push_back(tau_split);
+        }
+    }
+    std::sort(splits.begin(), splits.end());
+
+    // Build boundaries: tau_min, (split-inset, split+inset)..., tau_max
+    std::vector<double> bounds;
+    bounds.push_back(tau_min);
+    for (double sp : splits) {
+        bounds.push_back(sp - kInset);
+        bounds.push_back(sp + kInset);
+    }
+    bounds.push_back(tau_max);
+
+    return bounds;
+}
+
 // ============================================================================
 // Types for the callback-based refinement loop
 // ============================================================================
