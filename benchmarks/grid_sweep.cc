@@ -124,7 +124,7 @@ int main() {
         auto& [builder, axes] = builder_result.value();
         EEPDecomposer decomposer{OptionType::PUT, spot, div_yield};
         auto t0 = std::chrono::steady_clock::now();
-        auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        auto table_result = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });

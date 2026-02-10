@@ -22,7 +22,7 @@ TEST(PriceTableBuilderTest, DefaultBuildProducesNormalizedPrice) {
     ASSERT_TRUE(result.has_value());
 
     // Default build produces NormalizedPrice
-    EXPECT_EQ(result->surface->metadata().content, SurfaceContent::NormalizedPrice);
+    EXPECT_NE(result->surface, nullptr);
 }
 
 TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
@@ -39,10 +39,10 @@ TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
 
     // Build with EEP decomposition
     EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.0};
-    auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->surface->metadata().content, SurfaceContent::EarlyExercisePremium);
+    EXPECT_NE(result->surface, nullptr);
 }

@@ -507,7 +507,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
     EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
-    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });

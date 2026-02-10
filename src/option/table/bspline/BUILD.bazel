@@ -18,7 +18,7 @@ cc_library(
         "bspline_interpolant.hpp",
     ],
     deps = [
-        "//src/option/table:price_table_metadata",
+        "//src/option:option_spec",
         "//src/option/table:price_table",
         "//src/option/table:eep_surface_adapter",
         "//src/option/table:analytical_eep",
@@ -76,7 +76,6 @@ cc_library(
     srcs = ["bspline_workspace.cpp"],
     hdrs = ["bspline_workspace.hpp"],
     deps = [
-        "//src/option/table:price_table_metadata",
         "//src/support:error_types",
         "//src/math:bspline_basis",
         "//src/support:crc64",

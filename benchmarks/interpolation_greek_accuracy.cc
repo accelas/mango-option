@@ -70,7 +70,7 @@ const EEPFixture& GetEEPFixture() {
         }
         auto [builder, axes] = std::move(result.value());
         EEPDecomposer decomposer{OptionType::PUT, K_ref, q};
-        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });

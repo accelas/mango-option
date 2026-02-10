@@ -1670,18 +1670,10 @@ AdaptiveGridBuilder::build_cached_surface(
         return std::unexpected(fit_result.error());
     }
 
-    // Build metadata
-    PriceTableMetadata metadata;
-    metadata.K_ref = K_ref;
-    metadata.dividends.dividend_yield = dividend_yield;
-    metadata.m_min = m_grid.front();
-    metadata.m_max = m_grid.back();
-    metadata.dividends.discrete_dividends = {};
-    metadata.content = SurfaceContent::EarlyExercisePremium;
-
     // Build surface
     auto surface = PriceTableSurface::build(
-        axes, std::move(fit_result->coefficients), metadata);
+        axes, std::move(fit_result->coefficients), K_ref,
+        DividendSpec{.dividend_yield = dividend_yield, .discrete_dividends = {}});
     if (!surface.has_value()) {
         return std::unexpected(surface.error());
     }

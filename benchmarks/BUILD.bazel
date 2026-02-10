@@ -321,7 +321,6 @@ cc_binary(
     linkstatic = True,
     deps = [
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table:price_table_metadata",
         "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],

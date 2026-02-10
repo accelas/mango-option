@@ -282,20 +282,13 @@ def test_price_table_surface():
     ]
     axes.names = ["log_moneyness", "maturity", "volatility", "rate"]
 
-    # Create metadata
-    meta = mango_option.PriceTableMetadata()
-    meta.K_ref = 100.0
-    meta.dividends.dividend_yield = 0.02
-    meta.m_min = math.log(0.8)
-    meta.m_max = math.log(1.2)
-
     # Create coefficients
     shape = axes.shape()
     n_coeffs = shape[0] * shape[1] * shape[2] * shape[3]
     coeffs = np.random.rand(n_coeffs) * 10.0
 
     # Build surface
-    surface = mango_option.PriceTableSurface.build(axes, coeffs, meta)
+    surface = mango_option.PriceTableSurface.build(axes, coeffs, K_ref=100.0, dividend_yield=0.02)
     print(f"✓ Built surface")
 
     # Query value at ATM (log(1.0) = 0.0)

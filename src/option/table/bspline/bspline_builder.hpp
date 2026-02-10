@@ -428,12 +428,10 @@ public:
     /// Build price table surface
     ///
     /// @param axes Grid points for each dimension
-    /// @param content Metadata tag for what the surface stores
     /// @param transform Optional transform applied to tensor after extraction (e.g., EEP decompose)
     /// @return PriceTableResult with surface and diagnostics, or error
     [[nodiscard]] std::expected<PriceTableResult<N>, PriceTableError>
     build(const PriceTableAxesND<N>& axes,
-          SurfaceContent content = SurfaceContent::NormalizedPrice,
           TensorTransformFn transform = nullptr);
 
     /// When true, bypasses the τ>0 validation to allow τ=0 in the maturity grid

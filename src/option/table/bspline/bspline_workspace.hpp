@@ -2,7 +2,6 @@
 #pragma once
 
 #include <expected>
-#include "mango/option/table/price_table_metadata.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/math/bspline_basis.hpp"
 #include <experimental/mdspan>
@@ -55,8 +54,7 @@ public:
         double K_ref,
         double dividend_yield,
         double m_min,
-        double m_max,
-        SurfaceContent surface_content = SurfaceContent::NormalizedPrice);
+        double m_max);
 
     /// Grid accessors (zero-copy spans into arena)
     /// Note: log_moneyness() returns ln(S/K), use m_min()/m_max() for original bounds
@@ -94,7 +92,6 @@ public:
     /// Metadata accessors
     double K_ref() const { return K_ref_; }
     double dividend_yield() const { return dividend_yield_; }
-    SurfaceContent surface_content() const { return surface_content_; }
 
     /// Grid dimensions
     std::tuple<size_t, size_t, size_t, size_t> dimensions() const {
@@ -194,7 +191,6 @@ private:
     double dividend_yield_ = 0.0;
     double m_min_ = 0.0;  // Log-moneyness bounds ln(S/K)
     double m_max_ = 0.0;
-    SurfaceContent surface_content_ = SurfaceContent::NormalizedPrice;
 };
 
 }  // namespace mango

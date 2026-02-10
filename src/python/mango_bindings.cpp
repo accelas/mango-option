@@ -18,7 +18,6 @@
 #include "mango/option/table/bspline/bspline_workspace.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
-#include "mango/option/table/price_table_metadata.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
 #include "mango/math/yield_curve.hpp"
 #include "mango/option/american_option_batch.hpp"
@@ -696,20 +695,6 @@ PYBIND11_MODULE(mango_option, m) {
     // PriceTableSurfaceND (4D B-spline interpolation)
     // =========================================================================
 
-    // SurfaceContent enum
-    py::enum_<mango::SurfaceContent>(m, "SurfaceContent")
-        .value("NormalizedPrice", mango::SurfaceContent::NormalizedPrice)
-        .value("EarlyExercisePremium", mango::SurfaceContent::EarlyExercisePremium);
-
-    // PriceTableMetadata
-    py::class_<mango::PriceTableMetadata>(m, "PriceTableMetadata")
-        .def(py::init<>())
-        .def_readwrite("K_ref", &mango::PriceTableMetadata::K_ref)
-        .def_readwrite("dividends", &mango::PriceTableMetadata::dividends)
-        .def_readwrite("m_min", &mango::PriceTableMetadata::m_min)
-        .def_readwrite("m_max", &mango::PriceTableMetadata::m_max)
-        .def_readwrite("content", &mango::PriceTableMetadata::content);
-
     // PriceTableAxes
     py::class_<mango::PriceTableAxes>(m, "PriceTableAxes")
         .def(py::init<>())
@@ -761,24 +746,27 @@ PYBIND11_MODULE(mango_option, m) {
         m, "PriceTableSurface")
         .def_static("build",
             [](mango::PriceTableAxes axes, py::array_t<double> coeffs,
-               mango::PriceTableMetadata metadata) {
+               double K_ref, double dividend_yield) {
                 std::vector<double> coeffs_vec(coeffs.data(), coeffs.data() + coeffs.size());
                 auto result = mango::PriceTableSurface::build(
-                    std::move(axes), std::move(coeffs_vec), std::move(metadata));
+                    std::move(axes), std::move(coeffs_vec), K_ref,
+                    mango::DividendSpec{.dividend_yield = dividend_yield, .discrete_dividends = {}});
                 if (!result.has_value()) {
                     throw py::value_error("Failed to build surface: error code " +
                         std::to_string(static_cast<int>(result.error().code)));
                 }
                 return result.value();
             },
-            py::arg("axes"), py::arg("coefficients"), py::arg("metadata"),
+            py::arg("axes"), py::arg("coefficients"), py::arg("K_ref"),
+            py::arg("dividend_yield") = 0.0,
             R"pbdoc(
                 Build a 4D price table surface from axes and coefficients.
 
                 Args:
                     axes: PriceTableAxes with grid points for each dimension
                     coefficients: B-spline coefficients (flattened, row-major)
-                    metadata: PriceTableMetadata with K_ref, dividend info
+                    K_ref: Reference strike price
+                    dividend_yield: Continuous dividend yield (default: 0.0)
 
                 Returns:
                     PriceTableSurface instance
@@ -824,7 +812,10 @@ PYBIND11_MODULE(mango_option, m) {
                     Partial derivative estimate
             )pbdoc")
         .def_property_readonly("axes", &mango::PriceTableSurface::axes)
-        .def_property_readonly("metadata", &mango::PriceTableSurface::metadata);
+        .def_property_readonly("K_ref", &mango::PriceTableSurface::K_ref)
+        .def_property_readonly("dividends", &mango::PriceTableSurface::dividends)
+        .def_property_readonly("m_min", &mango::PriceTableSurface::m_min)
+        .def_property_readonly("m_max", &mango::PriceTableSurface::m_max);
 
     // =========================================================================
     // Price table builder convenience wrapper (auto-grid profiles)

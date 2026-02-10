@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/option/table/price_table_metadata.hpp"
+#include "mango/option/option_spec.hpp"
 #include "mango/option/table/price_table.hpp"
 #include "mango/option/table/eep_surface_adapter.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
@@ -110,20 +110,31 @@ using PriceTableAxes = PriceTableAxesND<kPriceTableDim>;
 template <size_t N>
 class PriceTableSurfaceND {
 public:
-    /// Build surface from axes, coefficients, and metadata
+    /// Build surface from axes, coefficients, and individual fields
     ///
     /// @param axes Grid points and names for each dimension
     /// @param coeffs Flattened B-spline coefficients (row-major)
-    /// @param metadata Reference strike, dividends, etc.
+    /// @param K_ref Reference strike price
+    /// @param dividends Continuous yield + discrete dividend schedule
     /// @return Shared pointer to surface or error
     [[nodiscard]] static std::expected<std::shared_ptr<const PriceTableSurfaceND<N>>, PriceTableError>
-    build(PriceTableAxesND<N> axes, std::vector<double> coeffs, PriceTableMetadata metadata);
+    build(PriceTableAxesND<N> axes, std::vector<double> coeffs,
+          double K_ref, DividendSpec dividends = {});
 
     /// Access axes
     [[nodiscard]] const PriceTableAxesND<N>& axes() const noexcept { return axes_; }
 
-    /// Access metadata
-    [[nodiscard]] const PriceTableMetadata& metadata() const noexcept { return meta_; }
+    /// Reference strike price
+    [[nodiscard]] double K_ref() const noexcept { return K_ref_; }
+
+    /// Dividend specification
+    [[nodiscard]] const DividendSpec& dividends() const noexcept { return dividends_; }
+
+    /// Minimum log-moneyness (from axes grid)
+    [[nodiscard]] double m_min() const noexcept { return axes_.grids[0].front(); }
+
+    /// Maximum log-moneyness (from axes grid)
+    [[nodiscard]] double m_max() const noexcept { return axes_.grids[0].back(); }
 
     /// Evaluate price at query point
     ///
@@ -149,11 +160,13 @@ public:
     [[nodiscard]] double second_partial(size_t axis, const std::array<double, N>& coords) const;
 
 private:
-    PriceTableSurfaceND(PriceTableAxesND<N> axes, PriceTableMetadata metadata,
+    PriceTableSurfaceND(PriceTableAxesND<N> axes, double K_ref,
+                     DividendSpec dividends,
                      std::unique_ptr<BSplineND<double, N>> spline);
 
     PriceTableAxesND<N> axes_;
-    PriceTableMetadata meta_;
+    double K_ref_;
+    DividendSpec dividends_;
     std::unique_ptr<BSplineND<double, N>> spline_;
 };
 
@@ -209,8 +222,8 @@ using BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>;
 
 
 /// Create a BSplinePriceTable from a pre-built EEP surface.
-/// Reads K_ref and dividend_yield from surface metadata.
-/// Requires SurfaceContent::EarlyExercisePremium; rejects NormalizedPrice.
+/// Reads K_ref and dividend_yield from surface fields.
+/// The surface must contain EEP data (built with EEPDecomposer transform).
 [[nodiscard]] std::expected<BSplinePriceTable, std::string>
 make_bspline_surface(
     std::shared_ptr<const PriceTableSurface> surface,

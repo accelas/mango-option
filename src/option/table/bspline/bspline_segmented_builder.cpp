@@ -349,14 +349,9 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         auto coeffs = std::move(fit_result->coefficients);
 
         // 10. Build PriceTableSurfaceND
-        PriceTableMetadata metadata{
-            .K_ref = K_ref,
-            .dividends = {.dividend_yield = config.dividends.dividend_yield},
-            .content = SurfaceContent::NormalizedPrice,
-        };
-
         auto surface = PriceTableSurface::build(
-            axes, std::move(coeffs), metadata);
+            axes, std::move(coeffs), K_ref,
+            DividendSpec{.dividend_yield = config.dividends.dividend_yield, .discrete_dividends = {}});
         if (!surface.has_value()) {
             return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
         }

@@ -124,7 +124,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
 
     // Pre-compute prices for PUT options with EEP decomposition
     EEPDecomposer decomposer{OptionType::PUT, 100.0, dividend_yield};
-    auto precompute_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto precompute_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });

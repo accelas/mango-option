@@ -224,7 +224,7 @@ A softplus floor (`log1p(exp(100·x))/100`) enforces non-negativity of the EEP d
 | 10x10x25x6 | ~8 | 2.5 |
 | 12x12x30x8 | ~5 | 1.9 |
 
-EEP decomposition is always applied. The surface metadata records `SurfaceContent::EarlyExercisePremium` so consumers use the correct reconstruction path via `AmericanPriceSurface`.
+EEP decomposition is always applied. The type system enforces the correct reconstruction path: standard surfaces use `AnalyticalEEP` (which adds the European component at query time), while segmented leaf surfaces use `IdentityEEP` (raw prices, no reconstruction).
 
 ### Multi-Dimensional Indexing with mdspan
 

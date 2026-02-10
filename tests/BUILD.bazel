@@ -162,17 +162,6 @@ cc_test(
 )
 
 cc_test(
-    name = "price_table_metadata_test",
-    size = "small",
-    srcs = ["price_table_metadata_test.cc"],
-    deps = [
-        "//src/option/table:price_table_metadata",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "price_table_surface_test",
     size = "small",
     srcs = ["price_table_surface_test.cc"],
@@ -1130,7 +1119,6 @@ cc_test(
         "//src/option:interpolated_iv_solver",
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table:price_table_metadata",
         "//src/option/table/bspline:eep_decomposer",
         "@googletest//:gtest_main",
     ],

@@ -78,7 +78,7 @@ int main() {
 
     auto& [builder, axes] = *setup;
     EEPDecomposer decomposer{OptionType::PUT, kSpot, kDivYield};
-    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
@@ -89,10 +89,8 @@ int main() {
     }
 
     auto surface = table_result->surface;
-    auto& meta = surface->metadata();
-    std::printf("  Surface content: %s\n",
-                meta.content == SurfaceContent::EarlyExercisePremium ? "EEP" : "NormalizedPrice");
-    std::printf("  K_ref: %.2f\n", meta.K_ref);
+    std::printf("  Surface content: EEP (type-enforced)\n");
+    std::printf("  K_ref: %.2f\n", surface->K_ref());
 
     // Query the raw surface at our test point
     double m = kSpot / kStrike;  // = 1.0 for ATM
@@ -115,7 +113,7 @@ int main() {
                 std::abs(wrapper_price - fdm_price) * 10000 / fdm_price);
 
     // Compute what the reconstruction formula gives
-    double reconstructed = raw_value * (kStrike / meta.K_ref) + eu_price;
+    double reconstructed = raw_value * (kStrike / surface->K_ref()) + eu_price;
     std::printf("  Manual reconstruction (EEP * K/Kref + Eu): %.6f\n", reconstructed);
 
     // Layer 5: Check if interpolation is the issue
@@ -163,10 +161,8 @@ int main() {
     }
 
     auto adaptive_surface = adaptive_result->surface;
-    auto& adaptive_meta = adaptive_surface->metadata();
-    std::printf("  Surface content: %s\n",
-                adaptive_meta.content == SurfaceContent::EarlyExercisePremium ? "EEP" : "NormalizedPrice");
-    std::printf("  K_ref: %.2f\n", adaptive_meta.K_ref);
+    std::printf("  Surface content: EEP (type-enforced)\n");
+    std::printf("  K_ref: %.2f\n", adaptive_surface->K_ref());
 
     double adaptive_raw = adaptive_surface->value({m, kTau, kSigma, kRate});
     std::printf("  Raw surface value: %.6f\n", adaptive_raw);
@@ -207,7 +203,7 @@ int main() {
     if (setup_hi.has_value()) {
         auto& [builder_hi, axes_hi] = *setup_hi;
         EEPDecomposer decomposer_hi{OptionType::PUT, kSpot, kDivYield};
-        auto result_hi = builder_hi.build(axes_hi, SurfaceContent::EarlyExercisePremium,
+        auto result_hi = builder_hi.build(axes_hi,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer_hi.decompose(tensor, a);
             });
@@ -486,9 +482,8 @@ int main() {
 
         // Unfortunately we can't access the tensor directly from outside
         // But we CAN check the fitting stats
-        std::printf("  Surface metadata content: %s\n",
-                    surf->metadata().content == SurfaceContent::EarlyExercisePremium ? "EEP" : "NormalizedPrice");
-        std::printf("  K_ref: %.2f\n", surf->metadata().K_ref);
+        std::printf("  Surface metadata content: EEP (type-enforced)\n");
+        std::printf("  K_ref: %.2f\n", surf->K_ref());
 
         // Check if this differs from the direct batch solve
         std::printf("  Expected from batch solve: 0.324765\n");

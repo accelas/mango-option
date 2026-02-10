@@ -187,7 +187,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
         static AdaptiveResult stored = std::move(*result);
         base_result = &stored;
         base_axes = stored.axes;
-        base_K_ref = stored.surface->metadata().K_ref;
+        base_K_ref = stored.surface->K_ref();
     }
 
     // 2. For scale=1, use adaptive result directly
@@ -224,7 +224,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
         }
         auto& [ptb, axes] = *setup;
         EEPDecomposer decomposer{OptionType::PUT, base_K_ref, kDivYield};
-        auto result = ptb.build(axes, SurfaceContent::EarlyExercisePremium,
+        auto result = ptb.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });

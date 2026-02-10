@@ -103,7 +103,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         }
         auto [builder, axes] = std::move(result.value());
         EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.0};
-        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });

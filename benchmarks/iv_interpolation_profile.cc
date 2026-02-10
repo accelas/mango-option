@@ -14,7 +14,6 @@
 
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/price_table_metadata.hpp"
 #include <benchmark/benchmark.h>
 #include <memory>
 #include <vector>
@@ -112,14 +111,8 @@ const AnalyticSurfaceFixture& GetSurface() {
             fixture_ptr->rate_grid
         };
 
-        // Create metadata
-        PriceTableMetadata meta{
-            .K_ref = fixture_ptr->K_ref,
-            .dividends = {},
-        };
-
         // Create surface with coefficients directly
-        auto surface_result = PriceTableSurface::build(axes, fit_result->coefficients, meta);
+        auto surface_result = PriceTableSurface::build(axes, fit_result->coefficients, fixture_ptr->K_ref);
         if (!surface_result.has_value()) {
             throw std::runtime_error("Failed to create surface");
         }

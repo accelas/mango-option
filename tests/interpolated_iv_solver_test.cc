@@ -9,7 +9,6 @@
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/price_table_metadata.hpp"
 #include "mango/option/table/bspline/eep_decomposer.hpp"
 
 namespace mango {
@@ -30,7 +29,7 @@ protected:
         ASSERT_TRUE(result.has_value()) << "Failed to build";
         auto [builder, axes] = std::move(result.value());
         EEPDecomposer decomposer{OptionType::PUT, K_ref_, 0.0};
-        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 decomposer.decompose(tensor, a);
             });
@@ -223,14 +222,8 @@ TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
     eep_axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
 
     std::vector<double> eep_coeffs(5 * 4 * 4 * 4, 2.0);
-    PriceTableMetadata eep_meta{
-        .K_ref = 100.0,
-        .m_min = std::log(0.8),
-        .m_max = std::log(1.2),
-        .content = SurfaceContent::EarlyExercisePremium,
-    };
 
-    auto eep_surface = PriceTableSurface::build(eep_axes, eep_coeffs, eep_meta);
+    auto eep_surface = PriceTableSurface::build(eep_axes, eep_coeffs, 100.0);
     ASSERT_TRUE(eep_surface.has_value());
 
     auto wrapper_result = make_bspline_surface(eep_surface.value(), OptionType::PUT);
@@ -281,7 +274,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
     ASSERT_TRUE(result.has_value());
     auto [builder, axes] = std::move(result.value());
     EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
-    auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });
@@ -321,7 +314,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
     ASSERT_TRUE(result.has_value());
     auto [builder, axes] = std::move(result.value());
     EEPDecomposer decomposer2{OptionType::PUT, K_ref, div_yield};
-    auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer2.decompose(tensor, a);
         });

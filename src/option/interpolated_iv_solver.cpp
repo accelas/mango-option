@@ -230,7 +230,7 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
 
     // Standard path: decompose tensor to EEP before B-spline fitting
     EEPDecomposer decomposer{config.option_type, config.spot, config.dividend_yield};
-    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             decomposer.decompose(tensor, a);
         });

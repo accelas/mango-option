@@ -495,54 +495,8 @@ TEST(PriceTableWorkspace, DISABLED_LoadDetectsCorruptedGrids) {
     std::filesystem::remove(filepath);
 }
 
-// ============================================================================
-// Surface Content Tests (format v2)
-// ============================================================================
-
-TEST(PriceTableWorkspaceTest, DefaultSurfaceContentIsZero) {
-    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
-    std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
-    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
-    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
-    std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
-
-    auto ws_result = mango::PriceTableWorkspace::create(
-        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
-
-    ASSERT_TRUE(ws_result.has_value());
-    EXPECT_EQ(ws_result.value().surface_content(), mango::SurfaceContent::NormalizedPrice);
-}
-
-TEST(PriceTableWorkspaceTest, DISABLED_RoundTripSurfaceContent) {
-    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
-    std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
-    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
-    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
-    std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
-
-    // Create workspace with surface_content=1 (EEP)
-    auto ws_result = mango::PriceTableWorkspace::create(
-        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1,
-        mango::SurfaceContent::EarlyExercisePremium);
-
-    ASSERT_TRUE(ws_result.has_value());
-    EXPECT_EQ(ws_result.value().surface_content(), mango::SurfaceContent::EarlyExercisePremium);
-
-    // Save to temp file
-    const std::string filepath = "/tmp/test_surface_content_roundtrip.arrow";
-    auto save_result = ws_result.value().save(filepath, "SPY", 0);
-    ASSERT_TRUE(save_result.has_value()) << "Save failed: " << save_result.error();
-
-    // Load back
-    auto load_result = mango::PriceTableWorkspace::load(filepath);
-    ASSERT_TRUE(load_result.has_value()) << "Load failed";
-
-    // Verify surface_content round-trips correctly
-    EXPECT_EQ(load_result.value().surface_content(), mango::SurfaceContent::EarlyExercisePremium);
-
-    // Cleanup
-    std::filesystem::remove(filepath);
-}
+// Note: SurfaceContent tests removed — SurfaceContent enum was deleted.
+// The type system now enforces correct EEP reconstruction via template parameters.
 
 TEST(PriceTableWorkspace, DISABLED_SavedFileHasNonZeroChecksums) {
     // Verify that saved files contain real (non-zero) checksums (log-moneyness)
