@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "chebyshev_surface",
+    hdrs = ["chebyshev_surface.hpp"],
+    deps = [
+        "//src/math/chebyshev:chebyshev_interpolant",
+        "//src/math/chebyshev:raw_tensor",
+        "//src/math/chebyshev:tucker_tensor",
+        "//src/option/table:bounded_surface",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:eep_surface_adapter",
+        "//src/option/table:standard_transform_4d",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/chebyshev",
+    include_prefix = "mango/option/table/chebyshev",
+)
