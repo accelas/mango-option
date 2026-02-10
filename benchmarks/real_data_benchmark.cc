@@ -18,7 +18,6 @@
 #include "mango/option/option_grid.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/option/table/price_table_grid_estimator.hpp"
 #include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"

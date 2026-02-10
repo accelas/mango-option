@@ -57,38 +57,6 @@ cc_library(
 )
 
 cc_library(
-    name = "price_table_config",
-    hdrs = ["price_table_config.hpp"],
-    deps = [
-        ":price_table_metadata",
-        "//src/option:grid_spec_types",
-        "//src/option:option_spec",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "recursion_helpers",
-    hdrs = ["recursion_helpers.hpp"],
-    deps = [
-        ":price_table_axes",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "price_table_grid_estimator",
-    hdrs = ["price_table_grid_estimator.hpp"],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
     name = "error_attribution",
     hdrs = ["error_attribution.hpp"],
     visibility = ["//visibility:public"],

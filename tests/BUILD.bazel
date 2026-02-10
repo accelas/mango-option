@@ -189,7 +189,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_config_test.cc"],
     deps = [
-        "//src/option/table:price_table_config",
+        "//src/option/table/bspline:bspline_builder",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -237,7 +237,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_grid_estimator_test.cc"],
     deps = [
-        "//src/option/table:price_table_grid_estimator",
+        "//src/option/table/bspline:bspline_builder",
         "//src/option:american_option",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -330,7 +330,6 @@ cc_test(
     deps = [
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table:price_table_axes",
-        "//src/option/table:price_table_config",
         "@googletest//:gtest_main",
     ],
 )
@@ -342,7 +341,6 @@ cc_test(
     deps = [
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table:price_table_axes",
-        "//src/option/table:price_table_config",
         "@googletest//:gtest_main",
     ],
 )
@@ -363,7 +361,7 @@ cc_test(
     size = "small",
     srcs = ["recursion_helpers_test.cc"],
     deps = [
-        "//src/option/table:recursion_helpers",
+        "//src/option/table/bspline:bspline_builder",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
