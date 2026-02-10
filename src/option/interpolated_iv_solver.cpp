@@ -23,8 +23,8 @@ namespace mango {
 // Explicit template instantiations
 // =====================================================================
 
-template class InterpolatedIVSolver<StandardSurfaceWrapper>;
-template class InterpolatedIVSolver<MultiKRefPriceWrapper>;
+template class InterpolatedIVSolver<StandardSurface>;
+template class InterpolatedIVSolver<MultiKRefPriceSurface>;
 
 // =====================================================================
 // Factory internals
@@ -46,8 +46,8 @@ to_log_moneyness(const std::vector<double>& moneyness) {
     return log_m;
 }
 
-/// Build a MultiKRefPriceSurface for manual grid path
-std::expected<MultiKRefPriceSurface, PriceTableError> build_multi_kref_manual(
+/// Build a MultiKRefInner for manual grid path
+std::expected<MultiKRefInner, PriceTableError> build_multi_kref_manual(
     double spot,
     OptionType option_type,
     const DividendSpec& dividends,
@@ -124,11 +124,11 @@ GridBounds extract_bounds(const IVGrid& grid) {
 // AnyIVSolver: type-erased wrapper
 // =====================================================================
 
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<StandardSurfaceWrapper> solver)
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<StandardSurface> solver)
     : solver_(std::move(solver))
 {}
 
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefPriceWrapper> solver)
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefPriceSurface> solver)
     : solver_(std::move(solver))
 {}
 
@@ -152,13 +152,13 @@ static std::expected<AnyIVSolver, ValidationError>
 wrap_surface(std::shared_ptr<const PriceTableSurface> surface,
              OptionType option_type,
              const InterpolatedIVSolverConfig& solver_config) {
-    auto wrapper = make_standard_wrapper(surface, option_type);
+    auto wrapper = make_standard_surface(surface, option_type);
     if (!wrapper.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    auto solver = InterpolatedIVSolver<StandardSurfaceWrapper>::create(
+    auto solver = InterpolatedIVSolver<StandardSurface>::create(
         std::move(*wrapper), solver_config);
     if (!solver.has_value()) {
         return std::unexpected(ValidationError{
@@ -246,9 +246,9 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
 // Factory: segmented path helpers
 // ---------------------------------------------------------------------------
 
-/// Wrap a MultiKRefPriceSurface into AnyIVSolver
+/// Wrap a MultiKRefInner into AnyIVSolver
 static std::expected<AnyIVSolver, ValidationError>
-wrap_multi_kref_surface(MultiKRefPriceSurface surface,
+wrap_multi_kref_surface(MultiKRefInner surface,
                         const GridBounds& b, double maturity,
                         OptionType option_type, double dividend_yield,
                         const InterpolatedIVSolverConfig& solver_config) {
@@ -259,10 +259,10 @@ wrap_multi_kref_surface(MultiKRefPriceSurface surface,
         .rate_min = b.rate_min, .rate_max = b.rate_max,
     };
 
-    auto wrapper = MultiKRefPriceWrapper(
+    auto wrapper = MultiKRefPriceSurface(
         std::move(surface), bounds, option_type, dividend_yield);
 
-    auto solver = InterpolatedIVSolver<MultiKRefPriceWrapper>::create(
+    auto solver = InterpolatedIVSolver<MultiKRefPriceSurface>::create(
         std::move(wrapper), solver_config);
     if (!solver.has_value()) {
         return std::unexpected(ValidationError{

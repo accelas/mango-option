@@ -5,10 +5,10 @@
 
 using namespace mango;
 
-static_assert(PriceSurface<StandardSurfaceWrapper>,
-    "StandardSurfaceWrapper must satisfy PriceSurface concept");
+static_assert(PriceSurface<StandardSurface>,
+    "StandardSurface must satisfy PriceSurface concept");
 
-TEST(PriceSurfaceConceptTest, StandardSurfaceWrapperSatisfiesConcept) {
+TEST(PriceSurfaceConceptTest, StandardSurfaceSatisfiesConcept) {
     // Compile-time check above is the real test.
     // This test exists so the test binary runs.
     SUCCEED();

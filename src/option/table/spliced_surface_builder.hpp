@@ -36,7 +36,7 @@ struct MultiKRefEntry {
     SegmentedPriceSurface surface;
 };
 
-[[nodiscard]] std::expected<MultiKRefPriceSurface, PriceTableError>
+[[nodiscard]] std::expected<MultiKRefInner, PriceTableError>
 build_multi_kref_surface(std::vector<MultiKRefEntry> entries);
 
 }  // namespace mango

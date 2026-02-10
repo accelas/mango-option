@@ -792,7 +792,7 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
     ASSERT_TRUE(result.has_value()) << "Adaptive build failed";
 
     // Wrap surface for price queries
-    auto wrapper = make_standard_wrapper(result->surface, OptionType::PUT);
+    auto wrapper = make_standard_surface(result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper.has_value()) << wrapper.error();
 
     // Query at K=80, T=1y, σ=15% — this was 1574 bps error before the fix

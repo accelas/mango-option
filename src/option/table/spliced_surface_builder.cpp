@@ -53,7 +53,7 @@ build_segmented_surface(SegmentedConfig config) {
 // Multi-K_ref surface builder
 // ===========================================================================
 
-std::expected<MultiKRefPriceSurface, PriceTableError>
+std::expected<MultiKRefInner, PriceTableError>
 build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
     if (entries.empty()) {
         return std::unexpected(PriceTableError{
@@ -78,7 +78,7 @@ build_multi_kref_surface(std::vector<MultiKRefEntry> entries) {
 
     MultiKRefSplit split(std::move(k_refs));
 
-    return MultiKRefPriceSurface(std::move(slices), std::move(split));
+    return MultiKRefInner(std::move(slices), std::move(split));
 }
 
 }  // namespace mango

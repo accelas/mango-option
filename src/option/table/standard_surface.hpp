@@ -24,8 +24,8 @@ namespace mango {
 using StandardLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
                                         StandardTransform4D, AnalyticalEEP>;
 
-/// Standard surface wrapper (satisfies PriceSurface concept)
-using StandardSurfaceWrapper = BoundedSurface<StandardLeaf>;
+/// Standard surface (satisfies PriceSurface concept)
+using StandardSurface = BoundedSurface<StandardLeaf>;
 
 /// Leaf adapter for segmented surfaces (no EEP decomposition)
 using SegmentedLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
@@ -35,23 +35,17 @@ using SegmentedLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
 using SegmentedPriceSurface = SplitSurface<SegmentedLeaf, TauSegmentSplit>;
 
 /// Multi-K_ref surface (outer split over K_refs of segmented inner)
-using MultiKRefPriceSurface = SplitSurface<SegmentedPriceSurface, MultiKRefSplit>;
+using MultiKRefInner = SplitSurface<SegmentedPriceSurface, MultiKRefSplit>;
 
-/// Multi-K_ref wrapper (satisfies PriceSurface concept)
-using MultiKRefPriceWrapper = BoundedSurface<MultiKRefPriceSurface>;
+/// Multi-K_ref surface (satisfies PriceSurface concept)
+using MultiKRefPriceSurface = BoundedSurface<MultiKRefInner>;
 
-// ===========================================================================
-// Legacy aliases for gradual migration
-// ===========================================================================
 
-/// Keep StandardSurface name for any code that references it.
-using StandardSurface = StandardLeaf;
-
-/// Create a StandardSurfaceWrapper from a pre-built EEP surface.
+/// Create a StandardSurface from a pre-built EEP surface.
 /// Reads K_ref and dividend_yield from surface metadata.
 /// Requires SurfaceContent::EarlyExercisePremium; rejects NormalizedPrice.
-[[nodiscard]] std::expected<StandardSurfaceWrapper, std::string>
-make_standard_wrapper(
+[[nodiscard]] std::expected<StandardSurface, std::string>
+make_standard_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type);
 

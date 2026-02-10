@@ -514,12 +514,12 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
         });
     ASSERT_TRUE(table_result.has_value());
 
-    // Create IV solver from surface via StandardSurfaceWrapper
+    // Create IV solver from surface via StandardSurface
     InterpolatedIVSolverConfig solver_config;
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
-    auto wrapper = make_standard_wrapper(table_result->surface, OptionType::PUT);
+    auto wrapper = make_standard_surface(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper.has_value()) << wrapper.error();
     auto iv_solver_result = DefaultInterpolatedIVSolver::create(
         std::move(wrapper).value(), solver_config);
@@ -535,8 +535,8 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     double rate = 0.04;
     double vol = 0.20;
 
-    // Get reconstructed American price from StandardSurfaceWrapper
-    auto wrapper_for_price = make_standard_wrapper(table_result->surface, OptionType::PUT);
+    // Get reconstructed American price from StandardSurface
+    auto wrapper_for_price = make_standard_surface(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_for_price.has_value()) << wrapper_for_price.error();
     double price = wrapper_for_price->price(spot, strike, maturity, vol, rate);
     EXPECT_GT(price, 0.0);

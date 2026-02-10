@@ -4,7 +4,7 @@
 
 **Goal:** Refactor the price surface architecture behind concept-based layers so interpolation schemes, coordinate transforms, EEP strategies, and surface splits are independently pluggable.
 
-**Architecture:** Four concept layers (SurfaceInterpolant → CoordinateTransform → EEPStrategy → SplitPolicy) compose at compile time with zero overhead. Old type aliases (StandardSurfaceWrapper, MultiKRefPriceWrapper) are redefined as compositions of new types, preserving the public API. PriceTableSurfaceND stays as the B-spline interpolant; new types wrap it behind concepts.
+**Architecture:** Four concept layers (SurfaceInterpolant → CoordinateTransform → EEPStrategy → SplitPolicy) compose at compile time with zero overhead. Old type aliases (StandardSurface, MultiKRefPriceSurface) are redefined as compositions of new types, preserving the public API. PriceTableSurfaceND stays as the B-spline interpolant; new types wrap it behind concepts.
 
 **Tech Stack:** C++23 concepts, templates, GoogleTest. Bazel build system.
 
@@ -1073,7 +1073,7 @@ git commit -m "Add BoundedSurface wrapper"
 
 ### Task 6: Bridge — redirect type aliases to new types
 
-This is the critical task. Old type aliases (`StandardSurface`, `StandardSurfaceWrapper`, `SegmentedPriceSurface`, `MultiKRefPriceSurface`, `MultiKRefPriceWrapper`) get redefined as compositions of new types. All 116 tests must pass.
+This is the critical task. Old type aliases (`StandardSurface`, `StandardSurface`, `SegmentedPriceSurface`, `MultiKRefInner`, `MultiKRefPriceSurface`) get redefined as compositions of new types. All 116 tests must pass.
 
 **Files:**
 - Modify: `src/option/table/standard_surface.hpp`
@@ -1117,7 +1117,7 @@ using StandardLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
                                         StandardTransform4D, AnalyticalEEP>;
 
 /// Standard surface wrapper (satisfies PriceSurface concept)
-using StandardSurfaceWrapper = BoundedSurface<StandardLeaf>;
+using StandardSurface = BoundedSurface<StandardLeaf>;
 
 /// Leaf adapter for segmented surfaces (no EEP decomposition)
 using SegmentedLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
@@ -1127,10 +1127,10 @@ using SegmentedLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
 using SegmentedPriceSurface = SplitSurface<SegmentedLeaf, TauSegmentSplit>;
 
 /// Multi-K_ref surface (outer split over K_refs of segmented inner)
-using MultiKRefPriceSurface = SplitSurface<SegmentedPriceSurface, MultiKRefSplit>;
+using MultiKRefInner = SplitSurface<SegmentedPriceSurface, MultiKRefSplit>;
 
 /// Multi-K_ref wrapper (satisfies PriceSurface concept)
-using MultiKRefPriceWrapper = BoundedSurface<MultiKRefPriceSurface>;
+using MultiKRefPriceSurface = BoundedSurface<MultiKRefInner>;
 
 // ===========================================================================
 // Legacy aliases for gradual migration
@@ -1140,25 +1140,25 @@ using MultiKRefPriceWrapper = BoundedSurface<MultiKRefPriceSurface>;
 // It was SplicedSurface<EEPPriceTableInner, ...>; now it's the leaf.
 using StandardSurface = StandardLeaf;
 
-/// Create a StandardSurfaceWrapper from a pre-built EEP surface.
-[[nodiscard]] std::expected<StandardSurfaceWrapper, std::string>
-make_standard_wrapper(
+/// Create a StandardSurface from a pre-built EEP surface.
+[[nodiscard]] std::expected<StandardSurface, std::string>
+make_standard_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type);
 
 // Alias for InterpolatedIVSolver template
-using DefaultInterpolatedIVSolver = InterpolatedIVSolver<StandardSurfaceWrapper>;
+using DefaultInterpolatedIVSolver = InterpolatedIVSolver<StandardSurface>;
 
 }  // namespace mango
 ```
 
 Wait — `DefaultInterpolatedIVSolver` is defined in `interpolated_iv_solver.hpp`, not here. Don't move it. Just update the aliases.
 
-**Step 2: Rewrite make_standard_wrapper in standard_surface.cpp**
+**Step 2: Rewrite make_standard_surface in standard_surface.cpp**
 
 ```cpp
-std::expected<StandardSurfaceWrapper, std::string>
-make_standard_wrapper(
+std::expected<StandardSurface, std::string>
+make_standard_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type)
 {
@@ -1184,7 +1184,7 @@ make_standard_wrapper(
         .rate_max = axes.grids[3].back(),
     };
 
-    return StandardSurfaceWrapper(std::move(leaf), bounds, type, dividend_yield);
+    return StandardSurface(std::move(leaf), bounds, type, dividend_yield);
 }
 ```
 
@@ -1204,11 +1204,11 @@ Run: `bazel test //... --test_output=errors`
 Expected: ALL 116 PASS
 
 This is the highest-risk step. If tests fail, check:
-- `StandardSurfaceWrapper` still satisfies `PriceSurface` concept
+- `StandardSurface` still satisfies `PriceSurface` concept
 - `SplitSurface` `price()/vega()` produce identical values to `SplicedSurface`
 - `BoundedSurface` forwards all methods correctly
 - `SegmentedPriceSurface` tau routing matches `SegmentLookup`
-- `MultiKRefPriceSurface` K_ref bracketing matches `KRefBracket`
+- `MultiKRefInner` K_ref bracketing matches `KRefBracket`
 
 **Step 5: Also build benchmarks and python bindings**
 
@@ -1241,18 +1241,18 @@ git commit -m "Redirect surface aliases to new concept-based types"
 
 In `interpolated_iv_solver.hpp`:
 - Replace `#include "mango/option/table/spliced_surface.hpp"` with new headers
-- `AnyIVSolver` variant types stay the same (StandardSurfaceWrapper, MultiKRefPriceWrapper)
+- `AnyIVSolver` variant types stay the same (StandardSurface, MultiKRefPriceSurface)
 - Template instantiations stay the same
 
 In `interpolated_iv_solver.cpp`:
-- `wrap_surface()` uses `make_standard_wrapper()` (already updated)
-- `wrap_multi_kref_surface()` constructs `MultiKRefPriceWrapper` using new types
+- `wrap_surface()` uses `make_standard_surface()` (already updated)
+- `wrap_multi_kref_surface()` constructs `MultiKRefPriceSurface` using new types
 - `build_multi_kref_manual()` uses new `SegmentedLeaf` + `TauSegmentSplit`
 
 **Step 2: Update adaptive_grid_builder**
 
 - `adaptive_grid_types.hpp`: `AdaptiveResult.surface` stays as `shared_ptr<const PriceTableSurface>` (the B-spline surface is still built by the builder)
-- `adaptive_grid_builder.cpp`: surface wrapping at the end uses `make_standard_wrapper()`
+- `adaptive_grid_builder.cpp`: surface wrapping at the end uses `make_standard_surface()`
 
 **Step 3: Update segmented_price_table_builder**
 

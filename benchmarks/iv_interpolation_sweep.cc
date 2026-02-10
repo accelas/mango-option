@@ -238,9 +238,9 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
     }
 
     // 4. Create InterpolatedIVSolver
-    auto wrapper = make_standard_wrapper(surface, OptionType::PUT);
+    auto wrapper = make_standard_surface(surface, OptionType::PUT);
     if (!wrapper) {
-        std::fprintf(stderr, "make_standard_wrapper failed (scale=%d)\n", scale);
+        std::fprintf(stderr, "make_standard_surface failed (scale=%d)\n", scale);
         std::abort();
     }
     auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper));

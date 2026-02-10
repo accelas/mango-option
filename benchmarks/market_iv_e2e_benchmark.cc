@@ -37,7 +37,7 @@
  *     });
  *
  * // Step 3: Create IV solver from surface
- * auto wrapper = make_standard_wrapper(result.value().surface, OptionType::PUT);
+ * auto wrapper = make_standard_surface(result.value().surface, OptionType::PUT);
  * auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
  * const auto& iv_solver = solver_result.value();
  *
@@ -285,9 +285,9 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
-    auto wrapper = make_standard_wrapper(surface, OptionType::PUT);
+    auto wrapper = make_standard_surface(surface, OptionType::PUT);
     if (!wrapper) {
-        state.SkipWithError("make_standard_wrapper failed");
+        state.SkipWithError("make_standard_surface failed");
         return;
     }
     auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper), solver_config);
@@ -396,9 +396,9 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         }
 
         // Step 3-4: Compute IVs
-        auto wrapper = make_standard_wrapper(surface, OptionType::PUT);
+        auto wrapper = make_standard_surface(surface, OptionType::PUT);
         if (!wrapper) {
-            state.SkipWithError("make_standard_wrapper failed");
+            state.SkipWithError("make_standard_surface failed");
             return;
         }
         auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));

@@ -20,7 +20,7 @@ namespace {
 // ===========================================================================
 
 /// Build a price table and verify that the reconstructed
-/// American price from StandardSurfaceWrapper matches a direct PDE solve.
+/// American price from StandardSurface matches a direct PDE solve.
 TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     // Grid covering a modest range for the price table
     // Each axis needs >= 4 points for B-spline fitting
@@ -56,10 +56,10 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     EXPECT_EQ(result->surface->metadata().content,
               SurfaceContent::EarlyExercisePremium);
 
-    // Wrap in StandardSurfaceWrapper for reconstruction
-    auto wrapper_result = make_standard_wrapper(result->surface, OptionType::PUT);
+    // Wrap in StandardSurface for reconstruction
+    auto wrapper_result = make_standard_surface(result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value())
-        << "make_standard_wrapper failed: " << wrapper_result.error();
+        << "make_standard_surface failed: " << wrapper_result.error();
     auto wrapper = std::move(*wrapper_result);
 
     // Test point: ATM put, 1-year, 20% vol, 5% rate
@@ -168,7 +168,7 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
 // Regression tests for bugs found during code review
 // ===========================================================================
 
-// Regression: make_standard_wrapper must reject NormalizedPrice content
+// Regression: make_standard_surface must reject NormalizedPrice content
 // Bug: Previously accepted NormalizedPrice but always used EEPPriceTableInner,
 // which adds the European component at query time — double-counting it for
 // surfaces that already contain full American prices.
@@ -196,10 +196,10 @@ TEST(EEPIntegrationTest, MakeStandardWrapperRejectsNormalizedPrice) {
     ASSERT_EQ(result->surface->metadata().content,
               SurfaceContent::NormalizedPrice);
 
-    // make_standard_wrapper must reject this
-    auto wrapper_result = make_standard_wrapper(result->surface, OptionType::PUT);
+    // make_standard_surface must reject this
+    auto wrapper_result = make_standard_surface(result->surface, OptionType::PUT);
     EXPECT_FALSE(wrapper_result.has_value())
-        << "make_standard_wrapper should reject NormalizedPrice surfaces";
+        << "make_standard_surface should reject NormalizedPrice surfaces";
     EXPECT_NE(wrapper_result.error().find("EEP"), std::string::npos)
         << "Error message should mention EEP; got: " << wrapper_result.error();
 }

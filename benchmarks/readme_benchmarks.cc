@@ -122,10 +122,10 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    // Create StandardSurfaceWrapper and IV solver
-    auto wrapper = make_standard_wrapper(surf.surface, OptionType::PUT);
+    // Create StandardSurface and IV solver
+    auto wrapper = make_standard_surface(surf.surface, OptionType::PUT);
     if (!wrapper) {
-        throw std::runtime_error("Failed to create StandardSurfaceWrapper");
+        throw std::runtime_error("Failed to create StandardSurface");
     }
     auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
 

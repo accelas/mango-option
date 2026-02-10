@@ -40,9 +40,9 @@ protected:
         surface_ = table->surface;
     }
 
-    /// Helper to create a StandardSurfaceWrapper for IV solver tests
-    StandardSurfaceWrapper make_wrapper() {
-        auto result = make_standard_wrapper(surface_, OptionType::PUT);
+    /// Helper to create a StandardSurface for IV solver tests
+    StandardSurface make_wrapper() {
+        auto result = make_standard_surface(surface_, OptionType::PUT);
         return std::move(*result);
     }
 
@@ -50,8 +50,8 @@ protected:
     static constexpr double K_ref_ = 100.0;
 };
 
-TEST_F(InterpolatedIVSolverTest, CreateFromStandardSurfaceWrapper) {
-    auto wrapper_result = make_standard_wrapper(surface_, OptionType::PUT);
+TEST_F(InterpolatedIVSolverTest, CreateFromStandardSurface) {
+    auto wrapper_result = make_standard_surface(surface_, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
@@ -235,7 +235,7 @@ TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
     auto eep_surface = PriceTableSurface::build(eep_axes, eep_coeffs, eep_meta);
     ASSERT_TRUE(eep_surface.has_value());
 
-    auto wrapper_result = make_standard_wrapper(eep_surface.value(), OptionType::PUT);
+    auto wrapper_result = make_standard_surface(eep_surface.value(), OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
@@ -254,10 +254,10 @@ TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
 
 // Verify that DefaultInterpolatedIVSolver alias works correctly
 TEST_F(InterpolatedIVSolverTest, StandardAliasMatchesExplicitTemplate) {
-    // DefaultInterpolatedIVSolver is InterpolatedIVSolver<StandardSurfaceWrapper>
+    // DefaultInterpolatedIVSolver is InterpolatedIVSolver<StandardSurface>
     static_assert(std::is_same_v<
         DefaultInterpolatedIVSolver,
-        InterpolatedIVSolver<StandardSurfaceWrapper>>);
+        InterpolatedIVSolver<StandardSurface>>);
 
     auto solver = DefaultInterpolatedIVSolver::create(make_wrapper());
     ASSERT_TRUE(solver.has_value());
@@ -289,7 +289,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
         });
     ASSERT_TRUE(table.has_value());
 
-    auto wrapper_result = make_standard_wrapper(table->surface, OptionType::PUT);
+    auto wrapper_result = make_standard_surface(table->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
@@ -306,7 +306,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
 }
 
 // Regression: InterpolatedIVSolver must reject queries with wrong dividend_yield
-// Bug: StandardSurfaceWrapper bakes in dividend_yield at construction; callers
+// Bug: StandardSurface bakes in dividend_yield at construction; callers
 // with a different yield get wrong prices silently
 TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
     // Build surface with dividend_yield = 0.02 (log-moneyness)
@@ -329,7 +329,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
         });
     ASSERT_TRUE(table.has_value());
 
-    auto wrapper_result = make_standard_wrapper(table->surface, OptionType::PUT);
+    auto wrapper_result = make_standard_surface(table->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));

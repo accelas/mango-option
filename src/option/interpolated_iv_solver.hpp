@@ -142,8 +142,8 @@ private:
     std::pair<double, double> adaptive_bounds(const IVQuery& query) const;
 };
 
-/// Type alias for backward compatibility: InterpolatedIVSolver with StandardSurfaceWrapper
-using DefaultInterpolatedIVSolver = InterpolatedIVSolver<StandardSurfaceWrapper>;
+/// Type alias for backward compatibility: InterpolatedIVSolver with StandardSurface
+using DefaultInterpolatedIVSolver = InterpolatedIVSolver<StandardSurface>;
 
 // =====================================================================
 // Factory: config types, type-erased solver, and factory function
@@ -182,15 +182,15 @@ public:
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
     /// Constructor from standard solver
-    explicit AnyIVSolver(InterpolatedIVSolver<StandardSurfaceWrapper> solver);
+    explicit AnyIVSolver(InterpolatedIVSolver<StandardSurface> solver);
 
     /// Constructor from segmented solver (spliced surface)
-    explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefPriceWrapper> solver);
+    explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefPriceSurface> solver);
 
 private:
     using SolverVariant = std::variant<
-        InterpolatedIVSolver<StandardSurfaceWrapper>,
-        InterpolatedIVSolver<MultiKRefPriceWrapper>
+        InterpolatedIVSolver<StandardSurface>,
+        InterpolatedIVSolver<MultiKRefPriceSurface>
     >;
     SolverVariant solver_;
 };

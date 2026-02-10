@@ -100,16 +100,16 @@ int main() {
     std::printf("  Raw surface value at (m=%.2f, tau=%.2f, sigma=%.2f, rate=%.2f): %.6f\n",
                 m, kTau, kSigma, kRate, raw_value);
 
-    // Layer 4: StandardSurfaceWrapper reconstruction
-    std::printf("\n--- Layer 4: StandardSurfaceWrapper Reconstruction ---\n");
-    auto wrapper = make_standard_wrapper(surface, OptionType::PUT);
+    // Layer 4: StandardSurface reconstruction
+    std::printf("\n--- Layer 4: StandardSurface Reconstruction ---\n");
+    auto wrapper = make_standard_surface(surface, OptionType::PUT);
     if (!wrapper.has_value()) {
-        std::fprintf(stderr, "make_standard_wrapper failed\n");
+        std::fprintf(stderr, "make_standard_surface failed\n");
         return 1;
     }
 
     double wrapper_price = wrapper->price(kSpot, kStrike, kTau, kSigma, kRate);
-    std::printf("  StandardSurfaceWrapper::price(): %.6f\n", wrapper_price);
+    std::printf("  StandardSurface::price(): %.6f\n", wrapper_price);
     std::printf("  Error vs FDM: %.6f (%.2f bps in price)\n",
                 std::abs(wrapper_price - fdm_price),
                 std::abs(wrapper_price - fdm_price) * 10000 / fdm_price);
@@ -171,14 +171,14 @@ int main() {
     double adaptive_raw = adaptive_surface->value({m, kTau, kSigma, kRate});
     std::printf("  Raw surface value: %.6f\n", adaptive_raw);
 
-    auto adaptive_wrapper = make_standard_wrapper(adaptive_surface, OptionType::PUT);
+    auto adaptive_wrapper = make_standard_surface(adaptive_surface, OptionType::PUT);
     if (!adaptive_wrapper.has_value()) {
-        std::fprintf(stderr, "make_standard_wrapper failed for adaptive\n");
+        std::fprintf(stderr, "make_standard_surface failed for adaptive\n");
         return 1;
     }
 
     double adaptive_price = adaptive_wrapper->price(kSpot, kStrike, kTau, kSigma, kRate);
-    std::printf("  StandardSurfaceWrapper::price(): %.6f\n", adaptive_price);
+    std::printf("  StandardSurface::price(): %.6f\n", adaptive_price);
     std::printf("  Error vs FDM: %.6f (%.2f bps in price)\n",
                 std::abs(adaptive_price - fdm_price),
                 std::abs(adaptive_price - fdm_price) * 10000 / fdm_price);
@@ -216,7 +216,7 @@ int main() {
             std::printf("  High-accuracy raw EEP (tol=1e-6): %.6f\n", raw_hi);
             std::printf("  Error vs expected: %.6f\n", std::abs(eep - raw_hi));
 
-            auto wrapper_hi = make_standard_wrapper(result_hi->surface, OptionType::PUT);
+            auto wrapper_hi = make_standard_surface(result_hi->surface, OptionType::PUT);
             if (wrapper_hi.has_value()) {
                 double price_hi = wrapper_hi->price(kSpot, kStrike, kTau, kSigma, kRate);
                 std::printf("  High-accuracy price: %.6f\n", price_hi);

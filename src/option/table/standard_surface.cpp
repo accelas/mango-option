@@ -3,8 +3,8 @@
 
 namespace mango {
 
-std::expected<StandardSurfaceWrapper, std::string>
-make_standard_wrapper(
+std::expected<StandardSurface, std::string>
+make_standard_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type)
 {
@@ -15,7 +15,7 @@ make_standard_wrapper(
     const auto& meta = surface->metadata();
     if (meta.content != SurfaceContent::EarlyExercisePremium) {
         return std::unexpected(std::string(
-            "make_standard_wrapper requires EEP content; got NormalizedPrice. "
+            "make_standard_surface requires EEP content; got NormalizedPrice. "
             "Build with SurfaceContent::EarlyExercisePremium + EEPDecomposer, "
             "or use make_interpolated_iv_solver() which handles this internally."));
     }
@@ -48,7 +48,7 @@ make_standard_wrapper(
         .rate_max = axes.grids[3].back(),
     };
 
-    return StandardSurfaceWrapper(std::move(leaf), bounds, type, dividend_yield);
+    return StandardSurface(std::move(leaf), bounds, type, dividend_yield);
 }
 
 }  // namespace mango
