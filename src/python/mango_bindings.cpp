@@ -957,17 +957,23 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("K_ref_count", &mango::MultiKRefConfig::K_ref_count)
         .def_readwrite("K_ref_span", &mango::MultiKRefConfig::K_ref_span);
 
-    // StandardIVPath
-    py::class_<mango::StandardIVPath>(m, "StandardIVPath")
+    // BSplineBackend
+    py::class_<mango::BSplineBackend>(m, "BSplineBackend")
         .def(py::init<>())
-        .def_readwrite("maturity_grid", &mango::StandardIVPath::maturity_grid);
+        .def_readwrite("maturity_grid", &mango::BSplineBackend::maturity_grid);
 
-    // SegmentedIVPath
-    py::class_<mango::SegmentedIVPath>(m, "SegmentedIVPath")
+    // ChebyshevBackend
+    py::class_<mango::ChebyshevBackend>(m, "ChebyshevBackend")
         .def(py::init<>())
-        .def_readwrite("maturity", &mango::SegmentedIVPath::maturity)
-        .def_readwrite("discrete_dividends", &mango::SegmentedIVPath::discrete_dividends)
-        .def_readwrite("kref_config", &mango::SegmentedIVPath::kref_config);
+        .def_readwrite("maturity", &mango::ChebyshevBackend::maturity)
+        .def_readwrite("tucker_epsilon", &mango::ChebyshevBackend::tucker_epsilon);
+
+    // DiscreteDividendConfig
+    py::class_<mango::DiscreteDividendConfig>(m, "DiscreteDividendConfig")
+        .def(py::init<>())
+        .def_readwrite("maturity", &mango::DiscreteDividendConfig::maturity)
+        .def_readwrite("discrete_dividends", &mango::DiscreteDividendConfig::discrete_dividends)
+        .def_readwrite("kref_config", &mango::DiscreteDividendConfig::kref_config);
 
     // IVSolverFactoryConfig
     py::class_<mango::IVSolverFactoryConfig>(m, "IVSolverFactoryConfig")
@@ -986,19 +992,28 @@ PYBIND11_MODULE(mango_option, m) {
                 else c.adaptive = obj.cast<mango::AdaptiveGridParams>();
             })
         .def_readwrite("solver_config", &mango::IVSolverFactoryConfig::solver_config)
-        .def_property("path",
+        .def_property("backend",
             [](const mango::IVSolverFactoryConfig& c) -> py::object {
-                return std::visit([](const auto& p) -> py::object {
-                    return py::cast(p);
-                }, c.path);
+                return std::visit([](const auto& b) -> py::object {
+                    return py::cast(b);
+                }, c.backend);
             },
             [](mango::IVSolverFactoryConfig& c, const py::object& obj) {
-                if (py::isinstance<mango::StandardIVPath>(obj))
-                    c.path = obj.cast<mango::StandardIVPath>();
-                else if (py::isinstance<mango::SegmentedIVPath>(obj))
-                    c.path = obj.cast<mango::SegmentedIVPath>();
+                if (py::isinstance<mango::BSplineBackend>(obj))
+                    c.backend = obj.cast<mango::BSplineBackend>();
+                else if (py::isinstance<mango::ChebyshevBackend>(obj))
+                    c.backend = obj.cast<mango::ChebyshevBackend>();
                 else
-                    throw py::type_error("path must be StandardIVPath or SegmentedIVPath");
+                    throw py::type_error("backend must be BSplineBackend or ChebyshevBackend");
+            })
+        .def_property("discrete_dividends",
+            [](const mango::IVSolverFactoryConfig& c) -> py::object {
+                if (c.discrete_dividends.has_value()) return py::cast(*c.discrete_dividends);
+                return py::none();
+            },
+            [](mango::IVSolverFactoryConfig& c, const py::object& obj) {
+                if (obj.is_none()) c.discrete_dividends = std::nullopt;
+                else c.discrete_dividends = obj.cast<mango::DiscreteDividendConfig>();
             });
 
     // AnyIVSolver (exposed as InterpolatedIVSolver for Python)

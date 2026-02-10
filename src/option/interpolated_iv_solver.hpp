@@ -150,26 +150,33 @@ using DefaultInterpolatedIVSolver = InterpolatedIVSolver<BSplinePriceTable>;
 // Factory: config types, type-erased solver, and factory function
 // =====================================================================
 
-/// Standard path: continuous dividends only, maturity grid for interpolation
-struct StandardIVPath {
-    std::vector<double> maturity_grid;
+/// B-spline interpolation backend
+struct BSplineBackend {
+    std::vector<double> maturity_grid;  ///< Tau knots (continuous) / chain maturities (adaptive)
 };
 
-/// Segmented path: discrete dividends with multi-K_ref surface
-struct SegmentedIVPath {
-    double maturity = 1.0;
-    std::vector<Dividend> discrete_dividends;
-    MultiKRefConfig kref_config;  ///< defaults to auto
-};
-
-/// Chebyshev path: tensor interpolation on CGL nodes
-struct ChebyshevIVPath {
-    double maturity = 2.0;
+/// Chebyshev tensor interpolation backend
+struct ChebyshevBackend {
+    double maturity = 2.0;                             ///< Domain upper bound for tau
     std::array<size_t, 4> num_pts = {16, 12, 12, 8};  ///< CGL nodes per axis
-    double tucker_epsilon = 1e-8;  ///< 0 = use RawTensor
+    double tucker_epsilon = 1e-8;                      ///< 0 = use RawTensor
+};
+
+/// Discrete dividend configuration (optional, orthogonal to backend choice)
+struct DiscreteDividendConfig {
+    double maturity = 1.0;                  ///< Surface maturity
+    std::vector<Dividend> discrete_dividends;
+    MultiKRefConfig kref_config;            ///< defaults to auto
 };
 
 /// Configuration for the IV solver factory
+///
+/// Backend choice (B-spline vs Chebyshev) and dividend type (continuous vs
+/// discrete) are orthogonal.  All four combinations are supported:
+///   - BSpline + continuous:  standard B-spline surface
+///   - BSpline + discrete:   segmented multi-K_ref B-spline surface
+///   - Chebyshev + continuous: Chebyshev tensor surface
+///   - Chebyshev + discrete:  segmented Chebyshev surface (requires adaptive)
 struct IVSolverFactoryConfig {
     OptionType option_type = OptionType::PUT;
     double spot = 100.0;
@@ -177,7 +184,8 @@ struct IVSolverFactoryConfig {
     IVGrid grid;                                    ///< Grid points (exact or domain bounds)
     std::optional<AdaptiveGridParams> adaptive;     ///< If set, refine grid adaptively
     InterpolatedIVSolverConfig solver_config;       ///< Newton config
-    std::variant<StandardIVPath, SegmentedIVPath, ChebyshevIVPath> path;
+    std::variant<BSplineBackend, ChebyshevBackend> backend;
+    std::optional<DiscreteDividendConfig> discrete_dividends;
 };
 
 /// Type-erased IV solver wrapping either path
@@ -213,10 +221,14 @@ private:
 
 /// Factory function: build price surface and IV solver from config
 ///
-/// If path holds StandardIVPath, uses the BSplinePriceTable path.
-/// If path holds SegmentedIVPath, uses the MultiKRefSurface path.
-/// If adaptive is set, uses AdaptiveGridBuilder
-/// to automatically refine grid density until the target IV error is met.
+/// Dispatches on backend × dividend type:
+///   - BSpline + continuous → standard B-spline surface
+///   - BSpline + discrete  → segmented multi-K_ref B-spline surface
+///   - Chebyshev + continuous → Chebyshev tensor surface
+///   - Chebyshev + discrete → segmented Chebyshev surface (requires adaptive)
+///
+/// When adaptive is set, uses AdaptiveGridBuilder to automatically refine
+/// grid density until the target IV error is met.
 ///
 /// @param config Solver configuration
 /// @return Type-erased AnyIVSolver or ValidationError

@@ -312,9 +312,9 @@ def test_iv_solver_interpolated():
     config.grid.vol = [0.10, 0.20, 0.30, 0.40]
     config.grid.rate = [0.01, 0.03, 0.05, 0.07]
 
-    path = mango_option.StandardIVPath()
-    path.maturity_grid = [0.1, 0.25, 0.5, 1.0]
-    config.path = path
+    backend = mango_option.BSplineBackend()
+    backend.maturity_grid = [0.1, 0.25, 0.5, 1.0]
+    config.backend = backend
 
     solver = mango_option.make_interpolated_iv_solver(config)
     print("✓ Created InterpolatedIVSolver via factory")
@@ -402,12 +402,20 @@ def test_iv_solver_config_defaults():
     assert config.adaptive is None
     print("✓ Adaptive optional works")
 
-    # Path variant
-    std_path = mango_option.StandardIVPath()
-    config.path = std_path
-    seg_path = mango_option.SegmentedIVPath()
-    config.path = seg_path
-    print("✓ Path variant setter works")
+    # Backend variant
+    bspline = mango_option.BSplineBackend()
+    config.backend = bspline
+    cheb = mango_option.ChebyshevBackend()
+    config.backend = cheb
+    print("✓ Backend variant setter works")
+
+    # Discrete dividends optional
+    div_config = mango_option.DiscreteDividendConfig()
+    config.discrete_dividends = div_config
+    assert config.discrete_dividends is not None
+    config.discrete_dividends = None
+    assert config.discrete_dividends is None
+    print("✓ Discrete dividends optional works")
 
 
 if __name__ == "__main__":

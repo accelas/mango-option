@@ -28,7 +28,7 @@ IVSolverFactoryConfig make_base_config() {
         .vol = {0.10, 0.15, 0.20, 0.25, 0.30},
         .rate = {0.02, 0.03, 0.05, 0.07},
     };
-    config.path = StandardIVPath{.maturity_grid = {0.1, 0.25, 0.5, 0.75, 1.0}};
+    config.backend = BSplineBackend{.maturity_grid = {0.1, 0.25, 0.5, 0.75, 1.0}};
     return config;
 }
 
@@ -153,7 +153,8 @@ TEST(IVSolverFactorySegmented, DiscreteDividends) {
             .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.05, 0.07},
         },
-        .path = SegmentedIVPath{
+        .backend = BSplineBackend{},
+        .discrete_dividends = DiscreteDividendConfig{
             .maturity = 1.0,
             .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
             .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
@@ -188,7 +189,8 @@ TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
             .max_iter = 2,
             .validation_samples = 16,
         },
-        .path = SegmentedIVPath{
+        .backend = BSplineBackend{},
+        .discrete_dividends = DiscreteDividendConfig{
             .maturity = 1.0,
             .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
             .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
@@ -197,7 +199,7 @@ TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
 
     auto solver = make_interpolated_iv_solver(config);
     ASSERT_TRUE(solver.has_value())
-        << "Factory should succeed with adaptive + SegmentedIVPath";
+        << "Factory should succeed with adaptive + discrete dividends";
 
     // Solve IV for a known option
     OptionSpec spec{

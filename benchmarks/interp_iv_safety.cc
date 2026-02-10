@@ -116,7 +116,7 @@ static PriceGrid generate_prices(bool with_dividends) {
 // Step 2: Build interpolated IV solvers
 // ============================================================================
 
-// Vanilla: one solver covering all maturities via StandardIVPath + adaptive grid
+// Vanilla: one solver covering all maturities via BSpline + adaptive grid
 static AnyIVSolver build_vanilla_solver() {
     // Maturity grid for price table — deliberately offset from test maturities
     // so most test points require real interpolation
@@ -130,7 +130,7 @@ static AnyIVSolver build_vanilla_solver() {
             .rate = {0.01, 0.03, 0.05, 0.10},
         },
         .adaptive = AdaptiveGridParams{.target_iv_error = 2e-5},  // 2 bps target
-        .path = StandardIVPath{
+        .backend = BSplineBackend{
             .maturity_grid = {0.01, 0.03, 0.06, 0.12, 0.20,
                               0.35, 0.60, 1.0, 1.5, 2.0, 2.5},
         },
@@ -144,7 +144,7 @@ static AnyIVSolver build_vanilla_solver() {
     return std::move(*solver);
 }
 
-// Dividends: one solver per maturity via SegmentedIVPath + adaptive grid
+// Dividends: one solver per maturity via BSpline + discrete dividends + adaptive grid
 static std::vector<std::pair<size_t, AnyIVSolver>> build_div_solvers() {
     std::vector<std::pair<size_t, AnyIVSolver>> solvers;
 
@@ -162,7 +162,8 @@ static std::vector<std::pair<size_t, AnyIVSolver>> build_div_solvers() {
                 .rate = {0.01, 0.03, 0.05, 0.10},
             },
             .adaptive = AdaptiveGridParams{.target_iv_error = 2e-5},
-            .path = SegmentedIVPath{
+            .backend = BSplineBackend{},
+            .discrete_dividends = DiscreteDividendConfig{
                 .maturity = mat,
                 .discrete_dividends = divs,
                 .kref_config = {.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end())},
