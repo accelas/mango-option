@@ -156,18 +156,6 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
         splines, config.K_ref, eep_values);
     analytical_eep_decompose(accessor, config.option_type, config.dividend_yield);
 
-    // Build Chebyshev interpolant from EEP values
-    auto interp = ChebyshevInterpolant<4, TuckerTensor<4>>::build_from_values(
-        std::span<const double>(eep_values),
-        config.domain, config.num_pts, config.tucker_epsilon);
-
-    // Wrap in EEPSurfaceAdapter + PriceTable
-    ChebyshevLeaf leaf(
-        std::move(interp),
-        StandardTransform4D{},
-        AnalyticalEEP(config.option_type, config.dividend_yield),
-        config.K_ref);
-
     SurfaceBounds bounds{
         .m_min = config.domain.lo[0], .m_max = config.domain.hi[0],
         .tau_min = config.domain.lo[1], .tau_max = config.domain.hi[1],
@@ -175,17 +163,35 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
         .rate_min = config.domain.lo[3], .rate_max = config.domain.hi[3],
     };
 
-    ChebyshevSurface surface(
-        std::move(leaf), bounds, config.option_type, config.dividend_yield);
+    auto eep_span = std::span<const double>(eep_values);
+    AnalyticalEEP eep(config.option_type, config.dividend_yield);
 
-    auto t1 = std::chrono::steady_clock::now();
-    double elapsed = std::chrono::duration<double>(t1 - t0).count();
-
-    return ChebyshevTableResult{
-        .surface = std::move(surface),
-        .n_pde_solves = n_pde_solves,
-        .build_seconds = elapsed,
+    auto make_result = [&](auto surface) {
+        auto t1 = std::chrono::steady_clock::now();
+        double elapsed = std::chrono::duration<double>(t1 - t0).count();
+        return ChebyshevTableResult{
+            .surface = std::move(surface),
+            .n_pde_solves = n_pde_solves,
+            .build_seconds = elapsed,
+        };
     };
+
+    // Build interpolant: Tucker-compressed or raw based on epsilon
+    if (config.tucker_epsilon > 0) {
+        auto interp = ChebyshevInterpolant<4, TuckerTensor<4>>::build_from_values(
+            eep_span, config.domain, config.num_pts, config.tucker_epsilon);
+        ChebyshevLeaf leaf(std::move(interp), StandardTransform4D{},
+                           eep, config.K_ref);
+        return make_result(ChebyshevSurface(
+            std::move(leaf), bounds, config.option_type, config.dividend_yield));
+    }
+
+    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build_from_values(
+        eep_span, config.domain, config.num_pts);
+    ChebyshevRawLeaf leaf(std::move(interp), StandardTransform4D{},
+                          eep, config.K_ref);
+    return make_result(ChebyshevRawSurface(
+        std::move(leaf), bounds, config.option_type, config.dividend_yield));
 }
 
 }  // namespace mango

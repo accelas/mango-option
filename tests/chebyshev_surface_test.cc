@@ -68,7 +68,7 @@ TEST(ChebyshevTableBuilderTest, BuildSucceeds) {
     EXPECT_GT(result->build_seconds, 0.0);
 
     // Query the surface at ATM
-    double p = result->surface.price(100.0, 100.0, 1.0, 0.20, 0.05);
+    double p = result->price(100.0, 100.0, 1.0, 0.20, 0.05);
     EXPECT_GT(p, 0.0);
     EXPECT_LT(p, 50.0);
 }
@@ -100,6 +100,6 @@ TEST(ChebyshevTableBuilderTest, IVRoundTrip) {
     ASSERT_TRUE(ref.has_value());
 
     // Chebyshev price should be close to FDM
-    double cheb_price = result->surface.price(100.0, 100.0, 1.0, 0.20, 0.05);
+    double cheb_price = result->price(100.0, 100.0, 1.0, 0.20, 0.05);
     EXPECT_NEAR(cheb_price, ref->value(), 0.50);  // within $0.50 for initial integration
 }

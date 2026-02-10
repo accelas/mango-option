@@ -467,7 +467,7 @@ static void print_tvk_comparison(const PriceGrid& prices, size_t vol_idx,
 // Chebyshev 4D
 // ============================================================================
 
-static ChebyshevSurface build_chebyshev_surface() {
+static ChebyshevTableResult build_chebyshev_surface() {
     ChebyshevTableConfig config{
         .num_pts = {20, 12, 12, 8},
         .domain = Domain<4>{
@@ -489,12 +489,12 @@ static ChebyshevSurface build_chebyshev_surface() {
     std::printf("  PDE solves: %zu\n", result->n_pde_solves);
     std::printf("  Build time: %.2f s\n", result->build_seconds);
 
-    return std::move(result->surface);
+    return std::move(*result);
 }
 
 static ErrorTable compute_errors_chebyshev(
     const PriceGrid& prices,
-    const ChebyshevSurface& surface,
+    const ChebyshevTableResult& surface,
     size_t vol_idx) {
     ErrorTable errors{};
     IVSolverConfig fdm_config;
