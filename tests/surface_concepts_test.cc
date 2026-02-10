@@ -81,18 +81,21 @@ TEST(AnalyticalEEPTest, EuropeanVegaIsPositive) {
 // Build a small test surface for comparison tests.
 static std::shared_ptr<const mango::PriceTableSurface> make_test_surface() {
     using namespace mango;
+    // Each axis needs >= 4 points for B-spline fitting
     auto setup = PriceTableBuilder::from_vectors(
-        {-0.2, -0.1, 0.0, 0.1, 0.2},     // log-moneyness
-        {0.1, 0.5, 1.0},                   // maturities
-        {0.15, 0.20, 0.30},                // vols
-        {0.03, 0.05},                      // rates
+        {-0.2, -0.1, 0.0, 0.1, 0.2},     // log-moneyness (5 pts)
+        {0.25, 0.50, 0.75, 1.00},         // maturities (4 pts)
+        {0.15, 0.20, 0.25, 0.30},         // vols (4 pts)
+        {0.02, 0.03, 0.04, 0.05},         // rates (4 pts)
         100.0,                              // K_ref
         GridAccuracyParams{},
         OptionType::PUT, 0.02);
+    EXPECT_TRUE(setup.has_value());
     auto& [builder, axes] = *setup;
     EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.02};
     auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
         [&](PriceTensor& t, const PriceTableAxes& a) { decomposer.decompose(t, a); });
+    EXPECT_TRUE(result.has_value());
     return result->surface;
 }
 
@@ -112,11 +115,11 @@ TEST(EEPSurfaceAdapterTest, MatchesOldEEPPriceTableInner) {
     // Compare at several query points
     struct TestPoint { double spot, strike, tau, sigma, rate; };
     TestPoint points[] = {
-        {100, 100, 0.5, 0.20, 0.05},  // ATM
-        {110, 100, 0.5, 0.20, 0.05},  // ITM put
-        {90,  100, 0.5, 0.20, 0.05},  // OTM put
-        {100, 100, 0.1, 0.30, 0.03},  // Short maturity
-        {100, 100, 1.0, 0.15, 0.05},  // Long maturity
+        {100, 100, 0.5, 0.20, 0.04},  // ATM
+        {110, 100, 0.5, 0.20, 0.04},  // ITM put
+        {90,  100, 0.5, 0.20, 0.04},  // OTM put
+        {100, 100, 0.3, 0.25, 0.03},  // Short maturity
+        {100, 100, 0.9, 0.20, 0.04},  // Long maturity
     };
 
     for (const auto& p : points) {
