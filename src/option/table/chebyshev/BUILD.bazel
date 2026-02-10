@@ -15,3 +15,21 @@ cc_library(
     strip_include_prefix = "/src/option/table/chebyshev",
     include_prefix = "mango/option/table/chebyshev",
 )
+
+cc_library(
+    name = "chebyshev_table_builder",
+    srcs = ["chebyshev_table_builder.cpp"],
+    hdrs = ["chebyshev_table_builder.hpp"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        ":chebyshev_surface",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/math:cubic_spline_solver",
+        "//src/option:american_option_batch",
+        "//src/option:european_option",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/chebyshev",
+    include_prefix = "mango/option/table/chebyshev",
+)

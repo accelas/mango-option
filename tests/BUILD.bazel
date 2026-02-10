@@ -1575,12 +1575,14 @@ cc_test(
 
 cc_test(
     name = "chebyshev_surface_test",
-    size = "small",
+    size = "medium",
     srcs = ["chebyshev_surface_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
+        "//src/option:american_option",
         "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
         "//src/option/table:price_surface_concept",
         "//src/option/table:surface_concepts",
         "@googletest//:gtest",
