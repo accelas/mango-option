@@ -6,7 +6,7 @@ cc_library(
         "//src/math/chebyshev:chebyshev_interpolant",
         "//src/math/chebyshev:raw_tensor",
         "//src/math/chebyshev:tucker_tensor",
-        "//src/option/table:bounded_surface",
+        "//src/option/table:price_table",
         "//src/option/table:analytical_eep",
         "//src/option/table:identity_eep",
         "//src/option/table:eep_surface_adapter",

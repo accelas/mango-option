@@ -4,7 +4,7 @@
 #include "mango/math/chebyshev/chebyshev_interpolant.hpp"
 #include "mango/math/chebyshev/raw_tensor.hpp"
 #include "mango/math/chebyshev/tucker_tensor.hpp"
-#include "mango/option/table/bounded_surface.hpp"
+#include "mango/option/table/price_table.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
 #include "mango/option/table/eep/identity_eep.hpp"
 #include "mango/option/table/eep_surface_adapter.hpp"
