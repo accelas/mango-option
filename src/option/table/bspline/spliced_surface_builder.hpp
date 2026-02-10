@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/support/error_types.hpp"
 #include <expected>
 #include <memory>

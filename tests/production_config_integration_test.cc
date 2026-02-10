@@ -21,7 +21,6 @@
 #include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/standard_surface.hpp"
 
 using namespace mango;
 

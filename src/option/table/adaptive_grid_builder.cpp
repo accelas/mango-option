@@ -16,7 +16,7 @@
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
-#include "mango/option/table/spliced_surface_builder.hpp"
+#include "mango/option/table/bspline/spliced_surface_builder.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include <algorithm>
 #include <cmath>

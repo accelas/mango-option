@@ -3,7 +3,6 @@
 
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/standard_surface.hpp"
 #include <array>
 #include <functional>
 #include <limits>

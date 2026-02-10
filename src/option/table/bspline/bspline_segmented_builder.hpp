@@ -4,8 +4,8 @@
 #include <vector>
 #include <expected>
 #include "mango/option/table/adaptive_grid_types.hpp"
-#include "mango/option/table/standard_surface.hpp"
-#include "mango/option/table/spliced_surface_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/bspline/spliced_surface_builder.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/support/error_types.hpp"

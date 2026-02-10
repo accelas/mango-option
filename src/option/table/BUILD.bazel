@@ -108,19 +108,6 @@ cc_library(
 )
 
 cc_library(
-    name = "spliced_surface_builder",
-    srcs = ["spliced_surface_builder.cpp"],
-    hdrs = ["spliced_surface_builder.hpp"],
-    deps = [
-        "//src/option/table/bspline:bspline_surface",
-        "//src/support:error_types",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
     name = "adaptive_grid_types",
     hdrs = ["adaptive_grid_types.hpp"],
     deps = [
@@ -155,7 +142,7 @@ cc_library(
         ":slice_cache",
         "//src/option/table/bspline:bspline_segmented_builder",
         ":split_surface",
-        ":spliced_surface_builder",
+        "//src/option/table/bspline:spliced_surface_builder",
         "//src/option/table/bspline:bspline_surface",
         ":tau_segment_split",
         "//src/math:black_scholes_analytics",

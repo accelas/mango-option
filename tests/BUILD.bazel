@@ -213,7 +213,7 @@ cc_test(
     srcs = ["price_surface_concept_test.cc"],
     deps = [
         "//src/option/table:price_surface_concept",
-        "//src/option/table:standard_surface",
+        "//src/option/table/bspline:bspline_surface",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -909,7 +909,6 @@ cc_test(
         "//src/option:interpolated_iv_solver",
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table:standard_surface",
         "//src/option/table:eep_decomposer",
         "@googletest//:gtest_main",
     ],
@@ -1136,7 +1135,6 @@ cc_test(
         "//src/option/table:price_table_axes",
         "//src/option/table:price_table_metadata",
         "//src/option/table:eep_decomposer",
-        "//src/option/table:standard_surface",
         "@googletest//:gtest_main",
     ],
 )
@@ -1266,7 +1264,7 @@ cc_test(
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_builder",
-        "//src/option/table:standard_surface",
+        "//src/option/table/bspline:bspline_surface",
         "//src/option:american_option_batch",
         "//src/option:option_grid",
         "//src/pde/core:grid",
@@ -1301,7 +1299,6 @@ cc_test(
     deps = [
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table:standard_surface",
         "//src/option/table:eep_decomposer",
         "//src/option:american_option_batch",
         "//src/option:interpolated_iv_solver",
@@ -1388,7 +1385,7 @@ cc_test(
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option/table/bspline:bspline_builder",
-        "//src/option/table:standard_surface",
+        "//src/option/table/bspline:bspline_surface",
         "//src/option/table:eep_decomposer",
         "//src/option:american_option",
         "//src/pde/core:pde_workspace",
@@ -1524,7 +1521,7 @@ cc_test(
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option/table:surface_concepts",
-        "//src/option/table/bspline:bspline_interpolant",
+        "//src/option/table/bspline:bspline_surface",
         "//src/option/table:standard_transform_4d",
         "//src/option/table:analytical_eep",
         "//src/option/table:identity_eep",

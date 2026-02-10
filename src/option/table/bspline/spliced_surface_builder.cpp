@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-#include "mango/option/table/spliced_surface_builder.hpp"
+#include "mango/option/table/bspline/spliced_surface_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include <algorithm>
 

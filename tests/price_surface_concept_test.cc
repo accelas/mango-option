@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/table/price_surface_concept.hpp"
-#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 
 using namespace mango;
 

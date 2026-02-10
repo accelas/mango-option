@@ -13,7 +13,7 @@
 #include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
-#include "mango/option/table/spliced_surface_builder.hpp"
+#include "mango/option/table/bspline/spliced_surface_builder.hpp"
 #include <algorithm>
 #include <cmath>
 

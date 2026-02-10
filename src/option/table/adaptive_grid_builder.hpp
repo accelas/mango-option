@@ -5,7 +5,7 @@
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/slice_cache.hpp"
 #include "mango/option/table/error_attribution.hpp"
-#include "mango/option/table/spliced_surface_builder.hpp"
+#include "mango/option/table/bspline/spliced_surface_builder.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/support/error_types.hpp"

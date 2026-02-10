@@ -77,6 +77,19 @@ cc_library(
 )
 
 cc_library(
+    name = "spliced_surface_builder",
+    srcs = ["spliced_surface_builder.cpp"],
+    hdrs = ["spliced_surface_builder.hpp"],
+    deps = [
+        ":bspline_surface",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
     name = "bspline_segmented_builder",
     srcs = ["bspline_segmented_builder.cpp"],
     hdrs = ["bspline_segmented_builder.hpp"],
@@ -85,7 +98,7 @@ cc_library(
         "//src/option/table:adaptive_grid_types",
         "//src/option:dividend_utils",
         ":bspline_surface",
-        "//src/option/table:spliced_surface_builder",
+        ":spliced_surface_builder",
         "//src/option:american_option",
         "//src/option:grid_spec_types",
         "//src/support:error_types",
