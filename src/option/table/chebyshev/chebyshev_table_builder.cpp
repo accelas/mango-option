@@ -4,7 +4,7 @@
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/american_option_batch.hpp"
-#include "mango/option/european_option.hpp"
+#include "mango/option/table/eep/eep_decomposer.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -89,36 +89,11 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
                     double sigma = sigma_nodes[si];
                     double rate = rate_nodes[ri];
 
-                    // American price in dollars (spline returns V/K_ref)
                     double am_price = spline.eval(m) * config.K_ref;
 
-                    // European price in dollars
-                    EuropeanOptionSolver eu_solver(
-                        OptionSpec{
-                            .spot = spot_node,
-                            .strike = config.K_ref,
-                            .maturity = tau,
-                            .rate = rate,
-                            .dividend_yield = config.dividend_yield,
-                            .option_type = config.option_type},
-                        sigma);
-                    auto eu = eu_solver.solve();
-
-                    double eep_raw = 0.0;
-                    if (eu.has_value()) {
-                        eep_raw = am_price - eu->value();
-                    }
-
-                    // Debiased softplus floor (matches EEPDecomposer)
-                    constexpr double kSharpness = 100.0;
-                    double eep;
-                    if (kSharpness * eep_raw > 500.0) {
-                        eep = eep_raw;
-                    } else {
-                        double sp = std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
-                        double bias = std::log(2.0) / kSharpness;
-                        eep = std::max(0.0, sp - bias);
-                    }
+                    double eep = compute_eep(
+                        am_price, spot_node, config.K_ref, tau, sigma, rate,
+                        config.dividend_yield, config.option_type);
 
                     size_t flat = mi * (n_tau * n_sigma * n_rate)
                                 + ti * (n_sigma * n_rate)
