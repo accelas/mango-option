@@ -108,16 +108,24 @@ double total_discrete_dividends(const std::vector<Dividend>& dividends,
     return total;
 }
 
+/// Minimum segment width for CGL node placement. Segments narrower than
+/// this are "gap" segments around dividend dates — they don't get CGL nodes
+/// or tensors, and queries landing in gaps are routed to adjacent real segments.
+static constexpr double kMinSegmentWidth = 0.01;
+
 /// Compute tau-space segment boundaries from dividend schedule.
-/// Returns sorted boundaries: {tau_min, tau_split_1 - kInset, tau_split_1 + kInset, ...}
-/// where splits occur at tau_split = maturity - dividend.calendar_time.
+/// Returns sorted boundaries: {tau_min, split-ε, split+ε, ..., tau_max}
+/// where split = maturity - dividend.calendar_time.
+/// Narrow gap segments around each dividend prevent CGL nodes from landing
+/// at the dividend date, where the PDE applies a spot adjustment that creates
+/// a value discontinuity between pre- and post-dividend snapshots.
 /// Dividends outside (tau_min, tau_max) are ignored.
 /// If no dividends fall inside range, returns {tau_min, tau_max} (single segment).
 static std::vector<double> compute_segment_boundaries(
     const std::vector<Dividend>& dividends, double maturity,
     double tau_min, double tau_max)
 {
-    constexpr double kInset = 5e-4;  // gap around dividend in tau-space
+    constexpr double kInset = 5e-4;  // gap half-width around dividend in tau-space
 
     // Collect tau-space split points from dividends
     std::vector<double> splits;
@@ -591,8 +599,8 @@ static BuildFn make_chebyshev_build_fn(
 }
 
 /// Create a BuildFn for segmented Chebyshev surfaces (discrete dividends).
-/// Stores V/K_ref directly (no EEP decomposition); segments are joined
-/// via TauSegmentSplit with local tau coordinates per segment.
+/// Stores V/K_ref directly (IdentityEEP, no EEP decomposition) with local
+/// tau coordinates per segment.
 static BuildFn make_segmented_chebyshev_build_fn(
     PDESliceCache& cache,
     const SegmentedChebyshevBuildConfig& config,
@@ -662,6 +670,9 @@ static BuildFn make_segmented_chebyshev_build_fn(
             double t = tau_nodes[ti];
             size_t s = 0;
             for (size_t k = 0; k < n_seg; ++k) {
+                // Skip gap segments — CGL nodes at boundaries belong
+                // to the adjacent real segment, not the narrow gap.
+                if (seg[k + 1] - seg[k] < kMinSegmentWidth) continue;
                 if (t >= seg[k] && t <= seg[k + 1]) {
                     s = k;
                     break;
@@ -710,13 +721,15 @@ static BuildFn make_segmented_chebyshev_build_fn(
                 for (size_t ri = 0; ri < Nr; ++ri) {
                     double rate = rate_nodes[ri];
                     for (size_t jt = 0; jt < Nt_seg; ++jt) {
-                        auto* spline = cache.get_slice(sigma, rate, tau_idx[jt]);
+                        auto* spline = cache.get_slice(
+                            sigma, rate, tau_idx[jt]);
                         if (!spline) continue;
                         for (size_t mi = 0; mi < Nm; ++mi) {
                             double v_over_k = spline->eval(m_nodes[mi]);
-                            size_t flat = mi * (Nt_seg * Ns * Nr)
-                                        + jt * (Ns * Nr)
-                                        + si * Nr + ri;
+                            size_t flat =
+                                mi * (Nt_seg * Ns * Nr)
+                                + jt * (Ns * Nr)
+                                + si * Nr + ri;
                             values[flat] = v_over_k;
                         }
                     }
@@ -737,28 +750,52 @@ static BuildFn make_segmented_chebyshev_build_fn(
                                 IdentityEEP{}, config.K_ref);
         }
 
-        // 4. Assemble TauSegmentSplit
-        std::vector<double> tau_start(n_seg), tau_end(n_seg);
-        std::vector<double> tau_min_v(n_seg), tau_max_v(n_seg);
-        for (size_t s = 0; s < n_seg; ++s) {
-            tau_start[s] = seg[s];
-            tau_end[s] = seg[s + 1];
-            tau_min_v[s] = 0.0;
-            tau_max_v[s] = seg[s + 1] - seg[s];
-        }
-
-        TauSegmentSplit split(std::move(tau_start), std::move(tau_end),
-                              std::move(tau_min_v), std::move(tau_max_v),
-                              config.K_ref);
-
-        using ChebTauSeg = SplitSurface<ChebyshevSegmentedLeaf, TauSegmentSplit>;
-        auto surface = std::make_shared<ChebTauSeg>(
-            std::move(leaves), std::move(split));
+        // 4. Direct evaluation lambda.
+        // IdentityEEP: leaf.price() = interp(log(S/K), τ, σ, r) * K/K_ref
+        // Multiply by K_ref to get V * K/K_ref (homogeneity scaling).
+        auto leaves_shared =
+            std::make_shared<std::vector<ChebyshevSegmentedLeaf>>(
+                std::move(leaves));
+        auto seg_copy = std::make_shared<std::vector<double>>(
+            seg.begin(), seg.end());
+        double K_ref = config.K_ref;
 
         return SurfaceHandle{
-            .price = [surface](double spot, double strike, double tau,
-                               double sigma, double rate) {
-                return surface->price(spot, strike, tau, sigma, rate);
+            .price = [leaves_shared, seg_copy, K_ref, n_seg](
+                double spot, double strike, double tau,
+                double sigma, double rate) {
+                // Find segment for tau (reverse scan for proper boundary handling)
+                const auto& bounds = *seg_copy;
+                size_t seg_idx = 0;
+                for (size_t i = n_seg; i > 0; --i) {
+                    size_t j = i - 1;
+                    if (j == 0 ? (tau >= bounds[j] && tau <= bounds[j + 1])
+                               : (tau > bounds[j] && tau <= bounds[j + 1])) {
+                        seg_idx = j;
+                        break;
+                    }
+                }
+                if (tau <= bounds.front()) seg_idx = 0;
+                else if (tau >= bounds.back()) seg_idx = n_seg - 1;
+
+                // If tau lands in a gap segment, route to nearest real segment
+                double seg_width = bounds[seg_idx + 1] - bounds[seg_idx];
+                if (seg_width < kMinSegmentWidth) {
+                    if (seg_idx + 1 < n_seg) {
+                        seg_idx = seg_idx + 1;
+                    } else if (seg_idx > 0) {
+                        seg_idx = seg_idx - 1;
+                    }
+                }
+
+                // Local tau within segment
+                double local_tau = std::clamp(
+                    tau - bounds[seg_idx],
+                    0.0, bounds[seg_idx + 1] - bounds[seg_idx]);
+
+                double v_over_kref = (*leaves_shared)[seg_idx].price(
+                    spot, strike, local_tau, sigma, rate);
+                return v_over_kref * K_ref;
             },
             .pde_solves = new_solves,
         };
@@ -839,14 +876,17 @@ static RefineFn make_segmented_chebyshev_refine_fn(
                 return true;
             }
             case 1: {
+                // Lower cap per segment (15) — higher counts cause Chebyshev
+                // oscillation near exercise boundary due to tensor product.
                 size_t new_n = std::min(
-                    static_cast<size_t>(state.num_tau * 1.3), size_t{30});
+                    static_cast<size_t>(state.num_tau * 1.3), size_t{15});
                 if (new_n <= state.num_tau) break;
                 state.num_tau = new_n;
                 tau.clear();
                 for (size_t s = 0; s + 1 < state.seg_boundaries.size(); ++s) {
                     double lo = state.seg_boundaries[s];
                     double hi = state.seg_boundaries[s + 1];
+                    if (hi - lo < kMinSegmentWidth) continue;
                     for (double t : chebyshev_nodes(new_n, lo, hi))
                         tau.push_back(t);
                 }
@@ -2126,12 +2166,15 @@ AdaptiveGridBuilder::build_segmented_chebyshev(
         config.dividend_yield, config.option_type, config.discrete_dividends);
     auto compute_error_fn = make_bs_vega_error_fn(params_);
 
-    // Seed initial tau: union of per-segment CGL nodes
+    // Seed initial tau: union of per-segment CGL nodes (skip gap segments)
     InitialGrids initial;
     initial.moneyness = chebyshev_nodes(state.num_m, state.m_lo, state.m_hi);
     initial.tau.clear();
     for (size_t s = 0; s + 1 < seg_bounds.size(); ++s) {
-        for (double t : chebyshev_nodes(state.num_tau, seg_bounds[s], seg_bounds[s + 1]))
+        double lo = seg_bounds[s];
+        double hi = seg_bounds[s + 1];
+        if (hi - lo < kMinSegmentWidth) continue;
+        for (double t : chebyshev_nodes(state.num_tau, lo, hi))
             initial.tau.push_back(t);
     }
     std::sort(initial.tau.begin(), initial.tau.end());
