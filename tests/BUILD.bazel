@@ -1537,6 +1537,9 @@ cc_test(
     deps = [
         "//src/option/table:surface_concepts",
         "//src/option/table:bspline_interpolant",
+        "//src/option/table:standard_transform_4d",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:identity_eep",
         "@googletest//:gtest_main",
     ],
 )
