@@ -4,7 +4,7 @@
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_slice_cache.hpp"
-#include "mango/option/table/bspline/spliced_surface_builder.hpp"
+#include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/support/error_types.hpp"

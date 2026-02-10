@@ -52,7 +52,6 @@ cc_library(
         "//src/option/table/bspline:bspline_slice_cache",
         "//src/option/table/bspline:bspline_segmented_builder",
         ":split_surface",
-        "//src/option/table/bspline:spliced_surface_builder",
         "//src/option/table/bspline:bspline_surface",
         ":tau_segment_split",
         "//src/math:black_scholes_analytics",

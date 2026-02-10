@@ -223,7 +223,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Build each segment's surface, then assemble into SegmentedSurface.
     // Index 0 = closest to expiry.
-    std::vector<SegmentConfig> segment_configs;
+    std::vector<BSplineSegmentConfig> segment_configs;
     segment_configs.reserve(n_segments);
 
     // The "previous" surface, used to generate chained ICs for earlier segments.
@@ -358,7 +358,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
 
         auto surface_ptr = *surface;
 
-        segment_configs.push_back(SegmentConfig{
+        segment_configs.push_back(BSplineSegmentConfig{
             .surface = surface_ptr,
             .tau_start = tau_start,
             .tau_end = tau_end,
@@ -369,12 +369,86 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Step 5: Assemble SegmentedSurface
     // =====================================================================
-    SegmentedConfig seg_config{
+    BSplineSegmentedConfig seg_config{
         .segments = std::move(segment_configs),
         .K_ref = K_ref,
     };
 
     return build_segmented_surface(std::move(seg_config));
+}
+
+// ===========================================================================
+// Segmented surface assembly
+// ===========================================================================
+
+std::expected<BSplineSegmentedSurface, PriceTableError>
+build_segmented_surface(BSplineSegmentedConfig config) {
+    if (config.segments.empty()) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig, 0, 0});
+    }
+
+    std::vector<double> tau_start;
+    std::vector<double> tau_end;
+    std::vector<double> tau_min;
+    std::vector<double> tau_max;
+    std::vector<BSplineSegmentedLeaf> leaves;
+
+    tau_start.reserve(config.segments.size());
+    tau_end.reserve(config.segments.size());
+    tau_min.reserve(config.segments.size());
+    tau_max.reserve(config.segments.size());
+    leaves.reserve(config.segments.size());
+
+    for (auto& seg : config.segments) {
+        tau_start.push_back(seg.tau_start);
+        tau_end.push_back(seg.tau_end);
+        tau_min.push_back(seg.surface->axes().grids[1].front());
+        tau_max.push_back(seg.surface->axes().grids[1].back());
+
+        SharedBSplineInterp<4> interp(seg.surface);
+        StandardTransform4D xform;
+        IdentityEEP eep;
+        leaves.emplace_back(std::move(interp), xform, eep, config.K_ref);
+    }
+
+    TauSegmentSplit split(
+        std::move(tau_start), std::move(tau_end),
+        std::move(tau_min), std::move(tau_max),
+        config.K_ref);
+
+    return BSplineSegmentedSurface(std::move(leaves), std::move(split));
+}
+
+// ===========================================================================
+// Multi-K_ref surface assembly
+// ===========================================================================
+
+std::expected<BSplineMultiKRefInner, PriceTableError>
+build_multi_kref_surface(std::vector<BSplineMultiKRefEntry> entries) {
+    if (entries.empty()) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig, 0, 0});
+    }
+
+    std::sort(entries.begin(), entries.end(),
+              [](const BSplineMultiKRefEntry& a, const BSplineMultiKRefEntry& b) {
+                  return a.K_ref < b.K_ref;
+              });
+
+    std::vector<double> k_refs;
+    std::vector<BSplineSegmentedSurface> slices;
+    k_refs.reserve(entries.size());
+    slices.reserve(entries.size());
+
+    for (auto& entry : entries) {
+        k_refs.push_back(entry.K_ref);
+        slices.push_back(std::move(entry.surface));
+    }
+
+    MultiKRefSplit split(std::move(k_refs));
+
+    return BSplineMultiKRefInner(std::move(slices), std::move(split));
 }
 
 }  // namespace mango

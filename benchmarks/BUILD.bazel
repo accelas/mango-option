@@ -184,7 +184,6 @@ cc_binary(
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/bspline:bspline_segmented_builder",
-        "//src/option/table/bspline:spliced_surface_builder",
         "//src/option/table/bspline:eep_decomposer",
         "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",

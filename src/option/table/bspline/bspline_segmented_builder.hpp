@@ -1,16 +1,46 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include <vector>
 #include <expected>
+#include <memory>
+#include <vector>
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/bspline/spliced_surface_builder.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/support/error_types.hpp"
 
 namespace mango {
+
+// ===========================================================================
+// Segmented surface assembly
+// ===========================================================================
+
+struct BSplineSegmentConfig {
+    std::shared_ptr<const PriceTableSurface> surface;
+    double tau_start;
+    double tau_end;
+};
+
+struct BSplineSegmentedConfig {
+    std::vector<BSplineSegmentConfig> segments;
+    double K_ref;
+};
+
+[[nodiscard]] std::expected<BSplineSegmentedSurface, PriceTableError>
+build_segmented_surface(BSplineSegmentedConfig config);
+
+// ===========================================================================
+// Multi-K_ref surface assembly
+// ===========================================================================
+
+struct BSplineMultiKRefEntry {
+    double K_ref;
+    BSplineSegmentedSurface surface;
+};
+
+[[nodiscard]] std::expected<BSplineMultiKRefInner, PriceTableError>
+build_multi_kref_surface(std::vector<BSplineMultiKRefEntry> entries);
 
 /// Orchestrates backward-chained construction of a SegmentedSurface for a
 /// single K_ref.  Splits maturity at discrete dividend dates. All segments use

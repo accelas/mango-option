@@ -13,7 +13,6 @@
 #include "mango/option/table/bspline/eep_decomposer.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
-#include "mango/option/table/bspline/spliced_surface_builder.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -68,7 +67,7 @@ std::expected<BSplineMultiKRefInner, PriceTableError> build_multi_kref_manual(
         }
     }
 
-    std::vector<MultiKRefEntry> entries;
+    std::vector<BSplineMultiKRefEntry> entries;
     entries.reserve(K_refs.size());
 
     for (double K_ref : K_refs) {
@@ -87,7 +86,7 @@ std::expected<BSplineMultiKRefInner, PriceTableError> build_multi_kref_manual(
             return std::unexpected(surface.error());
         }
 
-        entries.push_back(MultiKRefEntry{
+        entries.push_back(BSplineMultiKRefEntry{
             .K_ref = K_ref,
             .surface = std::move(*surface),
         });

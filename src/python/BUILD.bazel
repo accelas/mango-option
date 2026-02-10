@@ -12,7 +12,7 @@ pybind_extension(
         "//src/option:option_grid",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table:adaptive_grid_builder",
-        "//src/option/table/bspline:spliced_surface_builder",
+
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_workspace",
         "//src/math:root_finding",

@@ -16,7 +16,6 @@
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
-#include "mango/option/table/bspline/spliced_surface_builder.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include <algorithm>
 #include <cmath>
@@ -1883,7 +1882,7 @@ AdaptiveGridBuilder::build_segmented(
     auto& build = *result;
 
     // 3. Assemble MultiKRefSurface
-    std::vector<MultiKRefEntry> entries;
+    std::vector<BSplineMultiKRefEntry> entries;
     for (size_t i = 0; i < K_refs.size(); ++i) {
         entries.push_back({.K_ref = K_refs[i], .surface = std::move(build.surfaces[i])});
     }
@@ -1950,7 +1949,7 @@ AdaptiveGridBuilder::build_segmented(
         build.seg_template.tau_points_per_segment = bumped_tau;
         auto retry_segs = build_segmented_surfaces(build.seg_template, K_refs);
         if (retry_segs.has_value()) {
-            std::vector<MultiKRefEntry> retry_entries;
+            std::vector<BSplineMultiKRefEntry> retry_entries;
             for (size_t i = 0; i < K_refs.size(); ++i) {
                 retry_entries.push_back({.K_ref = K_refs[i], .surface = std::move((*retry_segs)[i])});
             }
