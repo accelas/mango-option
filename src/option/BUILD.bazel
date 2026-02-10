@@ -158,6 +158,8 @@ cc_library(
         "//src/option/table:adaptive_grid_builder",
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
         "//src/math:root_finding",
         "//src/support:parallel",
         "//src/support:error_types",

@@ -13,6 +13,7 @@
 #include "mango/option/table/bspline/eep_decomposer.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
+#include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -24,6 +25,8 @@ namespace mango {
 
 template class InterpolatedIVSolver<BSplinePriceTable>;
 template class InterpolatedIVSolver<BSplineMultiKRefSurface>;
+template class InterpolatedIVSolver<ChebyshevSurface>;
+template class InterpolatedIVSolver<ChebyshevRawSurface>;
 
 // =====================================================================
 // Factory internals
@@ -128,6 +131,14 @@ AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<BSplinePriceTable> solver)
 {}
 
 AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<BSplineMultiKRefSurface> solver)
+    : solver_(std::move(solver))
+{}
+
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<ChebyshevSurface> solver)
+    : solver_(std::move(solver))
+{}
+
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<ChebyshevRawSurface> solver)
     : solver_(std::move(solver))
 {}
 
@@ -328,6 +339,42 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
 }
 
 // ---------------------------------------------------------------------------
+// Factory: Chebyshev path
+// ---------------------------------------------------------------------------
+
+static std::expected<AnyIVSolver, ValidationError>
+build_chebyshev(const IVSolverFactoryConfig& config, const ChebyshevIVPath& path) {
+    auto b = extract_bounds(config.grid);
+
+    ChebyshevTableConfig cheb_config{
+        .num_pts = path.num_pts,
+        .domain = Domain<4>{
+            .lo = {b.m_min, 0.01, b.sigma_min, b.rate_min},
+            .hi = {b.m_max, path.maturity, b.sigma_max, b.rate_max},
+        },
+        .K_ref = config.spot,
+        .option_type = config.option_type,
+        .dividend_yield = config.dividend_yield,
+        .tucker_epsilon = path.tucker_epsilon,
+    };
+
+    auto result = build_chebyshev_table(cheb_config);
+    if (!result.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+
+    return std::visit([&](auto&& surface) -> std::expected<AnyIVSolver, ValidationError> {
+        auto solver = InterpolatedIVSolver<std::decay_t<decltype(surface)>>::create(
+            std::move(surface), config.solver_config);
+        if (!solver.has_value()) {
+            return std::unexpected(solver.error());
+        }
+        return AnyIVSolver(std::move(*solver));
+    }, std::move(result->surface));
+}
+
+// ---------------------------------------------------------------------------
 // Public factory
 // ---------------------------------------------------------------------------
 
@@ -336,8 +383,10 @@ std::expected<AnyIVSolver, ValidationError> make_interpolated_iv_solver(const IV
         using T = std::decay_t<decltype(path)>;
         if constexpr (std::is_same_v<T, StandardIVPath>) {
             return build_standard(config, path);
-        } else {
+        } else if constexpr (std::is_same_v<T, SegmentedIVPath>) {
             return build_segmented(config, path);
+        } else {
+            return build_chebyshev(config, path);
         }
     }, config.path);
 }

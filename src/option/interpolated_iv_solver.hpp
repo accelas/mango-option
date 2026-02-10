@@ -23,6 +23,7 @@
 #include "mango/option/iv_result.hpp"
 #include "mango/option/table/price_surface_concept.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"
@@ -161,6 +162,13 @@ struct SegmentedIVPath {
     MultiKRefConfig kref_config;  ///< defaults to auto
 };
 
+/// Chebyshev path: tensor interpolation on CGL nodes
+struct ChebyshevIVPath {
+    double maturity = 2.0;
+    std::array<size_t, 4> num_pts = {16, 12, 12, 8};  ///< CGL nodes per axis
+    double tucker_epsilon = 1e-8;  ///< 0 = use RawTensor
+};
+
 /// Configuration for the IV solver factory
 struct IVSolverFactoryConfig {
     OptionType option_type = OptionType::PUT;
@@ -169,7 +177,7 @@ struct IVSolverFactoryConfig {
     IVGrid grid;                                    ///< Grid points (exact or domain bounds)
     std::optional<AdaptiveGridParams> adaptive;     ///< If set, refine grid adaptively
     InterpolatedIVSolverConfig solver_config;       ///< Newton config
-    std::variant<StandardIVPath, SegmentedIVPath> path;
+    std::variant<StandardIVPath, SegmentedIVPath, ChebyshevIVPath> path;
 };
 
 /// Type-erased IV solver wrapping either path
@@ -181,16 +189,24 @@ public:
     /// Solve for implied volatility (batch with OpenMP)
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
-    /// Constructor from standard solver
+    /// Constructor from standard B-spline solver
     explicit AnyIVSolver(InterpolatedIVSolver<BSplinePriceTable> solver);
 
-    /// Constructor from segmented solver (spliced surface)
+    /// Constructor from segmented B-spline solver
     explicit AnyIVSolver(InterpolatedIVSolver<BSplineMultiKRefSurface> solver);
+
+    /// Constructor from Chebyshev Tucker solver
+    explicit AnyIVSolver(InterpolatedIVSolver<ChebyshevSurface> solver);
+
+    /// Constructor from Chebyshev raw solver
+    explicit AnyIVSolver(InterpolatedIVSolver<ChebyshevRawSurface> solver);
 
 private:
     using SolverVariant = std::variant<
         InterpolatedIVSolver<BSplinePriceTable>,
-        InterpolatedIVSolver<BSplineMultiKRefSurface>
+        InterpolatedIVSolver<BSplineMultiKRefSurface>,
+        InterpolatedIVSolver<ChebyshevSurface>,
+        InterpolatedIVSolver<ChebyshevRawSurface>
     >;
     SolverVariant solver_;
 };
