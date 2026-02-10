@@ -155,7 +155,7 @@ cc_test(
     size = "small",
     srcs = ["price_tensor_test.cc"],
     deps = [
-        "//src/option/table:price_tensor",
+        "//src/option/table/bspline:bspline_builder",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

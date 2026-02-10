@@ -20,20 +20,6 @@ cc_library(
 )
 
 cc_library(
-    name = "price_tensor",
-    hdrs = ["price_tensor.hpp"],
-    deps = [
-        "//src/option/table/bspline:bspline_surface",
-        "//src/support:aligned_allocator",
-        "//src/math:safe_math",
-        "@mdspan//:mdspan",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
     name = "price_table_metadata",
     hdrs = ["price_table_metadata.hpp"],
     deps = [
@@ -145,8 +131,7 @@ cc_library(
     srcs = ["eep/eep_decomposer.cpp"],
     hdrs = ["eep/eep_decomposer.hpp"],
     deps = [
-        "//src/option/table/bspline:bspline_surface",
-        ":price_tensor",
+        "//src/option/table/bspline:bspline_builder",
         "//src/option:european_option",
         "//src/option:option_spec",
     ],

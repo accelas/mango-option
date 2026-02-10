@@ -4,7 +4,6 @@
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "tests/price_table_builder_test_access.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
-#include "mango/option/table/price_tensor.hpp"
 
 namespace mango {
 namespace {
