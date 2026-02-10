@@ -2,9 +2,11 @@
 #pragma once
 
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
+#include "mango/support/parallel.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <span>
@@ -110,6 +112,7 @@ public:
 
     /// Evaluate the interpolant at a query point.
     /// Coordinates are clamped to the domain.
+    MANGO_TARGET_CLONES("default", "avx2", "avx512f")
     [[nodiscard]] double eval(std::array<double, N> query) const {
         // Clamp to domain
         for (size_t d = 0; d < N; ++d) {
@@ -170,14 +173,21 @@ private:
         }
 
         // Barycentric formula: c_j = w_j / (x - x_j) / sum_k w_k / (x - x_k)
+        const double* w = weights.data();
+        const double* nd = nodes.data();
         std::vector<double> c(n);
         double denom = 0.0;
+        MANGO_PRAGMA_SIMD
         for (size_t j = 0; j < n; ++j) {
-            c[j] = weights[j] / (x - nodes[j]);
-            denom += c[j];
+            c[j] = w[j] / (x - nd[j]);
         }
         for (size_t j = 0; j < n; ++j) {
-            c[j] /= denom;
+            denom += c[j];
+        }
+        double inv_denom = 1.0 / denom;
+        MANGO_PRAGMA_SIMD
+        for (size_t j = 0; j < n; ++j) {
+            c[j] *= inv_denom;
         }
         return c;
     }

@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "mango/support/parallel.hpp"
+
 #include <Eigen/Dense>
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <numeric>
 #include <vector>
@@ -328,40 +331,57 @@ public:
     }
 
     /// Contract with per-axis coefficient vectors (length shape[d] each).
-    /// Internally: contracted[d] = factors[d]^T * coeffs[d] (length ranks[d])
-    /// Then sum over core tensor weighted by product of contracted values.
+    /// Internally: projected[d] = factors[d]^T * coeffs[d] (length ranks[d])
+    /// Then contract core tensor via sequential axis reduction with SIMD.
+    MANGO_TARGET_CLONES("default", "avx2", "avx512f")
     [[nodiscard]] double
     contract(const std::array<std::vector<double>, N>& coeffs) const {
         // Step 1: Project each coefficient vector into the rank-space
-        std::array<Eigen::VectorXd, N> projected;
+        // projected[d] = U_d^T * coeffs[d], length ranks_[d]
+        std::array<std::vector<double>, N> projected;
         for (size_t d = 0; d < N; ++d) {
-            Eigen::Map<const Eigen::VectorXd> c(
-                coeffs[d].data(),
-                static_cast<Eigen::Index>(coeffs[d].size()));
-            projected[d] = factors_[d].transpose() * c;
-        }
-
-        // Step 2: Contract with core tensor
-        size_t core_total = core_.size();
-
-        // Precompute core strides
-        std::array<size_t, N> core_strides{};
-        core_strides[N - 1] = 1;
-        for (int d = static_cast<int>(N) - 2; d >= 0; --d)
-            core_strides[d] = core_strides[d + 1] * ranks_[d + 1];
-
-        double result = 0.0;
-        for (size_t flat = 0; flat < core_total; ++flat) {
-            double weight = core_[flat];
-            size_t remaining = flat;
-            for (size_t d = 0; d < N; ++d) {
-                size_t idx = remaining / core_strides[d];
-                remaining %= core_strides[d];
-                weight *= projected[d](static_cast<Eigen::Index>(idx));
+            size_t r = ranks_[d];
+            size_t n = shape_[d];
+            projected[d].resize(r);
+            const auto& U = factors_[d];
+            const double* c = coeffs[d].data();
+            for (size_t i = 0; i < r; ++i) {
+                double sum = 0.0;
+                MANGO_PRAGMA_SIMD
+                for (size_t j = 0; j < n; ++j) {
+                    sum = std::fma(
+                        U(static_cast<Eigen::Index>(j),
+                          static_cast<Eigen::Index>(i)),
+                        c[j], sum);
+                }
+                projected[d][i] = sum;
             }
-            result += weight;
         }
-        return result;
+
+        // Step 2: Sequential axis contraction on the core tensor
+        // Same pattern as RawTensor: contract last axis first, then next, ...
+        std::vector<double> buf = core_;
+        size_t buf_size = core_.size();
+
+        for (int d = static_cast<int>(N) - 1; d >= 0; --d) {
+            size_t axis_len = ranks_[d];
+            size_t outer = buf_size / axis_len;
+            const double* p = projected[d].data();
+
+            std::vector<double> next(outer);
+            for (size_t i = 0; i < outer; ++i) {
+                const double* row = buf.data() + i * axis_len;
+                double sum = 0.0;
+                MANGO_PRAGMA_SIMD
+                for (size_t j = 0; j < axis_len; ++j) {
+                    sum = std::fma(row[j], p[j], sum);
+                }
+                next[i] = sum;
+            }
+            buf = std::move(next);
+            buf_size = outer;
+        }
+        return buf[0];
     }
 
     /// Total number of stored doubles (core + all factor matrices).
