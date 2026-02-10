@@ -361,3 +361,29 @@ cc_library(
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
 )
+
+cc_library(
+    name = "split_surface",
+    hdrs = ["split_surface.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
+    name = "tau_segment_split",
+    hdrs = ["splits/tau_segment.hpp"],
+    deps = [":split_surface"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
+    name = "multi_kref_split",
+    hdrs = ["splits/multi_kref.hpp"],
+    deps = [":split_surface"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)

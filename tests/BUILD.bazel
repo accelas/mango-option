@@ -1544,3 +1544,15 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "split_surface_test",
+    size = "small",
+    srcs = ["split_surface_test.cc"],
+    deps = [
+        "//src/option/table:split_surface",
+        "//src/option/table:tau_segment_split",
+        "//src/option/table:multi_kref_split",
+        "@googletest//:gtest_main",
+    ],
+)
+
