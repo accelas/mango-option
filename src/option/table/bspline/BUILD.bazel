@@ -105,6 +105,7 @@ cc_library(
     hdrs = ["eep_decomposer.hpp"],
     deps = [
         ":bspline_builder",
+        "//src/option:european_option",
         "//src/option/table:eep_decomposer",
     ],
     visibility = ["//visibility:public"],

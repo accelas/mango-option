@@ -37,6 +37,7 @@ cc_library(
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/math:cubic_spline_solver",
         "//src/option:american_option_batch",
+        "//src/option:european_option",
         "//src/option/table:eep_decomposer",
     ],
     visibility = ["//visibility:public"],

@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "mango/option/european_option.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
+
+#include <cmath>
 
 namespace mango {
 
@@ -34,9 +37,14 @@ struct EEPDecomposer {
                         double spot = std::exp(x) * K_ref;
                         double american_price = K_ref * tensor.view[i, j, v_idx, r_idx];
 
-                        tensor.view[i, j, v_idx, r_idx] = compute_eep(
-                            american_price, spot, K_ref, tau, sigma, rate,
-                            dividend_yield, option_type);
+                        auto eu = EuropeanOptionSolver(
+                            OptionSpec{.spot = spot, .strike = K_ref, .maturity = tau,
+                                .rate = rate, .dividend_yield = dividend_yield,
+                                .option_type = option_type}, sigma).solve();
+
+                        double eep_raw = eu.has_value()
+                            ? american_price - eu->value() : 0.0;
+                        tensor.view[i, j, v_idx, r_idx] = eep_floor(eep_raw);
                     }
                 }
             }

@@ -4,6 +4,7 @@
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/european_option.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
 
 #include <chrono>
@@ -91,9 +92,15 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
 
                     double am_price = spline.eval(m) * config.K_ref;
 
-                    double eep = compute_eep(
-                        am_price, spot_node, config.K_ref, tau, sigma, rate,
-                        config.dividend_yield, config.option_type);
+                    auto eu = EuropeanOptionSolver(
+                        OptionSpec{.spot = spot_node, .strike = config.K_ref,
+                            .maturity = tau, .rate = rate,
+                            .dividend_yield = config.dividend_yield,
+                            .option_type = config.option_type}, sigma).solve();
+
+                    double eep_raw = eu.has_value()
+                        ? am_price - eu->value() : 0.0;
+                    double eep = eep_floor(eep_raw);
 
                     size_t flat = mi * (n_tau * n_sigma * n_rate)
                                 + ti * (n_sigma * n_rate)
