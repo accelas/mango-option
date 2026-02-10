@@ -25,7 +25,7 @@ using StandardLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
                                         StandardTransform4D, AnalyticalEEP>;
 
 /// Standard surface (satisfies PriceSurface concept)
-using StandardSurface = BoundedSurface<StandardLeaf>;
+using StandardSurface = PriceTable<StandardLeaf>;
 
 /// Leaf adapter for segmented surfaces (no EEP decomposition)
 using SegmentedLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
@@ -38,7 +38,7 @@ using SegmentedPriceSurface = SplitSurface<SegmentedLeaf, TauSegmentSplit>;
 using MultiKRefInner = SplitSurface<SegmentedPriceSurface, MultiKRefSplit>;
 
 /// Multi-K_ref surface (satisfies PriceSurface concept)
-using MultiKRefPriceSurface = BoundedSurface<MultiKRefInner>;
+using MultiKRefPriceSurface = PriceTable<MultiKRefInner>;
 
 
 /// Create a StandardSurface from a pre-built EEP surface.

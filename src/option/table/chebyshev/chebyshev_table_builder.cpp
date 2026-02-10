@@ -135,7 +135,7 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
         std::span<const double>(eep_values),
         config.domain, config.num_pts, config.tucker_epsilon);
 
-    // Wrap in EEPSurfaceAdapter + BoundedSurface
+    // Wrap in EEPSurfaceAdapter + PriceTable
     ChebyshevLeaf leaf(
         std::move(interp),
         StandardTransform4D{},

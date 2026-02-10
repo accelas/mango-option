@@ -21,7 +21,7 @@ structure between the B-spline and Chebyshev backends.
 
 | Old | New | Reason |
 |-----|-----|--------|
-| `BoundedSurface<T>` | `PriceTable<T>` | Describes role, not implementation |
+| `PriceTable<T>` | `PriceTable<T>` | Describes role, not implementation |
 | `StandardLeaf` | `BSplineLeaf` | "Standard" is not descriptive |
 | `StandardSurface` | `BSplinePriceTable` | Symmetric with `ChebyshevPriceTable` |
 | `SegmentedLeaf` | `BSplineSegmentedLeaf` | Symmetric with `ChebyshevSegmentedLeaf` |
@@ -120,7 +120,7 @@ using ChebyshevSegmentedLeaf = EEPSurfaceAdapter<
     StandardTransform4D, IdentityEEP>;
 ```
 
-## `PriceTable<Inner>` (was `BoundedSurface`)
+## `PriceTable<Inner>` (was `PriceTable`)
 
 ```cpp
 template <typename Inner>

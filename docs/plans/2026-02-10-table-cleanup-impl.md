@@ -25,7 +25,7 @@ These tasks use `replace_all` across the repo. No file moves, no interface chang
 
 ---
 
-### Task 1: Rename BoundedSurface → PriceTable
+### Task 1: Rename PriceTable → PriceTable
 
 Rename the class template and its file. This is the most-referenced type in the cleanup.
 
@@ -36,19 +36,19 @@ Rename the class template and its file. This is the most-referenced type in the 
 **Step 1: Rename the class**
 
 In `src/option/table/bounded_surface.hpp`:
-- `BoundedSurface` → `PriceTable` (class name, all occurrences)
+- `PriceTable` → `PriceTable` (class name, all occurrences)
 - Keep `SurfaceBounds` for now (removed in Phase 3)
 - Update comment: "Adds bounds and metadata to any inner surface" → "Top-level queryable price surface with runtime metadata"
 
 **Step 2: Apply rename across repo**
 
-Use `replace_all` in every file that references `BoundedSurface`:
+Use `replace_all` in every file that references `PriceTable`:
 - `src/option/table/standard_surface.hpp:28,41` — type aliases
 - `src/option/table/chebyshev/chebyshev_surface.hpp:19,25` — type aliases
 - `src/option/table/chebyshev/chebyshev_table_builder.cpp:138,145`
 - `src/option/table/adaptive_grid_builder.cpp:603`
 - `tests/surface_concepts_test.cc:79,82`
-- `docs/` — all planning docs referencing BoundedSurface
+- `docs/` — all planning docs referencing PriceTable
 
 **Step 3: Build and test**
 
@@ -62,7 +62,7 @@ bazel build //src/python:mango_option
 
 ```bash
 git add -A
-git commit -m "Rename BoundedSurface to PriceTable"
+git commit -m "Rename PriceTable to PriceTable"
 ```
 
 ---
@@ -703,7 +703,7 @@ ls src/option/table/error_attribution.hpp      # should not exist
 ls src/option/table/dividend_utils.hpp         # should not exist
 
 # Confirm no references to old names
-grep -r "BoundedSurface" src/ tests/ benchmarks/  # should be zero
+grep -r "PriceTable" src/ tests/ benchmarks/  # should be zero
 grep -r "StandardLeaf" src/ tests/ benchmarks/     # should be zero
 grep -r "StandardSurface" src/ tests/ benchmarks/  # should be zero
 grep -r "make_standard_surface" src/ tests/ benchmarks/  # should be zero

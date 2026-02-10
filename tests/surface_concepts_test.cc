@@ -76,8 +76,8 @@ TEST(AnalyticalEEPTest, EuropeanVegaIsPositive) {
     EXPECT_GT(v, 0.0);
 }
 
-TEST(BoundedSurfaceTest, SatisfiesPriceSurfaceConcept) {
+TEST(PriceTableTest, SatisfiesPriceSurfaceConcept) {
     using StandardAdapter = EEPSurfaceAdapter<SharedBSplineInterp<4>,
                                                StandardTransform4D, AnalyticalEEP>;
-    static_assert(PriceSurface<BoundedSurface<StandardAdapter>>);
+    static_assert(PriceSurface<PriceTable<StandardAdapter>>);
 }

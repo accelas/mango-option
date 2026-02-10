@@ -16,13 +16,13 @@ using ChebyshevLeaf = EEPSurfaceAdapter<
     ChebyshevInterpolant<4, TuckerTensor<4>>,
     StandardTransform4D, AnalyticalEEP>;
 
-using ChebyshevSurface = BoundedSurface<ChebyshevLeaf>;
+using ChebyshevSurface = PriceTable<ChebyshevLeaf>;
 
 using ChebyshevRawLeaf = EEPSurfaceAdapter<
     ChebyshevInterpolant<4, RawTensor<4>>,
     StandardTransform4D, AnalyticalEEP>;
 
-using ChebyshevRawSurface = BoundedSurface<ChebyshevRawLeaf>;
+using ChebyshevRawSurface = PriceTable<ChebyshevRawLeaf>;
 
 /// Leaf for segmented Chebyshev surfaces (V/K_ref, no EEP decomposition).
 /// Used with TauSegmentSplit for discrete dividend support.
