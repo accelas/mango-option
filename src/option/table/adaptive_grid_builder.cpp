@@ -9,7 +9,6 @@
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/pde_slice_cache.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
-#include "mango/option/table/eep/identity_eep.hpp"
 #include "mango/option/table/bspline/bspline_slice_cache.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/split_surface.hpp"
@@ -577,10 +576,10 @@ static BuildFn make_chebyshev_build_fn(
             build_from_values(std::span<const double>(eep_values),
                               domain, num_pts);
 
-        ChebyshevRawLeaf leaf(
-            std::move(interp), StandardTransform4D{},
-            AnalyticalEEP(config.option_type, config.dividend_yield),
-            config.K_ref);
+        ChebyshevRawTransformLeaf tleaf(
+            std::move(interp), StandardTransform4D{}, config.K_ref);
+        ChebyshevRawLeaf leaf(std::move(tleaf),
+            AnalyticalEEP(config.option_type, config.dividend_yield));
 
         SurfaceBounds bounds{
             .m_min = m_nodes.front(), .m_max = m_nodes.back(),
@@ -605,7 +604,7 @@ static BuildFn make_chebyshev_build_fn(
 }
 
 /// Create a BuildFn for segmented Chebyshev surfaces (discrete dividends).
-/// Stores V/K_ref directly (IdentityEEP, no EEP decomposition) with local
+/// Stores V/K_ref directly (TransformLeaf, no EEP decomposition) with local
 /// tau coordinates per segment.
 static BuildFn make_segmented_chebyshev_build_fn(
     PDESliceCache& cache,
@@ -712,7 +711,7 @@ static BuildFn make_segmented_chebyshev_build_fn(
                     build_from_values(std::span<const double>(zeros),
                                       domain, num_pts);
                 leaves.emplace_back(std::move(interp), StandardTransform4D{},
-                                    IdentityEEP{}, config.K_ref);
+                                    config.K_ref);
                 continue;
             }
 
@@ -753,11 +752,11 @@ static BuildFn make_segmented_chebyshev_build_fn(
                 build_from_values(std::span<const double>(values),
                                   domain, num_pts);
             leaves.emplace_back(std::move(interp), StandardTransform4D{},
-                                IdentityEEP{}, config.K_ref);
+                                config.K_ref);
         }
 
         // 4. Direct evaluation lambda.
-        // IdentityEEP: leaf.price() = interp(log(S/K), τ, σ, r) * K/K_ref
+        // TransformLeaf: leaf.price() = interp(log(S/K), τ, σ, r) * K/K_ref
         // Multiply by K_ref to get V * K/K_ref (homogeneity scaling).
         auto leaves_shared =
             std::make_shared<std::vector<ChebyshevSegmentedLeaf>>(

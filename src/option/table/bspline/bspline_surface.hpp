@@ -3,9 +3,9 @@
 
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/price_table.hpp"
-#include "mango/option/table/eep/eep_surface_adapter.hpp"
+#include "mango/option/table/transform_leaf.hpp"
+#include "mango/option/table/eep/eep_layer.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
-#include "mango/option/table/eep/identity_eep.hpp"
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
@@ -200,16 +200,17 @@ private:
 // B-spline type aliases — concept-based layered architecture
 // ===========================================================================
 
+/// Base transform leaf (coords + interpolation + K/K_ref scaling)
+using BSplineTransformLeaf = TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>;
+
 /// Leaf adapter for standard (EEP) surfaces
-using BSplineLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
-                                        StandardTransform4D, AnalyticalEEP>;
+using BSplineLeaf = EEPLayer<BSplineTransformLeaf, AnalyticalEEP>;
 
 /// Standard B-spline price table
 using BSplinePriceTable = PriceTable<BSplineLeaf>;
 
 /// Leaf adapter for segmented surfaces (no EEP decomposition)
-using BSplineSegmentedLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
-                                         StandardTransform4D, IdentityEEP>;
+using BSplineSegmentedLeaf = TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>;
 
 /// Tau-segmented surface
 using BSplineSegmentedSurface = SplitSurface<BSplineSegmentedLeaf, TauSegmentSplit>;

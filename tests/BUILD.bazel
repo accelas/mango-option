@@ -1487,8 +1487,6 @@ cc_test(
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table:standard_transform_4d",
         "//src/option/table:analytical_eep",
-        "//src/option/table:identity_eep",
-        "//src/option/table:eep_surface_adapter",
         "//src/option/table:price_table",
 
         "@googletest//:gtest_main",

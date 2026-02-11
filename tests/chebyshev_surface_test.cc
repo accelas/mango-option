@@ -23,11 +23,10 @@ TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
         [](std::array<double, 4>) { return 0.05; },
         domain, num_pts, 1e-8);
 
-    ChebyshevLeaf leaf(
-        std::move(interp),
-        StandardTransform4D{},
-        AnalyticalEEP(OptionType::PUT, 0.02),
-        100.0);
+    ChebyshevTransformLeaf tleaf(
+        std::move(interp), StandardTransform4D{}, 100.0);
+    ChebyshevLeaf leaf(std::move(tleaf),
+        AnalyticalEEP(OptionType::PUT, 0.02));
 
     SurfaceBounds bounds{
         .m_min = -0.5, .m_max = 0.5,

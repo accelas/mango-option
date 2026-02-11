@@ -408,8 +408,7 @@ build_segmented_surface(BSplineSegmentedConfig config) {
 
         SharedBSplineInterp<4> interp(seg.surface);
         StandardTransform4D xform;
-        IdentityEEP eep;
-        leaves.emplace_back(std::move(interp), xform, eep, config.K_ref);
+        leaves.emplace_back(std::move(interp), xform, config.K_ref);
     }
 
     TauSegmentSplit split(

@@ -181,16 +181,18 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     if (config.tucker_epsilon > 0) {
         auto interp = ChebyshevInterpolant<4, TuckerTensor<4>>::build_from_values(
             eep_span, config.domain, config.num_pts, config.tucker_epsilon);
-        ChebyshevLeaf leaf(std::move(interp), StandardTransform4D{},
-                           eep, config.K_ref);
+        ChebyshevTransformLeaf tleaf(std::move(interp), StandardTransform4D{},
+                                     config.K_ref);
+        ChebyshevLeaf leaf(std::move(tleaf), eep);
         return make_result(ChebyshevSurface(
             std::move(leaf), bounds, config.option_type, config.dividend_yield));
     }
 
     auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build_from_values(
         eep_span, config.domain, config.num_pts);
-    ChebyshevRawLeaf leaf(std::move(interp), StandardTransform4D{},
-                          eep, config.K_ref);
+    ChebyshevRawTransformLeaf tleaf(std::move(interp), StandardTransform4D{},
+                                    config.K_ref);
+    ChebyshevRawLeaf leaf(std::move(tleaf), eep);
     return make_result(ChebyshevRawSurface(
         std::move(leaf), bounds, config.option_type, config.dividend_yield));
 }

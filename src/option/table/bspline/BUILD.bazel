@@ -20,9 +20,9 @@ cc_library(
     deps = [
         "//src/option:option_spec",
         "//src/option/table:price_table",
-        "//src/option/table:eep_surface_adapter",
+        "//src/option/table:transform_leaf",
+        "//src/option/table:eep_layer",
         "//src/option/table:analytical_eep",
-        "//src/option/table:identity_eep",
         "//src/option/table:split_surface",
         "//src/option/table:tau_segment_split",
         "//src/option/table:multi_kref_split",

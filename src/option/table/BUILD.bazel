@@ -35,7 +35,6 @@ cc_library(
         ":adaptive_grid_types",
         "//src/option:dividend_utils",
         "//src/option/table/bspline:bspline_tensor_accessor",
-        ":identity_eep",
         ":multi_kref_split",
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_slice_cache",
@@ -108,16 +107,17 @@ cc_library(
 )
 
 cc_library(
-    name = "identity_eep",
-    hdrs = ["eep/identity_eep.hpp"],
+    name = "transform_leaf",
+    hdrs = ["transform_leaf.hpp"],
+    deps = [":surface_concepts"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
 )
 
 cc_library(
-    name = "eep_surface_adapter",
-    hdrs = ["eep/eep_surface_adapter.hpp"],
+    name = "eep_layer",
+    hdrs = ["eep/eep_layer.hpp"],
     deps = [":surface_concepts"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",

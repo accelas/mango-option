@@ -111,7 +111,8 @@ make_bspline_surface(
     SharedBSplineInterp<4> interp(surface);
     StandardTransform4D xform;
     AnalyticalEEP eep(type, dividend_yield);
-    BSplineLeaf leaf(std::move(interp), xform, eep, K_ref);
+    BSplineTransformLeaf tleaf(std::move(interp), xform, K_ref);
+    BSplineLeaf leaf(std::move(tleaf), eep);
 
     SurfaceBounds bounds{
         .m_min = surface->m_min(),
