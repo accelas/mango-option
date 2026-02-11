@@ -820,15 +820,6 @@ cc_test(
 )
 
 cc_test(
-    name = "price_table_workspace_test",
-    srcs = ["price_table_workspace_test.cc"],
-    deps = [
-        "//src/option/table/bspline:bspline_workspace",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "bspline_banded_solver_test",
     srcs = ["bspline_banded_solver_test.cc"],
     deps = [

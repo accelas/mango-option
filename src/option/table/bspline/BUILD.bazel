@@ -72,22 +72,6 @@ cc_library(
 )
 
 cc_library(
-    name = "bspline_workspace",
-    srcs = ["bspline_workspace.cpp"],
-    hdrs = ["bspline_workspace.hpp"],
-    deps = [
-        "//src/support:error_types",
-        "//src/math:bspline_basis",
-        "//src/support:crc64",
-        "//third_party/arrow",
-        "@mdspan//:mdspan",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table/bspline",
-    include_prefix = "mango/option/table/bspline",
-)
-
-cc_library(
     name = "bspline_tensor_accessor",
     hdrs = ["bspline_tensor_accessor.hpp"],
     deps = [

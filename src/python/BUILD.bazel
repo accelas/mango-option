@@ -14,7 +14,6 @@ pybind_extension(
         "//src/option/table:adaptive_grid_builder",
 
         "//src/option/table/bspline:bspline_builder",
-        "//src/option/table/bspline:bspline_workspace",
         "//src/math:root_finding",
         "//src/support:error_types",
     ],

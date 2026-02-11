@@ -229,44 +229,6 @@ def test_batch_solver_per_option_grids():
     print("✓ Per-option grid batch works")
 
 
-def test_price_table_workspace():
-    """Test PriceTableWorkspace create (save/load disabled pending #373)"""
-    print("Testing PriceTableWorkspace...")
-
-    # Create small grids (minimum 4 points each)
-    log_m = np.array([-0.2, -0.1, 0.0, 0.1, 0.2])  # ln(S/K)
-    tau = np.array([0.1, 0.25, 0.5, 1.0])
-    sigma = np.array([0.1, 0.2, 0.3, 0.4])
-    r = np.array([0.01, 0.03, 0.05, 0.07])
-
-    # Coefficients (just placeholders for testing)
-    n_coeffs = len(log_m) * len(tau) * len(sigma) * len(r)
-    coeffs = np.random.rand(n_coeffs) * 10.0
-
-    # Create workspace
-    ws = mango_option.PriceTableWorkspace.create(
-        log_m, tau, sigma, r, coeffs,
-        K_ref=100.0,
-        dividend_yield=0.02,
-        m_min=log_m[0],   # log-moneyness bounds
-        m_max=log_m[-1]
-    )
-    print(f"✓ Created workspace: {ws}")
-
-    # Check dimensions
-    dims = ws.dimensions
-    assert dims == (5, 4, 4, 4), f"Expected (5,4,4,4), got {dims}"
-    print(f"✓ Dimensions correct: {dims}")
-
-    # Check properties
-    assert ws.K_ref == 100.0
-    assert abs(ws.dividend_yield - 0.02) < 1e-10
-    print(f"✓ Metadata: K_ref={ws.K_ref}, q={ws.dividend_yield}")
-
-    # Save/load disabled pending issue #373
-    print("✓ Skipping save/load (disabled pending #373)")
-
-
 def test_price_table_surface():
     """Test PriceTableSurface build and query"""
     import math
@@ -337,40 +299,9 @@ def test_iv_solver_interpolated():
     print(f"✓ solve_batch ran: {len(results)} results, {failed_count} failed")
 
 
-def test_load_error_enum():
-    """Test PriceTableLoadError enum"""
-    print("Testing PriceTableLoadError enum...")
-
-    assert mango_option.PriceTableLoadError.FILE_NOT_FOUND is not None
-    assert mango_option.PriceTableLoadError.CORRUPTED_COEFFICIENTS is not None
-    assert mango_option.PriceTableLoadError.NOT_ARROW_FILE is not None
-    print("✓ PriceTableLoadError enum accessible")
-
-
 def test_error_handling():
     """Test error conditions are properly raised"""
     print("Testing error handling...")
-
-    # Load disabled pending #373 — verify it raises
-    try:
-        mango_option.PriceTableWorkspace.load("/nonexistent/path.arrow")
-        assert False, "Should have raised ValueError"
-    except ValueError:
-        print("✓ Load raises ValueError (disabled pending #373)")
-
-    # Insufficient grid points (< 4)
-    try:
-        mango_option.PriceTableWorkspace.create(
-            np.array([-0.1, 0.0, 0.1]),  # Only 3 points
-            np.array([0.1, 0.25, 0.5, 1.0]),
-            np.array([0.1, 0.2, 0.3, 0.4]),
-            np.array([0.01, 0.03, 0.05, 0.07]),
-            np.zeros(3*4*4*4),
-            K_ref=100.0, dividend_yield=0.02, m_min=-0.1, m_max=0.1
-        )
-        assert False, "Should have raised ValueError for insufficient grid points"
-    except ValueError as e:
-        print(f"✓ Insufficient grid points raises ValueError: {e}")
 
     # PriceTableAxes with wrong number of grids
     axes = mango_option.PriceTableAxes()
@@ -430,10 +361,8 @@ if __name__ == "__main__":
         test_american_option_yield_curve,
         test_batch_solver,
         test_batch_solver_per_option_grids,
-        test_price_table_workspace,
         test_price_table_surface,
         test_iv_solver_interpolated,
-        test_load_error_enum,
         test_error_handling,
         test_iv_solver_config_defaults,
     ]
