@@ -10,12 +10,15 @@
 
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/eep_decomposer.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
+#include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include <algorithm>
 #include <cmath>
+#include <variant>
 
 namespace mango {
 
@@ -123,35 +126,43 @@ GridBounds extract_bounds(const IVGrid& grid) {
 }  // anonymous namespace
 
 // =====================================================================
-// AnyIVSolver: type-erased wrapper
+// AnyIVSolver: pimpl implementation
 // =====================================================================
 
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<BSplinePriceTable> solver)
-    : solver_(std::move(solver))
-{}
+struct AnyIVSolver::Impl {
+    using SolverVariant = std::variant<
+        InterpolatedIVSolver<BSplinePriceTable>,
+        InterpolatedIVSolver<BSplineMultiKRefSurface>,
+        InterpolatedIVSolver<ChebyshevSurface>,
+        InterpolatedIVSolver<ChebyshevRawSurface>
+    >;
+    SolverVariant solver;
 
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<BSplineMultiKRefSurface> solver)
-    : solver_(std::move(solver))
-{}
+    template <typename T>
+    explicit Impl(T s) : solver(std::move(s)) {}
+};
 
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<ChebyshevSurface> solver)
-    : solver_(std::move(solver))
-{}
-
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<ChebyshevRawSurface> solver)
-    : solver_(std::move(solver))
-{}
+AnyIVSolver::AnyIVSolver(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+AnyIVSolver::AnyIVSolver(AnyIVSolver&&) noexcept = default;
+AnyIVSolver& AnyIVSolver::operator=(AnyIVSolver&&) noexcept = default;
+AnyIVSolver::~AnyIVSolver() = default;
 
 std::expected<IVSuccess, IVError> AnyIVSolver::solve(const IVQuery& query) const {
     return std::visit([&](const auto& solver) {
         return solver.solve(query);
-    }, solver_);
+    }, impl_->solver);
 }
 
 BatchIVResult AnyIVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
     return std::visit([&](const auto& solver) {
         return solver.solve_batch(queries);
-    }, solver_);
+    }, impl_->solver);
+}
+
+/// Helper: wrap a typed solver into AnyIVSolver via pimpl
+template <PriceSurface Surface>
+static AnyIVSolver make_any_solver(InterpolatedIVSolver<Surface> solver) {
+    return AnyIVSolver(std::make_unique<AnyIVSolver::Impl>(std::move(solver)));
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +186,7 @@ wrap_surface(std::shared_ptr<const PriceTableSurface> surface,
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    return AnyIVSolver(std::move(*solver));
+    return make_any_solver(std::move(*solver));
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +289,7 @@ wrap_multi_kref_surface(BSplineMultiKRefInner surface,
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
-    return AnyIVSolver(std::move(*solver));
+    return make_any_solver(std::move(*solver));
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +383,7 @@ build_chebyshev(const IVSolverFactoryConfig& config,
         if (!solver.has_value()) {
             return std::unexpected(solver.error());
         }
-        return AnyIVSolver(std::move(*solver));
+        return make_any_solver(std::move(*solver));
     }, std::move(result->surface));
 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * @file interpolated_iv_solver.hpp
- * @brief Implied volatility solver using B-spline price interpolation
+ * @brief Implied volatility solver using pre-computed price interpolation
  *
  * Provides:
  * - InterpolatedIVSolver<Surface>: Newton-Raphson IV solver on any PriceSurface
@@ -22,8 +22,6 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/iv_result.hpp"
 #include "mango/option/table/price_surface_concept.hpp"
-#include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"
@@ -31,8 +29,8 @@
 #include <expected>
 #include <cmath>
 #include <algorithm>
+#include <memory>
 #include <vector>
-#include <variant>
 #include <optional>
 
 namespace mango {
@@ -47,10 +45,10 @@ struct InterpolatedIVSolverConfig {
 
 /// Interpolation-based IV Solver
 ///
-/// Uses pre-computed B-spline price surface for ultra-fast IV calculation.
+/// Uses a pre-computed price surface for ultra-fast IV calculation.
 /// Solves: Find s such that Price(m, tau, s, r) = Market_Price
 ///
-/// Thread-safe: Fully thread-safe for both single and batch queries (immutable spline)
+/// Thread-safe: Fully thread-safe for both single and batch queries (immutable surface)
 ///
 /// Rate handling: The price surface uses a scalar rate axis (designed for SOFR/flat rates).
 /// When a YieldCurve is provided, it is collapsed to a zero rate: -ln(D(T))/T.
@@ -75,7 +73,7 @@ public:
 
     /// Solve for implied volatility (single query)
     ///
-    /// Uses Newton-Raphson method with B-spline price interpolation.
+    /// Uses Newton-Raphson method with price surface interpolation.
     ///
     /// @param query Option specification and market price
     /// @return Success with IV and diagnostics, or error with details
@@ -83,7 +81,7 @@ public:
 
     /// Solve for implied volatility (batch with OpenMP)
     ///
-    /// Trivially parallel since B-spline is immutable and thread-safe.
+    /// Trivially parallel since the surface is immutable and thread-safe.
     ///
     /// @param queries Input queries (as vector for convenience)
     /// @return BatchIVResult with individual results and failure count
@@ -116,10 +114,10 @@ private:
     OptionType option_type_;
     double dividend_yield_;
 
-    /// Evaluate option price using B-spline interpolation with strike scaling
+    /// Evaluate option price using surface interpolation with strike scaling
     double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const;
 
-    /// Compute vega using partial derivative w.r.t. volatility (axis 2)
+    /// Compute vega using partial derivative w.r.t. volatility
     double compute_vega(double moneyness, double maturity, double vol, double rate, double strike) const;
 
     /// Check if query parameters are within surface bounds
@@ -142,9 +140,6 @@ private:
     /// Determine adaptive volatility bounds based on intrinsic value
     std::pair<double, double> adaptive_bounds(const IVQuery& query) const;
 };
-
-/// Type alias for backward compatibility: InterpolatedIVSolver with BSplinePriceTable
-using DefaultInterpolatedIVSolver = InterpolatedIVSolver<BSplinePriceTable>;
 
 // =====================================================================
 // Factory: config types, type-erased solver, and factory function
@@ -188,7 +183,9 @@ struct IVSolverFactoryConfig {
     std::optional<DiscreteDividendConfig> discrete_dividends;
 };
 
-/// Type-erased IV solver wrapping either path
+/// Type-erased IV solver wrapping any PriceSurface backend
+///
+/// Impl is defined in the .cpp — only the factory can construct instances.
 class AnyIVSolver {
 public:
     /// Solve for implied volatility (single query)
@@ -197,26 +194,15 @@ public:
     /// Solve for implied volatility (batch with OpenMP)
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
-    /// Constructor from standard B-spline solver
-    explicit AnyIVSolver(InterpolatedIVSolver<BSplinePriceTable> solver);
-
-    /// Constructor from segmented B-spline solver
-    explicit AnyIVSolver(InterpolatedIVSolver<BSplineMultiKRefSurface> solver);
-
-    /// Constructor from Chebyshev Tucker solver
-    explicit AnyIVSolver(InterpolatedIVSolver<ChebyshevSurface> solver);
-
-    /// Constructor from Chebyshev raw solver
-    explicit AnyIVSolver(InterpolatedIVSolver<ChebyshevRawSurface> solver);
+    // Pimpl: move-only, defined in .cpp
+    struct Impl;
+    explicit AnyIVSolver(std::unique_ptr<Impl> impl);
+    AnyIVSolver(AnyIVSolver&&) noexcept;
+    AnyIVSolver& operator=(AnyIVSolver&&) noexcept;
+    ~AnyIVSolver();
 
 private:
-    using SolverVariant = std::variant<
-        InterpolatedIVSolver<BSplinePriceTable>,
-        InterpolatedIVSolver<BSplineMultiKRefSurface>,
-        InterpolatedIVSolver<ChebyshevSurface>,
-        InterpolatedIVSolver<ChebyshevRawSurface>
-    >;
-    SolverVariant solver_;
+    std::unique_ptr<Impl> impl_;
 };
 
 /// Factory function: build price surface and IV solver from config
@@ -446,7 +432,7 @@ InterpolatedIVSolver<Surface>::solve_batch(const std::vector<IVQuery>& queries) 
     std::vector<std::expected<IVSuccess, IVError>> results(queries.size());
     size_t failed_count = 0;
 
-    // Trivially parallel: B-spline is immutable and thread-safe
+    // Trivially parallel: surface is immutable and thread-safe
     MANGO_PRAGMA_PARALLEL_FOR
     for (size_t i = 0; i < queries.size(); ++i) {
         results[i] = solve(queries[i]);

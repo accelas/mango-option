@@ -141,7 +141,7 @@ int main() {
             printf("%-6zu WRAPPER CREATE FAILED\n", trial);
             continue;
         }
-        auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
+        auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper));
         if (!iv_solver_result) {
             printf("%-6zu IV SOLVER FAILED\n", trial);
             continue;

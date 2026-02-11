@@ -38,7 +38,7 @@
  *
  * // Step 3: Create IV solver from surface
  * auto wrapper = make_bspline_surface(result.value().surface, OptionType::PUT);
- * auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
+ * auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper));
  * const auto& iv_solver = solver_result.value();
  *
  * // Step 4: Solve for IV at any (S, K, T, r)
@@ -289,7 +289,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
         state.SkipWithError("make_bspline_surface failed");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper), solver_config);
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper), solver_config);
     if (!iv_solver_result) {
         auto err = iv_solver_result.error();
         std::string error_msg = "Validation error code " + std::to_string(static_cast<int>(err.code));
@@ -400,7 +400,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
             state.SkipWithError("make_bspline_surface failed");
             return;
         }
-        auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
+        auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper));
         if (!iv_solver_result) {
             auto err = iv_solver_result.error();
             std::string error_msg = "Validation error code " + std::to_string(static_cast<int>(err.code));

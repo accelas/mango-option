@@ -51,7 +51,7 @@ TEST_F(InterpolatedIVSolverTest, CreateFromBSplinePriceTable) {
     auto wrapper_result = make_bspline_surface(surface_, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
-    auto result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
+    auto result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
     ASSERT_TRUE(result.has_value()) << "Failed to create solver";
 }
 
@@ -63,12 +63,12 @@ TEST_F(InterpolatedIVSolverTest, CreateWithConfig) {
         .sigma_max = 2.0
     };
 
-    auto result = DefaultInterpolatedIVSolver::create(make_wrapper(), config);
+    auto result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper(), config);
     ASSERT_TRUE(result.has_value()) << "Failed to create solver with config";
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveATMPut) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -90,7 +90,7 @@ TEST_F(InterpolatedIVSolverTest, SolveATMPut) {
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveITMPut) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -107,7 +107,7 @@ TEST_F(InterpolatedIVSolverTest, SolveITMPut) {
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveOTMPut) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -124,7 +124,7 @@ TEST_F(InterpolatedIVSolverTest, SolveOTMPut) {
 }
 
 TEST_F(InterpolatedIVSolverTest, RejectsInvalidQuery) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -138,7 +138,7 @@ TEST_F(InterpolatedIVSolverTest, RejectsInvalidQuery) {
 }
 
 TEST_F(InterpolatedIVSolverTest, RejectsNegativeMarketPrice) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -151,7 +151,7 @@ TEST_F(InterpolatedIVSolverTest, RejectsNegativeMarketPrice) {
 }
 
 TEST_F(InterpolatedIVSolverTest, BatchSolve) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -177,7 +177,7 @@ TEST_F(InterpolatedIVSolverTest, BatchSolve) {
 }
 
 TEST_F(InterpolatedIVSolverTest, BatchSolveAllSucceed) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -200,7 +200,7 @@ TEST_F(InterpolatedIVSolverTest, ConvergenceWithinIterations) {
         .tolerance = 1e-6
     };
 
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper(), config);
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper(), config);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -229,7 +229,7 @@ TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
     auto wrapper_result = make_bspline_surface(eep_surface.value(), OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
+    auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
     ASSERT_TRUE(solver.has_value());
 
     IVQuery query(
@@ -241,17 +241,6 @@ TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
         EXPECT_GT(result->implied_vol, 0.0);
         EXPECT_LT(result->implied_vol, 5.0);
     }
-}
-
-// Verify that DefaultInterpolatedIVSolver alias works correctly
-TEST_F(InterpolatedIVSolverTest, StandardAliasMatchesExplicitTemplate) {
-    // DefaultInterpolatedIVSolver is InterpolatedIVSolver<BSplinePriceTable>
-    static_assert(std::is_same_v<
-        DefaultInterpolatedIVSolver,
-        InterpolatedIVSolver<BSplinePriceTable>>);
-
-    auto solver = DefaultInterpolatedIVSolver::create(make_wrapper());
-    ASSERT_TRUE(solver.has_value());
 }
 
 // ===========================================================================
@@ -283,7 +272,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
     auto wrapper_result = make_bspline_surface(table->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
+    auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
     ASSERT_TRUE(solver.has_value());
 
     // Query with CALL type against a PUT surface — must fail
@@ -323,7 +312,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
     auto wrapper_result = make_bspline_surface(table->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
+    auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
     ASSERT_TRUE(solver.has_value());
 
     // Query with dividend_yield = 0.05 — must fail (surface was built with 0.02)

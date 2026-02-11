@@ -520,11 +520,11 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
 
     auto wrapper = make_bspline_surface(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper.has_value()) << wrapper.error();
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(
         std::move(wrapper).value(), solver_config);
 
     ASSERT_TRUE(iv_solver_result.has_value())
-        << "DefaultInterpolatedIVSolver::create failed";
+        << "InterpolatedIVSolver<BSplinePriceTable>::create failed";
 
     // Test IV solve at a sample point
     const auto& iv_solver = iv_solver_result.value();

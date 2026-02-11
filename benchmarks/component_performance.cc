@@ -289,7 +289,7 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     if (!wrapper) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
-    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper));
 
     if (!solver_result) {
         auto err = solver_result.error();

@@ -142,7 +142,7 @@ static std::vector<double> refine_axis(const std::vector<double>& base, int scal
 // ============================================================================
 
 struct AdaptiveSolverEntry {
-    std::unique_ptr<DefaultInterpolatedIVSolver> solver;
+    std::unique_ptr<InterpolatedIVSolver<BSplinePriceTable>> solver;
     double build_time_ms = 0.0;
     size_t n_pde_solves = 0;
     std::array<size_t, 4> base_grid_sizes = {};  // [m, tau, sigma, r]
@@ -242,7 +242,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
         std::fprintf(stderr, "make_bspline_surface failed (scale=%d)\n", scale);
         std::abort();
     }
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
+    auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper));
     if (!solver) {
         std::fprintf(stderr, "InterpolatedIVSolver::create failed (scale=%d)\n", scale);
         std::abort();
@@ -252,7 +252,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
     double build_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
     auto [pos, _] = cache.emplace(scale, AdaptiveSolverEntry{
-        std::make_unique<DefaultInterpolatedIVSolver>(std::move(*solver)),
+        std::make_unique<InterpolatedIVSolver<BSplinePriceTable>>(std::move(*solver)),
         build_ms,
         total_pde,
         grid_sizes,

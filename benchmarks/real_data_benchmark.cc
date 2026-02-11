@@ -340,7 +340,7 @@ static void BM_RealData_IV_BSpline(benchmark::State& state) {
     if (!wrapper) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
-    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper));
     if (!solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -564,7 +564,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     if (!wrapper_query) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_query));
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_query));
     if (!iv_solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -666,7 +666,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     if (!wrapper_acc) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_acc));
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_acc));
     if (!iv_solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -833,7 +833,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
         state.SkipWithError("Failed to create BSplinePriceTable");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_dense));
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_dense));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
@@ -944,7 +944,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
         state.SkipWithError("Failed to create BSplinePriceTable");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_est));
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_est));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
@@ -1065,7 +1065,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
         state.SkipWithError("Failed to create BSplinePriceTable");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_prof));
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_prof));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
