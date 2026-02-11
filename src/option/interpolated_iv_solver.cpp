@@ -564,7 +564,7 @@ build_dimensionless_bspline(const IVSolverFactoryConfig& config,
 
     // 2. EEP decompose via accessor
     Dimensionless3DAccessor accessor(pde->values, axes, config.spot);
-    eep_decompose(accessor, AnalyticalEEP(config.option_type, config.dividend_yield));
+    eep_decompose(accessor, AnalyticalEEP(config.option_type, 0.0));
 
     // 3. Fit B-spline on (now dollar EEP) values
     std::array<std::vector<double>, 3> grids = {
@@ -598,12 +598,12 @@ build_dimensionless_bspline(const IVSolverFactoryConfig& config,
     SharedBSplineInterp<3> interp(std::move(surface.value()));
     DimensionlessTransform3D xform;
     BSpline3DTransformLeaf leaf(std::move(interp), xform, config.spot);
-    AnalyticalEEP eep(config.option_type, config.dividend_yield);
+    AnalyticalEEP eep(config.option_type, 0.0);
     BSpline3DLeaf eep_leaf(std::move(leaf), std::move(eep));
 
     BSpline3DPriceTable table(
         std::move(eep_leaf), dimless_bounds(d, backend.maturity),
-        config.option_type, config.dividend_yield);
+        config.option_type, 0.0);
 
     auto solver = InterpolatedIVSolver<BSpline3DPriceTable>::create(
         std::move(table), config.solver_config);
@@ -640,7 +640,7 @@ build_dimensionless_chebyshev(const IVSolverFactoryConfig& config,
 
     // 2. EEP decompose via accessor
     Dimensionless3DAccessor accessor(pde->values, axes, config.spot);
-    eep_decompose(accessor, AnalyticalEEP(config.option_type, config.dividend_yield));
+    eep_decompose(accessor, AnalyticalEEP(config.option_type, 0.0));
 
     // 3. Fit Chebyshev on (now dollar EEP) values
     Domain<3> domain{
@@ -655,12 +655,12 @@ build_dimensionless_chebyshev(const IVSolverFactoryConfig& config,
     // 4. Wrap in layered PriceTable (K_ref = config.spot)
     DimensionlessTransform3D xform;
     Chebyshev3DTransformLeaf leaf(std::move(cheb), xform, config.spot);
-    AnalyticalEEP eep_fn(config.option_type, config.dividend_yield);
+    AnalyticalEEP eep_fn(config.option_type, 0.0);
     Chebyshev3DLeaf eep_leaf(std::move(leaf), std::move(eep_fn));
 
     Chebyshev3DPriceTable table(
         std::move(eep_leaf), dimless_bounds(d, backend.maturity),
-        config.option_type, config.dividend_yield);
+        config.option_type, 0.0);
 
     auto solver = InterpolatedIVSolver<Chebyshev3DPriceTable>::create(
         std::move(table), config.solver_config);
@@ -671,6 +671,29 @@ build_dimensionless_chebyshev(const IVSolverFactoryConfig& config,
 static std::expected<AnyIVSolver, ValidationError>
 build_dimensionless(const IVSolverFactoryConfig& config,
                     const DimensionlessBackend& backend) {
+    // Dimensionless backend requires q=0, no discrete dividends, r > 0.
+    if (std::abs(config.dividend_yield) > 1e-12) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidDividend, config.dividend_yield});
+    }
+    if (config.discrete_dividends.has_value() &&
+        !config.discrete_dividends->discrete_dividends.empty()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidDividend,
+            static_cast<double>(config.discrete_dividends->discrete_dividends.size())});
+    }
+
+    // ln(2r/sigma^2) requires strictly positive rate and sigma bounds.
+    auto b = extract_bounds(config.grid);
+    if (b.rate_min <= 0.0) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidRate, b.rate_min});
+    }
+    if (b.sigma_min <= 0.0) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidVolatility, b.sigma_min});
+    }
+
     if (backend.interpolant == DimensionlessBackend::Interpolant::Chebyshev)
         return build_dimensionless_chebyshev(config, backend);
     return build_dimensionless_bspline(config, backend);

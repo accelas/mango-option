@@ -74,5 +74,62 @@ TEST(DimensionlessIVTest, IVMatchesFDM) {
         << "3D IV=" << iv_3d->implied_vol << " FDM IV=" << iv_fdm->implied_vol;
 }
 
+TEST(DimensionlessIVTest, RejectsNonzeroDividendYield) {
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = 100.0,
+        .dividend_yield = 0.01,
+        .grid = IVGrid{
+            .moneyness = {0.8, 1.0, 1.2},
+            .vol = {0.10, 0.20, 0.30},
+            .rate = {0.02, 0.05},
+        },
+        .backend = DimensionlessBackend{.maturity = 1.0},
+    };
+
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_FALSE(solver.has_value());
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::InvalidDividend);
+}
+
+TEST(DimensionlessIVTest, RejectsDiscreteDividends) {
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = 100.0,
+        .grid = IVGrid{
+            .moneyness = {0.8, 1.0, 1.2},
+            .vol = {0.10, 0.20, 0.30},
+            .rate = {0.02, 0.05},
+        },
+        .backend = DimensionlessBackend{.maturity = 1.0},
+        .discrete_dividends = DiscreteDividendConfig{
+            .maturity = 1.0,
+            .discrete_dividends = {Dividend{0.5, 0.25}},
+        },
+    };
+
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_FALSE(solver.has_value());
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::InvalidDividend);
+}
+
+// Regression: ln(2r/sigma^2) with rate <= 0 produces NaN
+TEST(DimensionlessIVTest, RejectsNonpositiveRate) {
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = 100.0,
+        .grid = IVGrid{
+            .moneyness = {0.8, 1.0, 1.2},
+            .vol = {0.10, 0.20, 0.30},
+            .rate = {0.0, 0.05},
+        },
+        .backend = DimensionlessBackend{.maturity = 1.0},
+    };
+
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_FALSE(solver.has_value());
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::InvalidRate);
+}
+
 }  // namespace
 }  // namespace mango

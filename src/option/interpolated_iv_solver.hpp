@@ -161,6 +161,11 @@ struct ChebyshevBackend {
 ///
 /// Collapses (sigma, r) into kappa = 2r/sigma^2, reducing to 3D (x, tau', ln kappa).
 /// Fewer PDE solves but sigma/r coupling limits accuracy.
+///
+/// Constraints: dividend_yield must be 0, no discrete dividends, rate > 0.
+///
+/// IVGrid values define domain bounds only (not exact knots).  The B-spline
+/// path derives its own linspace grid; the Chebyshev path uses CGL nodes.
 struct DimensionlessBackend {
     enum class Interpolant { BSpline, Chebyshev };
 

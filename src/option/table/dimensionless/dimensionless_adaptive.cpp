@@ -146,22 +146,34 @@ double SegmentedDimensionlessSurface::value(
 {
     double lk = coords[2];
 
-    for (size_t i = 0; i < segments_.size(); ++i) {
-        if (lk <= segments_[i].lk_max || i == segments_.size() - 1) {
-            double val = segments_[i].surface->value(coords);
+    if (segments_.size() == 1) {
+        return std::max(segments_[0].surface->value(coords), 0.0);
+    }
 
-            // Blend with next segment near upper boundary
-            if (i + 1 < segments_.size()) {
-                double blend_lo = segments_[i].lk_max;
-                double blend_hi = segments_[i + 1].lk_min;
-                if (lk >= blend_hi && lk <= blend_lo) {
-                    double t = (lk - blend_hi) / (blend_lo - blend_hi);
-                    double val_next = segments_[i + 1].surface->value(coords);
-                    val = (1.0 - t) * val_next + t * val;
-                }
-            }
+    // Check blend zones at segment boundaries.  Each segment's B-spline is
+    // valid beyond its physical bounds (headroom), so we can safely evaluate
+    // adjacent segments in the blend region.
+    constexpr double kBlendFrac = 0.1;  // blend over 10% of segment width
 
-            return std::max(val, 0.0);
+    for (size_t i = 0; i + 1 < segments_.size(); ++i) {
+        double boundary = segments_[i].lk_max;
+        double width_lo = segments_[i].lk_max - segments_[i].lk_min;
+        double width_hi = segments_[i + 1].lk_max - segments_[i + 1].lk_min;
+        double blend_half = kBlendFrac * std::min(width_lo, width_hi);
+
+        if (lk >= boundary - blend_half && lk <= boundary + blend_half
+            && blend_half > 1e-10) {
+            double t = (lk - (boundary - blend_half)) / (2.0 * blend_half);
+            double v0 = segments_[i].surface->value(coords);
+            double v1 = segments_[i + 1].surface->value(coords);
+            return std::max((1.0 - t) * v0 + t * v1, 0.0);
+        }
+    }
+
+    // Not in any blend zone — find owning segment
+    for (size_t i = 0; i < segments_.size() - 1; ++i) {
+        if (lk <= segments_[i].lk_max) {
+            return std::max(segments_[i].surface->value(coords), 0.0);
         }
     }
 
@@ -178,6 +190,16 @@ build_dimensionless_surface_adaptive(
     double K_ref)
 {
     auto t_start = std::chrono::steady_clock::now();
+
+    // ln(2r/sigma^2) requires strictly positive rate and sigma bounds.
+    if (params.rate_min <= 0.0) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig, 0, 0});
+    }
+    if (params.sigma_min <= 0.0) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig, 0, 0});
+    }
 
     constexpr size_t N_SEED = 10;
     constexpr size_t N_PROBES = 50;
