@@ -256,7 +256,7 @@ build_bspline(const IVSolverFactoryConfig& config, const BSplineBackend& backend
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, config.spot);
-            analytical_eep_decompose(accessor, config.option_type, config.dividend_yield);
+            eep_decompose(accessor, AnalyticalEEP(config.option_type, config.dividend_yield));
         });
     if (!table_result.has_value()) {
         return std::unexpected(ValidationError{

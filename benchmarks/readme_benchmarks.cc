@@ -105,7 +105,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, 100.0);
-                analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
             });
         if (!table) {
             throw std::runtime_error("Failed to build price table");

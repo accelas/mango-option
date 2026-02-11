@@ -156,7 +156,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, SPOT);
-                analytical_eep_decompose(accessor, OptionType::PUT, DIVIDEND_YIELD);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
             });
         if (!table) {
             throw std::runtime_error("Failed to build price table");
@@ -553,7 +553,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, SPOT);
-            analytical_eep_decompose(accessor, OptionType::PUT, DIVIDEND_YIELD);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
         });
     if (!table_result) {
         throw std::runtime_error("Failed to build price table");
@@ -655,7 +655,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, SPOT);
-            analytical_eep_decompose(accessor, OptionType::PUT, DIVIDEND_YIELD);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
         });
     if (!table_result) {
         throw std::runtime_error("Failed to build price table");
@@ -820,7 +820,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, SPOT);
-            analytical_eep_decompose(accessor, OptionType::PUT, DIVIDEND_YIELD);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
         });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
@@ -931,7 +931,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, SPOT);
-            analytical_eep_decompose(accessor, OptionType::PUT, DIVIDEND_YIELD);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
         });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
@@ -1053,7 +1053,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, SPOT);
-            analytical_eep_decompose(accessor, OptionType::PUT, DIVIDEND_YIELD);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
         });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");

@@ -553,7 +553,7 @@ static BuildFn make_chebyshev_build_fn(
 
                         double eep = compute_eep(
                             am, spot_node, config.K_ref, tau, sigma, rate,
-                            config.dividend_yield, config.option_type);
+                            AnalyticalEEP(config.option_type, config.dividend_yield));
 
                         size_t flat = mi * (Nt*Ns*Nr)
                                     + ti * (Ns*Nr)
@@ -1721,7 +1721,7 @@ build_cached_surface(
 
     // EEP decomposition: convert normalized prices to early exercise premium
     BSplineTensorAccessor accessor(extraction.tensor, axes, K_ref);
-    analytical_eep_decompose(accessor, type, dividend_yield);
+    eep_decompose(accessor, AnalyticalEEP(type, dividend_yield));
 
     // Fit coefficients
     auto fit_result = builder.fit_coeffs(extraction.tensor, axes);

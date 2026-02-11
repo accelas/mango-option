@@ -126,7 +126,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     auto precompute_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, 100.0);
-            analytical_eep_decompose(accessor, OptionType::PUT, dividend_yield);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, dividend_yield));
         });
     ASSERT_TRUE(precompute_result.has_value())
         << "Price table precomputation failed: " << precompute_result.error();

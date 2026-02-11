@@ -31,7 +31,7 @@ protected:
         auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, K_ref_);
-                analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
             });
         ASSERT_TRUE(table.has_value()) << "Failed to build table";
         surface_ = table->surface;
@@ -265,7 +265,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
     auto table = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, K_ref);
-            analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
         });
     ASSERT_TRUE(table.has_value());
 
@@ -305,7 +305,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
     auto table = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, K_ref);
-            analytical_eep_decompose(accessor, OptionType::PUT, div_yield);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, div_yield));
         });
     ASSERT_TRUE(table.has_value());
 

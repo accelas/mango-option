@@ -72,7 +72,7 @@ const EEPFixture& GetEEPFixture() {
         auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, K_ref);
-                analytical_eep_decompose(accessor, OptionType::PUT, q);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, q));
             });
         if (!table) {
             throw std::runtime_error("Failed to build price table");

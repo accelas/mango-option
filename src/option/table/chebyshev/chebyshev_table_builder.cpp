@@ -151,10 +151,12 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     size_t total = n_m * n_tau * n_sigma * n_rate;
     std::vector<double> eep_values(total);
 
+    AnalyticalEEP eep(config.option_type, config.dividend_yield);
+
     ChebyshevSplineAccessor accessor(
         m_nodes, tau_nodes, sigma_nodes, rate_nodes,
         splines, config.K_ref, eep_values);
-    analytical_eep_decompose(accessor, config.option_type, config.dividend_yield);
+    eep_decompose(accessor, eep);
 
     SurfaceBounds bounds{
         .m_min = config.domain.lo[0], .m_max = config.domain.hi[0],
@@ -164,7 +166,6 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     };
 
     auto eep_span = std::span<const double>(eep_values);
-    AnalyticalEEP eep(config.option_type, config.dividend_yield);
 
     auto make_result = [&](auto surface) {
         auto t1 = std::chrono::steady_clock::now();

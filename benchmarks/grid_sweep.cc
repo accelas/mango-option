@@ -126,7 +126,7 @@ int main() {
         auto table_result = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, spot);
-                analytical_eep_decompose(accessor, OptionType::PUT, div_yield);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, div_yield));
             });
         auto t1 = std::chrono::steady_clock::now();
         double build_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();

@@ -18,7 +18,7 @@ namespace mango {
 ///
 /// Use directly when the European price comes from a non-analytical source
 /// (e.g. numerical PDE). For analytical Black-Scholes, use
-/// analytical_eep_decompose().
+/// eep_decompose() with AnalyticalEEP.
 inline double eep_floor(double eep_raw) {
     constexpr double kSharpness = 100.0;
     if (kSharpness * eep_raw > 500.0) {

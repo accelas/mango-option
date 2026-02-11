@@ -509,7 +509,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, grid.K_ref);
-            analytical_eep_decompose(accessor, OptionType::PUT, grid.dividend);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, grid.dividend));
         });
     ASSERT_TRUE(table_result.has_value());
 
