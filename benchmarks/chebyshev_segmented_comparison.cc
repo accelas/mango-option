@@ -33,7 +33,7 @@ static SegmentedAdaptiveConfig make_seg_config() {
         .dividend_yield = kDivYield,
         .discrete_dividends = make_div_schedule(1.0),
         .maturity = 1.0,
-        .kref_config = {.K_refs = {80.0, 90.0, 100.0, 110.0, 120.0}},
+        .kref_config = {.K_refs = {90.0, 100.0, 110.0}},
     };
 }
 
@@ -58,7 +58,7 @@ static void compare_build_time() {
 
     AdaptiveGridParams params;
     params.target_iv_error = 5e-4;
-    params.max_iter = 6;
+    params.max_iter = 3;
 
     auto seg_config = make_seg_config();
     auto domain = make_log_domain();
@@ -126,7 +126,7 @@ static void compare_query_time() {
     auto domain = make_log_domain();
     AdaptiveGridParams params;
     params.target_iv_error = 5e-4;
-    params.max_iter = 6;
+    params.max_iter = 3;
 
     // Build old solver
     std::printf("Building old solver...\n");
@@ -152,7 +152,7 @@ static void compare_query_time() {
         .discrete_dividends = DiscreteDividendConfig{
             .maturity = 1.0,
             .discrete_dividends = make_div_schedule(1.0),
-            .kref_config = {.K_refs = {80.0, 90.0, 100.0, 110.0, 120.0}},
+            .kref_config = {.K_refs = {90.0, 100.0, 110.0}},
         },
     };
 
@@ -241,7 +241,7 @@ static void compare_raw_query_time() {
     auto domain = make_log_domain();
     AdaptiveGridParams params;
     params.target_iv_error = 5e-4;
-    params.max_iter = 6;
+    params.max_iter = 3;
 
     // Build both
     auto old_result = build_adaptive_chebyshev_segmented(params, seg_config, domain);

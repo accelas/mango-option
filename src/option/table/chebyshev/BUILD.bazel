@@ -11,7 +11,6 @@ cc_library(
         "//src/option/table:eep_layer",
         "//src/option/table:transform_leaf",
         "//src/option/table:standard_transform_4d",
-        "//src/option/table:fd_vega_adapter",
         "//src/option/table:split_surface",
         "//src/option/table:tau_segment_split",
         "//src/option/table:multi_kref_split",
