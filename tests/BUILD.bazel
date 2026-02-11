@@ -1624,3 +1624,15 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "dimensionless_iv_test",
+    size = "medium",
+    srcs = ["dimensionless_iv_test.cc"],
+    deps = [
+        "//src/option:interpolated_iv_solver",
+        "//src/option:iv_solver",
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+

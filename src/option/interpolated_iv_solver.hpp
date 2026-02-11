@@ -157,6 +157,14 @@ struct ChebyshevBackend {
     double tucker_epsilon = 1e-8;                      ///< 0 = use RawTensor
 };
 
+/// Dimensionless 3D interpolation backend
+///
+/// Collapses (sigma, r) into kappa = 2r/sigma^2, reducing to 3D (x, tau', ln kappa).
+/// Fewer PDE solves but sigma/r coupling limits accuracy.
+struct DimensionlessBackend {
+    double maturity = 2.0;  ///< Domain upper bound for physical tau
+};
+
 /// Discrete dividend configuration (optional, orthogonal to backend choice)
 struct DiscreteDividendConfig {
     double maturity = 1.0;                  ///< Surface maturity
@@ -179,7 +187,7 @@ struct IVSolverFactoryConfig {
     IVGrid grid;                                    ///< Grid points (exact or domain bounds)
     std::optional<AdaptiveGridParams> adaptive;     ///< If set, refine grid adaptively
     InterpolatedIVSolverConfig solver_config;       ///< Newton config
-    std::variant<BSplineBackend, ChebyshevBackend> backend;
+    std::variant<BSplineBackend, ChebyshevBackend, DimensionlessBackend> backend;
     std::optional<DiscreteDividendConfig> discrete_dividends;
 };
 
