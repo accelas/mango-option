@@ -21,6 +21,9 @@
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
+#include "mango/option/table/bspline/bspline_3d_surface.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
+#include "mango/option/table/transforms/dimensionless_3d.hpp"
 #include "mango/option/option_grid.hpp"
 #include <benchmark/benchmark.h>
 #include <array>
@@ -426,6 +429,93 @@ static void BM_Chebyshev_IV(benchmark::State& state) {
 }
 
 BENCHMARK(BM_Chebyshev_IV)
+    ->DenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1)
+    ->Unit(benchmark::kMicrosecond);
+
+// ============================================================================
+// Dimensionless 3D: build once, benchmark IV query time
+// ============================================================================
+
+struct Dimensionless3DSolverEntry {
+    std::unique_ptr<AnyIVSolver> solver;
+    double build_time_ms = 0.0;
+    size_t n_pde_solves = 0;
+};
+
+static const Dimensionless3DSolverEntry& get_dimensionless_solver() {
+    static Dimensionless3DSolverEntry entry = [] {
+        auto t0 = std::chrono::steady_clock::now();
+
+        IVSolverFactoryConfig config{
+            .option_type = OptionType::PUT,
+            .spot = kSpot,
+            .dividend_yield = kDivYield,
+            .grid = IVGrid{
+                .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
+                .vol = {0.05, 0.10, 0.20, 0.30, 0.50},
+                .rate = {0.01, 0.03, 0.05, 0.10},
+            },
+            .backend = DimensionlessBackend{.maturity = 2.5},
+        };
+
+        auto solver = make_interpolated_iv_solver(config);
+        if (!solver) {
+            std::fprintf(stderr, "make_interpolated_iv_solver(Dimensionless3D) failed\n");
+            std::abort();
+        }
+
+        auto t1 = std::chrono::steady_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+        Dimensionless3DSolverEntry e;
+        e.solver = std::make_unique<AnyIVSolver>(std::move(*solver));
+        e.build_time_ms = ms;
+        return e;
+    }();
+    return entry;
+}
+
+static void BM_Dimensionless3D_IV(benchmark::State& state) {
+    size_t si = static_cast<size_t>(state.range(0));
+    double K = kStrikes[si];
+
+    double ref_price = get_reference_prices()[si];
+    if (!std::isfinite(ref_price)) {
+        state.SkipWithError("Reference price not available");
+        return;
+    }
+
+    OptionSpec spec{
+        .spot = kSpot, .strike = K, .maturity = kMaturity,
+        .rate = kRate, .dividend_yield = kDivYield,
+        .option_type = OptionType::PUT
+    };
+    IVQuery query(spec, ref_price);
+
+    const auto& entry = get_dimensionless_solver();
+
+    std::expected<IVSuccess, IVError> last_result;
+    for (auto _ : state) {
+        last_result = entry.solver->solve(query);
+        if (!last_result) {
+            state.SkipWithError("Dimensionless 3D IV solve failed");
+            return;
+        }
+        benchmark::DoNotOptimize(last_result);
+    }
+
+    double iv = last_result->implied_vol;
+    double iv_err_bps = std::abs(iv - kTrueVol) * 10000.0;
+
+    state.SetLabel(std::format("K={:.0f} dim3d", K));
+    state.counters["strike"] = K;
+    state.counters["iv"] = iv;
+    state.counters["iv_err_bps"] = iv_err_bps;
+    state.counters["iters"] = static_cast<double>(last_result->iterations);
+    state.counters["build_ms"] = entry.build_time_ms;
+}
+
+BENCHMARK(BM_Dimensionless3D_IV)
     ->DenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1)
     ->Unit(benchmark::kMicrosecond);
 

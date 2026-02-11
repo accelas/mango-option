@@ -1497,6 +1497,17 @@ cc_test(
 )
 
 cc_test(
+    name = "dimensionless_transform_test",
+    size = "small",
+    srcs = ["dimensionless_transform_test.cc"],
+    deps = [
+        "//src/option/table:dimensionless_transform_3d",
+        "//src/option/table:surface_concepts",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "chebyshev_nodes_test",
     size = "small",
     srcs = ["chebyshev_nodes_test.cc"],
@@ -1557,6 +1568,85 @@ cc_test(
 
         "//src/option/table:surface_concepts",
         "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "surface_3d_concepts_test",
+    size = "small",
+    srcs = ["surface_3d_concepts_test.cc"],
+    deps = [
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+        "//src/option/table:surface_concepts",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dimensionless_european_test",
+    size = "small",
+    srcs = ["dimensionless_european_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_european",
+        "//src/option:european_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dimensionless_builder_test",
+    size = "medium",
+    srcs = ["dimensionless_builder_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_european",
+        "//src/option/table:dimensionless_3d_accessor",
+        "//src/option/table:analytical_eep",
+        "//src/option:american_option",
+        "//src/option:european_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dimensionless_3d_surface_test",
+    size = "medium",
+    srcs = ["dimensionless_3d_surface_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table:dimensionless_3d_accessor",
+        "//src/option/table:analytical_eep",
+        "//src/math:bspline_nd_separable",
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dimensionless_iv_test",
+    size = "medium",
+    srcs = ["dimensionless_iv_test.cc"],
+    deps = [
+        "//src/option:interpolated_iv_solver",
+        "//src/option:iv_solver",
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dimensionless_adaptive_test",
+    size = "large",
+    srcs = ["dimensionless_adaptive_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_adaptive",
         "@googletest//:gtest_main",
     ],
 )

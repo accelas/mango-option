@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: MIT
+
+cc_library(
+    name = "dimensionless_european",
+    hdrs = ["dimensionless_european.hpp"],
+    deps = ["//src/option:option_spec"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
+cc_library(
+    name = "dimensionless_adaptive",
+    srcs = ["dimensionless_adaptive.cpp"],
+    hdrs = ["dimensionless_builder.hpp"],
+    copts = ["-fopenmp", "-pthread"],
+    linkopts = ["-fopenmp", "-pthread"],
+    deps = [
+        ":dimensionless_builder",
+        ":dimensionless_european",
+        "//src/option:american_option_batch",
+        "//src/option:grid_spec_types",
+        "//src/math:cubic_spline_solver",
+        "//src/option/table:dimensionless_3d_accessor",
+        "//src/option/table:eep_decomposer",
+        "//src/option/table:analytical_eep",
+        "//src/math:bspline_nd_separable",
+        "//src/option/table/bspline:bspline_surface",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
+cc_library(
+    name = "dimensionless_builder",
+    srcs = ["dimensionless_builder.cpp"],
+    hdrs = ["dimensionless_builder.hpp"],
+    copts = ["-fopenmp", "-pthread"],
+    linkopts = ["-fopenmp", "-pthread"],
+    deps = [
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option:american_option_batch",
+        "//src/option:grid_spec_types",
+        "//src/math:cubic_spline_solver",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)

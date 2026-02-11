@@ -157,6 +157,24 @@ struct ChebyshevBackend {
     double tucker_epsilon = 1e-8;                      ///< 0 = use RawTensor
 };
 
+/// Dimensionless 3D interpolation backend
+///
+/// Collapses (sigma, r) into kappa = 2r/sigma^2, reducing to 3D (x, tau', ln kappa).
+/// Fewer PDE solves but sigma/r coupling limits accuracy.
+///
+/// Constraints: dividend_yield must be 0, no discrete dividends, rate > 0.
+///
+/// IVGrid values define domain bounds only (not exact knots).  The B-spline
+/// path derives its own linspace grid; the Chebyshev path uses CGL nodes.
+struct DimensionlessBackend {
+    enum class Interpolant { BSpline, Chebyshev };
+
+    double maturity = 2.0;                    ///< Domain upper bound for physical tau
+    Interpolant interpolant = Interpolant::BSpline;
+    std::array<size_t, 3> chebyshev_pts = {16, 16, 12};  ///< CGL nodes (x, tau', ln_kappa)
+    double tucker_epsilon = 1e-8;             ///< Tucker compression threshold
+};
+
 /// Discrete dividend configuration (optional, orthogonal to backend choice)
 struct DiscreteDividendConfig {
     double maturity = 1.0;                  ///< Surface maturity
@@ -179,7 +197,7 @@ struct IVSolverFactoryConfig {
     IVGrid grid;                                    ///< Grid points (exact or domain bounds)
     std::optional<AdaptiveGridParams> adaptive;     ///< If set, refine grid adaptively
     InterpolatedIVSolverConfig solver_config;       ///< Newton config
-    std::variant<BSplineBackend, ChebyshevBackend> backend;
+    std::variant<BSplineBackend, ChebyshevBackend, DimensionlessBackend> backend;
     std::optional<DiscreteDividendConfig> discrete_dividends;
 };
 

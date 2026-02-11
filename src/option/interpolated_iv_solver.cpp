@@ -18,6 +18,14 @@
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_3d_surface.hpp"
+#include "mango/option/table/chebyshev/chebyshev_3d_surface.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
+#include "mango/option/table/eep/dimensionless_3d_accessor.hpp"
+#include "mango/option/table/transforms/dimensionless_3d.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/chebyshev/chebyshev_nodes.hpp"
+#include "mango/math/chebyshev/tucker_tensor.hpp"
 #include <algorithm>
 #include <cmath>
 #include <variant>
@@ -32,6 +40,8 @@ template class InterpolatedIVSolver<BSplinePriceTable>;
 template class InterpolatedIVSolver<BSplineMultiKRefSurface>;
 template class InterpolatedIVSolver<ChebyshevSurface>;
 template class InterpolatedIVSolver<ChebyshevRawSurface>;
+template class InterpolatedIVSolver<BSpline3DPriceTable>;
+template class InterpolatedIVSolver<Chebyshev3DPriceTable>;
 
 // =====================================================================
 // Factory internals
@@ -177,7 +187,9 @@ struct AnyIVSolver::Impl {
         InterpolatedIVSolver<BSplineMultiKRefSurface>,
         InterpolatedIVSolver<ChebyshevSurface>,
         InterpolatedIVSolver<ChebyshevRawSurface>,
-        InterpolatedIVSolver<ChebyshevSegmentedSurface>
+        InterpolatedIVSolver<ChebyshevSegmentedSurface>,
+        InterpolatedIVSolver<BSpline3DPriceTable>,
+        InterpolatedIVSolver<Chebyshev3DPriceTable>
     >;
     SolverVariant solver;
 
@@ -487,6 +499,207 @@ build_chebyshev_segmented(const IVSolverFactoryConfig& config,
 }
 
 // ---------------------------------------------------------------------------
+// Factory: Dimensionless 3D
+// ---------------------------------------------------------------------------
+
+/// Compute dimensionless domain bounds from config.
+struct DimlessDomain {
+    double sigma_min, sigma_max, rate_min, rate_max;
+    double tau_min, tp_min, tp_max, lk_min, lk_max;
+    double m_min, m_max;
+};
+
+static DimlessDomain compute_dimless_domain(
+    const GridBounds& b, double maturity)
+{
+    DimlessDomain d;
+    d.sigma_min = b.sigma_min;  d.sigma_max = b.sigma_max;
+    d.rate_min  = b.rate_min;   d.rate_max  = b.rate_max;
+    d.m_min     = b.m_min;      d.m_max     = b.m_max;
+    d.tau_min   = 0.01;
+    d.tp_min = d.sigma_min * d.sigma_min * d.tau_min / 2.0;
+    d.tp_max = d.sigma_max * d.sigma_max * maturity / 2.0;
+    d.lk_min = std::log(2.0 * d.rate_min / (d.sigma_max * d.sigma_max));
+    d.lk_max = std::log(2.0 * d.rate_max / (d.sigma_min * d.sigma_min));
+    return d;
+}
+
+static SurfaceBounds dimless_bounds(const DimlessDomain& d, double maturity) {
+    return {
+        .m_min = d.m_min, .m_max = d.m_max,
+        .tau_min = d.tau_min, .tau_max = maturity,
+        .sigma_min = d.sigma_min, .sigma_max = d.sigma_max,
+        .rate_min = d.rate_min, .rate_max = d.rate_max,
+    };
+}
+
+static std::expected<AnyIVSolver, ValidationError>
+build_dimensionless_bspline(const IVSolverFactoryConfig& config,
+                            const DimensionlessBackend& backend) {
+    auto log_m = to_log_moneyness(config.grid.moneyness);
+    if (!log_m.has_value()) return std::unexpected(log_m.error());
+
+    auto b = extract_bounds(config.grid);
+    auto d = compute_dimless_domain(b, backend.maturity);
+
+    auto linspace = [](double lo, double hi, size_t n) {
+        std::vector<double> v(n);
+        for (size_t i = 0; i < n; ++i)
+            v[i] = lo + (hi - lo) * static_cast<double>(i) / static_cast<double>(n - 1);
+        return v;
+    };
+
+    DimensionlessAxes axes{
+        .log_moneyness = linspace(d.m_min, d.m_max, 12),
+        .tau_prime = linspace(d.tp_min, d.tp_max, 10),
+        .ln_kappa = linspace(d.lk_min, d.lk_max, 10),
+    };
+
+    // 1. PDE solve -> raw V/K
+    auto pde = solve_dimensionless_pde(axes, config.spot, config.option_type);
+    if (!pde.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+
+    // 2. EEP decompose via accessor
+    Dimensionless3DAccessor accessor(pde->values, axes, config.spot);
+    eep_decompose(accessor, AnalyticalEEP(config.option_type, 0.0));
+
+    // 3. Fit B-spline on (now dollar EEP) values
+    std::array<std::vector<double>, 3> grids = {
+        axes.log_moneyness, axes.tau_prime, axes.ln_kappa};
+    auto fitter_result = BSplineNDSeparable<double, 3>::create(grids);
+    if (!fitter_result.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+    auto fit_result = fitter_result->fit(std::move(pde->values));
+    if (!fit_result.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+
+    // 4. Build surface with actual K_ref
+    PriceTableAxesND<3> surface_axes;
+    surface_axes.grids[0] = axes.log_moneyness;
+    surface_axes.grids[1] = axes.tau_prime;
+    surface_axes.grids[2] = axes.ln_kappa;
+    surface_axes.names = {"log_moneyness", "tau_prime", "ln_kappa"};
+
+    auto surface = PriceTableSurfaceND<3>::build(
+        std::move(surface_axes), std::move(fit_result->coefficients), config.spot);
+    if (!surface.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+
+    // 5. Wrap in layered PriceTable (K_ref = config.spot)
+    SharedBSplineInterp<3> interp(std::move(surface.value()));
+    DimensionlessTransform3D xform;
+    BSpline3DTransformLeaf leaf(std::move(interp), xform, config.spot);
+    AnalyticalEEP eep(config.option_type, 0.0);
+    BSpline3DLeaf eep_leaf(std::move(leaf), std::move(eep));
+
+    BSpline3DPriceTable table(
+        std::move(eep_leaf), dimless_bounds(d, backend.maturity),
+        config.option_type, 0.0);
+
+    auto solver = InterpolatedIVSolver<BSpline3DPriceTable>::create(
+        std::move(table), config.solver_config);
+    if (!solver.has_value()) return std::unexpected(solver.error());
+    return make_any_solver(std::move(*solver));
+}
+
+static std::expected<AnyIVSolver, ValidationError>
+build_dimensionless_chebyshev(const IVSolverFactoryConfig& config,
+                              const DimensionlessBackend& backend) {
+    auto log_m = to_log_moneyness(config.grid.moneyness);
+    if (!log_m.has_value()) return std::unexpected(log_m.error());
+
+    auto b = extract_bounds(config.grid);
+    auto d = compute_dimless_domain(b, backend.maturity);
+
+    // Generate Chebyshev nodes per axis
+    auto x_nodes  = chebyshev_nodes(backend.chebyshev_pts[0], d.m_min, d.m_max);
+    auto tp_nodes = chebyshev_nodes(backend.chebyshev_pts[1], d.tp_min, d.tp_max);
+    auto lk_nodes = chebyshev_nodes(backend.chebyshev_pts[2], d.lk_min, d.lk_max);
+
+    DimensionlessAxes axes{
+        .log_moneyness = x_nodes,
+        .tau_prime = tp_nodes,
+        .ln_kappa = lk_nodes,
+    };
+
+    // 1. PDE solve -> raw V/K
+    auto pde = solve_dimensionless_pde(axes, config.spot, config.option_type);
+    if (!pde.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+
+    // 2. EEP decompose via accessor
+    Dimensionless3DAccessor accessor(pde->values, axes, config.spot);
+    eep_decompose(accessor, AnalyticalEEP(config.option_type, 0.0));
+
+    // 3. Fit Chebyshev on (now dollar EEP) values
+    Domain<3> domain{
+        .lo = {d.m_min, d.tp_min, d.lk_min},
+        .hi = {d.m_max, d.tp_max, d.lk_max},
+    };
+
+    auto cheb = ChebyshevInterpolant<3, TuckerTensor<3>>::build_from_values(
+        std::span<const double>(pde->values),
+        domain, backend.chebyshev_pts, backend.tucker_epsilon);
+
+    // 4. Wrap in layered PriceTable (K_ref = config.spot)
+    DimensionlessTransform3D xform;
+    Chebyshev3DTransformLeaf leaf(std::move(cheb), xform, config.spot);
+    AnalyticalEEP eep_fn(config.option_type, 0.0);
+    Chebyshev3DLeaf eep_leaf(std::move(leaf), std::move(eep_fn));
+
+    Chebyshev3DPriceTable table(
+        std::move(eep_leaf), dimless_bounds(d, backend.maturity),
+        config.option_type, 0.0);
+
+    auto solver = InterpolatedIVSolver<Chebyshev3DPriceTable>::create(
+        std::move(table), config.solver_config);
+    if (!solver.has_value()) return std::unexpected(solver.error());
+    return make_any_solver(std::move(*solver));
+}
+
+static std::expected<AnyIVSolver, ValidationError>
+build_dimensionless(const IVSolverFactoryConfig& config,
+                    const DimensionlessBackend& backend) {
+    // Dimensionless backend requires q=0, no discrete dividends, r > 0.
+    if (std::abs(config.dividend_yield) > 1e-12) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidDividend, config.dividend_yield});
+    }
+    if (config.discrete_dividends.has_value() &&
+        !config.discrete_dividends->discrete_dividends.empty()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidDividend,
+            static_cast<double>(config.discrete_dividends->discrete_dividends.size())});
+    }
+
+    // ln(2r/sigma^2) requires strictly positive rate and sigma bounds.
+    auto b = extract_bounds(config.grid);
+    if (b.rate_min <= 0.0) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidRate, b.rate_min});
+    }
+    if (b.sigma_min <= 0.0) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidVolatility, b.sigma_min});
+    }
+
+    if (backend.interpolant == DimensionlessBackend::Interpolant::Chebyshev)
+        return build_dimensionless_chebyshev(config, backend);
+    return build_dimensionless_bspline(config, backend);
+}
+
+// ---------------------------------------------------------------------------
 // Public factory
 // ---------------------------------------------------------------------------
 
@@ -500,6 +713,8 @@ std::expected<AnyIVSolver, ValidationError> make_interpolated_iv_solver(const IV
                 return build_bspline_segmented(config, *config.discrete_dividends);
             else
                 return build_bspline(config, backend);
+        } else if constexpr (std::is_same_v<B, DimensionlessBackend>) {
+            return build_dimensionless(config, backend);
         } else {
             if (has_divs)
                 return build_chebyshev_segmented(config, backend, *config.discrete_dividends);
