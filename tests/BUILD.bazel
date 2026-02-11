@@ -144,7 +144,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_axes_test.cc"],
     deps = [
-        "//src/option/table:price_table_axes",
+        "//src/option/table/bspline:bspline_surface",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -155,18 +155,7 @@ cc_test(
     size = "small",
     srcs = ["price_tensor_test.cc"],
     deps = [
-        "//src/option/table:price_tensor",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "price_table_metadata_test",
-    size = "small",
-    srcs = ["price_table_metadata_test.cc"],
-    deps = [
-        "//src/option/table:price_table_metadata",
+        "//src/option/table/bspline:bspline_builder",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -177,7 +166,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_surface_test.cc"],
     deps = [
-        "//src/option/table:price_table_surface",
+        "//src/option/table/bspline:bspline_surface",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -189,7 +178,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_config_test.cc"],
     deps = [
-        "//src/option/table:price_table_config",
+        "//src/option/table/bspline:bspline_builder",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -208,19 +197,6 @@ cc_test(
 )
 
 cc_test(
-    name = "price_surface_concept_test",
-    size = "small",
-    srcs = ["price_surface_concept_test.cc"],
-    deps = [
-        "//src/option/table:price_surface_concept",
-        "//src/option/table:standard_surface",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
-
-
-cc_test(
     name = "option_concepts_test",
     size = "small",
     srcs = ["option_concepts_test.cc"],
@@ -237,7 +213,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_grid_estimator_test.cc"],
     deps = [
-        "//src/option/table:price_table_grid_estimator",
+        "//src/option/table/bspline:bspline_builder",
         "//src/option:american_option",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -249,7 +225,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_builder_test.cc", "price_table_builder_test_access.hpp"],
     deps = [
-        "//src/option/table:price_table_builder",
+        "//src/option/table/bspline:bspline_builder",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -260,7 +236,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_builder_custom_grid_test.cc", "price_table_builder_test_access.hpp"],
     deps = [
-        "//src/option/table:price_table_builder",
+        "//src/option/table/bspline:bspline_builder",
         "//src/pde/core:time_domain",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -272,7 +248,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_builder_custom_grid_advanced_test.cc", "price_table_builder_test_access.hpp"],
     deps = [
-        "//src/option/table:price_table_builder",
+        "//src/option/table/bspline:bspline_builder",
         "//src/pde/core:time_domain",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -284,7 +260,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_builder_custom_grid_diagnosis_test.cc", "price_table_builder_test_access.hpp"],
     deps = [
-        "//src/option/table:price_table_builder",
+        "//src/option/table/bspline:bspline_builder",
         "//src/pde/core:time_domain",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -296,7 +272,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_builder_root_cause_test.cc", "price_table_builder_test_access.hpp"],
     deps = [
-        "//src/option/table:price_table_builder",
+        "//src/option/table/bspline:bspline_builder",
         "//src/pde/core:time_domain",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -318,7 +294,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_result_test.cc"],
     deps = [
-        "//src/option/table:price_table_builder",
+        "//src/option/table/bspline:bspline_builder",
         "@googletest//:gtest_main",
     ],
 )
@@ -328,9 +304,8 @@ cc_test(
     size = "small",
     srcs = ["price_table_builder_result_test.cc"],
     deps = [
-        "//src/option/table:price_table_builder",
-        "//src/option/table:price_table_axes",
-        "//src/option/table:price_table_config",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
         "@googletest//:gtest_main",
     ],
 )
@@ -340,9 +315,8 @@ cc_test(
     size = "small",
     srcs = ["price_table_builder_grid_test.cc"],
     deps = [
-        "//src/option/table:price_table_builder",
-        "//src/option/table:price_table_axes",
-        "//src/option/table:price_table_config",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
         "@googletest//:gtest_main",
     ],
 )
@@ -352,7 +326,7 @@ cc_test(
     size = "small",
     srcs = ["price_table_builder_factories_test.cc"],
     deps = [
-        "//src/option/table:price_table_builder",
+        "//src/option/table/bspline:bspline_builder",
         "//src/option:option_grid",
         "@googletest//:gtest_main",
     ],
@@ -363,7 +337,7 @@ cc_test(
     size = "small",
     srcs = ["recursion_helpers_test.cc"],
     deps = [
-        "//src/option/table:recursion_helpers",
+        "//src/option/table/bspline:bspline_builder",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -803,8 +777,8 @@ cc_test(
 #     name = "price_table_4d_integration_test",
 #     srcs = ["price_table_4d_integration_test.cc"],
 #     deps = [
-#         "//src/option/table:price_table_builder",
-#         "//src/option/table:price_table_surface",
+#         "//src/option/table/bspline:bspline_builder",
+#         "//src/option/table/bspline:bspline_surface",
 #         "@googletest//:gtest_main",
 #     ],
 #     copts = ["-std=c++23"],
@@ -815,7 +789,7 @@ cc_test(
 #     name = "price_table_end_to_end_performance_test",
 #     srcs = ["price_table_end_to_end_performance_test.cc"],
 #     deps = [
-#         "//src/option/table:price_table_builder",
+#         "//src/option/table/bspline:bspline_builder",
 #         "@googletest//:gtest_main",
 #     ],
 #     copts = ["-std=c++23"],
@@ -828,15 +802,6 @@ cc_test(
     srcs = ["crc64_test.cc"],
     deps = [
         "//src/support:crc64",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "price_table_workspace_test",
-    srcs = ["price_table_workspace_test.cc"],
-    deps = [
-        "//src/option/table:price_table_workspace",
         "@googletest//:gtest_main",
     ],
 )
@@ -907,10 +872,9 @@ cc_test(
         "//src/option:american_option",
         "//src/option:iv_solver",
         "//src/option:interpolated_iv_solver",
-        "//src/option/table:price_table_builder",
-        "//src/option/table:price_table_surface",
-        "//src/option/table:standard_surface",
-        "//src/option/table:eep_decomposer",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],
@@ -1131,12 +1095,9 @@ cc_test(
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option:interpolated_iv_solver",
-        "//src/option/table:price_table_builder",
-        "//src/option/table:price_table_surface",
-        "//src/option/table:price_table_axes",
-        "//src/option/table:price_table_metadata",
-        "//src/option/table:eep_decomposer",
-        "//src/option/table:standard_surface",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "@googletest//:gtest_main",
     ],
 )
@@ -1227,18 +1188,18 @@ cc_test(
     size = "small",
     srcs = ["error_attribution_test.cc"],
     deps = [
-        "//src/option/table:error_attribution",
+        "//src/option/table:adaptive_refinement",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
 )
 
 cc_test(
-    name = "slice_cache_test",
+    name = "bspline_pde_cache_test",
     size = "small",
-    srcs = ["slice_cache_test.cc"],
+    srcs = ["bspline_pde_cache_test.cc"],
     deps = [
-        "//src/option/table:slice_cache",
+        "//src/option/table/bspline:bspline_pde_cache",
         "//src/option:american_option_result",
         "//src/pde/core:grid",
         "//src/pde/core:time_domain",
@@ -1265,8 +1226,11 @@ cc_test(
     timeout = "moderate",
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
-        "//src/option/table:adaptive_grid_builder",
-        "//src/option/table:standard_surface",
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/option/table/bspline:bspline_pde_cache",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option:american_option_batch",
         "//src/option:option_grid",
         "//src/pde/core:grid",
@@ -1283,7 +1247,7 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
-        "//src/option/table:adaptive_grid_builder",
+        "//src/option/table/bspline:bspline_adaptive",
         "//src/option:option_grid",
         "//src/pde/core:grid",
         "@googletest//:gtest",
@@ -1299,10 +1263,9 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
-        "//src/option/table:price_table_builder",
-        "//src/option/table:price_table_surface",
-        "//src/option/table:standard_surface",
-        "//src/option/table:eep_decomposer",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "//src/option:american_option_batch",
         "//src/option:interpolated_iv_solver",
         "//src/pde/core:grid",
@@ -1387,9 +1350,9 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
-        "//src/option/table:price_table_builder",
-        "//src/option/table:standard_surface",
-        "//src/option/table:eep_decomposer",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "//src/option:american_option",
         "//src/pde/core:pde_workspace",
         "@googletest//:gtest",
@@ -1403,7 +1366,7 @@ cc_test(
     timeout = "moderate",
     srcs = ["segmented_price_surface_test.cc"],
     deps = [
-        "//src/option/table:segmented_price_table_builder",
+        "//src/option/table/bspline:bspline_segmented_builder",
         "@googletest//:gtest_main",
     ],
 )
@@ -1424,7 +1387,7 @@ cc_test(
     size = "medium",
     srcs = ["segmented_price_table_builder_test.cc"],
     deps = [
-        "//src/option/table:segmented_price_table_builder",
+        "//src/option/table/bspline:bspline_segmented_builder",
         "@googletest//:gtest_main",
     ],
 )
@@ -1434,8 +1397,8 @@ cc_test(
     size = "small",
     srcs = ["price_table_builder_raw_price_test.cc"],
     deps = [
-        "//src/option/table:price_table_builder",
-        "//src/option/table:eep_decomposer",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "@googletest//:gtest_main",
     ],
 )
@@ -1524,13 +1487,11 @@ cc_test(
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option/table:surface_concepts",
-        "//src/option/table:bspline_interpolant",
+        "//src/option/table/bspline:bspline_surface",
         "//src/option/table:standard_transform_4d",
         "//src/option/table:analytical_eep",
-        "//src/option/table:identity_eep",
-        "//src/option/table:eep_surface_adapter",
-        "//src/option/table:bounded_surface",
-        "//src/option/table:price_surface_concept",
+        "//src/option/table:price_table",
+
         "@googletest//:gtest_main",
     ],
 )
@@ -1569,6 +1530,33 @@ cc_test(
         "//src/option/table:split_surface",
         "//src/option/table:tau_segment_split",
         "//src/option/table:multi_kref_split",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "chebyshev_pde_cache_test",
+    size = "small",
+    srcs = ["chebyshev_pde_cache_test.cc"],
+    deps = [
+        "//src/option/table/chebyshev:chebyshev_pde_cache",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "chebyshev_surface_test",
+    size = "medium",
+    srcs = ["chebyshev_surface_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
+
+        "//src/option/table:surface_concepts",
+        "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
 )

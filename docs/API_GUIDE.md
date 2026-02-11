@@ -268,7 +268,7 @@ auto result = solver.solve(query);
 **Pre-compute American option prices across parameter space:**
 
 ```cpp
-#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/standard_surface.hpp"
 
 // Define 4D parameter grids
@@ -302,7 +302,7 @@ if (!result.has_value()) {
 }
 
 // Wrap surface for price reconstruction
-auto wrapper = mango::make_standard_surface(
+auto wrapper = mango::make_bspline_surface(
     result->surface, mango::OptionType::PUT).value();
 
 // Query American option prices (~500ns)
@@ -311,7 +311,7 @@ double price = wrapper.price(spot, strike, tau, sigma, rate);
 
 ### Interpolated Greek Accuracy
 
-`StandardSurface` computes price by combining B-spline interpolation of the EEP surface with exact Black-Scholes pricing for the European component:
+`BSplinePriceTable` computes price by combining B-spline interpolation of the EEP surface with exact Black-Scholes pricing for the European component:
 
 | Greek | Method | Accuracy |
 |---|---|---|
@@ -411,7 +411,7 @@ surface = mo.build_price_table_surface_from_grid(
 ```cpp
 #include "mango/option/interpolated_iv_solver.hpp"
 
-// Create IV solver from StandardSurface
+// Create IV solver from BSplinePriceTable
 auto iv_solver = mango::DefaultInterpolatedIVSolver::create(std::move(wrapper)).value();
 
 // Solve IV — internally uses EEP reconstruction + Newton iteration
@@ -507,7 +507,7 @@ The [Price Table Pre-Computation](#price-table-pre-computation) workflow assumes
 
 2. **Segment k** (τ ∈ [τ_k, τ_{k+1}]): Built in raw-price mode. Its initial condition comes from the previous segment's surface, evaluated at the post-dividend spot: S_adj = S − D_k. This embeds the dividend jump into the initial condition, so no spot adjustment is needed at query time for these segments.
 
-The result is a `SegmentedPriceSurface` — an ordered list of segments that together cover [0, T]. At query time, the surface finds the segment covering the requested τ and evaluates it directly.
+The result is a `BSplineSegmentedSurface` — an ordered list of segments that together cover [0, T]. At query time, the surface finds the segment covering the requested τ and evaluates it directly.
 
 **Why multiple K_ref values?** Cash dividends break the scale invariance that American options normally have in strike. A single reference-strike surface cannot accurately interpolate across strikes far from K_ref. The builder constructs surfaces at several reference strikes and interpolates across them with Catmull-Rom splines in log(K_ref). The result is a `SegmentedMultiKRefSurface`.
 
@@ -775,7 +775,7 @@ Use FDM batch when you need exact PDE accuracy or have few queries. Use the pric
 | Single option with discrete dividends | `solve_american_option(params)` with `Dividend` list | ~5–20ms |
 | Batch (same parameters, varying strikes) | `BatchAmericanOptionSolver` with chain solving | ~5–20ms total (1 PDE) |
 | Batch (mixed parameters) | `BatchAmericanOptionSolver` | ~5–20ms per group |
-| Many queries, same parameter space | Pre-compute price table, query `StandardSurface` | ~500ns/query |
+| Many queries, same parameter space | Pre-compute price table, query `BSplinePriceTable` | ~500ns/query |
 
 ### Implied Volatility
 

@@ -12,10 +12,9 @@
  */
 
 #include "tests/quantlib_validation_framework.hpp"
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/standard_surface.hpp"
-#include "mango/option/table/eep/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -124,10 +123,10 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     auto [builder, axes] = std::move(builder_axes_result.value());
 
     // Pre-compute prices for PUT options with EEP decomposition
-    EEPDecomposer decomposer{OptionType::PUT, 100.0, dividend_yield};
-    auto precompute_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto precompute_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, 100.0);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, dividend_yield));
         });
     ASSERT_TRUE(precompute_result.has_value())
         << "Price table precomputation failed: " << precompute_result.error();
@@ -141,9 +140,9 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
         .sigma_min = 0.05,
         .sigma_max = 2.0
     };
-    auto wrapper = make_standard_surface(price_table_result.surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(price_table_result.surface, OptionType::PUT);
     ASSERT_TRUE(wrapper.has_value()) << "Failed to create wrapper: " << wrapper.error();
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper), iv_config);
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper), iv_config);
     ASSERT_TRUE(iv_solver_result.has_value())
         << "Failed to create interpolated IV solver: " << iv_solver_result.error();
 

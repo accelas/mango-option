@@ -577,7 +577,7 @@ The adaptive grid builder (section 10) extends to segmented surfaces via a probe
 
 1. **Selects 2–3 probe K_ref values** from the full list: the lowest, highest, and the one closest to ATM (deduplicated if ATM coincides with an endpoint).
 
-2. **Runs independent refinement loops** on each probe, building single-K_ref `SegmentedPriceSurface` instances. Each probe validates at strike = K_ref (the only strike that single-K_ref raw segments can price exactly).
+2. **Runs independent refinement loops** on each probe, building single-K_ref `BSplineSegmentedSurface` instances. Each probe validates at strike = K_ref (the only strike that single-K_ref raw segments can price exactly).
 
 3. **Takes the per-axis maximum** grid sizes across probes — the worst-case K_ref determines each axis.
 

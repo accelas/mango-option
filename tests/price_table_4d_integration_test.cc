@@ -4,8 +4,8 @@
  * @brief Integration tests for PriceTableBuilder with routing
  */
 
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <iostream>

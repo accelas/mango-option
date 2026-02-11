@@ -14,7 +14,7 @@
  * - Expected speedup: ≥1.47× (banded solver is ~40% of total runtime)
  */
 
-#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <cmath>

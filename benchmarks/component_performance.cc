@@ -16,10 +16,9 @@
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/eep/eep_decomposer.hpp"
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cmath>
@@ -74,10 +73,10 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to create PriceTableBuilderND");
         }
         auto [builder, axes] = std::move(result.value());
-        EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.0};
-        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
-                decomposer.decompose(tensor, a);
+                BSplineTensorAccessor accessor(tensor, a, 100.0);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
             });
         if (!table) {
             throw std::runtime_error("Failed to build price table");
@@ -285,12 +284,12 @@ BENCHMARK(BM_ImpliedVol_ITM_Put);
 static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    // Create StandardSurface and IV solver
-    auto wrapper = make_standard_surface(surf.surface, OptionType::PUT);
+    // Create BSplinePriceTable and IV solver
+    auto wrapper = make_bspline_surface(surf.surface, OptionType::PUT);
     if (!wrapper) {
-        throw std::runtime_error("Failed to create StandardSurface");
+        throw std::runtime_error("Failed to create BSplinePriceTable");
     }
-    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper));
 
     if (!solver_result) {
         auto err = solver_result.error();

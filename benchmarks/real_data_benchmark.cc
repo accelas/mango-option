@@ -16,13 +16,11 @@
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/option_grid.hpp"
-#include "mango/option/table/eep/eep_decomposer.hpp"
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/price_table_grid_estimator.hpp"
-#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
-#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -155,10 +153,10 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to create PriceTableBuilderND");
         }
         auto [builder, axes] = std::move(result.value());
-        EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
-        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
-                decomposer.decompose(tensor, a);
+                BSplineTensorAccessor accessor(tensor, a, SPOT);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
             });
         if (!table) {
             throw std::runtime_error("Failed to build price table");
@@ -338,11 +336,11 @@ BENCHMARK(BM_RealData_IV_FDM)
 static void BM_RealData_IV_BSpline(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    auto wrapper = make_standard_surface(surf.surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(surf.surface, OptionType::PUT);
     if (!wrapper) {
-        throw std::runtime_error("Failed to create StandardSurface");
+        throw std::runtime_error("Failed to create BSplinePriceTable");
     }
-    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper));
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper));
     if (!solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -552,21 +550,21 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
-    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, SPOT);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
         });
     if (!table_result) {
         throw std::runtime_error("Failed to build price table");
     }
 
     // Create IV solver
-    auto wrapper_query = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_query = make_bspline_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_query) {
-        throw std::runtime_error("Failed to create StandardSurface");
+        throw std::runtime_error("Failed to create BSplinePriceTable");
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_query));
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_query));
     if (!iv_solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -654,21 +652,21 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
-    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, SPOT);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
         });
     if (!table_result) {
         throw std::runtime_error("Failed to build price table");
     }
 
     // Create interpolated IV solver
-    auto wrapper_acc = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_acc = make_bspline_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_acc) {
-        throw std::runtime_error("Failed to create StandardSurface");
+        throw std::runtime_error("Failed to create BSplinePriceTable");
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_acc));
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_acc));
     if (!iv_solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -819,10 +817,10 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
-    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, SPOT);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
         });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
@@ -830,12 +828,12 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     }
 
     // Create interpolated IV solver
-    auto wrapper_dense = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_dense = make_bspline_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_dense) {
-        state.SkipWithError("Failed to create StandardSurface");
+        state.SkipWithError("Failed to create BSplinePriceTable");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_dense));
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_dense));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
@@ -930,10 +928,10 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
-    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, SPOT);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
         });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
@@ -941,12 +939,12 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     }
 
     // Create interpolated IV solver
-    auto wrapper_est = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_est = make_bspline_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_est) {
-        state.SkipWithError("Failed to create StandardSurface");
+        state.SkipWithError("Failed to create BSplinePriceTable");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_est));
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_est));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
@@ -1052,22 +1050,22 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     }
 
     auto& [builder, axes] = builder_result.value();
-    EEPDecomposer decomposer{OptionType::PUT, SPOT, DIVIDEND_YIELD};
-    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, SPOT);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, DIVIDEND_YIELD));
         });
     if (!table_result) {
         state.SkipWithError("Failed to build price table");
         return;
     }
 
-    auto wrapper_prof = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_prof = make_bspline_surface(table_result->surface, OptionType::PUT);
     if (!wrapper_prof) {
-        state.SkipWithError("Failed to create StandardSurface");
+        state.SkipWithError("Failed to create BSplinePriceTable");
         return;
     }
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_prof));
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_prof));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 
 namespace mango {
 namespace {
@@ -18,14 +18,13 @@ TEST(PriceTableSurfaceTest, Build2DSurface) {
         coeffs[i] = static_cast<double>(i + 1);
     }
 
-    PriceTableMetadata meta{.K_ref = 100.0, .dividends = {.dividend_yield = 0.02}};
-
-    auto result = PriceTableSurfaceND<2>::build(std::move(axes), std::move(coeffs), meta);
+    auto result = PriceTableSurfaceND<2>::build(std::move(axes), std::move(coeffs),
+        100.0, DividendSpec{.dividend_yield = 0.02});
     ASSERT_TRUE(result.has_value()) << "Error: " << result.error();
 
     auto surface = result.value();
     EXPECT_EQ(surface->axes().grids[0].size(), 5);
-    EXPECT_DOUBLE_EQ(surface->metadata().K_ref, 100.0);
+    EXPECT_DOUBLE_EQ(surface->K_ref(), 100.0);
 }
 
 TEST(PriceTableSurfaceTest, ValueInterpolation) {
@@ -40,8 +39,7 @@ TEST(PriceTableSurfaceTest, ValueInterpolation) {
         coeffs[i] = static_cast<double>(i + 1);
     }
 
-    PriceTableMetadata meta{.K_ref = 100.0};
-    auto surface = PriceTableSurfaceND<2>::build(std::move(axes), std::move(coeffs), meta).value();
+    auto surface = PriceTableSurfaceND<2>::build(std::move(axes), std::move(coeffs), 100.0).value();
 
     // Query at grid point: value() returns raw B-spline value
     // At (m=0.8, tau=0.1), the spline value is 1.0 (first coefficient)
@@ -56,8 +54,7 @@ TEST(PriceTableSurfaceTest, RejectInvalidCoefficients) {
 
     std::vector<double> coeffs = {1.0, 2.0};  // Only 2, need 4*4=16
 
-    PriceTableMetadata meta{.K_ref = 100.0};
-    auto result = PriceTableSurfaceND<2>::build(std::move(axes), std::move(coeffs), meta);
+    auto result = PriceTableSurfaceND<2>::build(std::move(axes), std::move(coeffs), 100.0);
 
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::FittingFailed);
@@ -73,9 +70,8 @@ TEST(PriceTableSurfaceTest, BuildReturnsCorrectTemplateType) {
     axes.grids[1] = {0.1, 0.5, 1.0, 1.5};
 
     std::vector<double> coeffs(16, 1.0);
-    PriceTableMetadata meta{.K_ref = 100.0};
 
-    auto result = PriceTableSurfaceND<2>::build(std::move(axes), std::move(coeffs), meta);
+    auto result = PriceTableSurfaceND<2>::build(std::move(axes), std::move(coeffs), 100.0);
     ASSERT_TRUE(result.has_value());
 
     // Compile-time type verification: ensure template parameter is present
@@ -96,9 +92,8 @@ TEST(PriceTableSurfaceTest, Build3DReturnsCorrectTemplateType) {
     axes.grids[2] = {0.15, 0.20, 0.25, 0.30};
 
     std::vector<double> coeffs(64, 1.0);  // 4*4*4 = 64
-    PriceTableMetadata meta{.K_ref = 100.0};
 
-    auto result = PriceTableSurfaceND<3>::build(std::move(axes), std::move(coeffs), meta);
+    auto result = PriceTableSurfaceND<3>::build(std::move(axes), std::move(coeffs), 100.0);
     ASSERT_TRUE(result.has_value());
 
     // Compile-time type verification
@@ -113,8 +108,7 @@ TEST(PriceTableSurfaceTest, PartialClampsBeyondBounds) {
     axes.grids[1] = {0.1, 0.5, 1.0, 1.5};  // maturity
 
     std::vector<double> coeffs(16, 1.0);
-    PriceTableMetadata meta{.K_ref = 100.0};
-    auto surface = PriceTableSurfaceND<2>::build(std::move(axes), std::move(coeffs), meta).value();
+    auto surface = PriceTableSurfaceND<2>::build(std::move(axes), std::move(coeffs), 100.0).value();
 
     // Query partial at m=0.5 (below m_min=0.8) should produce same result as at m_min
     double partial_oob = surface->partial(0, {0.5, 0.5});

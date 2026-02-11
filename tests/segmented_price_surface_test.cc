@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Tests for SegmentedSurface<> created via SegmentedPriceTableBuilder
 #include <gtest/gtest.h>
-#include "mango/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include <cmath>
 #include <vector>
 

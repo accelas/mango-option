@@ -59,8 +59,7 @@ TEST(NormalizedSolverRegressionTest, PriceTableSnapshotRegistration) {
     // We test the mechanism by checking that a solver with set_snapshot_times() actually
     // registers snapshots, which is what the price table builder's callback does.
 
-    // The actual price table end-to-end test is in price_table_workspace_test.cc
-    // This test just verifies the snapshot registration mechanism works.
+    // This test verifies the snapshot registration mechanism works.
 
     std::vector<double> maturities = {0.25, 0.5, 1.0};
     bool callback_invoked = false;
