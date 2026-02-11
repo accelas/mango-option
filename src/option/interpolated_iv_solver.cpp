@@ -95,6 +95,9 @@ std::expected<BSplineMultiKRefInner, PriceTableError> build_multi_kref_manual(
     // Generate K_refs if not provided
     std::vector<double> K_refs = kref_config.K_refs;
     if (K_refs.empty()) {
+        if (kref_config.K_ref_count < 1) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
         // Auto-generate K_refs around spot
         if (kref_config.K_ref_count == 1) {
             K_refs.push_back(spot);
