@@ -24,11 +24,16 @@
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_3d_surface.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
+#include "mango/option/table/transforms/dimensionless_3d.hpp"
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace mango;
@@ -855,10 +860,74 @@ run_chebyshev_dividends(const PriceGrid& prices) {
 }
 
 // ============================================================================
+// Dimensionless 3D — collapses (σ, r) into κ
+// ============================================================================
+
+static std::array<ErrorTable, kNV>
+run_dimensionless_3d(const PriceGrid& prices) {
+    std::printf("\n================================================================\n");
+    std::printf("Dimensionless 3D — collapses (σ, r) into κ = 2r/σ²\n");
+    std::printf("================================================================\n\n");
+
+    std::printf("--- Building dimensionless 3D surface (via factory)...\n");
+
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = kSpot,
+        .dividend_yield = kDivYield,
+        .grid = IVGrid{
+            .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
+            .vol = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50},
+            .rate = {0.01, 0.03, 0.05, 0.10},
+        },
+        .backend = DimensionlessBackend{.maturity = 2.5},
+    };
+
+    auto solver = make_interpolated_iv_solver(config);
+    if (!solver.has_value()) {
+        std::fprintf(stderr, "Dimensionless 3D build failed\n");
+        std::array<ErrorTable, kNV> empty{};
+        return empty;
+    }
+
+    std::array<ErrorTable, kNV> all_errors{};
+    std::printf("--- Computing dimensionless 3D IV errors...\n");
+    for (size_t vi = 0; vi < kNV; ++vi) {
+        all_errors[vi] = compute_errors_vanilla(prices, *solver, vi);
+        char title[128];
+        std::snprintf(title, sizeof(title),
+                      "Dimensionless 3D IV Error (bps) — σ=%.0f%%",
+                      kVols[vi] * 100);
+        print_heatmap(title, all_errors[vi]);
+    }
+    return all_errors;
+}
+
+// ============================================================================
+// CLI path selection
+// ============================================================================
+
+static std::string_view parse_path(int argc, char* argv[]) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::strncmp(argv[i], "--path=", 7) == 0) {
+            return std::string_view(argv[i] + 7);
+        }
+    }
+    return "all";
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
-int main() {
+int main(int argc, char* argv[]) {
+    auto path = parse_path(argc, argv);
+    bool run_all = (path == "all");
+
+    if (!run_all) {
+        std::printf("Running path: %.*s\n\n",
+                    static_cast<int>(path.size()), path.data());
+    }
     std::printf("Interpolation IV Safety Diagnostic\n");
     std::printf("===================================\n");
     std::printf("S=%.0f, r=%.2f, q=%.2f, PUT\n", kSpot, kRate, kDivYield);
@@ -875,77 +944,118 @@ int main() {
     for (double v : kVols) std::printf("%.0f%% ", v * 100);
     std::printf("\n");
 
-    // Step 1: Generate reference prices
-    std::printf("\n--- Generating vanilla reference prices (batch chain solver)...\n");
-    auto vanilla_prices = generate_prices(/*with_dividends=*/false);
+    std::printf("Usage: interp_iv_safety [--path=all|bspline|chebyshev|dimensionless|dividends]\n\n");
 
-    std::printf("--- Generating dividend reference prices (batch solver)...\n");
-    auto div_prices = generate_prices(/*with_dividends=*/true);
+    // Step 1: Generate reference prices (always needed)
+    PriceGrid vanilla_prices{}, div_prices{};
+    bool need_vanilla = run_all || path == "bspline" || path == "chebyshev" || path == "dimensionless";
+    bool need_divs = run_all || path == "dividends";
 
-    // Step 2: Build interpolated solvers
-    std::printf("--- Building vanilla interpolated solver (adaptive)...\n");
-    auto vanilla_solver = build_vanilla_solver();
+    if (need_vanilla) {
+        std::printf("--- Generating vanilla reference prices (batch chain solver)...\n");
+        vanilla_prices = generate_prices(/*with_dividends=*/false);
+    }
+    if (need_divs) {
+        std::printf("--- Generating dividend reference prices (batch solver)...\n");
+        div_prices = generate_prices(/*with_dividends=*/true);
+    }
 
-    std::printf("--- Building dividend interpolated solvers (per-maturity)...\n");
-    auto div_solvers = build_div_solvers();
-
-    // Step 3 & 4: Compute errors and print heatmaps
+    // Per-path error tables
     std::array<ErrorTable, kNV> vanilla_errors{};
     std::array<ErrorTable, kNV> div_errors{};
+    std::array<ErrorTable, kNV> cheb_errors{};
+    std::array<ErrorTable, kNV> cheb_adaptive_errors{};
+    std::array<ErrorTable, kNV> cheb_div_errors{};
+    std::array<ErrorTable, kNV> dim3d_errors{};
 
-    std::printf("--- Computing vanilla IV errors...\n");
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        char title[128];
-        std::snprintf(title, sizeof(title),
-                      "Interpolation IV Error (bps) — σ=%.0f%%, no dividends",
-                      kVols[vi] * 100);
-        vanilla_errors[vi] = compute_errors_vanilla(vanilla_prices, vanilla_solver, vi);
-        print_heatmap(title, vanilla_errors[vi]);
+    // B-spline adaptive (vanilla + dividends)
+    if (run_all || path == "bspline") {
+        std::printf("--- Building vanilla interpolated solver (adaptive)...\n");
+        auto vanilla_solver = build_vanilla_solver();
+
+        std::printf("--- Computing vanilla IV errors...\n");
+        for (size_t vi = 0; vi < kNV; ++vi) {
+            char title[128];
+            std::snprintf(title, sizeof(title),
+                          "Interpolation IV Error (bps) — σ=%.0f%%, no dividends",
+                          kVols[vi] * 100);
+            vanilla_errors[vi] = compute_errors_vanilla(vanilla_prices, vanilla_solver, vi);
+            print_heatmap(title, vanilla_errors[vi]);
+        }
     }
 
-    std::printf("\n--- Computing dividend IV errors...\n");
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        char title[128];
-        std::snprintf(title, sizeof(title),
-                      "Interpolation IV Error (bps) — σ=%.0f%%, quarterly $0.50 div",
-                      kVols[vi] * 100);
-        div_errors[vi] = compute_errors_div(div_prices, div_solvers, vi);
-        print_heatmap(title, div_errors[vi]);
+    if (run_all || path == "dividends") {
+        std::printf("--- Building dividend interpolated solvers (per-maturity)...\n");
+        auto div_solvers = build_div_solvers();
+
+        std::printf("\n--- Computing dividend IV errors...\n");
+        for (size_t vi = 0; vi < kNV; ++vi) {
+            char title[128];
+            std::snprintf(title, sizeof(title),
+                          "Interpolation IV Error (bps) — σ=%.0f%%, quarterly $0.50 div",
+                          kVols[vi] * 100);
+            div_errors[vi] = compute_errors_div(div_prices, div_solvers, vi);
+            print_heatmap(title, div_errors[vi]);
+        }
     }
 
-    // Chebyshev 4D (fixed grid)
-    auto cheb_errors = run_chebyshev_4d(vanilla_prices);
-
-    // Chebyshev adaptive (CC-level refinement)
-    auto cheb_adaptive_errors = run_chebyshev_adaptive(vanilla_prices);
-
-    // Chebyshev adaptive dividends (segmented)
-    auto cheb_div_errors = run_chebyshev_dividends(div_prices);
-
-    // TV/K filtered comparison: same mask for all algorithms
-    std::printf("\n================================================================\n");
-    std::printf("TV/K Filtered Comparison — vanilla (no dividends)\n");
-    std::printf("================================================================\n");
-
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        AlgoErrors algos[] = {
-            {"B-spline", &vanilla_errors[vi]},
-            {"Cheb(fixed)", &cheb_errors[vi]},
-            {"Cheb(adapt)", &cheb_adaptive_errors[vi]},
-        };
-        print_tvk_comparison(vanilla_prices, vi, algos);
+    // Chebyshev 4D
+    if (run_all || path == "chebyshev") {
+        cheb_errors = run_chebyshev_4d(vanilla_prices);
+        cheb_adaptive_errors = run_chebyshev_adaptive(vanilla_prices);
     }
 
-    std::printf("\n================================================================\n");
-    std::printf("TV/K Filtered Comparison — discrete dividends\n");
-    std::printf("================================================================\n");
+    // Chebyshev dividends
+    if (run_all || path == "dividends") {
+        cheb_div_errors = run_chebyshev_dividends(div_prices);
+    }
 
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        AlgoErrors algos[] = {
-            {"B-spline(div)", &div_errors[vi]},
-            {"Cheb(div)", &cheb_div_errors[vi]},
-        };
-        print_tvk_comparison(div_prices, vi, algos);
+    // Dimensionless 3D
+    if (run_all || path == "dimensionless") {
+        dim3d_errors = run_dimensionless_3d(vanilla_prices);
+    }
+
+    // TV/K filtered comparison — vanilla backends
+    if (need_vanilla) {
+        std::vector<AlgoErrors> algos;
+        if (run_all || path == "bspline")
+            for (size_t vi = 0; vi < kNV; ++vi)
+                algos.push_back({"B-spline", &vanilla_errors[vi]});
+
+        // Build per-vol comparison
+        std::printf("\n================================================================\n");
+        std::printf("TV/K Filtered Comparison — vanilla (no dividends)\n");
+        std::printf("================================================================\n");
+
+        for (size_t vi = 0; vi < kNV; ++vi) {
+            std::vector<AlgoErrors> vol_algos;
+            if (run_all || path == "bspline")
+                vol_algos.push_back({"B-spline", &vanilla_errors[vi]});
+            if (run_all || path == "chebyshev") {
+                vol_algos.push_back({"Cheb(fixed)", &cheb_errors[vi]});
+                vol_algos.push_back({"Cheb(adapt)", &cheb_adaptive_errors[vi]});
+            }
+            if (run_all || path == "dimensionless")
+                vol_algos.push_back({"Dim3D", &dim3d_errors[vi]});
+            if (!vol_algos.empty())
+                print_tvk_comparison(vanilla_prices, vi, vol_algos);
+        }
+    }
+
+    if (need_divs) {
+        std::printf("\n================================================================\n");
+        std::printf("TV/K Filtered Comparison — discrete dividends\n");
+        std::printf("================================================================\n");
+
+        for (size_t vi = 0; vi < kNV; ++vi) {
+            std::vector<AlgoErrors> vol_algos;
+            if (run_all || path == "dividends") {
+                vol_algos.push_back({"B-spline(div)", &div_errors[vi]});
+                vol_algos.push_back({"Cheb(div)", &cheb_div_errors[vi]});
+            }
+            if (!vol_algos.empty())
+                print_tvk_comparison(div_prices, vi, vol_algos);
+        }
     }
 
     return 0;
