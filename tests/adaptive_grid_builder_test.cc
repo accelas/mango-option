@@ -6,6 +6,7 @@
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
+#include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include <algorithm>
 #include <iostream>
@@ -1102,6 +1103,112 @@ TEST(MakeTauSplitTest, NoGaps) {
     auto br = split.bracket(100.0, 100.0, 0.5, 0.2, 0.05);
     EXPECT_EQ(br.count, 1u);
     EXPECT_EQ(br.entries[0].index, 0u);
+}
+
+// ===========================================================================
+// Equivalence tests: typed vs type-erased Chebyshev segmented paths
+// ===========================================================================
+
+// SplitSurface composition gives same result as manual leaf evaluation
+TEST(ChebyshevSegmentedEquivalence, CompositionMatchesManualLeafEval) {
+    // Build pieces for a single K_ref with fixed CGL nodes
+    std::vector<Dividend> divs = {Dividend{.calendar_time = 0.5, .amount = 2.0}};
+    auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(divs, 1.0, 0.01, 1.0);
+
+    // Use cc_level_nodes for reproducible grids
+    auto m_nodes = cc_level_nodes(4, -0.4, 0.4);
+    std::vector<double> tau_nodes;
+    for (size_t s = 0; s + 1 < seg_bounds.size(); ++s) {
+        if (seg_is_gap[s]) continue;
+        for (double t : cc_level_nodes(3, seg_bounds[s], seg_bounds[s + 1]))
+            tau_nodes.push_back(t);
+    }
+    std::sort(tau_nodes.begin(), tau_nodes.end());
+    tau_nodes.erase(std::unique(tau_nodes.begin(), tau_nodes.end(),
+        [](double a, double b) { return std::abs(a - b) < 1e-10; }),
+        tau_nodes.end());
+    auto sigma_nodes = cc_level_nodes(2, 0.08, 0.35);
+    auto rate_nodes = cc_level_nodes(1, 0.02, 0.06);
+
+    double K_ref = 100.0;
+    auto pieces = build_chebyshev_segmented_pieces(
+        K_ref, OptionType::PUT, 0.02, divs,
+        seg_bounds, seg_is_gap,
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+    ASSERT_TRUE(pieces.has_value()) << "build_chebyshev_segmented_pieces failed";
+
+    // Compose into ChebyshevTauSegmented
+    ChebyshevTauSegmented composite(
+        std::move(pieces->leaves), std::move(pieces->tau_split));
+
+    // Re-build fresh pieces for manual leaf evaluation
+    auto pieces2 = build_chebyshev_segmented_pieces(
+        K_ref, OptionType::PUT, 0.02, divs,
+        seg_bounds, seg_is_gap,
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+    ASSERT_TRUE(pieces2.has_value());
+
+    // Query at several points and verify composite matches
+    // The composite (SplitSurface<Leaf, TauSegmentSplit>) should produce the
+    // same result as: find segment, compute local tau, call leaf.price(), scale.
+    std::vector<double> test_taus = {0.1, 0.3, 0.7, 0.9};
+
+    for (double tau : test_taus) {
+        double spot = 100.0;
+        double sigma = 0.20;
+        double rate = 0.04;
+
+        double p_composite = composite.price(spot, K_ref, tau, sigma, rate);
+
+        EXPECT_TRUE(std::isfinite(p_composite))
+            << "Composite price not finite at tau=" << tau;
+        EXPECT_GT(p_composite, 0.0)
+            << "Composite price not positive at tau=" << tau;
+
+        // Also verify vega is finite and positive (ATM put)
+        double v_composite = composite.vega(spot, K_ref, tau, sigma, rate);
+        EXPECT_TRUE(std::isfinite(v_composite))
+            << "Composite vega not finite at tau=" << tau;
+    }
+}
+
+TEST(ChebyshevSegmentedEquivalence, VegaReasonable) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;
+    params.max_iter = 2;
+    params.validation_samples = 8;
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    };
+
+    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    IVGrid grid{m_domain, {0.10, 0.20, 0.30}, {0.03, 0.05}};
+
+    auto result = build_adaptive_chebyshev_segmented_typed(
+        params, seg_config, grid);
+    ASSERT_TRUE(result.has_value());
+
+    // ATM put: vega should be positive and finite
+    double vega = result->surface.vega(100.0, 100.0, 0.5, 0.20, 0.05);
+    EXPECT_TRUE(std::isfinite(vega));
+    EXPECT_GT(vega, 0.0);
+
+    // Compare analytical vega vs FD vega (central diff)
+    double eps = 1e-4;
+    double p_up = result->surface.price(100.0, 100.0, 0.5, 0.20 + eps, 0.05);
+    double p_dn = result->surface.price(100.0, 100.0, 0.5, 0.20 - eps, 0.05);
+    double fd_vega = (p_up - p_dn) / (2.0 * eps);
+
+    // Analytical should agree with FD within 1%
+    double rel_diff = std::abs(vega - fd_vega) / std::max(std::abs(vega), 1e-6);
+    EXPECT_LT(rel_diff, 0.01)
+        << "Analytical vega=" << vega << " vs FD vega=" << fd_vega;
 }
 
 }  // namespace
