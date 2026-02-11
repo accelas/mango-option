@@ -15,10 +15,9 @@
 
 #include "mango/option/american_option.hpp"
 #include "mango/option/european_option.hpp"
-#include "mango/option/table/eep_transform.hpp"
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -38,7 +37,7 @@ namespace {
 // ---------------------------------------------------------------------------
 
 struct EEPFixture {
-    StandardSurfaceWrapper wrapper;
+    BSplinePriceTable wrapper;
     std::shared_ptr<const PriceTableSurface> surface;
     double K_ref;
     double dividend_yield;
@@ -70,18 +69,18 @@ const EEPFixture& GetEEPFixture() {
             throw std::runtime_error("Failed to create PriceTableBuilderND");
         }
         auto [builder, axes] = std::move(result.value());
-        EEPDecomposer decomposer{OptionType::PUT, K_ref, q};
-        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
-                decomposer.decompose(tensor, a);
+                BSplineTensorAccessor accessor(tensor, a, K_ref);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, q));
             });
         if (!table) {
             throw std::runtime_error("Failed to build price table");
         }
 
-        auto wrapper = make_standard_wrapper(table->surface, OptionType::PUT);
+        auto wrapper = make_bspline_surface(table->surface, OptionType::PUT);
         if (!wrapper) {
-            throw std::runtime_error("Failed to create StandardSurfaceWrapper");
+            throw std::runtime_error("Failed to create BSplinePriceTable");
         }
 
         return new EEPFixture{std::move(*wrapper), table->surface, K_ref, q, OptionType::PUT};

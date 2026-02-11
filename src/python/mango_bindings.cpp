@@ -14,13 +14,9 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/option/option_grid.hpp"
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/price_table_workspace.hpp"
-#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
-#include "mango/option/table/spliced_surface.hpp"
-#include "mango/option/table/price_table_metadata.hpp"
-#include "mango/option/table/price_table_axes.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
 #include "mango/math/yield_curve.hpp"
 #include "mango/option/american_option_batch.hpp"
@@ -508,209 +504,8 @@ PYBIND11_MODULE(mango_option, m) {
             )pbdoc");
 
     // =========================================================================
-    // Price Table File Storage (Arrow IPC format)
-    // =========================================================================
-
-    // PriceTableWorkspace LoadError enum
-    py::enum_<mango::PriceTableWorkspace::LoadError>(m, "PriceTableLoadError")
-        .value("NOT_ARROW_FILE", mango::PriceTableWorkspace::LoadError::NOT_ARROW_FILE)
-        .value("UNSUPPORTED_VERSION", mango::PriceTableWorkspace::LoadError::UNSUPPORTED_VERSION)
-        .value("INSUFFICIENT_GRID_POINTS", mango::PriceTableWorkspace::LoadError::INSUFFICIENT_GRID_POINTS)
-        .value("SIZE_MISMATCH", mango::PriceTableWorkspace::LoadError::SIZE_MISMATCH)
-        .value("COEFFICIENT_SIZE_MISMATCH", mango::PriceTableWorkspace::LoadError::COEFFICIENT_SIZE_MISMATCH)
-        .value("GRID_NOT_SORTED", mango::PriceTableWorkspace::LoadError::GRID_NOT_SORTED)
-        .value("MMAP_FAILED", mango::PriceTableWorkspace::LoadError::MMAP_FAILED)
-        .value("INVALID_ALIGNMENT", mango::PriceTableWorkspace::LoadError::INVALID_ALIGNMENT)
-        .value("FILE_NOT_FOUND", mango::PriceTableWorkspace::LoadError::FILE_NOT_FOUND)
-        .value("SCHEMA_MISMATCH", mango::PriceTableWorkspace::LoadError::SCHEMA_MISMATCH)
-        .value("ARROW_READ_ERROR", mango::PriceTableWorkspace::LoadError::ARROW_READ_ERROR)
-        .value("CORRUPTED_COEFFICIENTS", mango::PriceTableWorkspace::LoadError::CORRUPTED_COEFFICIENTS)
-        .value("CORRUPTED_GRIDS", mango::PriceTableWorkspace::LoadError::CORRUPTED_GRIDS)
-        .value("CORRUPTED_KNOTS", mango::PriceTableWorkspace::LoadError::CORRUPTED_KNOTS)
-        .export_values();
-
-    // PriceTableWorkspace class
-    py::class_<mango::PriceTableWorkspace>(m, "PriceTableWorkspace")
-        .def_static("create",
-            [](py::array_t<double> log_m_grid,
-               py::array_t<double> tau_grid,
-               py::array_t<double> sigma_grid,
-               py::array_t<double> r_grid,
-               py::array_t<double> coefficients,
-               double K_ref,
-               double dividend_yield,
-               double m_min,
-               double m_max) {
-                auto result = mango::PriceTableWorkspace::create(
-                    std::span<const double>(log_m_grid.data(), log_m_grid.size()),
-                    std::span<const double>(tau_grid.data(), tau_grid.size()),
-                    std::span<const double>(sigma_grid.data(), sigma_grid.size()),
-                    std::span<const double>(r_grid.data(), r_grid.size()),
-                    std::span<const double>(coefficients.data(), coefficients.size()),
-                    K_ref, dividend_yield, m_min, m_max);
-                if (!result.has_value()) {
-                    throw py::value_error(result.error());
-                }
-                return std::move(result.value());
-            },
-            py::arg("log_m_grid"), py::arg("tau_grid"),
-            py::arg("sigma_grid"), py::arg("r_grid"),
-            py::arg("coefficients"), py::arg("K_ref"),
-            py::arg("dividend_yield"), py::arg("m_min"), py::arg("m_max"),
-            R"pbdoc(
-                Create a PriceTableWorkspace from grid data and coefficients.
-
-                Args:
-                    log_m_grid: Log-moneyness grid (ln(S/K), sorted ascending, >= 4 points)
-                    tau_grid: Maturity grid (years, sorted ascending, >= 4 points)
-                    sigma_grid: Volatility grid (sorted ascending, >= 4 points)
-                    r_grid: Rate grid (sorted ascending, >= 4 points)
-                    coefficients: B-spline coefficients (size = n_m * n_tau * n_sigma * n_r)
-                    K_ref: Reference strike price
-                    dividend_yield: Continuous dividend yield
-                    m_min: Minimum log-moneyness ln(S/K)
-                    m_max: Maximum log-moneyness ln(S/K)
-
-                Returns:
-                    PriceTableWorkspace instance
-
-                Raises:
-                    ValueError: If validation fails (grid size, sorting, etc.)
-            )pbdoc")
-        .def_static("load",
-            [](const std::string& filepath) {
-                auto result = mango::PriceTableWorkspace::load(filepath);
-                if (!result.has_value()) {
-                    std::string msg = "Failed to load price table: ";
-                    switch (result.error()) {
-                        case mango::PriceTableWorkspace::LoadError::NOT_ARROW_FILE:
-                            msg += "Not an Arrow file"; break;
-                        case mango::PriceTableWorkspace::LoadError::UNSUPPORTED_VERSION:
-                            msg += "Unsupported version"; break;
-                        case mango::PriceTableWorkspace::LoadError::INSUFFICIENT_GRID_POINTS:
-                            msg += "Insufficient grid points"; break;
-                        case mango::PriceTableWorkspace::LoadError::SIZE_MISMATCH:
-                            msg += "Size mismatch"; break;
-                        case mango::PriceTableWorkspace::LoadError::COEFFICIENT_SIZE_MISMATCH:
-                            msg += "Coefficient size mismatch"; break;
-                        case mango::PriceTableWorkspace::LoadError::GRID_NOT_SORTED:
-                            msg += "Grid not sorted"; break;
-                        case mango::PriceTableWorkspace::LoadError::MMAP_FAILED:
-                            msg += "Memory mapping failed"; break;
-                        case mango::PriceTableWorkspace::LoadError::INVALID_ALIGNMENT:
-                            msg += "Invalid alignment"; break;
-                        case mango::PriceTableWorkspace::LoadError::FILE_NOT_FOUND:
-                            msg += "File not found"; break;
-                        case mango::PriceTableWorkspace::LoadError::SCHEMA_MISMATCH:
-                            msg += "Schema mismatch"; break;
-                        case mango::PriceTableWorkspace::LoadError::ARROW_READ_ERROR:
-                            msg += "Arrow read error"; break;
-                        case mango::PriceTableWorkspace::LoadError::CORRUPTED_COEFFICIENTS:
-                            msg += "Corrupted coefficients"; break;
-                        case mango::PriceTableWorkspace::LoadError::CORRUPTED_GRIDS:
-                            msg += "Corrupted grids"; break;
-                        case mango::PriceTableWorkspace::LoadError::CORRUPTED_KNOTS:
-                            msg += "Corrupted knots"; break;
-                    }
-                    throw py::value_error(msg);
-                }
-                return std::move(result.value());
-            },
-            py::arg("filepath"),
-            R"pbdoc(
-                Load a PriceTableWorkspace from an Arrow IPC file.
-
-                Args:
-                    filepath: Path to the Arrow IPC file
-
-                Returns:
-                    PriceTableWorkspace instance
-
-                Raises:
-                    ValueError: If loading fails (file not found, corrupted, etc.)
-            )pbdoc")
-        .def("save",
-            [](const mango::PriceTableWorkspace& self, const std::string& filepath,
-               const std::string& ticker, uint8_t option_type) {
-                auto result = self.save(filepath, ticker, option_type);
-                if (!result.has_value()) {
-                    throw py::value_error(result.error());
-                }
-            },
-            py::arg("filepath"), py::arg("ticker"), py::arg("option_type"),
-            R"pbdoc(
-                Save the workspace to an Arrow IPC file.
-
-                Args:
-                    filepath: Output file path
-                    ticker: Underlying symbol (e.g., "SPY")
-                    option_type: 0=PUT, 1=CALL
-
-                Raises:
-                    ValueError: If saving fails
-            )pbdoc")
-        .def_property_readonly("log_moneyness",
-            [](const mango::PriceTableWorkspace& self) {
-                auto span = self.log_moneyness();
-                return py::array_t<double>(span.size(), span.data());
-            }, "Log-moneyness grid (ln(S/K))")
-        .def_property_readonly("maturity",
-            [](const mango::PriceTableWorkspace& self) {
-                auto span = self.maturity();
-                return py::array_t<double>(span.size(), span.data());
-            }, "Maturity grid (years)")
-        .def_property_readonly("volatility",
-            [](const mango::PriceTableWorkspace& self) {
-                auto span = self.volatility();
-                return py::array_t<double>(span.size(), span.data());
-            }, "Volatility grid")
-        .def_property_readonly("rate",
-            [](const mango::PriceTableWorkspace& self) {
-                auto span = self.rate();
-                return py::array_t<double>(span.size(), span.data());
-            }, "Rate grid")
-        .def_property_readonly("coefficients",
-            [](const mango::PriceTableWorkspace& self) {
-                auto span = self.coefficients();
-                return py::array_t<double>(span.size(), span.data());
-            }, "B-spline coefficients")
-        .def_property_readonly("K_ref", &mango::PriceTableWorkspace::K_ref,
-            "Reference strike price")
-        .def_property_readonly("dividend_yield", &mango::PriceTableWorkspace::dividend_yield,
-            "Continuous dividend yield")
-        .def_property_readonly("m_min", &mango::PriceTableWorkspace::m_min,
-            "Minimum log-moneyness ln(S/K)")
-        .def_property_readonly("m_max", &mango::PriceTableWorkspace::m_max,
-            "Maximum log-moneyness ln(S/K)")
-        .def_property_readonly("dimensions",
-            [](const mango::PriceTableWorkspace& self) {
-                auto [nm, nt, nv, nr] = self.dimensions();
-                return py::make_tuple(nm, nt, nv, nr);
-            }, "Grid dimensions (n_m, n_tau, n_sigma, n_r)")
-        .def("__repr__", [](const mango::PriceTableWorkspace& self) {
-            auto [nm, nt, nv, nr] = self.dimensions();
-            return "<PriceTableWorkspace dims=(" + std::to_string(nm) + "," +
-                   std::to_string(nt) + "," + std::to_string(nv) + "," +
-                   std::to_string(nr) + ") K_ref=" + std::to_string(self.K_ref()) + ">";
-        });
-
-    // =========================================================================
     // PriceTableSurfaceND (4D B-spline interpolation)
     // =========================================================================
-
-    // SurfaceContent enum
-    py::enum_<mango::SurfaceContent>(m, "SurfaceContent")
-        .value("NormalizedPrice", mango::SurfaceContent::NormalizedPrice)
-        .value("EarlyExercisePremium", mango::SurfaceContent::EarlyExercisePremium);
-
-    // PriceTableMetadata
-    py::class_<mango::PriceTableMetadata>(m, "PriceTableMetadata")
-        .def(py::init<>())
-        .def_readwrite("K_ref", &mango::PriceTableMetadata::K_ref)
-        .def_readwrite("dividends", &mango::PriceTableMetadata::dividends)
-        .def_readwrite("m_min", &mango::PriceTableMetadata::m_min)
-        .def_readwrite("m_max", &mango::PriceTableMetadata::m_max)
-        .def_readwrite("content", &mango::PriceTableMetadata::content);
 
     // PriceTableAxes
     py::class_<mango::PriceTableAxes>(m, "PriceTableAxes")
@@ -763,24 +558,27 @@ PYBIND11_MODULE(mango_option, m) {
         m, "PriceTableSurface")
         .def_static("build",
             [](mango::PriceTableAxes axes, py::array_t<double> coeffs,
-               mango::PriceTableMetadata metadata) {
+               double K_ref, double dividend_yield) {
                 std::vector<double> coeffs_vec(coeffs.data(), coeffs.data() + coeffs.size());
                 auto result = mango::PriceTableSurface::build(
-                    std::move(axes), std::move(coeffs_vec), std::move(metadata));
+                    std::move(axes), std::move(coeffs_vec), K_ref,
+                    mango::DividendSpec{.dividend_yield = dividend_yield, .discrete_dividends = {}});
                 if (!result.has_value()) {
                     throw py::value_error("Failed to build surface: error code " +
                         std::to_string(static_cast<int>(result.error().code)));
                 }
                 return result.value();
             },
-            py::arg("axes"), py::arg("coefficients"), py::arg("metadata"),
+            py::arg("axes"), py::arg("coefficients"), py::arg("K_ref"),
+            py::arg("dividend_yield") = 0.0,
             R"pbdoc(
                 Build a 4D price table surface from axes and coefficients.
 
                 Args:
                     axes: PriceTableAxes with grid points for each dimension
                     coefficients: B-spline coefficients (flattened, row-major)
-                    metadata: PriceTableMetadata with K_ref, dividend info
+                    K_ref: Reference strike price
+                    dividend_yield: Continuous dividend yield (default: 0.0)
 
                 Returns:
                     PriceTableSurface instance
@@ -826,7 +624,10 @@ PYBIND11_MODULE(mango_option, m) {
                     Partial derivative estimate
             )pbdoc")
         .def_property_readonly("axes", &mango::PriceTableSurface::axes)
-        .def_property_readonly("metadata", &mango::PriceTableSurface::metadata);
+        .def_property_readonly("K_ref", &mango::PriceTableSurface::K_ref)
+        .def_property_readonly("dividends", &mango::PriceTableSurface::dividends)
+        .def_property_readonly("m_min", &mango::PriceTableSurface::m_min)
+        .def_property_readonly("m_max", &mango::PriceTableSurface::m_max);
 
     // =========================================================================
     // Price table builder convenience wrapper (auto-grid profiles)
@@ -968,17 +769,23 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("K_ref_count", &mango::MultiKRefConfig::K_ref_count)
         .def_readwrite("K_ref_span", &mango::MultiKRefConfig::K_ref_span);
 
-    // StandardIVPath
-    py::class_<mango::StandardIVPath>(m, "StandardIVPath")
+    // BSplineBackend
+    py::class_<mango::BSplineBackend>(m, "BSplineBackend")
         .def(py::init<>())
-        .def_readwrite("maturity_grid", &mango::StandardIVPath::maturity_grid);
+        .def_readwrite("maturity_grid", &mango::BSplineBackend::maturity_grid);
 
-    // SegmentedIVPath
-    py::class_<mango::SegmentedIVPath>(m, "SegmentedIVPath")
+    // ChebyshevBackend
+    py::class_<mango::ChebyshevBackend>(m, "ChebyshevBackend")
         .def(py::init<>())
-        .def_readwrite("maturity", &mango::SegmentedIVPath::maturity)
-        .def_readwrite("discrete_dividends", &mango::SegmentedIVPath::discrete_dividends)
-        .def_readwrite("kref_config", &mango::SegmentedIVPath::kref_config);
+        .def_readwrite("maturity", &mango::ChebyshevBackend::maturity)
+        .def_readwrite("tucker_epsilon", &mango::ChebyshevBackend::tucker_epsilon);
+
+    // DiscreteDividendConfig
+    py::class_<mango::DiscreteDividendConfig>(m, "DiscreteDividendConfig")
+        .def(py::init<>())
+        .def_readwrite("maturity", &mango::DiscreteDividendConfig::maturity)
+        .def_readwrite("discrete_dividends", &mango::DiscreteDividendConfig::discrete_dividends)
+        .def_readwrite("kref_config", &mango::DiscreteDividendConfig::kref_config);
 
     // IVSolverFactoryConfig
     py::class_<mango::IVSolverFactoryConfig>(m, "IVSolverFactoryConfig")
@@ -997,19 +804,28 @@ PYBIND11_MODULE(mango_option, m) {
                 else c.adaptive = obj.cast<mango::AdaptiveGridParams>();
             })
         .def_readwrite("solver_config", &mango::IVSolverFactoryConfig::solver_config)
-        .def_property("path",
+        .def_property("backend",
             [](const mango::IVSolverFactoryConfig& c) -> py::object {
-                return std::visit([](const auto& p) -> py::object {
-                    return py::cast(p);
-                }, c.path);
+                return std::visit([](const auto& b) -> py::object {
+                    return py::cast(b);
+                }, c.backend);
             },
             [](mango::IVSolverFactoryConfig& c, const py::object& obj) {
-                if (py::isinstance<mango::StandardIVPath>(obj))
-                    c.path = obj.cast<mango::StandardIVPath>();
-                else if (py::isinstance<mango::SegmentedIVPath>(obj))
-                    c.path = obj.cast<mango::SegmentedIVPath>();
+                if (py::isinstance<mango::BSplineBackend>(obj))
+                    c.backend = obj.cast<mango::BSplineBackend>();
+                else if (py::isinstance<mango::ChebyshevBackend>(obj))
+                    c.backend = obj.cast<mango::ChebyshevBackend>();
                 else
-                    throw py::type_error("path must be StandardIVPath or SegmentedIVPath");
+                    throw py::type_error("backend must be BSplineBackend or ChebyshevBackend");
+            })
+        .def_property("discrete_dividends",
+            [](const mango::IVSolverFactoryConfig& c) -> py::object {
+                if (c.discrete_dividends.has_value()) return py::cast(*c.discrete_dividends);
+                return py::none();
+            },
+            [](mango::IVSolverFactoryConfig& c, const py::object& obj) {
+                if (obj.is_none()) c.discrete_dividends = std::nullopt;
+                else c.discrete_dividends = obj.cast<mango::DiscreteDividendConfig>();
             });
 
     // AnyIVSolver (exposed as InterpolatedIVSolver for Python)

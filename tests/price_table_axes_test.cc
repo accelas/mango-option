@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/price_table_axes.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include <cmath>
 
 namespace mango {

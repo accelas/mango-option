@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 /**
  * @file interpolated_iv_solver.hpp
- * @brief Implied volatility solver using B-spline price interpolation
+ * @brief Implied volatility solver using pre-computed price interpolation
  *
  * Provides:
- * - InterpolatedIVSolver<Surface>: Newton-Raphson IV solver on any PriceSurface
+ * - InterpolatedIVSolver<Surface>: Newton-Raphson IV solver on any PriceTable
  * - AnyIVSolver: type-erased wrapper for convenient use
  * - make_interpolated_iv_solver(): factory that builds the price surface and solver
  *
  * Two construction paths:
- * 1. Direct: build your own PriceSurface, then InterpolatedIVSolver::create()
+ * 1. Direct: build your own PriceTable, then InterpolatedIVSolver::create()
  * 2. Factory: fill IVSolverFactoryConfig, call make_interpolated_iv_solver()
  *
  * Grid density is controlled via IVGrid.  When `adaptive` is set, the grid
@@ -21,9 +21,7 @@
 
 #include "mango/option/option_spec.hpp"
 #include "mango/option/iv_result.hpp"
-#include "mango/option/table/price_surface_concept.hpp"
-#include "mango/option/table/standard_surface.hpp"
-#include "mango/option/table/spliced_surface.hpp"
+#include "mango/option/table/price_table.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"
@@ -31,8 +29,8 @@
 #include <expected>
 #include <cmath>
 #include <algorithm>
+#include <memory>
 #include <vector>
-#include <variant>
 #include <optional>
 
 namespace mango {
@@ -47,10 +45,10 @@ struct InterpolatedIVSolverConfig {
 
 /// Interpolation-based IV Solver
 ///
-/// Uses pre-computed B-spline price surface for ultra-fast IV calculation.
+/// Uses a pre-computed price surface for ultra-fast IV calculation.
 /// Solves: Find s such that Price(m, tau, s, r) = Market_Price
 ///
-/// Thread-safe: Fully thread-safe for both single and batch queries (immutable spline)
+/// Thread-safe: Fully thread-safe for both single and batch queries (immutable surface)
 ///
 /// Rate handling: The price surface uses a scalar rate axis (designed for SOFR/flat rates).
 /// When a YieldCurve is provided, it is collapsed to a zero rate: -ln(D(T))/T.
@@ -58,11 +56,11 @@ struct InterpolatedIVSolverConfig {
 /// For full yield curve support, use IVSolver instead.
 /// When rate approximation is used, IVSuccess::used_rate_approximation is set to true.
 ///
-/// @tparam Surface A type satisfying the PriceSurface concept
-template <PriceSurface Surface>
+/// @tparam Surface A PriceTable<Inner> instantiation
+template <typename Surface>
 class InterpolatedIVSolver {
 public:
-    /// Create solver from a PriceSurface
+    /// Create solver from a PriceTable
     ///
     /// The surface must provide price(), vega(), and bounds accessors.
     ///
@@ -75,7 +73,7 @@ public:
 
     /// Solve for implied volatility (single query)
     ///
-    /// Uses Newton-Raphson method with B-spline price interpolation.
+    /// Uses Newton-Raphson method with price surface interpolation.
     ///
     /// @param query Option specification and market price
     /// @return Success with IV and diagnostics, or error with details
@@ -83,7 +81,7 @@ public:
 
     /// Solve for implied volatility (batch with OpenMP)
     ///
-    /// Trivially parallel since B-spline is immutable and thread-safe.
+    /// Trivially parallel since the surface is immutable and thread-safe.
     ///
     /// @param queries Input queries (as vector for convenience)
     /// @return BatchIVResult with individual results and failure count
@@ -116,10 +114,10 @@ private:
     OptionType option_type_;
     double dividend_yield_;
 
-    /// Evaluate option price using B-spline interpolation with strike scaling
+    /// Evaluate option price using surface interpolation with strike scaling
     double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const;
 
-    /// Compute vega using partial derivative w.r.t. volatility (axis 2)
+    /// Compute vega using partial derivative w.r.t. volatility
     double compute_vega(double moneyness, double maturity, double vol, double rate, double strike) const;
 
     /// Check if query parameters are within surface bounds
@@ -143,26 +141,37 @@ private:
     std::pair<double, double> adaptive_bounds(const IVQuery& query) const;
 };
 
-/// Type alias for backward compatibility: InterpolatedIVSolver with StandardSurfaceWrapper
-using DefaultInterpolatedIVSolver = InterpolatedIVSolver<StandardSurfaceWrapper>;
-
 // =====================================================================
 // Factory: config types, type-erased solver, and factory function
 // =====================================================================
 
-/// Standard path: continuous dividends only, maturity grid for interpolation
-struct StandardIVPath {
-    std::vector<double> maturity_grid;
+/// B-spline interpolation backend
+struct BSplineBackend {
+    std::vector<double> maturity_grid;  ///< Tau knots (continuous) / chain maturities (adaptive)
 };
 
-/// Segmented path: discrete dividends with multi-K_ref surface
-struct SegmentedIVPath {
-    double maturity = 1.0;
+/// Chebyshev tensor interpolation backend
+struct ChebyshevBackend {
+    double maturity = 2.0;                             ///< Domain upper bound for tau
+    std::array<size_t, 4> num_pts = {16, 12, 12, 8};  ///< CGL nodes per axis
+    double tucker_epsilon = 1e-8;                      ///< 0 = use RawTensor
+};
+
+/// Discrete dividend configuration (optional, orthogonal to backend choice)
+struct DiscreteDividendConfig {
+    double maturity = 1.0;                  ///< Surface maturity
     std::vector<Dividend> discrete_dividends;
-    MultiKRefConfig kref_config;  ///< defaults to auto
+    MultiKRefConfig kref_config;            ///< defaults to auto
 };
 
 /// Configuration for the IV solver factory
+///
+/// Backend choice (B-spline vs Chebyshev) and dividend type (continuous vs
+/// discrete) are orthogonal.  All four combinations are supported:
+///   - BSpline + continuous:  standard B-spline surface
+///   - BSpline + discrete:   segmented multi-K_ref B-spline surface
+///   - Chebyshev + continuous: Chebyshev tensor surface
+///   - Chebyshev + discrete:  segmented Chebyshev surface (requires adaptive)
 struct IVSolverFactoryConfig {
     OptionType option_type = OptionType::PUT;
     double spot = 100.0;
@@ -170,10 +179,13 @@ struct IVSolverFactoryConfig {
     IVGrid grid;                                    ///< Grid points (exact or domain bounds)
     std::optional<AdaptiveGridParams> adaptive;     ///< If set, refine grid adaptively
     InterpolatedIVSolverConfig solver_config;       ///< Newton config
-    std::variant<StandardIVPath, SegmentedIVPath> path;
+    std::variant<BSplineBackend, ChebyshevBackend> backend;
+    std::optional<DiscreteDividendConfig> discrete_dividends;
 };
 
-/// Type-erased IV solver wrapping either path
+/// Type-erased IV solver wrapping any PriceTable backend
+///
+/// Impl is defined in the .cpp — only the factory can construct instances.
 class AnyIVSolver {
 public:
     /// Solve for implied volatility (single query)
@@ -182,26 +194,27 @@ public:
     /// Solve for implied volatility (batch with OpenMP)
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
-    /// Constructor from standard solver
-    explicit AnyIVSolver(InterpolatedIVSolver<StandardSurfaceWrapper> solver);
-
-    /// Constructor from segmented solver (spliced surface)
-    explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefPriceWrapper> solver);
+    // Pimpl: move-only, defined in .cpp
+    struct Impl;
+    explicit AnyIVSolver(std::unique_ptr<Impl> impl);
+    AnyIVSolver(AnyIVSolver&&) noexcept;
+    AnyIVSolver& operator=(AnyIVSolver&&) noexcept;
+    ~AnyIVSolver();
 
 private:
-    using SolverVariant = std::variant<
-        InterpolatedIVSolver<StandardSurfaceWrapper>,
-        InterpolatedIVSolver<MultiKRefPriceWrapper>
-    >;
-    SolverVariant solver_;
+    std::unique_ptr<Impl> impl_;
 };
 
 /// Factory function: build price surface and IV solver from config
 ///
-/// If path holds StandardIVPath, uses the StandardSurface path.
-/// If path holds SegmentedIVPath, uses the MultiKRefSurface path.
-/// If adaptive is set, uses AdaptiveGridBuilder
-/// to automatically refine grid density until the target IV error is met.
+/// Dispatches on backend × dividend type:
+///   - BSpline + continuous → standard B-spline surface
+///   - BSpline + discrete  → segmented multi-K_ref B-spline surface
+///   - Chebyshev + continuous → Chebyshev tensor surface
+///   - Chebyshev + discrete → segmented Chebyshev surface (requires adaptive)
+///
+/// When adaptive is set, uses adaptive refinement to automatically refine
+/// grid density until the target IV error is met.
 ///
 /// @param config Solver configuration
 /// @return Type-erased AnyIVSolver or ValidationError
@@ -211,7 +224,7 @@ std::expected<AnyIVSolver, ValidationError> make_interpolated_iv_solver(const IV
 // Template implementation (must be in header for template instantiation)
 // =====================================================================
 
-template <PriceSurface Surface>
+template <typename Surface>
 std::expected<InterpolatedIVSolver<Surface>, ValidationError>
 InterpolatedIVSolver<Surface>::create(
     Surface surface,
@@ -245,7 +258,7 @@ InterpolatedIVSolver<Surface>::create(
         config);
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 double InterpolatedIVSolver<Surface>::eval_price(
     double moneyness, double maturity, double vol, double rate, double strike) const
 {
@@ -253,7 +266,7 @@ double InterpolatedIVSolver<Surface>::eval_price(
     return surface_.price(spot, strike, maturity, vol, rate);
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 double InterpolatedIVSolver<Surface>::compute_vega(
     double moneyness, double maturity, double vol, double rate, double strike) const
 {
@@ -261,7 +274,7 @@ double InterpolatedIVSolver<Surface>::compute_vega(
     return surface_.vega(spot, strike, maturity, vol, rate);
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 std::optional<ValidationError>
 InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
 {
@@ -284,7 +297,7 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
     return std::nullopt;
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 std::pair<double, double>
 InterpolatedIVSolver<Surface>::adaptive_bounds(const IVQuery& query) const
 {
@@ -314,7 +327,7 @@ InterpolatedIVSolver<Surface>::adaptive_bounds(const IVQuery& query) const
     return {sigma_min, sigma_max};
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 std::expected<IVSuccess, IVError>
 InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
 {
@@ -412,14 +425,14 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
     };
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 BatchIVResult
 InterpolatedIVSolver<Surface>::solve_batch(const std::vector<IVQuery>& queries) const noexcept
 {
     std::vector<std::expected<IVSuccess, IVError>> results(queries.size());
     size_t failed_count = 0;
 
-    // Trivially parallel: B-spline is immutable and thread-safe
+    // Trivially parallel: surface is immutable and thread-safe
     MANGO_PRAGMA_PARALLEL_FOR
     for (size_t i = 0; i < queries.size(); ++i) {
         results[i] = solve(queries[i]);

@@ -7,12 +7,9 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/price_table_axes.hpp"
-#include "mango/option/table/price_table_metadata.hpp"
-#include "mango/option/table/eep_transform.hpp"
-#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 
 namespace mango {
 namespace {
@@ -31,18 +28,18 @@ protected:
             GridAccuracyParams{}, OptionType::PUT, 0.0);
         ASSERT_TRUE(result.has_value()) << "Failed to build";
         auto [builder, axes] = std::move(result.value());
-        EEPDecomposer decomposer{OptionType::PUT, K_ref_, 0.0};
-        auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+        auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
-                decomposer.decompose(tensor, a);
+                BSplineTensorAccessor accessor(tensor, a, K_ref_);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
             });
         ASSERT_TRUE(table.has_value()) << "Failed to build table";
         surface_ = table->surface;
     }
 
-    /// Helper to create a StandardSurfaceWrapper for IV solver tests
-    StandardSurfaceWrapper make_wrapper() {
-        auto result = make_standard_wrapper(surface_, OptionType::PUT);
+    /// Helper to create a BSplinePriceTable for IV solver tests
+    BSplinePriceTable make_wrapper() {
+        auto result = make_bspline_surface(surface_, OptionType::PUT);
         return std::move(*result);
     }
 
@@ -50,11 +47,11 @@ protected:
     static constexpr double K_ref_ = 100.0;
 };
 
-TEST_F(InterpolatedIVSolverTest, CreateFromStandardSurfaceWrapper) {
-    auto wrapper_result = make_standard_wrapper(surface_, OptionType::PUT);
+TEST_F(InterpolatedIVSolverTest, CreateFromBSplinePriceTable) {
+    auto wrapper_result = make_bspline_surface(surface_, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
-    auto result = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
+    auto result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
     ASSERT_TRUE(result.has_value()) << "Failed to create solver";
 }
 
@@ -66,12 +63,12 @@ TEST_F(InterpolatedIVSolverTest, CreateWithConfig) {
         .sigma_max = 2.0
     };
 
-    auto result = DefaultInterpolatedIVSolver::create(make_wrapper(), config);
+    auto result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper(), config);
     ASSERT_TRUE(result.has_value()) << "Failed to create solver with config";
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveATMPut) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -93,7 +90,7 @@ TEST_F(InterpolatedIVSolverTest, SolveATMPut) {
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveITMPut) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -110,7 +107,7 @@ TEST_F(InterpolatedIVSolverTest, SolveITMPut) {
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveOTMPut) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -127,7 +124,7 @@ TEST_F(InterpolatedIVSolverTest, SolveOTMPut) {
 }
 
 TEST_F(InterpolatedIVSolverTest, RejectsInvalidQuery) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -141,7 +138,7 @@ TEST_F(InterpolatedIVSolverTest, RejectsInvalidQuery) {
 }
 
 TEST_F(InterpolatedIVSolverTest, RejectsNegativeMarketPrice) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -154,7 +151,7 @@ TEST_F(InterpolatedIVSolverTest, RejectsNegativeMarketPrice) {
 }
 
 TEST_F(InterpolatedIVSolverTest, BatchSolve) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -180,7 +177,7 @@ TEST_F(InterpolatedIVSolverTest, BatchSolve) {
 }
 
 TEST_F(InterpolatedIVSolverTest, BatchSolveAllSucceed) {
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper());
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -203,7 +200,7 @@ TEST_F(InterpolatedIVSolverTest, ConvergenceWithinIterations) {
         .tolerance = 1e-6
     };
 
-    auto solver_result = DefaultInterpolatedIVSolver::create(make_wrapper(), config);
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper(), config);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -225,20 +222,14 @@ TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
     eep_axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
 
     std::vector<double> eep_coeffs(5 * 4 * 4 * 4, 2.0);
-    PriceTableMetadata eep_meta{
-        .K_ref = 100.0,
-        .m_min = std::log(0.8),
-        .m_max = std::log(1.2),
-        .content = SurfaceContent::EarlyExercisePremium,
-    };
 
-    auto eep_surface = PriceTableSurface::build(eep_axes, eep_coeffs, eep_meta);
+    auto eep_surface = PriceTableSurface::build(eep_axes, eep_coeffs, 100.0);
     ASSERT_TRUE(eep_surface.has_value());
 
-    auto wrapper_result = make_standard_wrapper(eep_surface.value(), OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(eep_surface.value(), OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
+    auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
     ASSERT_TRUE(solver.has_value());
 
     IVQuery query(
@@ -250,17 +241,6 @@ TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
         EXPECT_GT(result->implied_vol, 0.0);
         EXPECT_LT(result->implied_vol, 5.0);
     }
-}
-
-// Verify that DefaultInterpolatedIVSolver alias works correctly
-TEST_F(InterpolatedIVSolverTest, StandardAliasMatchesExplicitTemplate) {
-    // DefaultInterpolatedIVSolver is InterpolatedIVSolver<StandardSurfaceWrapper>
-    static_assert(std::is_same_v<
-        DefaultInterpolatedIVSolver,
-        InterpolatedIVSolver<StandardSurfaceWrapper>>);
-
-    auto solver = DefaultInterpolatedIVSolver::create(make_wrapper());
-    ASSERT_TRUE(solver.has_value());
 }
 
 // ===========================================================================
@@ -282,17 +262,17 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
         GridAccuracyParams{}, OptionType::PUT, 0.0);
     ASSERT_TRUE(result.has_value());
     auto [builder, axes] = std::move(result.value());
-    EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
-    auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, K_ref);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
         });
     ASSERT_TRUE(table.has_value());
 
-    auto wrapper_result = make_standard_wrapper(table->surface, OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(table->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
+    auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
     ASSERT_TRUE(solver.has_value());
 
     // Query with CALL type against a PUT surface — must fail
@@ -306,7 +286,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
 }
 
 // Regression: InterpolatedIVSolver must reject queries with wrong dividend_yield
-// Bug: StandardSurfaceWrapper bakes in dividend_yield at construction; callers
+// Bug: BSplinePriceTable bakes in dividend_yield at construction; callers
 // with a different yield get wrong prices silently
 TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
     // Build surface with dividend_yield = 0.02 (log-moneyness)
@@ -322,17 +302,17 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
         GridAccuracyParams{}, OptionType::PUT, div_yield);
     ASSERT_TRUE(result.has_value());
     auto [builder, axes] = std::move(result.value());
-    EEPDecomposer decomposer2{OptionType::PUT, K_ref, div_yield};
-    auto table = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer2.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, K_ref);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, div_yield));
         });
     ASSERT_TRUE(table.has_value());
 
-    auto wrapper_result = make_standard_wrapper(table->surface, OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(table->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(*wrapper_result));
+    auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
     ASSERT_TRUE(solver.has_value());
 
     // Query with dividend_yield = 0.05 — must fail (surface was built with 0.02)

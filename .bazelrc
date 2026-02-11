@@ -10,6 +10,11 @@ test --test_output=errors
 build --per_file_copt=^//src/,^//tests/,^//benchmarks/@-Werror
 build --host_copt=-Wno-error
 
+# Eigen alignment: cap at 32 bytes (AVX2) to avoid GCC 14 AVX-512
+# alignment issues with Eigen 3.4 MatrixXd in template-heavy code.
+# Only affects project code; external deps compile without -march=native.
+build --per_file_copt=^//src/,^//tests/,^//benchmarks/@-DEIGEN_MAX_ALIGN_BYTES=32
+
 # Arrow persistence feature (enabled by default)
 build --define=enable_arrow=true
 

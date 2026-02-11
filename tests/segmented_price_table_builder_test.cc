@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/american_option.hpp"
 #include <cmath>
 #include <vector>
@@ -37,13 +37,12 @@ TEST(SegmentedPriceTableBuilderTest, BuildWithOneDividend) {
     ASSERT_TRUE(result.has_value()) << "Build should succeed";
 
     // Verify price is reasonable for ATM put
-    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.8, .sigma = 0.20, .rate = 0.05};
-    double price = result->price(q);
+    double price = result->price(100.0, 100.0, 0.8, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_LT(price, 50.0);  // sanity check
 
     // Verify vega is finite
-    double vega = result->vega(q);
+    double vega = result->vega(100.0, 100.0, 0.8, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(vega));
     EXPECT_GT(vega, 0.0);
 }
@@ -64,8 +63,7 @@ TEST(SegmentedPriceTableBuilderTest, BuildWithNoDividends) {
     auto result = SegmentedPriceTableBuilder::build(config);
     ASSERT_TRUE(result.has_value());
 
-    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
-    double price = result->price(q);
+    double price = result->price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
 }
 
@@ -161,14 +159,12 @@ TEST(SegmentedPriceTableBuilderTest, ManualPathMatchesBuildPath) {
     ASSERT_TRUE(result.has_value()) << "Build with 1 dividend should succeed";
 
     // ATM put price should be reasonable
-    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.3, .sigma = 0.20, .rate = 0.05};
-    double price = result->price(q);
+    double price = result->price(100.0, 100.0, 0.3, 0.20, 0.05);
     EXPECT_GT(price, 3.0) << "ATM put should have meaningful value";
     EXPECT_LT(price, 20.0) << "ATM put should not be absurdly large";
 
     // Cross-segment query (tau > 0.5 spans the dividend boundary)
-    PriceQuery q2{.spot = 100.0, .strike = 100.0, .tau = 0.8, .sigma = 0.20, .rate = 0.05};
-    double price2 = result->price(q2);
+    double price2 = result->price(100.0, 100.0, 0.8, 0.20, 0.05);
     EXPECT_GT(price2, 0.0);
     EXPECT_TRUE(std::isfinite(price2));
 }
@@ -205,8 +201,7 @@ TEST(SegmentedPriceTableBuilderTest, UnifiedManualPathMultiDividend) {
     // Verify prices at multiple tau values spanning different segments
     double taus[] = {0.1, 0.3, 0.6, 0.9};
     for (double tau : taus) {
-        PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = tau, .sigma = 0.20, .rate = 0.05};
-        double price = result->price(q);
+        double price = result->price(100.0, 100.0, tau, 0.20, 0.05);
         EXPECT_TRUE(std::isfinite(price))
             << "Price must be finite at tau=" << tau;
         EXPECT_GT(price, 0.0)
@@ -252,14 +247,8 @@ TEST(SegmentedPriceTableBuilderTest, LongMaturityMultiDividendEdgeBiasControlled
     auto fd = solve_american_option(p);
     ASSERT_TRUE(fd.has_value());
 
-    PriceQuery q{
-        .spot = p.spot,
-        .strike = p.strike,
-        .tau = p.maturity,
-        .sigma = p.volatility,
-        .rate = std::get<double>(p.rate),
-    };
-    double interp_price = surface->price(q);
+    double interp_price = surface->price(p.spot, p.strike, p.maturity,
+                                         p.volatility, std::get<double>(p.rate));
     double fd_price = fd->value();
     double abs_error = std::abs(interp_price - fd_price);
 

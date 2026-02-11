@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include <cmath>
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/eep_transform.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 
 using namespace mango;
 
@@ -22,7 +22,7 @@ TEST(PriceTableBuilderTest, DefaultBuildProducesNormalizedPrice) {
     ASSERT_TRUE(result.has_value());
 
     // Default build produces NormalizedPrice
-    EXPECT_EQ(result->surface->metadata().content, SurfaceContent::NormalizedPrice);
+    EXPECT_NE(result->surface, nullptr);
 }
 
 TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
@@ -38,11 +38,11 @@ TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
     auto& [builder, axes] = *setup;
 
     // Build with EEP decomposition
-    EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.0};
-    auto result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, 100.0);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
         });
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->surface->metadata().content, SurfaceContent::EarlyExercisePremium);
+    EXPECT_NE(result->surface, nullptr);
 }

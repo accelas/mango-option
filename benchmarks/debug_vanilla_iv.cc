@@ -6,12 +6,12 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/european_option.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
-#include "mango/option/table/standard_surface.hpp"
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/eep_transform.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 
 using namespace mango;
 
@@ -77,10 +77,10 @@ int main() {
     }
 
     auto& [builder, axes] = *setup;
-    EEPDecomposer decomposer{OptionType::PUT, kSpot, kDivYield};
-    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, kSpot);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, kDivYield));
         });
     if (!table_result.has_value()) {
         std::fprintf(stderr, "PriceTableBuilderND build failed: error code %d\n",
@@ -89,10 +89,8 @@ int main() {
     }
 
     auto surface = table_result->surface;
-    auto& meta = surface->metadata();
-    std::printf("  Surface content: %s\n",
-                meta.content == SurfaceContent::EarlyExercisePremium ? "EEP" : "NormalizedPrice");
-    std::printf("  K_ref: %.2f\n", meta.K_ref);
+    std::printf("  Surface content: EEP (type-enforced)\n");
+    std::printf("  K_ref: %.2f\n", surface->K_ref());
 
     // Query the raw surface at our test point
     double m = kSpot / kStrike;  // = 1.0 for ATM
@@ -100,22 +98,22 @@ int main() {
     std::printf("  Raw surface value at (m=%.2f, tau=%.2f, sigma=%.2f, rate=%.2f): %.6f\n",
                 m, kTau, kSigma, kRate, raw_value);
 
-    // Layer 4: StandardSurfaceWrapper reconstruction
-    std::printf("\n--- Layer 4: StandardSurfaceWrapper Reconstruction ---\n");
-    auto wrapper = make_standard_wrapper(surface, OptionType::PUT);
+    // Layer 4: BSplinePriceTable reconstruction
+    std::printf("\n--- Layer 4: BSplinePriceTable Reconstruction ---\n");
+    auto wrapper = make_bspline_surface(surface, OptionType::PUT);
     if (!wrapper.has_value()) {
-        std::fprintf(stderr, "make_standard_wrapper failed\n");
+        std::fprintf(stderr, "make_bspline_surface failed\n");
         return 1;
     }
 
     double wrapper_price = wrapper->price(kSpot, kStrike, kTau, kSigma, kRate);
-    std::printf("  StandardSurfaceWrapper::price(): %.6f\n", wrapper_price);
+    std::printf("  BSplinePriceTable::price(): %.6f\n", wrapper_price);
     std::printf("  Error vs FDM: %.6f (%.2f bps in price)\n",
                 std::abs(wrapper_price - fdm_price),
                 std::abs(wrapper_price - fdm_price) * 10000 / fdm_price);
 
     // Compute what the reconstruction formula gives
-    double reconstructed = raw_value * (kStrike / meta.K_ref) + eu_price;
+    double reconstructed = raw_value * (kStrike / surface->K_ref()) + eu_price;
     std::printf("  Manual reconstruction (EEP * K/Kref + Eu): %.6f\n", reconstructed);
 
     // Layer 5: Check if interpolation is the issue
@@ -154,31 +152,29 @@ int main() {
 
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0);
     AdaptiveGridParams params{.target_iv_error = 2e-5};
-    AdaptiveGridBuilder adaptive_builder(params);
 
-    auto adaptive_result = adaptive_builder.build(chain, *grid_spec, 500, OptionType::PUT);
+    auto adaptive_result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{*grid_spec, 500, {}}, OptionType::PUT);
     if (!adaptive_result.has_value()) {
         std::fprintf(stderr, "AdaptiveGridBuilder failed\n");
         return 1;
     }
 
     auto adaptive_surface = adaptive_result->surface;
-    auto& adaptive_meta = adaptive_surface->metadata();
-    std::printf("  Surface content: %s\n",
-                adaptive_meta.content == SurfaceContent::EarlyExercisePremium ? "EEP" : "NormalizedPrice");
-    std::printf("  K_ref: %.2f\n", adaptive_meta.K_ref);
+    std::printf("  Surface content: EEP (type-enforced)\n");
+    std::printf("  K_ref: %.2f\n", adaptive_surface->K_ref());
 
     double adaptive_raw = adaptive_surface->value({m, kTau, kSigma, kRate});
     std::printf("  Raw surface value: %.6f\n", adaptive_raw);
 
-    auto adaptive_wrapper = make_standard_wrapper(adaptive_surface, OptionType::PUT);
+    auto adaptive_wrapper = make_bspline_surface(adaptive_surface, OptionType::PUT);
     if (!adaptive_wrapper.has_value()) {
-        std::fprintf(stderr, "make_standard_wrapper failed for adaptive\n");
+        std::fprintf(stderr, "make_bspline_surface failed for adaptive\n");
         return 1;
     }
 
     double adaptive_price = adaptive_wrapper->price(kSpot, kStrike, kTau, kSigma, kRate);
-    std::printf("  StandardSurfaceWrapper::price(): %.6f\n", adaptive_price);
+    std::printf("  BSplinePriceTable::price(): %.6f\n", adaptive_price);
     std::printf("  Error vs FDM: %.6f (%.2f bps in price)\n",
                 std::abs(adaptive_price - fdm_price),
                 std::abs(adaptive_price - fdm_price) * 10000 / fdm_price);
@@ -206,17 +202,17 @@ int main() {
         kSpot, high_acc, OptionType::PUT, kDivYield);
     if (setup_hi.has_value()) {
         auto& [builder_hi, axes_hi] = *setup_hi;
-        EEPDecomposer decomposer_hi{OptionType::PUT, kSpot, kDivYield};
-        auto result_hi = builder_hi.build(axes_hi, SurfaceContent::EarlyExercisePremium,
+        auto result_hi = builder_hi.build(axes_hi,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
-                decomposer_hi.decompose(tensor, a);
+                BSplineTensorAccessor accessor(tensor, a, kSpot);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, kDivYield));
             });
         if (result_hi.has_value()) {
             double raw_hi = result_hi->surface->value({m, kTau, kSigma, kRate});
             std::printf("  High-accuracy raw EEP (tol=1e-6): %.6f\n", raw_hi);
             std::printf("  Error vs expected: %.6f\n", std::abs(eep - raw_hi));
 
-            auto wrapper_hi = make_standard_wrapper(result_hi->surface, OptionType::PUT);
+            auto wrapper_hi = make_bspline_surface(result_hi->surface, OptionType::PUT);
             if (wrapper_hi.has_value()) {
                 double price_hi = wrapper_hi->price(kSpot, kStrike, kTau, kSigma, kRate);
                 std::printf("  High-accuracy price: %.6f\n", price_hi);
@@ -486,9 +482,8 @@ int main() {
 
         // Unfortunately we can't access the tensor directly from outside
         // But we CAN check the fitting stats
-        std::printf("  Surface metadata content: %s\n",
-                    surf->metadata().content == SurfaceContent::EarlyExercisePremium ? "EEP" : "NormalizedPrice");
-        std::printf("  K_ref: %.2f\n", surf->metadata().K_ref);
+        std::printf("  Surface metadata content: EEP (type-enforced)\n");
+        std::printf("  K_ref: %.2f\n", surf->K_ref());
 
         // Check if this differs from the direct batch solve
         std::printf("  Expected from batch solve: 0.324765\n");
