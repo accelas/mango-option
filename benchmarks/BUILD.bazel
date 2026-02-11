@@ -454,6 +454,25 @@ cc_binary(
 )
 
 cc_binary(
+    name = "golden_surface_comparison",
+    srcs = ["golden_surface_comparison.cc", "golden_surface_data.inc"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    linkstatic = True,
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_adaptive",
+        "//src/option/table/bspline:bspline_surface",
+    ],
+    tags = ["manual"],
+)
+
+cc_binary(
     name = "interp_iv_safety",
     srcs = ["interp_iv_safety.cc", "iv_benchmark_common.hpp"],
     copts = [
