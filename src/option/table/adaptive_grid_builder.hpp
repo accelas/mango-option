@@ -2,6 +2,7 @@
 #pragma once
 
 #include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/support/error_types.hpp"
@@ -21,13 +22,6 @@ struct SegmentedAdaptiveConfig {
     std::vector<Dividend> discrete_dividends;
     double maturity;
     MultiKRefConfig kref_config;
-};
-
-/// Type-erased surface handle for validation queries during adaptive refinement
-struct SurfaceHandle {
-    std::function<double(double spot, double strike, double tau,
-                         double sigma, double rate)> price;
-    size_t pde_solves = 0;
 };
 
 /// Adaptive grid builder for price tables

@@ -4,6 +4,7 @@ cc_library(
     hdrs = ["bspline_slice_cache.hpp"],
     deps = [
         "//src/option:american_option_result",
+        "//src/option/table:adaptive_refinement",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table/bspline",
