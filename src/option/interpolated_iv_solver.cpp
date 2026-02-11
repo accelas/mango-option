@@ -401,7 +401,7 @@ build_chebyshev(const IVSolverFactoryConfig& config,
     ChebyshevTableConfig cheb_config{
         .num_pts = backend.num_pts,
         .domain = Domain<4>{
-            .lo = {b.m_min, 0.01, b.sigma_min, b.rate_min},
+            .lo = {b.m_min, std::min(0.01, backend.maturity * 0.5), b.sigma_min, b.rate_min},
             .hi = {b.m_max, backend.maturity, b.sigma_max, b.rate_max},
         },
         .K_ref = config.spot,
@@ -466,7 +466,7 @@ build_chebyshev_segmented(const IVSolverFactoryConfig& config,
     auto b = extract_bounds(config.grid);
     SurfaceBounds bounds{
         .m_min = b.m_min, .m_max = b.m_max,
-        .tau_min = 0.01, .tau_max = divs.maturity,
+        .tau_min = std::min(0.01, divs.maturity * 0.5), .tau_max = divs.maturity,
         .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
         .rate_min = b.rate_min, .rate_max = b.rate_max,
     };
