@@ -1610,3 +1610,17 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "dimensionless_3d_surface_test",
+    size = "medium",
+    srcs = ["dimensionless_3d_surface_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
