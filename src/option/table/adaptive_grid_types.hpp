@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/option/table/bspline/bspline_surface.hpp"
+#include <any>
 #include <array>
 #include <functional>
 #include <limits>
-#include <memory>
 #include <vector>
 #include <cstddef>
 #include <cstdint>
@@ -21,7 +20,7 @@ struct MultiKRefConfig {
 };
 
 /// Grid specification for IV solver: explicit grid points for each axis.
-/// Requires >= 4 points per axis (B-spline minimum).
+/// Requires >= 4 points per axis (interpolation minimum).
 ///
 /// Defaults cover typical equity option ranges.  When used with adaptive
 /// refinement the values serve as domain bounds; otherwise they are the
@@ -49,7 +48,7 @@ struct AdaptiveGridParams {
 
     /// Minimum moneyness grid points (default: 60)
     /// Moneyness requires higher density than other dimensions due to
-    /// exercise boundary curvature and PDE → B-spline sampling loss.
+    /// exercise boundary curvature and interpolation sampling loss.
     size_t min_moneyness_points = 60;
 
     /// Number of validation FD solves per iteration (default: 64)
@@ -84,23 +83,12 @@ struct IterationStats {
 
 /// Final result with full diagnostics
 struct AdaptiveResult {
-    /// The built price table surface
-    std::shared_ptr<const PriceTableSurface> surface = nullptr;
-
-    /// Final axes used for the surface
-    PriceTableAxes axes;
-
-    /// Type-erased price function (set by Chebyshev path)
+    /// Type-erased price function for generic access
     std::function<double(double spot, double strike, double tau,
                          double sigma, double rate)> price_fn;
 
-    /// Query price from the surface
-    /// Returns NaN if no surface is available (build failure or not yet built)
-    /// coords: [moneyness, tau, sigma, rate]
-    [[nodiscard]] double value(const std::array<double, 4>& coords) const {
-        return surface ? surface->value(coords)
-                       : std::numeric_limits<double>::quiet_NaN();
-    }
+    /// Backend-specific typed surface (cast with std::any_cast in .cpp)
+    std::any typed_surface;
 
     /// Per-iteration history for diagnostics
     std::vector<IterationStats> iterations;
@@ -120,8 +108,8 @@ struct AdaptiveResult {
 
 /// Result from adaptive segmented grid building (multi-K_ref path)
 struct SegmentedAdaptiveResult {
-    BSplineMultiKRefInner surface;
-    IVGrid grid;  ///< The grid sizes adaptive chose
+    std::any typed_surface;         ///< Backend-specific surface (cast in .cpp)
+    IVGrid grid;                    ///< The grid sizes adaptive chose
     int tau_points_per_segment;
 };
 

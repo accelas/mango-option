@@ -17,6 +17,7 @@
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include <algorithm>
+#include <any>
 #include <cmath>
 #include <variant>
 
@@ -220,7 +221,9 @@ build_bspline_adaptive(const IVSolverFactoryConfig& config,
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    return wrap_surface(result->surface, config.option_type, config.solver_config);
+    auto surface = std::any_cast<std::shared_ptr<const PriceTableSurface>>(
+        result->typed_surface);
+    return wrap_surface(std::move(surface), config.option_type, config.solver_config);
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +331,9 @@ build_bspline_segmented(const IVSolverFactoryConfig& config,
             return std::unexpected(ValidationError{
                 ValidationErrorCode::InvalidGridSize, 0.0});
         }
-        return wrap_multi_kref_surface(std::move(result->surface),
+        auto surface = std::any_cast<BSplineMultiKRefInner>(
+            std::move(result->typed_surface));
+        return wrap_multi_kref_surface(std::move(surface),
             b, divs.maturity, config.option_type,
             config.dividend_yield, config.solver_config);
     }

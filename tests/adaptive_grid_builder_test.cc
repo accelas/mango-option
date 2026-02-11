@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/bspline/bspline_slice_cache.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include <any>
 #include <algorithm>
 #include <iostream>
 
@@ -84,7 +86,7 @@ TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
     EXPECT_GE(result->iterations.size(), 1);
 
     // Surface should be populated
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_TRUE(result->typed_surface.has_value());
 
     // Should have done some PDE solves
     EXPECT_GT(result->total_pde_solves, 0);
@@ -307,7 +309,7 @@ TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
         << "Error code: " << (result.has_value() ? 0 : static_cast<int>(result.error().code));
 
     // Surface should be usable
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_TRUE(result->typed_surface.has_value());
 }
 
 // Regression: Cache should clear on new build
@@ -368,12 +370,12 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
         << "build_segmented failed";
 
     // Should be able to query prices at various strikes
-    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
+    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 
     // And at off-K_ref strikes
-    double price2 = result->surface.price(100.0, 90.0, 0.5, 0.20, 0.05);
+    double price2 = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 90.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price2, 0.0);
     EXPECT_TRUE(std::isfinite(price2));
 }
@@ -428,7 +430,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
     auto result = builder.build_segmented(seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value());
 
-    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
+    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -458,7 +460,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
     auto result = builder.build_segmented(seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value());
 
-    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
+    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -547,7 +549,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
 
     auto result = builder.build_segmented(seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    double price = result->surface.price(100.0, 110.0, 0.5, 0.20, 0.05);
+    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 110.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
 }
 
@@ -578,7 +580,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
 
     auto result = builder.build_segmented(seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    double price = result->surface.price(100.0, 90.0, 0.5, 0.20, 0.05);
+    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 90.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
 }
 
@@ -608,7 +610,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     ASSERT_TRUE(result.has_value());
 
     // Single K_ref = spot, should produce valid prices
-    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
+    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -638,7 +640,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     ASSERT_TRUE(result.has_value());
 
     // Query at a tau within the short maturity
-    double price = result->surface.price(100.0, 100.0, 0.03, 0.20, 0.05);
+    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 100.0, 0.03, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -792,7 +794,9 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
     ASSERT_TRUE(result.has_value()) << "Adaptive build failed";
 
     // Wrap surface for price queries
-    auto wrapper = make_bspline_surface(result->surface, OptionType::PUT);
+    auto surface = std::any_cast<std::shared_ptr<const PriceTableSurface>>(
+        result->typed_surface);
+    auto wrapper = make_bspline_surface(surface, OptionType::PUT);
     ASSERT_TRUE(wrapper.has_value()) << wrapper.error();
 
     // Query at K=80, T=1y, σ=15% — this was 1574 bps error before the fix

@@ -10,6 +10,7 @@
 #include "mango/option/table/chebyshev/pde_slice_cache.hpp"
 #include "mango/option/table/bspline/eep_decomposer.hpp"
 #include "mango/option/table/eep/identity_eep.hpp"
+#include "mango/option/table/bspline/bspline_slice_cache.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/dividend_utils.hpp"
@@ -18,6 +19,7 @@
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include <algorithm>
+#include <any>
 #include <cmath>
 #include <chrono>
 #include <limits>
@@ -1538,10 +1540,87 @@ BatchAmericanOptionResult solve_missing_slices(
 
 AdaptiveGridBuilder::AdaptiveGridBuilder(AdaptiveGridParams params)
     : params_(std::move(params))
+    , cache_(std::make_unique<SliceCache>())
 {}
 
-std::expected<SurfaceHandle, PriceTableError>
-AdaptiveGridBuilder::build_cached_surface(
+AdaptiveGridBuilder::~AdaptiveGridBuilder() = default;
+AdaptiveGridBuilder::AdaptiveGridBuilder(AdaptiveGridBuilder&&) noexcept = default;
+AdaptiveGridBuilder& AdaptiveGridBuilder::operator=(AdaptiveGridBuilder&&) noexcept = default;
+
+/// Compute IV error metric from price error and vega
+static double compute_error_metric(const AdaptiveGridParams& params,
+                                   double price_error, double vega) {
+    return compute_iv_error(price_error, vega,
+                            params.vega_floor, params.target_iv_error);
+}
+
+static BatchAmericanOptionResult merge_results(
+    const SliceCache& cache,
+    const std::vector<PricingParams>& all_params,
+    const std::vector<size_t>& fresh_indices,
+    const BatchAmericanOptionResult& fresh_results)
+{
+    BatchAmericanOptionResult merged;
+    merged.results.reserve(all_params.size());
+    merged.failed_count = 0;
+
+    // Create a map from fresh_indices to fresh_results for fast lookup
+    std::map<size_t, size_t> fresh_map;
+    for (size_t i = 0; i < fresh_indices.size(); ++i) {
+        fresh_map[fresh_indices[i]] = i;
+    }
+
+    // Build merged result vector
+    for (size_t i = 0; i < all_params.size(); ++i) {
+        auto fresh_it = fresh_map.find(i);
+        if (fresh_it != fresh_map.end()) {
+            // Use fresh result
+            size_t fresh_idx = fresh_it->second;
+            if (fresh_idx < fresh_results.results.size()) {
+                const auto& fresh = fresh_results.results[fresh_idx];
+                if (fresh.has_value()) {
+                    // Create new AmericanOptionResult sharing the same grid
+                    merged.results.push_back(AmericanOptionResult(
+                        fresh.value().grid(), all_params[i]));
+                } else {
+                    // Copy the error
+                    merged.results.push_back(std::unexpected(fresh.error()));
+                    merged.failed_count++;
+                }
+            } else {
+                // Should never happen, but handle gracefully
+                merged.results.push_back(std::unexpected(SolverError{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .iterations = 0
+                }));
+                merged.failed_count++;
+            }
+        } else {
+            // Use cached result
+            double sigma = all_params[i].volatility;
+            double rate = get_zero_rate(all_params[i].rate, all_params[i].maturity);
+            auto cached = cache.get(sigma, rate);
+            if (cached) {
+                merged.results.push_back(AmericanOptionResult(
+                    cached->grid(), all_params[i]));
+            } else {
+                // Cache miss - should never happen
+                merged.results.push_back(std::unexpected(SolverError{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .iterations = 0
+                }));
+                merged.failed_count++;
+            }
+        }
+    }
+
+    return merged;
+}
+
+static std::expected<SurfaceHandle, PriceTableError>
+build_cached_surface(
+    const AdaptiveGridParams& params,
+    SliceCache& cache,
     const std::vector<double>& m_grid,
     const std::vector<double>& tau_grid,
     const std::vector<double>& v_grid,
@@ -1557,7 +1636,7 @@ AdaptiveGridBuilder::build_cached_surface(
     auto builder_result = PriceTableBuilder::from_vectors(
         m_grid, tau_grid, v_grid, r_grid,
         K_ref, pde_grid, type, dividend_yield,
-        params_.max_failure_rate);
+        params.max_failure_rate);
 
     if (!builder_result.has_value()) {
         return std::unexpected(builder_result.error());
@@ -1568,9 +1647,9 @@ AdaptiveGridBuilder::build_cached_surface(
     // On first iteration, set the initial tau grid; subsequent iterations
     // compare against it and clear cache only if tau actually changed.
     if (build_iteration == 0) {
-        cache_.set_tau_grid(tau_grid);
+        cache.set_tau_grid(tau_grid);
     } else {
-        cache_.invalidate_if_tau_changed(tau_grid);
+        cache.invalidate_if_tau_changed(tau_grid);
     }
     build_iteration++;
 
@@ -1586,7 +1665,7 @@ AdaptiveGridBuilder::build_cached_surface(
     }
 
     // Find which pairs are missing from cache
-    auto missing_indices = cache_.get_missing_indices(all_pairs);
+    auto missing_indices = cache.get_missing_indices(all_pairs);
 
     // Build batch of params for missing pairs only
     std::vector<PricingParams> missing_params;
@@ -1612,7 +1691,7 @@ AdaptiveGridBuilder::build_cached_surface(
                 auto result_ptr = std::make_shared<AmericanOptionResult>(
                     fresh_results.results[i].value().grid(),
                     missing_params[i]);
-                cache_.add(sigma, rate, std::move(result_ptr));
+                cache.add(sigma, rate, std::move(result_ptr));
             }
         }
     } else {
@@ -1620,7 +1699,7 @@ AdaptiveGridBuilder::build_cached_surface(
     }
 
     // Merge cached + fresh results into full batch
-    auto merged_results = merge_results(all_params, missing_indices, fresh_results);
+    auto merged_results = merge_results(cache, all_params, missing_indices, fresh_results);
 
     // Extract tensor from merged results
     auto tensor_result = builder.extract_tensor(merged_results, axes);
@@ -1686,7 +1765,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
                            OptionType type)
 {
     // Clear cache to prevent stale slices from previous builds leaking in
-    cache_.clear();
+    cache_->clear();
 
     auto domain = extract_chain_domain(chain);
     if (!domain.has_value()) {
@@ -1707,6 +1786,8 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
                            std::span<const double> v_grid,
                            std::span<const double> r_grid) {
         return build_cached_surface(
+            params_,
+            *cache_,
             {m_grid.begin(), m_grid.end()},
             {tau_grid.begin(), tau_grid.end()},
             {v_grid.begin(), v_grid.end()},
@@ -1719,7 +1800,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
 
     // compute_error: FD American vega for standard path
-    auto compute_error_fn = [this, &validate_fn](
+    auto compute_error_fn = [&params = params_, &validate_fn](
         double interp_price, double ref_price,
         double spot, double strike, double tau,
         double sigma, double rate,
@@ -1747,7 +1828,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
             // FD bump failed or eps too small — clamp to floor inside compute_error_metric
             vega = 0.0;
         }
-        return compute_error_metric(price_error, vega);
+        return compute_error_metric(params, price_error, vega);
     };
 
     auto refine_fn = make_bspline_refine_fn(params_);
@@ -1761,8 +1842,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     auto& grids = grid_result.value();
 
     AdaptiveResult result;
-    result.surface = last_surface;
-    result.axes = last_axes;
+    result.typed_surface = last_surface;
     result.iterations = std::move(grids.iterations);
     result.achieved_max_error = grids.achieved_max_error;
     result.achieved_avg_error = grids.achieved_avg_error;
@@ -1776,76 +1856,6 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
 
     return result;
 }
-
-double AdaptiveGridBuilder::compute_error_metric(
-    double price_error, double vega) const
-{
-    return compute_iv_error(price_error, vega,
-                            params_.vega_floor, params_.target_iv_error);
-}
-
-BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
-    const std::vector<PricingParams>& all_params,
-    const std::vector<size_t>& fresh_indices,
-    const BatchAmericanOptionResult& fresh_results) const
-{
-    BatchAmericanOptionResult merged;
-    merged.results.reserve(all_params.size());
-    merged.failed_count = 0;
-
-    // Create a map from fresh_indices to fresh_results for fast lookup
-    std::map<size_t, size_t> fresh_map;
-    for (size_t i = 0; i < fresh_indices.size(); ++i) {
-        fresh_map[fresh_indices[i]] = i;
-    }
-
-    // Build merged result vector
-    for (size_t i = 0; i < all_params.size(); ++i) {
-        auto fresh_it = fresh_map.find(i);
-        if (fresh_it != fresh_map.end()) {
-            // Use fresh result
-            size_t fresh_idx = fresh_it->second;
-            if (fresh_idx < fresh_results.results.size()) {
-                const auto& fresh = fresh_results.results[fresh_idx];
-                if (fresh.has_value()) {
-                    // Create new AmericanOptionResult sharing the same grid
-                    merged.results.push_back(AmericanOptionResult(
-                        fresh.value().grid(), all_params[i]));
-                } else {
-                    // Copy the error
-                    merged.results.push_back(std::unexpected(fresh.error()));
-                    merged.failed_count++;
-                }
-            } else {
-                // Should never happen, but handle gracefully
-                merged.results.push_back(std::unexpected(SolverError{
-                    .code = SolverErrorCode::InvalidConfiguration,
-                    .iterations = 0
-                }));
-                merged.failed_count++;
-            }
-        } else {
-            // Use cached result
-            double sigma = all_params[i].volatility;
-            double rate = get_zero_rate(all_params[i].rate, all_params[i].maturity);
-            auto cached = cache_.get(sigma, rate);
-            if (cached) {
-                merged.results.push_back(AmericanOptionResult(
-                    cached->grid(), all_params[i]));
-            } else {
-                // Cache miss - should never happen
-                merged.results.push_back(std::unexpected(SolverError{
-                    .code = SolverErrorCode::InvalidConfiguration,
-                    .iterations = 0
-                }));
-                merged.failed_count++;
-            }
-        }
-    }
-
-    return merged;
-}
-
 
 std::expected<SegmentedAdaptiveResult, PriceTableError>
 AdaptiveGridBuilder::build_segmented(
@@ -1927,7 +1937,7 @@ AdaptiveGridBuilder::build_segmented(
 
         double price_error = std::abs(interp - fd->value());
         double vega = bs_vega(config.spot, strike, tau, sigma, rate, config.dividend_yield);
-        double err = compute_error_metric(price_error, vega);
+        double err = compute_error_metric(params_, price_error, vega);
 
         final_max_error = std::max(final_max_error, err);
         valid++;
@@ -1956,7 +1966,7 @@ AdaptiveGridBuilder::build_segmented(
             auto retry_surface = build_multi_kref_surface(std::move(retry_entries));
             if (retry_surface.has_value()) {
                 return SegmentedAdaptiveResult{
-                    .surface = std::move(*retry_surface),
+                    .typed_surface = std::move(*retry_surface),
                     .grid = {.moneyness = retry_m, .vol = retry_v, .rate = retry_r},
                     .tau_points_per_segment = bumped_tau,
                 };
@@ -1965,7 +1975,7 @@ AdaptiveGridBuilder::build_segmented(
     }
 
     return SegmentedAdaptiveResult{
-        .surface = std::move(*surface),
+        .typed_surface = std::move(*surface),
         .grid = build.seg_template.grid,
         .tau_points_per_segment = build.seg_template.tau_points_per_segment,
     };

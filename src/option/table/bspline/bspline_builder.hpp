@@ -548,24 +548,18 @@ public:
         OptionType type = OptionType::PUT);
 
 
-private:
-    /// Internal result from B-spline coefficient fitting
+    // -----------------------------------------------------------------
+    // Pipeline steps (public for use by free-standing builder helpers)
+    // -----------------------------------------------------------------
+
+    /// Result from B-spline coefficient fitting
     struct FitCoeffsResult {
         std::vector<double> coefficients;
         BSplineFittingStats<double, N> stats;
     };
+
     /// Generate batch of PricingParams from axes
     [[nodiscard]] std::vector<PricingParams> make_batch(
-        const PriceTableAxesND<N>& axes) const;
-
-    /// Estimate PDE grid from batch parameters using pde_accuracy config
-    [[nodiscard]] std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
-        const std::vector<PricingParams>& batch,
-        const PriceTableAxesND<N>& axes) const;
-
-    /// Solve batch of options with snapshot registration
-    [[nodiscard]] BatchAmericanOptionResult solve_batch(
-        const std::vector<PricingParams>& batch,
         const PriceTableAxesND<N>& axes) const;
 
     /// Extract PriceTensorND from batch results using cubic spline interpolation
@@ -585,12 +579,22 @@ private:
         const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
         const PriceTableAxesND<N>& axes) const;
 
+private:
+    /// Estimate PDE grid from batch parameters using pde_accuracy config
+    [[nodiscard]] std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
+        const std::vector<PricingParams>& batch,
+        const PriceTableAxesND<N>& axes) const;
+
+    /// Solve batch of options with snapshot registration
+    [[nodiscard]] BatchAmericanOptionResult solve_batch(
+        const std::vector<PricingParams>& batch,
+        const PriceTableAxesND<N>& axes) const;
+
     /// Find nearest valid neighbor in (σ,r) grid using Manhattan distance
     [[nodiscard]] std::optional<std::pair<size_t, size_t>> find_nearest_valid_neighbor(
         size_t σ_idx, size_t r_idx, size_t Nσ, size_t Nr,
         const std::vector<bool>& slice_valid) const;
 
-    friend class AdaptiveGridBuilder;
     friend class SegmentedPriceTableBuilder;
 #ifndef NDEBUG
     template <size_t M> friend struct testing::PriceTableBuilderAccess;

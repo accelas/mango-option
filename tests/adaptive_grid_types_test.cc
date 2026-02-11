@@ -79,7 +79,7 @@ TEST(IterationStatsTest, SetValues) {
 TEST(AdaptiveResultTest, DefaultConstruction) {
     AdaptiveResult result;
 
-    EXPECT_EQ(result.surface, nullptr);
+    EXPECT_FALSE(result.typed_surface.has_value());
     EXPECT_TRUE(result.iterations.empty());
     EXPECT_DOUBLE_EQ(result.achieved_max_error, 0.0);
     EXPECT_DOUBLE_EQ(result.achieved_avg_error, 0.0);

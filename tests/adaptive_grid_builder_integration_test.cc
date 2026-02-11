@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
+#include <any>
 #include <chrono>
 
 namespace mango {
@@ -48,7 +50,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, ConvergesToTarget) {
     EXPECT_FALSE(result->iterations.empty());
 
     // Should have a surface
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_TRUE(result->typed_surface.has_value());
 }
 
 TEST_F(AdaptiveGridBuilderIntegrationTest, RefinementIncreasesGridSize) {
@@ -103,7 +105,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, HandlesImpossibleTarget) {
     EXPECT_FALSE(result->target_met);
 
     // Still have a surface
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_TRUE(result->typed_surface.has_value());
 
     // Should have reached max iterations
     EXPECT_EQ(result->iterations.size(), params.max_iter);
@@ -184,7 +186,10 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, SurfaceInterpolatesWithinBounds) {
     auto result = builder.build(chain, grid_spec, 200, OptionType::PUT);
 
     ASSERT_TRUE(result.has_value());
-    ASSERT_NE(result->surface, nullptr);
+    ASSERT_TRUE(result->typed_surface.has_value());
+    auto surface = std::any_cast<std::shared_ptr<const PriceTableSurface>>(
+        result->typed_surface);
+    ASSERT_NE(surface, nullptr);
 
     // Query the surface at interior points
     // Moneyness from chain: S/K = 100/90 to 100/110 ≈ 0.91 to 1.11
@@ -194,7 +199,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, SurfaceInterpolatesWithinBounds) {
     double sigma = 0.20;
     double rate = 0.05;
 
-    double price = result->surface->value({m, tau, sigma, rate});
+    double price = surface->value({m, tau, sigma, rate});
 
     // Price should be positive and reasonable
     EXPECT_GT(price, 0.0) << "Interpolated price should be positive";
