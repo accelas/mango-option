@@ -127,7 +127,6 @@ cc_library(
         "//src/option:american_option_batch",
         "//src/option:dividend_utils",
         "//src/option:option_grid",
-        "//src/option/table:adaptive_grid_builder",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:adaptive_refinement",
         "//src/option/table:eep_decomposer",

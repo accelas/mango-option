@@ -11,8 +11,6 @@ pybind_extension(
         "//src/option:american_option_batch",
         "//src/option:option_grid",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table:adaptive_grid_builder",
-
         "//src/option/table/bspline:bspline_builder",
         "//src/math:root_finding",
         "//src/support:error_types",

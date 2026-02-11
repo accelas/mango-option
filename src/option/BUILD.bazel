@@ -155,7 +155,6 @@ cc_library(
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table:price_table",
         "//src/option/table:adaptive_grid_types",
-        "//src/option/table:adaptive_grid_builder",
         "//src/option/table/bspline:bspline_adaptive",
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_segmented_builder",

@@ -13,8 +13,6 @@
 
 namespace mango {
 
-struct SegmentedAdaptiveConfig;  // forward declare from adaptive_grid_builder.hpp
-
 /// Result of adaptive B-spline surface construction
 struct BSplineAdaptiveResult {
     std::shared_ptr<const PriceTableSurface> surface;

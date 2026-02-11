@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/table/bspline/bspline_slice_cache.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
@@ -36,23 +36,6 @@ std::shared_ptr<AmericanOptionResult> make_dummy_result() {
         return std::make_shared<AmericanOptionResult>(std::move(result.value()));
     }
     return nullptr;
-}
-
-TEST(AdaptiveGridBuilderTest, ConstructWithDefaultParams) {
-    AdaptiveGridParams params;
-    AdaptiveGridBuilder builder(params);
-
-    // Should compile and not crash
-    SUCCEED();
-}
-
-TEST(AdaptiveGridBuilderTest, ConstructWithCustomParams) {
-    AdaptiveGridParams params;
-    params.target_iv_error = 0.001;  // 10 bps
-    params.max_iter = 3;
-
-    AdaptiveGridBuilder builder(params);
-    SUCCEED();
 }
 
 TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {

@@ -11,8 +11,6 @@
 
 namespace mango {
 
-struct SegmentedAdaptiveConfig;  // forward declare (from adaptive_grid_builder.hpp)
-
 /// Result of adaptive Chebyshev surface construction
 struct ChebyshevAdaptiveResult {
     /// Price function (type-erased; underlying Chebyshev surface captured

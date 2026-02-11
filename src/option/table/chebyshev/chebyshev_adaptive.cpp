@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
-#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"

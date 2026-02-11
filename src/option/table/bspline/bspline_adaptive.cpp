@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
-#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"

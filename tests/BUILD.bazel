@@ -1226,7 +1226,7 @@ cc_test(
     timeout = "moderate",
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
-        "//src/option/table:adaptive_grid_builder",
+        "//src/option/table:adaptive_grid_types",
         "//src/option/table/bspline:bspline_adaptive",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/chebyshev:chebyshev_adaptive",

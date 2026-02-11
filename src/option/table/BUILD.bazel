@@ -12,7 +12,7 @@ cc_library(
     name = "adaptive_grid_types",
     hdrs = ["adaptive_grid_types.hpp"],
     deps = [
-        "//src/option/table/bspline:bspline_surface",
+        "//src/option:option_spec",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
@@ -39,23 +39,6 @@ cc_library(
         "//src/option:option_spec",
         "//src/math:black_scholes_analytics",
         "//src/math:latin_hypercube",
-        "//src/support:error_types",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "adaptive_grid_builder",
-    srcs = ["adaptive_grid_builder.cpp"],
-    hdrs = ["adaptive_grid_builder.hpp"],
-    deps = [
-        ":adaptive_grid_types",
-        ":adaptive_refinement",
-        "//src/option:grid_spec_types",
-        "//src/option:option_grid",
-        "//src/option/table/bspline:bspline_slice_cache",
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
