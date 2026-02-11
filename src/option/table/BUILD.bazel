@@ -9,8 +9,8 @@ filegroup(
 )
 
 cc_library(
-    name = "price_surface_concept",
-    hdrs = ["price_surface_concept.hpp"],
+    name = "adaptive_grid_types",
+    hdrs = ["adaptive_grid_types.hpp"],
     deps = [
         "//src/option:option_spec",
     ],
@@ -20,20 +20,17 @@ cc_library(
 )
 
 cc_library(
-    name = "adaptive_grid_types",
-    hdrs = ["adaptive_grid_types.hpp"],
-    deps = [
-        "//src/option/table/bspline:bspline_surface",
-    ],
+    name = "pde_cache",
+    hdrs = ["pde_cache.hpp"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
 )
 
 cc_library(
-    name = "adaptive_grid_builder",
-    srcs = ["adaptive_grid_builder.cpp"],
-    hdrs = ["adaptive_grid_builder.hpp"],
+    name = "adaptive_refinement",
+    srcs = ["adaptive_refinement.cpp"],
+    hdrs = ["adaptive_refinement.hpp"],
     copts = [
         "-fopenmp",
         "-pthread",
@@ -44,24 +41,11 @@ cc_library(
     ],
     deps = [
         ":adaptive_grid_types",
+        "//src/option:american_option",
         "//src/option:dividend_utils",
-        "//src/option/table/bspline:bspline_tensor_accessor",
-        ":identity_eep",
-        ":multi_kref_split",
-        "//src/option/table/bspline:bspline_builder",
-        "//src/option/table/bspline:bspline_slice_cache",
-        "//src/option/table/bspline:bspline_segmented_builder",
-        ":split_surface",
-        "//src/option/table/bspline:bspline_surface",
-        ":tau_segment_split",
-        "//src/math:black_scholes_analytics",
-        "//src/math:cubic_spline_solver",
-        "//src/math:latin_hypercube",
-        "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:option_grid",
-        "//src/option/table/chebyshev:chebyshev_surface",
-        "//src/option/table/chebyshev:pde_slice_cache",
-        "//src/pde/core:grid",
+        "//src/option:option_spec",
+        "//src/math:latin_hypercube",
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
@@ -119,16 +103,17 @@ cc_library(
 )
 
 cc_library(
-    name = "identity_eep",
-    hdrs = ["eep/identity_eep.hpp"],
+    name = "transform_leaf",
+    hdrs = ["transform_leaf.hpp"],
+    deps = [":surface_concepts"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
 )
 
 cc_library(
-    name = "eep_surface_adapter",
-    hdrs = ["eep/eep_surface_adapter.hpp"],
+    name = "eep_layer",
+    hdrs = ["eep/eep_layer.hpp"],
     deps = [":surface_concepts"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",

@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/chebyshev/pde_slice_cache.hpp"
+#include "mango/option/table/chebyshev/chebyshev_pde_cache.hpp"
 
 using namespace mango;
 
-TEST(PDESliceCacheTest, MissingPairsReturnsAllInitially) {
-    PDESliceCache cache;
+TEST(ChebyshevPDECacheTest, MissingPairsReturnsAllInitially) {
+    ChebyshevPDECache cache;
     std::vector<double> sigmas = {0.10, 0.20, 0.30};
     std::vector<double> rates = {0.03, 0.05};
     auto missing = cache.missing_pairs(sigmas, rates);
     EXPECT_EQ(missing.size(), 6u);  // 3 x 2
 }
 
-TEST(PDESliceCacheTest, StoreAndRetrieveSlice) {
-    PDESliceCache cache;
+TEST(ChebyshevPDECacheTest, StoreAndRetrieveSlice) {
+    ChebyshevPDECache cache;
     std::vector<double> x = {0.0, 0.5, 1.0};
     std::vector<double> v = {1.0, 1.5, 2.0};
     cache.store_slice(0.20, 0.05, /*tau_idx=*/0, x, v);
@@ -23,8 +23,8 @@ TEST(PDESliceCacheTest, StoreAndRetrieveSlice) {
     EXPECT_NEAR(spline->eval(0.25), 1.25, 0.1);
 }
 
-TEST(PDESliceCacheTest, MissingPairsExcludesCached) {
-    PDESliceCache cache;
+TEST(ChebyshevPDECacheTest, MissingPairsExcludesCached) {
+    ChebyshevPDECache cache;
     std::vector<double> x = {0.0, 0.5, 1.0};
     std::vector<double> v = {1.0, 1.5, 2.0};
     cache.store_slice(0.20, 0.05, 0, x, v);
@@ -36,8 +36,8 @@ TEST(PDESliceCacheTest, MissingPairsExcludesCached) {
     EXPECT_EQ(missing.size(), 5u);
 }
 
-TEST(PDESliceCacheTest, QuantizationMatchesCrossLevel) {
-    PDESliceCache cache;
+TEST(ChebyshevPDECacheTest, QuantizationMatchesCrossLevel) {
+    ChebyshevPDECache cache;
     std::vector<double> x = {0.0, 0.5, 1.0};
     std::vector<double> v = {1.0, 1.5, 2.0};
     // Store at a value computed one way

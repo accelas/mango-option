@@ -21,7 +21,8 @@
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/option_spec.hpp"
-#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include <array>
 #include <cmath>
@@ -671,8 +672,7 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
     std::printf("--- Building adaptive Chebyshev surface (target=%.1f bps)...\n",
                 params.target_iv_error * 1e4);
 
-    AdaptiveGridBuilder builder(params);
-    auto result = builder.build_chebyshev(chain, OptionType::PUT);
+    auto result = build_adaptive_chebyshev(params, chain, OptionType::PUT);
     if (!result.has_value()) {
         std::fprintf(stderr, "Chebyshev adaptive build failed\n");
         std::array<ErrorTable, kNV> empty{};
@@ -702,7 +702,11 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
                       "Chebyshev Adaptive IV Error (bps) — σ=%.0f%%",
                       kVols[vi] * 100);
         all_errors[vi] = compute_errors_from_price_fn(
-            prices, result->price_fn, vi);
+            prices,
+            [&](double spot, double strike, double tau, double sigma, double rate) {
+                return result->surface->price(spot, strike, tau, sigma, rate);
+            },
+            vi);
         print_heatmap(title, all_errors[vi]);
     }
     return all_errors;
@@ -744,8 +748,7 @@ run_chebyshev_dividends(const PriceGrid& prices) {
     std::printf("--- Building segmented Chebyshev surface (target=%.1f bps)...\n",
                 params.target_iv_error * 1e4);
 
-    AdaptiveGridBuilder builder(params);
-    auto result = builder.build_segmented_chebyshev(config, domain);
+    auto result = build_adaptive_chebyshev_segmented(params, config, domain);
     if (!result.has_value()) {
         std::fprintf(stderr, "Chebyshev dividend build failed\n");
         std::array<ErrorTable, kNV> empty{};

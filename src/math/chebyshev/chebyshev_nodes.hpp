@@ -8,9 +8,10 @@
 namespace mango {
 
 /// Generate num_pts Chebyshev-Gauss-Lobatto nodes on [a, b], sorted ascending.
-/// Polynomial degree = num_pts - 1.
+/// Polynomial degree = num_pts - 1.  Requires num_pts >= 2.
 [[nodiscard]] inline std::vector<double>
 chebyshev_nodes(size_t num_pts, double a, double b) {
+    if (num_pts < 2) return {};
     const size_t n = num_pts - 1;
     std::vector<double> nodes(num_pts);
     for (size_t j = 0; j <= n; ++j) {
@@ -23,8 +24,10 @@ chebyshev_nodes(size_t num_pts, double a, double b) {
 /// Barycentric weights for num_pts Chebyshev-Gauss-Lobatto nodes.
 /// w_j = (-1)^j * delta_j, where delta_j = 1/2 for endpoints, 1 otherwise.
 /// Returned in ascending node order (reversed from standard CGL ordering).
+/// Requires num_pts >= 2.
 [[nodiscard]] inline std::vector<double>
 chebyshev_barycentric_weights(size_t num_pts) {
+    if (num_pts < 2) return {};
     const size_t n = num_pts - 1;
     std::vector<double> w(num_pts);
     for (size_t j = 0; j <= n; ++j) {

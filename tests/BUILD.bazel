@@ -197,19 +197,6 @@ cc_test(
 )
 
 cc_test(
-    name = "price_surface_concept_test",
-    size = "small",
-    srcs = ["price_surface_concept_test.cc"],
-    deps = [
-        "//src/option/table:price_surface_concept",
-        "//src/option/table/bspline:bspline_surface",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
-
-
-cc_test(
     name = "option_concepts_test",
     size = "small",
     srcs = ["option_concepts_test.cc"],
@@ -820,15 +807,6 @@ cc_test(
 )
 
 cc_test(
-    name = "price_table_workspace_test",
-    srcs = ["price_table_workspace_test.cc"],
-    deps = [
-        "//src/option/table/bspline:bspline_workspace",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "bspline_banded_solver_test",
     srcs = ["bspline_banded_solver_test.cc"],
     deps = [
@@ -1210,18 +1188,18 @@ cc_test(
     size = "small",
     srcs = ["error_attribution_test.cc"],
     deps = [
-        "//src/option/table/bspline:bspline_slice_cache",
+        "//src/option/table:adaptive_refinement",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
 )
 
 cc_test(
-    name = "slice_cache_test",
+    name = "bspline_pde_cache_test",
     size = "small",
-    srcs = ["slice_cache_test.cc"],
+    srcs = ["bspline_pde_cache_test.cc"],
     deps = [
-        "//src/option/table/bspline:bspline_slice_cache",
+        "//src/option/table/bspline:bspline_pde_cache",
         "//src/option:american_option_result",
         "//src/pde/core:grid",
         "//src/pde/core:time_domain",
@@ -1248,8 +1226,11 @@ cc_test(
     timeout = "moderate",
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
-        "//src/option/table:adaptive_grid_builder",
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/option/table/bspline:bspline_pde_cache",
         "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option:american_option_batch",
         "//src/option:option_grid",
         "//src/pde/core:grid",
@@ -1266,7 +1247,7 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
-        "//src/option/table:adaptive_grid_builder",
+        "//src/option/table/bspline:bspline_adaptive",
         "//src/option:option_grid",
         "//src/pde/core:grid",
         "@googletest//:gtest",
@@ -1509,10 +1490,8 @@ cc_test(
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table:standard_transform_4d",
         "//src/option/table:analytical_eep",
-        "//src/option/table:identity_eep",
-        "//src/option/table:eep_surface_adapter",
         "//src/option/table:price_table",
-        "//src/option/table:price_surface_concept",
+
         "@googletest//:gtest_main",
     ],
 )
@@ -1556,11 +1535,11 @@ cc_test(
 )
 
 cc_test(
-    name = "pde_slice_cache_test",
+    name = "chebyshev_pde_cache_test",
     size = "small",
-    srcs = ["pde_slice_cache_test.cc"],
+    srcs = ["chebyshev_pde_cache_test.cc"],
     deps = [
-        "//src/option/table/chebyshev:pde_slice_cache",
+        "//src/option/table/chebyshev:chebyshev_pde_cache",
         "@googletest//:gtest_main",
     ],
 )
@@ -1575,7 +1554,7 @@ cc_test(
         "//src/option:american_option",
         "//src/option/table/chebyshev:chebyshev_surface",
         "//src/option/table/chebyshev:chebyshev_table_builder",
-        "//src/option/table:price_surface_concept",
+
         "//src/option/table:surface_concepts",
         "@googletest//:gtest",
         "@googletest//:gtest_main",

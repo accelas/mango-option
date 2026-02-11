@@ -84,6 +84,11 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     const size_t n_sigma = config.num_pts[2];
     const size_t n_rate  = config.num_pts[3];
 
+    // CGL nodes require at least 2 points per axis
+    if (n_m < 2 || n_tau < 2 || n_sigma < 2 || n_rate < 2) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
     // Generate CGL nodes per axis
     auto m_nodes     = chebyshev_nodes(n_m,     config.domain.lo[0], config.domain.hi[0]);
     auto tau_nodes   = chebyshev_nodes(n_tau,   config.domain.lo[1], config.domain.hi[1]);
@@ -181,16 +186,18 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     if (config.tucker_epsilon > 0) {
         auto interp = ChebyshevInterpolant<4, TuckerTensor<4>>::build_from_values(
             eep_span, config.domain, config.num_pts, config.tucker_epsilon);
-        ChebyshevLeaf leaf(std::move(interp), StandardTransform4D{},
-                           eep, config.K_ref);
+        ChebyshevTransformLeaf tleaf(std::move(interp), StandardTransform4D{},
+                                     config.K_ref);
+        ChebyshevLeaf leaf(std::move(tleaf), eep);
         return make_result(ChebyshevSurface(
             std::move(leaf), bounds, config.option_type, config.dividend_yield));
     }
 
     auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build_from_values(
         eep_span, config.domain, config.num_pts);
-    ChebyshevRawLeaf leaf(std::move(interp), StandardTransform4D{},
-                          eep, config.K_ref);
+    ChebyshevRawTransformLeaf tleaf(std::move(interp), StandardTransform4D{},
+                                    config.K_ref);
+    ChebyshevRawLeaf leaf(std::move(tleaf), eep);
     return make_result(ChebyshevRawSurface(
         std::move(leaf), bounds, config.option_type, config.dividend_yield));
 }

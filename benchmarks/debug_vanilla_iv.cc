@@ -6,7 +6,7 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/european_option.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
@@ -152,9 +152,9 @@ int main() {
 
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0);
     AdaptiveGridParams params{.target_iv_error = 2e-5};
-    AdaptiveGridBuilder adaptive_builder(params);
 
-    auto adaptive_result = adaptive_builder.build(chain, *grid_spec, 500, OptionType::PUT);
+    auto adaptive_result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{*grid_spec, 500, {}}, OptionType::PUT);
     if (!adaptive_result.has_value()) {
         std::fprintf(stderr, "AdaptiveGridBuilder failed\n");
         return 1;

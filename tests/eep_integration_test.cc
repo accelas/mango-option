@@ -163,7 +163,7 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
 
 // Note: The old MakeStandardWrapperRejectsNormalizedPrice test was removed.
 // SurfaceContent enum was deleted — the type system now enforces correct
-// EEP reconstruction via AnalyticalEEP vs IdentityEEP template parameters.
+// EEP reconstruction via EEPLayer<..., AnalyticalEEP> vs TransformLeaf.
 
 }  // namespace
 }  // namespace mango

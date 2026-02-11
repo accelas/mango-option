@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/adaptive_grid_builder.hpp"
-#include "mango/option/table/bspline/bspline_slice_cache.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/bspline/bspline_adaptive.hpp"
+#include "mango/option/table/bspline/bspline_pde_cache.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/american_option_batch.hpp"
-#include <any>
 #include <algorithm>
 #include <iostream>
 
@@ -37,23 +38,6 @@ std::shared_ptr<AmericanOptionResult> make_dummy_result() {
     return nullptr;
 }
 
-TEST(AdaptiveGridBuilderTest, ConstructWithDefaultParams) {
-    AdaptiveGridParams params;
-    AdaptiveGridBuilder builder(params);
-
-    // Should compile and not crash
-    SUCCEED();
-}
-
-TEST(AdaptiveGridBuilderTest, ConstructWithCustomParams) {
-    AdaptiveGridParams params;
-    params.target_iv_error = 0.001;  // 10 bps
-    params.max_iter = 3;
-
-    AdaptiveGridBuilder builder(params);
-    SUCCEED();
-}
-
 TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
     // Create a minimal synthetic chain
     OptionGrid chain;
@@ -71,10 +55,9 @@ TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
     params.max_iter = 2;
     params.validation_samples = 8;  // Fewer for test speed
 
-    AdaptiveGridBuilder builder(params);
-
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
-    auto result = builder.build(chain, grid_spec, 200, OptionType::PUT);
+    auto result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
 
     if (!result.has_value()) {
         std::cerr << "Build failed with error code: "
@@ -86,7 +69,7 @@ TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
     EXPECT_GE(result->iterations.size(), 1);
 
     // Surface should be populated
-    EXPECT_TRUE(result->typed_surface.has_value());
+    EXPECT_NE(result->surface, nullptr);
 
     // Should have done some PDE solves
     EXPECT_GT(result->total_pde_solves, 0);
@@ -94,7 +77,6 @@ TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
 
 TEST(AdaptiveGridBuilderTest, EmptyChainReturnsError) {
     AdaptiveGridParams params;
-    AdaptiveGridBuilder builder(params);
 
     OptionGrid chain;
     chain.spot = 100.0;
@@ -102,7 +84,8 @@ TEST(AdaptiveGridBuilderTest, EmptyChainReturnsError) {
     // No options added
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 51).value();
-    auto result = builder.build(chain, grid_spec, 100, OptionType::PUT);
+    auto result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 100, {}}, OptionType::PUT);
 
     // Should return error for empty chain
     EXPECT_FALSE(result.has_value());
@@ -110,11 +93,11 @@ TEST(AdaptiveGridBuilderTest, EmptyChainReturnsError) {
 }
 
 // ===========================================================================
-// SliceCache unit tests
+// BSplinePDECache unit tests
 // ===========================================================================
 
-TEST(SliceCacheTest, AddAndRetrieve) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, AddAndRetrieve) {
+    BSplinePDECache cache;
 
     // Create a result using the auto solver
     auto result_ptr = make_dummy_result();
@@ -130,8 +113,8 @@ TEST(SliceCacheTest, AddAndRetrieve) {
     EXPECT_EQ(missed, nullptr);
 }
 
-TEST(SliceCacheTest, ContainsCheck) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, ContainsCheck) {
+    BSplinePDECache cache;
 
     EXPECT_FALSE(cache.contains(0.20, 0.05));
 
@@ -143,8 +126,8 @@ TEST(SliceCacheTest, ContainsCheck) {
     EXPECT_FALSE(cache.contains(0.25, 0.05));
 }
 
-TEST(SliceCacheTest, GetMissingIndices) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, GetMissingIndices) {
+    BSplinePDECache cache;
 
     // Add some pairs
     auto dummy = make_dummy_result();
@@ -166,8 +149,8 @@ TEST(SliceCacheTest, GetMissingIndices) {
     EXPECT_EQ(missing[1], 3);  // Index of (0.20, 0.06)
 }
 
-TEST(SliceCacheTest, InvalidateOnTauChange) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, InvalidateOnTauChange) {
+    BSplinePDECache cache;
 
     auto dummy = make_dummy_result();
     ASSERT_NE(dummy, nullptr);
@@ -190,8 +173,8 @@ TEST(SliceCacheTest, InvalidateOnTauChange) {
     EXPECT_EQ(cache.size(), 0);
 }
 
-TEST(SliceCacheTest, CachePreservedOnMChange) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, CachePreservedOnMChange) {
+    BSplinePDECache cache;
 
     auto dummy = make_dummy_result();
     ASSERT_NE(dummy, nullptr);
@@ -211,8 +194,8 @@ TEST(SliceCacheTest, CachePreservedOnMChange) {
     EXPECT_TRUE(cache.contains(0.25, 0.05));
 }
 
-TEST(SliceCacheTest, Clear) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, Clear) {
+    BSplinePDECache cache;
 
     auto dummy = make_dummy_result();
     ASSERT_NE(dummy, nullptr);
@@ -298,10 +281,9 @@ TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
     params.max_iter = 1;
     params.validation_samples = 4;
 
-    AdaptiveGridBuilder builder(params);
-
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 31).value();
-    auto result = builder.build(chain, grid_spec, 100, OptionType::PUT);
+    auto result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 100, {}}, OptionType::PUT);
 
     // Should succeed (bounds expanded) rather than fail with InsufficientGridPoints
     ASSERT_TRUE(result.has_value())
@@ -309,7 +291,7 @@ TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
         << "Error code: " << (result.has_value() ? 0 : static_cast<int>(result.error().code));
 
     // Surface should be usable
-    EXPECT_TRUE(result->typed_surface.has_value());
+    EXPECT_NE(result->surface, nullptr);
 }
 
 // Regression: Cache should clear on new build
@@ -330,14 +312,16 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
     params.max_iter = 1;
     params.validation_samples = 1;  // Minimum to satisfy validation guard
 
-    AdaptiveGridBuilder builder(params);
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 31).value();
 
-    auto result1 = builder.build(chain1, grid_spec, 100, OptionType::PUT);
+    // Free functions create fresh caches each call, so no cross-contamination
+    auto result1 = build_adaptive_bspline(params, chain1,
+        PDEGridConfig{grid_spec, 100, {}}, OptionType::PUT);
     ASSERT_TRUE(result1.has_value());
     size_t solves1 = result1->iterations[0].pde_solves_table;
 
-    auto result2 = builder.build(chain2, grid_spec, 100, OptionType::PUT);
+    auto result2 = build_adaptive_bspline(params, chain2,
+        PDEGridConfig{grid_spec, 100, {}}, OptionType::PUT);
     ASSERT_TRUE(result2.has_value());
     size_t solves2 = result2->iterations[0].pde_solves_table;
 
@@ -351,7 +335,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
     params.max_iter = 2;
     params.validation_samples = 16;
 
-    AdaptiveGridBuilder builder(params);
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
@@ -365,17 +348,17 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
     std::vector<double> v_domain = {0.05, 0.10, 0.20, 0.30, 0.50};
     std::vector<double> r_domain = {0.01, 0.03, 0.05, 0.10};
 
-    auto result = builder.build_segmented(seg_config, {m_domain, v_domain, r_domain});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value())
-        << "build_segmented failed";
+        << "build_adaptive_bspline_segmented failed";
 
     // Should be able to query prices at various strikes
-    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 100.0, 0.5, 0.20, 0.05);
+    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 
     // And at off-K_ref strikes
-    double price2 = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 90.0, 0.5, 0.20, 0.05);
+    double price2 = result->surface.price(100.0, 90.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price2, 0.0);
     EXPECT_TRUE(std::isfinite(price2));
 }
@@ -386,7 +369,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
     params.max_iter = 1;
     params.validation_samples = 8;
 
-    AdaptiveGridBuilder builder(params);
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
@@ -400,7 +382,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
     std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, {m_domain, v_domain, r_domain});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value());
 }
 
@@ -410,8 +392,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
     params.target_iv_error = 0.005;
     params.max_iter = 2;
     params.validation_samples = 16;
-
-    AdaptiveGridBuilder builder(params);
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -427,10 +407,10 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
     std::vector<double> v_domain = {0.05, 0.10, 0.20, 0.30, 0.50};
     std::vector<double> r_domain = {0.01, 0.03, 0.05, 0.10};
 
-    auto result = builder.build_segmented(seg_config, {m_domain, v_domain, r_domain});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value());
 
-    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 100.0, 0.5, 0.20, 0.05);
+    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -441,8 +421,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
-
-    AdaptiveGridBuilder builder(params);
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -457,10 +435,10 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
     std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, {m_domain, v_domain, r_domain});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value());
 
-    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 100.0, 0.5, 0.20, 0.05);
+    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -474,7 +452,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvalidKRefCount) {
     AdaptiveGridParams params;
     params.max_iter = 1;
     params.validation_samples = 4;
-    AdaptiveGridBuilder builder(params);
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -489,7 +466,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvalidKRefCount) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, {m, v, r});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
@@ -499,7 +476,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsZeroSpan) {
     AdaptiveGridParams params;
     params.max_iter = 1;
     params.validation_samples = 4;
-    AdaptiveGridBuilder builder(params);
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -514,7 +490,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsZeroSpan) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, {m, v, r});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
@@ -529,7 +505,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
-    AdaptiveGridBuilder builder(params);
+    params.min_moneyness_points = 10;  // Use smaller grid for test speed
 
     // spot=100, K_refs sorted: {100, 110, 120, 130}
     // Lowest=100, highest=130, ATM=100 (closest to spot)
@@ -547,9 +523,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, {m, v, r});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 110.0, 0.5, 0.20, 0.05);
+    double price = result->surface.price(100.0, 110.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
 }
 
@@ -560,7 +536,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
     params.max_iter = 1;
     params.validation_samples = 8;
     params.min_moneyness_points = 10;  // Use smaller grid for test speed
-    AdaptiveGridBuilder builder(params);
 
     // spot=100, K_refs sorted: {70, 80, 90, 100}
     // Lowest=70, highest=100, ATM=100 (closest to spot)
@@ -578,9 +553,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, {m, v, r});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 90.0, 0.5, 0.20, 0.05);
+    double price = result->surface.price(100.0, 90.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
 }
 
@@ -591,7 +566,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     params.max_iter = 1;
     params.validation_samples = 8;
     params.min_moneyness_points = 10;  // Use smaller grid for test speed
-    AdaptiveGridBuilder builder(params);
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -606,11 +580,11 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, {m, v, r});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
 
     // Single K_ref = spot, should produce valid prices
-    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 100.0, 0.5, 0.20, 0.05);
+    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -621,7 +595,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
-    AdaptiveGridBuilder builder(params);
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -636,11 +609,11 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, {m, v, r});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
 
     // Query at a tau within the short maturity
-    double price = std::any_cast<const BSplineMultiKRefInner&>(result->typed_surface).price(100.0, 100.0, 0.03, 0.20, 0.05);
+    double price = result->surface.price(100.0, 100.0, 0.03, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -656,7 +629,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
     params.max_iter = 1;
     params.validation_samples = 8;
     params.min_moneyness_points = 10;  // Use smaller grid for test speed
-    AdaptiveGridBuilder builder(params);
 
     // total_div = 50, K_ref_min = 50 → expansion = 1.0
     // min_m = 0.5, expanded = max(0.5 - 1.0, 0.01) = 0.01
@@ -674,7 +646,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.50};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, {m, v, r});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     // Should succeed — moneyness floor prevents negative/zero domain
     ASSERT_TRUE(result.has_value());
 }
@@ -685,7 +657,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNegativeKRefExpansionGuard) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
-    AdaptiveGridBuilder builder(params);
 
     // K_ref_min=0.01 is very small, making expansion = total_div / 0.01 = 200
     // This exercises the K_ref_min > 0 guard and the moneyness clamp.
@@ -702,7 +673,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNegativeKRefExpansionGuard) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.50};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, {m, v, r});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     // With K_ref=0.01, the per-K_ref PDE build will likely fail.
     // The important thing is it doesn't crash or divide by zero.
     // It should either succeed or return a clean error.
@@ -721,7 +692,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedProbeFailurePropagation) {
     AdaptiveGridParams params;
     params.max_iter = 1;
     params.validation_samples = 0;  // Triggers InvalidConfig inside run_refinement
-    AdaptiveGridBuilder builder(params);
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -736,7 +706,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedProbeFailurePropagation) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, {m, v, r});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
@@ -746,7 +716,6 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsNegativeSpan) {
     AdaptiveGridParams params;
     params.max_iter = 1;
     params.validation_samples = 4;
-    AdaptiveGridBuilder builder(params);
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -761,7 +730,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsNegativeSpan) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, {m, v, r});
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
@@ -785,18 +754,15 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
     AdaptiveGridParams params;
     params.target_iv_error = 2e-5;  // 2 bps
 
-    AdaptiveGridBuilder builder(params);
     GridAccuracyParams accuracy;
     accuracy.min_spatial_points = 200;
     accuracy.max_spatial_points = 200;
 
-    auto result = builder.build(chain, accuracy, OptionType::PUT);
+    auto result = build_adaptive_bspline(params, chain, accuracy, OptionType::PUT);
     ASSERT_TRUE(result.has_value()) << "Adaptive build failed";
 
     // Wrap surface for price queries
-    auto surface = std::any_cast<std::shared_ptr<const PriceTableSurface>>(
-        result->typed_surface);
-    auto wrapper = make_bspline_surface(surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper.has_value()) << wrapper.error();
 
     // Query at K=80, T=1y, σ=15% — this was 1574 bps error before the fix
@@ -842,7 +808,6 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
     params.max_iter = 1;
     params.validation_samples = 4;
 
-    AdaptiveGridBuilder builder(params);
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
@@ -856,10 +821,10 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
     std::vector<double> v_domain = {0.10, 0.20, 0.30};
     std::vector<double> r_domain = {0.03, 0.05};
 
-    auto result = builder.build_segmented_chebyshev(
-        seg_config, {m_domain, v_domain, r_domain});
+    auto result = build_adaptive_chebyshev_segmented(
+        params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value())
-        << "build_segmented_chebyshev failed";
+        << "build_adaptive_chebyshev_segmented failed";
 
     // Dividend at cal_time=0.5 → tau_split=0.5.
     // Gap is [0.5-ε, 0.5+ε] with ε=5e-4.
@@ -913,7 +878,6 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
     params.max_iter = 1;
     params.validation_samples = 4;
 
-    AdaptiveGridBuilder builder(params);
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
@@ -931,10 +895,10 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
     std::vector<double> v_domain = {0.10, 0.20, 0.30};
     std::vector<double> r_domain = {0.03, 0.05};
 
-    auto result = builder.build_segmented_chebyshev(
-        seg_config, {m_domain, v_domain, r_domain});
+    auto result = build_adaptive_chebyshev_segmented(
+        params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value())
-        << "build_segmented_chebyshev failed with duplicate dividends";
+        << "build_adaptive_chebyshev_segmented failed with duplicate dividends";
 
     // Should be able to query across the entire tau range
     for (double tau : {0.1, 0.3, 0.5, 0.7, 0.9}) {
@@ -954,7 +918,6 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
     params.max_iter = 1;
     params.validation_samples = 4;
 
-    AdaptiveGridBuilder builder(params);
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
@@ -972,10 +935,10 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
     std::vector<double> v_domain = {0.10, 0.20, 0.30};
     std::vector<double> r_domain = {0.03, 0.05};
 
-    auto result = builder.build_segmented_chebyshev(
-        seg_config, {m_domain, v_domain, r_domain});
+    auto result = build_adaptive_chebyshev_segmented(
+        params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value())
-        << "build_segmented_chebyshev failed with nearly-coincident dividends";
+        << "build_adaptive_chebyshev_segmented failed with nearly-coincident dividends";
 
     double p = result->price_fn(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(p));
@@ -995,7 +958,6 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     params.max_iter = 1;
     params.validation_samples = 4;
 
-    AdaptiveGridBuilder builder(params);
     // Maturity=0.02 (~7 days) with dividend at mid-point.
     // Gap ε=5e-4 on each side of tau_split=0.01 creates segments
     // [0.005, 0.0095] and [0.0105, 0.015] — narrow but real.
@@ -1012,8 +974,8 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     std::vector<double> v_domain = {0.15, 0.25};
     std::vector<double> r_domain = {0.05};
 
-    auto result = builder.build_segmented_chebyshev(
-        seg_config, {m_domain, v_domain, r_domain});
+    auto result = build_adaptive_chebyshev_segmented(
+        params, seg_config, {m_domain, v_domain, r_domain});
 
     // Narrow real segments should build successfully, not be rejected as gaps
     ASSERT_TRUE(result.has_value())
@@ -1035,7 +997,6 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
     params.max_iter = 1;
     params.validation_samples = 4;
 
-    AdaptiveGridBuilder builder(params);
     // Two dividends 5 days apart. With ε=5e-4 gap half-width:
     //   div1 at cal_time=0.48 → tau_split=0.52, gap [0.5195, 0.5205]
     //   div2 at cal_time=0.50 → tau_split=0.50, gap [0.4995, 0.5005]
@@ -1061,10 +1022,10 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
     std::vector<double> v_domain = {0.10, 0.20, 0.30};
     std::vector<double> r_domain = {0.03, 0.05};
 
-    auto result = builder.build_segmented_chebyshev(
-        seg_config, {m_domain, v_domain, r_domain});
+    auto result = build_adaptive_chebyshev_segmented(
+        params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value())
-        << "build_segmented_chebyshev failed";
+        << "build_adaptive_chebyshev_segmented failed";
 
     // Query inside the narrow real segment between the two gaps.
     // tau=0.503 is between the two gap bands.

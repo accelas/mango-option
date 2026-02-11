@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/table/surface_concepts.hpp"
-#include "mango/option/table/bspline/bspline_interpolant.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/transforms/standard_4d.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
-#include "mango/option/table/eep/identity_eep.hpp"
-#include "mango/option/table/eep/eep_surface_adapter.hpp"
 #include "mango/option/table/price_table.hpp"
-#include "mango/option/table/price_surface_concept.hpp"
-
 using namespace mango;
 
 TEST(SurfaceConceptsTest, BSplineInterpolantSatisfiesConcept) {
@@ -23,10 +19,6 @@ TEST(SurfaceConceptsTest, StandardTransform4DSatisfiesConcept) {
 
 TEST(SurfaceConceptsTest, AnalyticalEEPSatisfiesConcept) {
     static_assert(EEPStrategy<AnalyticalEEP>);
-}
-
-TEST(SurfaceConceptsTest, IdentityEEPSatisfiesConcept) {
-    static_assert(EEPStrategy<IdentityEEP>);
 }
 
 TEST(StandardTransform4DTest, ToCoordsReturnsLogMoneyness) {
@@ -47,22 +39,6 @@ TEST(StandardTransform4DTest, VegaWeightsOnlySigmaAxis) {
     EXPECT_EQ(w[3], 0.0);
 }
 
-TEST(IdentityEEPTest, EuropeanPriceIsZero) {
-    IdentityEEP eep;
-    EXPECT_EQ(eep.european_price(100, 100, 0.5, 0.20, 0.05), 0.0);
-    EXPECT_EQ(eep.european_vega(100, 100, 0.5, 0.20, 0.05), 0.0);
-}
-
-TEST(IdentityEEPTest, ScaleIsStrikeOverKRef) {
-    IdentityEEP eep;
-    EXPECT_NEAR(eep.scale(110.0, 100.0), 1.1, 1e-12);
-}
-
-TEST(AnalyticalEEPTest, ScaleIsStrikeOverKRef) {
-    AnalyticalEEP eep(OptionType::PUT, 0.02);
-    EXPECT_NEAR(eep.scale(110.0, 100.0), 1.1, 1e-12);
-}
-
 TEST(AnalyticalEEPTest, EuropeanPriceIsPositiveForATMPut) {
     AnalyticalEEP eep(OptionType::PUT, 0.02);
     double p = eep.european_price(100.0, 100.0, 1.0, 0.20, 0.05);
@@ -74,10 +50,4 @@ TEST(AnalyticalEEPTest, EuropeanVegaIsPositive) {
     AnalyticalEEP eep(OptionType::PUT, 0.02);
     double v = eep.european_vega(100.0, 100.0, 1.0, 0.20, 0.05);
     EXPECT_GT(v, 0.0);
-}
-
-TEST(PriceTableTest, SatisfiesPriceSurfaceConcept) {
-    using StandardAdapter = EEPSurfaceAdapter<SharedBSplineInterp<4>,
-                                               StandardTransform4D, AnalyticalEEP>;
-    static_assert(PriceSurface<PriceTable<StandardAdapter>>);
 }
