@@ -84,6 +84,11 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     const size_t n_sigma = config.num_pts[2];
     const size_t n_rate  = config.num_pts[3];
 
+    // CGL nodes require at least 2 points per axis
+    if (n_m < 2 || n_tau < 2 || n_sigma < 2 || n_rate < 2) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
     // Generate CGL nodes per axis
     auto m_nodes     = chebyshev_nodes(n_m,     config.domain.lo[0], config.domain.hi[0]);
     auto tau_nodes   = chebyshev_nodes(n_tau,   config.domain.lo[1], config.domain.hi[1]);

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include <any>
+#include "mango/option/option_spec.hpp"
 #include <array>
-#include <functional>
-#include <limits>
 #include <vector>
 #include <cstddef>
 #include <cstdint>
@@ -69,6 +67,16 @@ struct AdaptiveGridParams {
     double max_failure_rate = 0.5;
 };
 
+/// Configuration for segmented adaptive grid building
+struct SegmentedAdaptiveConfig {
+    double spot;
+    OptionType option_type;
+    double dividend_yield;
+    std::vector<Dividend> discrete_dividends;
+    double maturity;
+    MultiKRefConfig kref_config;
+};
+
 /// Per-iteration diagnostics
 struct IterationStats {
     size_t iteration = 0;                    ///< Iteration number (0-indexed)
@@ -79,38 +87,6 @@ struct IterationStats {
     double avg_error = 0.0;                  ///< Mean IV error
     int refined_dim = -1;                    ///< Which dim was refined (-1 if none)
     double elapsed_seconds = 0.0;            ///< Wall-clock time for this iteration
-};
-
-/// Final result with full diagnostics
-struct AdaptiveResult {
-    /// Type-erased price function for generic access
-    std::function<double(double spot, double strike, double tau,
-                         double sigma, double rate)> price_fn;
-
-    /// Backend-specific typed surface (cast with std::any_cast in .cpp)
-    std::any typed_surface;
-
-    /// Per-iteration history for diagnostics
-    std::vector<IterationStats> iterations;
-
-    /// Actual max IV error from final validation
-    double achieved_max_error = 0.0;
-
-    /// Actual mean IV error from final validation
-    double achieved_avg_error = 0.0;
-
-    /// True iff achieved_max_error <= target_iv_error
-    bool target_met = false;
-
-    /// Total PDE solves across all iterations (table + validation)
-    size_t total_pde_solves = 0;
-};
-
-/// Result from adaptive segmented grid building (multi-K_ref path)
-struct SegmentedAdaptiveResult {
-    std::any typed_surface;         ///< Backend-specific surface (cast in .cpp)
-    IVGrid grid;                    ///< The grid sizes adaptive chose
-    int tau_points_per_segment;
 };
 
 }  // namespace mango

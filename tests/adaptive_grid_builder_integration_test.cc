@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include <any>
 #include <chrono>
 
 namespace mango {
@@ -34,10 +33,10 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, ConvergesToTarget) {
     params.max_iter = 2;
     params.validation_samples = 8;  // Match unit test
 
-    AdaptiveGridBuilder builder(params);
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
 
-    auto result = builder.build(chain, grid_spec, 200, OptionType::PUT);
+    auto result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
 
     ASSERT_TRUE(result.has_value()) << "Build should succeed";
 
@@ -50,7 +49,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, ConvergesToTarget) {
     EXPECT_FALSE(result->iterations.empty());
 
     // Should have a surface
-    EXPECT_TRUE(result->typed_surface.has_value());
+    EXPECT_NE(result->surface, nullptr);
 }
 
 TEST_F(AdaptiveGridBuilderIntegrationTest, RefinementIncreasesGridSize) {
@@ -61,10 +60,10 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, RefinementIncreasesGridSize) {
     params.max_iter = 3;
     params.validation_samples = 8;
 
-    AdaptiveGridBuilder builder(params);
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
 
-    auto result = builder.build(chain, grid_spec, 200, OptionType::PUT);
+    auto result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
 
     ASSERT_TRUE(result.has_value());
 
@@ -94,10 +93,10 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, HandlesImpossibleTarget) {
     params.max_points_per_dim = 10;  // Limited grid
     params.validation_samples = 8;
 
-    AdaptiveGridBuilder builder(params);
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
 
-    auto result = builder.build(chain, grid_spec, 200, OptionType::PUT);
+    auto result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
 
     ASSERT_TRUE(result.has_value());
 
@@ -105,7 +104,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, HandlesImpossibleTarget) {
     EXPECT_FALSE(result->target_met);
 
     // Still have a surface
-    EXPECT_TRUE(result->typed_surface.has_value());
+    EXPECT_NE(result->surface, nullptr);
 
     // Should have reached max iterations
     EXPECT_EQ(result->iterations.size(), params.max_iter);
@@ -120,13 +119,12 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, DeterministicWithSameSeed) {
     params.validation_samples = 8;
     params.lhs_seed = 12345;
 
-    AdaptiveGridBuilder builder1(params);
-    AdaptiveGridBuilder builder2(params);
-
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
 
-    auto result1 = builder1.build(chain, grid_spec, 200, OptionType::PUT);
-    auto result2 = builder2.build(chain, grid_spec, 200, OptionType::PUT);
+    auto result1 = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+    auto result2 = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
 
     ASSERT_TRUE(result1.has_value());
     ASSERT_TRUE(result2.has_value());
@@ -154,13 +152,12 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, DifferentSeedsProduceDifferentSamples
     AdaptiveGridParams params2 = params1;
     params2.lhs_seed = 222;
 
-    AdaptiveGridBuilder builder1(params1);
-    AdaptiveGridBuilder builder2(params2);
-
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
 
-    auto result1 = builder1.build(chain, grid_spec, 200, OptionType::PUT);
-    auto result2 = builder2.build(chain, grid_spec, 200, OptionType::PUT);
+    auto result1 = build_adaptive_bspline(params1, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+    auto result2 = build_adaptive_bspline(params2, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
 
     ASSERT_TRUE(result1.has_value());
     ASSERT_TRUE(result2.has_value());
@@ -180,19 +177,18 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, SurfaceInterpolatesWithinBounds) {
     params.max_iter = 2;
     params.validation_samples = 8;
 
-    AdaptiveGridBuilder builder(params);
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
 
-    auto result = builder.build(chain, grid_spec, 200, OptionType::PUT);
+    auto result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
 
     ASSERT_TRUE(result.has_value());
-    ASSERT_TRUE(result->typed_surface.has_value());
-    auto surface = std::any_cast<std::shared_ptr<const PriceTableSurface>>(
-        result->typed_surface);
-    ASSERT_NE(surface, nullptr);
+    ASSERT_NE(result->surface, nullptr);
+
+    auto surface = result->surface;
 
     // Query the surface at interior points
-    // Moneyness from chain: S/K = 100/90 to 100/110 ≈ 0.91 to 1.11
+    // Moneyness from chain: S/K = 100/90 to 100/110 ~= 0.91 to 1.11
     // Use a middle point
     double m = 1.0;    // ATM
     double tau = 0.5;  // 6 months
@@ -214,10 +210,10 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, TracksIterationDiagnostics) {
     params.max_iter = 3;
     params.validation_samples = 8;
 
-    AdaptiveGridBuilder builder(params);
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
 
-    auto result = builder.build(chain, grid_spec, 200, OptionType::PUT);
+    auto result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
 
     ASSERT_TRUE(result.has_value());
 
