@@ -128,7 +128,7 @@ cc_library(
 
 cc_library(
     name = "eep_surface_adapter",
-    hdrs = ["eep_surface_adapter.hpp"],
+    hdrs = ["eep/eep_surface_adapter.hpp"],
     deps = [":surface_concepts"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",

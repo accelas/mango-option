@@ -5,7 +5,7 @@
 #include "mango/option/table/transforms/standard_4d.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
 #include "mango/option/table/eep/identity_eep.hpp"
-#include "mango/option/table/eep_surface_adapter.hpp"
+#include "mango/option/table/eep/eep_surface_adapter.hpp"
 #include "mango/option/table/price_table.hpp"
 #include "mango/option/table/price_surface_concept.hpp"
 
