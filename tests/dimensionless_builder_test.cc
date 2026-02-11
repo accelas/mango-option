@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/table/dimensionless/dimensionless_european.hpp"
-#include "mango/option/table/eep/dimensionless_3d_accessor.hpp"
+#include "mango/option/table/dimensionless/dimensionless_3d_accessor.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/european_option.hpp"

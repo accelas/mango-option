@@ -21,7 +21,7 @@
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_3d_surface.hpp"
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
-#include "mango/option/table/eep/dimensionless_3d_accessor.hpp"
+#include "mango/option/table/dimensionless/dimensionless_3d_accessor.hpp"
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
@@ -47,36 +47,6 @@ template class InterpolatedIVSolver<Chebyshev3DPriceTable>;
 // =====================================================================
 // Factory internals
 // =====================================================================
-
-/// Surface leaf that wraps a type-erased price_fn and computes vega via FD.
-/// Used for segmented Chebyshev which produces multi-K_ref blended price_fn.
-class FDVegaLeaf {
-public:
-    using PriceFn = std::function<double(double, double, double, double, double)>;
-
-    explicit FDVegaLeaf(PriceFn fn) : fn_(std::move(fn)) {}
-
-    double price(double spot, double strike,
-                 double tau, double sigma, double rate) const {
-        return fn_(spot, strike, tau, sigma, rate);
-    }
-
-    double vega(double spot, double strike,
-                double tau, double sigma, double rate) const {
-        double eps = std::max(1e-4, 0.01 * sigma);
-        double sigma_up = sigma + eps;
-        double sigma_dn = std::max(1e-4, sigma - eps);
-        double eff_eps = (sigma_up - sigma_dn) / 2.0;
-        return (fn_(spot, strike, tau, sigma_up, rate) -
-                fn_(spot, strike, tau, sigma_dn, rate)) / (2.0 * eff_eps);
-    }
-
-private:
-    PriceFn fn_;
-};
-
-using ChebyshevSegmentedSurface = PriceTable<FDVegaLeaf>;
-template class InterpolatedIVSolver<ChebyshevSegmentedSurface>;
 
 namespace {
 
@@ -188,8 +158,7 @@ struct AnyIVSolver::Impl {
         InterpolatedIVSolver<BSplineMultiKRefSurface>,
         InterpolatedIVSolver<ChebyshevSurface>,
         InterpolatedIVSolver<ChebyshevRawSurface>,
-        InterpolatedIVSolver<ChebyshevSegmentedSurface>,    // OLD -- keep for now
-        InterpolatedIVSolver<ChebyshevMultiKRefSurface>,    // NEW
+        InterpolatedIVSolver<ChebyshevMultiKRefSurface>,
         InterpolatedIVSolver<BSpline3DPriceTable>,
         InterpolatedIVSolver<Chebyshev3DPriceTable>
     >;
@@ -468,7 +437,7 @@ build_chebyshev_segmented(const IVSolverFactoryConfig& config,
     IVGrid log_grid{std::move(*log_m), config.grid.vol, config.grid.rate};
 
     if (config.adaptive.has_value()) {
-        auto result = build_adaptive_chebyshev_segmented_typed(
+        auto result = build_adaptive_chebyshev_segmented(
             *config.adaptive, seg_config, log_grid);
         if (!result.has_value()) {
             return std::unexpected(ValidationError{
