@@ -1636,3 +1636,13 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "dimensionless_adaptive_test",
+    size = "large",
+    srcs = ["dimensionless_adaptive_test.cc"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_adaptive",
+        "@googletest//:gtest_main",
+    ],
+)
+

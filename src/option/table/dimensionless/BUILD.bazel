@@ -10,6 +10,24 @@ cc_library(
 )
 
 cc_library(
+    name = "dimensionless_adaptive",
+    srcs = ["dimensionless_adaptive.cpp"],
+    hdrs = ["dimensionless_builder.hpp"],
+    copts = ["-fopenmp", "-pthread"],
+    linkopts = ["-fopenmp", "-pthread"],
+    deps = [
+        ":dimensionless_builder",
+        ":dimensionless_european",
+        "//src/option:american_option_batch",
+        "//src/option:grid_spec_types",
+        "//src/math:cubic_spline_solver",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
+
+cc_library(
     name = "dimensionless_builder",
     srcs = ["dimensionless_builder.cpp"],
     hdrs = ["dimensionless_builder.hpp"],
