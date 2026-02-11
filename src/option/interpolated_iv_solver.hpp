@@ -162,7 +162,12 @@ struct ChebyshevBackend {
 /// Collapses (sigma, r) into kappa = 2r/sigma^2, reducing to 3D (x, tau', ln kappa).
 /// Fewer PDE solves but sigma/r coupling limits accuracy.
 struct DimensionlessBackend {
-    double maturity = 2.0;  ///< Domain upper bound for physical tau
+    enum class Interpolant { BSpline, Chebyshev };
+
+    double maturity = 2.0;                    ///< Domain upper bound for physical tau
+    Interpolant interpolant = Interpolant::BSpline;
+    std::array<size_t, 3> chebyshev_pts = {16, 16, 12};  ///< CGL nodes (x, tau', ln_kappa)
+    double tucker_epsilon = 1e-8;             ///< Tucker compression threshold
 };
 
 /// Discrete dividend configuration (optional, orthogonal to backend choice)

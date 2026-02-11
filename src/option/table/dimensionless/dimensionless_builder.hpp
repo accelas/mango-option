@@ -18,26 +18,30 @@ struct DimensionlessAxes {
     std::vector<double> ln_kappa;        ///< ln(2r/sigma^2), sorted ascending
 };
 
-/// Result of building a dimensionless 3D surface.
-struct DimensionlessBuildResult {
-    std::shared_ptr<const PriceTableSurfaceND<3>> surface;
+/// Result of solving the dimensionless PDE on a 3D grid.
+///
+/// Values are raw American V/K in dimensionless coordinates (NOT EEP-decomposed).
+/// The caller is responsible for EEP decomposition before fitting if desired.
+struct DimensionlessPDEResult {
+    std::vector<double> values;  ///< Row-major (x × tau' × ln_kappa), American V/K
     int n_pde_solves = 0;
     double build_time_seconds = 0.0;
 };
 
-/// Build a 3D B-spline surface over (x, tau', ln kappa) using dimensionless PDE.
+/// Solve the dimensionless PDE on arbitrary 3D grid nodes.
 ///
-/// For each kappa value, solves the Black-Scholes PDE in dimensionless coordinates
-/// (sigma_eff = sqrt(2), r_eff = kappa, spot = strike = K_ref) with snapshots at
-/// all tau' grid points. The solutions are resampled onto the log-moneyness grid,
-/// EEP decomposed, then fit with a 3D tensor-product B-spline.
+/// For each ln_kappa node, solves the Black-Scholes PDE in dimensionless
+/// coordinates (sigma_eff = sqrt(2), r_eff = kappa) with snapshots at all
+/// tau' nodes, then resamples onto the log-moneyness grid via cubic spline.
 ///
-/// @param axes Grid axes (each needs >= 4 points)
+/// Returns raw American V/K values — no EEP decomposition.
+///
+/// @param axes Grid axes (each needs >= 2 points)
 /// @param K_ref Reference strike for PDE solves
 /// @param option_type PUT or CALL
-/// @return Build result or error
-[[nodiscard]] std::expected<DimensionlessBuildResult, PriceTableError>
-build_dimensionless_surface(
+/// @return Row-major American values or error
+[[nodiscard]] std::expected<DimensionlessPDEResult, PriceTableError>
+solve_dimensionless_pde(
     const DimensionlessAxes& axes,
     double K_ref,
     OptionType option_type);

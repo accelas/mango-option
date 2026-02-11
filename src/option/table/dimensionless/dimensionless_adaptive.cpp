@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/table/dimensionless/dimensionless_european.hpp"
+#include "mango/option/table/eep/dimensionless_3d_accessor.hpp"
+#include "mango/option/table/eep/analytical_eep.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
@@ -90,21 +94,44 @@ build_segment(const SegmentDomain& dom,
               double K_ref, OptionType option_type)
 {
     auto lk_grid = linspace(dom.lk_min, dom.lk_max, n_lk_points);
-
     DimensionlessAxes axes{x_grid, tp_grid, lk_grid};
-    auto build = build_dimensionless_surface(axes, K_ref, option_type);
 
-    if (!build.has_value()) {
-        return std::unexpected(build.error());
+    // 1. PDE solve -> raw V/K
+    auto pde = solve_dimensionless_pde(axes, K_ref, option_type);
+    if (!pde.has_value()) return std::unexpected(pde.error());
+
+    // 2. EEP decompose via accessor
+    Dimensionless3DAccessor accessor(pde->values, axes, K_ref);
+    eep_decompose(accessor, AnalyticalEEP(option_type, 0.0));
+
+    // 3. Fit B-spline on dollar EEP values
+    std::array<std::vector<double>, 3> grids = {
+        axes.log_moneyness, axes.tau_prime, axes.ln_kappa};
+    auto fitter_result = BSplineNDSeparable<double, 3>::create(grids);
+    if (!fitter_result.has_value()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
+    }
+    auto fit_result = fitter_result->fit(std::move(pde->values));
+    if (!fit_result.has_value()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
+    }
+
+    // 4. Build surface with actual K_ref
+    PriceTableAxesND<3> surface_axes;
+    surface_axes.grids[0] = axes.log_moneyness;
+    surface_axes.grids[1] = axes.tau_prime;
+    surface_axes.grids[2] = axes.ln_kappa;
+    surface_axes.names = {"log_moneyness", "tau_prime", "ln_kappa"};
+
+    auto surface = PriceTableSurfaceND<3>::build(
+        std::move(surface_axes), std::move(fit_result->coefficients), K_ref);
+    if (!surface.has_value()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
     }
 
     return SegmentBuildResult{
-        .segment = {
-            .surface = build->surface,
-            .lk_min = dom.lk_min_phys,
-            .lk_max = dom.lk_max_phys,
-        },
-        .n_pde_solves = build->n_pde_solves,
+        .segment = {.surface = std::move(surface.value()), .lk_min = dom.lk_min_phys, .lk_max = dom.lk_max_phys},
+        .n_pde_solves = pde->n_pde_solves,
     };
 }
 

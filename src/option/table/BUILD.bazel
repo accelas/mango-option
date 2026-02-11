@@ -129,6 +129,18 @@ cc_library(
 )
 
 cc_library(
+    name = "dimensionless_3d_accessor",
+    hdrs = ["eep/dimensionless_3d_accessor.hpp"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_builder",
+        ":eep_decomposer",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "split_surface",
     hdrs = ["split_surface.hpp"],
     visibility = ["//visibility:public"],

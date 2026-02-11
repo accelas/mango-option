@@ -2,7 +2,10 @@
 #include <gtest/gtest.h>
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
+#include "mango/option/table/eep/dimensionless_3d_accessor.hpp"
+#include "mango/option/table/eep/analytical_eep.hpp"
 #include "mango/option/american_option.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
 #include <cmath>
 
 namespace mango {
@@ -16,22 +19,41 @@ protected:
         axes.tau_prime = {0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.12, 0.16};
         axes.ln_kappa = {-2.5, -1.5, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 2.8};
 
-        auto result = build_dimensionless_surface(axes, K_ref_, OptionType::PUT);
-        ASSERT_TRUE(result.has_value())
-            << "Build failed: code=" << static_cast<int>(result.error().code);
+        // 1. PDE solve -> raw V/K
+        auto pde = solve_dimensionless_pde(axes, K_ref_, OptionType::PUT);
+        ASSERT_TRUE(pde.has_value())
+            << "PDE solve failed: code=" << static_cast<int>(pde.error().code);
 
-        // Build BSpline3DPriceTable via the layered architecture
-        SharedBSplineInterp<3> interp(result->surface);
+        // 2. EEP decompose
+        Dimensionless3DAccessor accessor(pde->values, axes, K_ref_);
+        eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
+
+        // 3. Fit B-spline
+        std::array<std::vector<double>, 3> grids = {
+            axes.log_moneyness, axes.tau_prime, axes.ln_kappa};
+        auto fitter = BSplineNDSeparable<double, 3>::create(grids);
+        ASSERT_TRUE(fitter.has_value());
+        auto fit = fitter->fit(std::move(pde->values));
+        ASSERT_TRUE(fit.has_value());
+
+        // 4. Build surface with actual K_ref
+        PriceTableAxesND<3> surface_axes;
+        surface_axes.grids[0] = axes.log_moneyness;
+        surface_axes.grids[1] = axes.tau_prime;
+        surface_axes.grids[2] = axes.ln_kappa;
+        surface_axes.names = {"log_moneyness", "tau_prime", "ln_kappa"};
+
+        auto surface = PriceTableSurfaceND<3>::build(
+            std::move(surface_axes), std::move(fit->coefficients), K_ref_);
+        ASSERT_TRUE(surface.has_value());
+
+        // 5. Wrap in layered PriceTable
+        SharedBSplineInterp<3> interp(std::move(surface.value()));
         DimensionlessTransform3D xform;
-        BSpline3DTransformLeaf leaf(std::move(interp), xform, 1.0);
+        BSpline3DTransformLeaf leaf(std::move(interp), xform, K_ref_);
         AnalyticalEEP eep(OptionType::PUT, 0.0);
         BSpline3DLeaf eep_leaf(std::move(leaf), std::move(eep));
 
-        // Compute bounds in physical coords from dimensionless axes.
-        // tau' = sigma^2 * tau / 2, so tau = 2*tau'/sigma^2.
-        // For sigma range [0.10, 0.80]:
-        //   tau_min arises from smallest tau' with largest sigma
-        //   tau_max arises from largest tau' with smallest sigma
         const double sigma_min = 0.10;
         const double sigma_max = 0.80;
         SurfaceBounds bounds{

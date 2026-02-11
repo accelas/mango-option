@@ -864,12 +864,16 @@ run_chebyshev_dividends(const PriceGrid& prices) {
 // ============================================================================
 
 static std::array<ErrorTable, kNV>
-run_dimensionless_3d(const PriceGrid& prices) {
+run_dimensionless_3d(const PriceGrid& prices,
+                     DimensionlessBackend::Interpolant interp) {
+    const char* label = (interp == DimensionlessBackend::Interpolant::BSpline)
+                        ? "B-spline" : "Chebyshev";
+
     std::printf("\n================================================================\n");
-    std::printf("Dimensionless 3D — collapses (σ, r) into κ = 2r/σ²\n");
+    std::printf("Dimensionless 3D (%s) — κ = 2r/σ²\n", label);
     std::printf("================================================================\n\n");
 
-    std::printf("--- Building dimensionless 3D surface (via factory)...\n");
+    std::printf("--- Building dimensionless 3D %s surface (via factory)...\n", label);
 
     IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,
@@ -880,24 +884,24 @@ run_dimensionless_3d(const PriceGrid& prices) {
             .vol = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50},
             .rate = {0.01, 0.03, 0.05, 0.10},
         },
-        .backend = DimensionlessBackend{.maturity = 2.5},
+        .backend = DimensionlessBackend{.maturity = 2.5, .interpolant = interp},
     };
 
     auto solver = make_interpolated_iv_solver(config);
     if (!solver.has_value()) {
-        std::fprintf(stderr, "Dimensionless 3D build failed\n");
+        std::fprintf(stderr, "Dimensionless 3D %s build failed\n", label);
         std::array<ErrorTable, kNV> empty{};
         return empty;
     }
 
     std::array<ErrorTable, kNV> all_errors{};
-    std::printf("--- Computing dimensionless 3D IV errors...\n");
+    std::printf("--- Computing dimensionless 3D %s IV errors...\n", label);
     for (size_t vi = 0; vi < kNV; ++vi) {
         all_errors[vi] = compute_errors_vanilla(prices, *solver, vi);
         char title[128];
         std::snprintf(title, sizeof(title),
-                      "Dimensionless 3D IV Error (bps) — σ=%.0f%%",
-                      kVols[vi] * 100);
+                      "Dim3D %s IV Error (bps) — σ=%.0f%%",
+                      label, kVols[vi] * 100);
         print_heatmap(title, all_errors[vi]);
     }
     return all_errors;
@@ -944,11 +948,12 @@ int main(int argc, char* argv[]) {
     for (double v : kVols) std::printf("%.0f%% ", v * 100);
     std::printf("\n");
 
-    std::printf("Usage: interp_iv_safety [--path=all|bspline|chebyshev|dimensionless|dividends]\n\n");
+    std::printf("Usage: interp_iv_safety [--path=all|bspline|chebyshev|dim3d-bspline|dim3d-chebyshev|dividends]\n\n");
 
     // Step 1: Generate reference prices (always needed)
     PriceGrid vanilla_prices{}, div_prices{};
-    bool need_vanilla = run_all || path == "bspline" || path == "chebyshev" || path == "dimensionless";
+    bool need_vanilla = run_all || path == "bspline" || path == "chebyshev"
+                        || path == "dim3d-bspline" || path == "dim3d-chebyshev";
     bool need_divs = run_all || path == "dividends";
 
     if (need_vanilla) {
@@ -966,7 +971,8 @@ int main(int argc, char* argv[]) {
     std::array<ErrorTable, kNV> cheb_errors{};
     std::array<ErrorTable, kNV> cheb_adaptive_errors{};
     std::array<ErrorTable, kNV> cheb_div_errors{};
-    std::array<ErrorTable, kNV> dim3d_errors{};
+    std::array<ErrorTable, kNV> dim3d_bs_errors{};
+    std::array<ErrorTable, kNV> dim3d_ch_errors{};
 
     // B-spline adaptive (vanilla + dividends)
     if (run_all || path == "bspline") {
@@ -1010,9 +1016,16 @@ int main(int argc, char* argv[]) {
         cheb_div_errors = run_chebyshev_dividends(div_prices);
     }
 
-    // Dimensionless 3D
-    if (run_all || path == "dimensionless") {
-        dim3d_errors = run_dimensionless_3d(vanilla_prices);
+    // Dimensionless 3D B-spline
+    if (run_all || path == "dim3d-bspline") {
+        dim3d_bs_errors = run_dimensionless_3d(
+            vanilla_prices, DimensionlessBackend::Interpolant::BSpline);
+    }
+
+    // Dimensionless 3D Chebyshev
+    if (run_all || path == "dim3d-chebyshev") {
+        dim3d_ch_errors = run_dimensionless_3d(
+            vanilla_prices, DimensionlessBackend::Interpolant::Chebyshev);
     }
 
     // TV/K filtered comparison — vanilla backends
@@ -1035,8 +1048,10 @@ int main(int argc, char* argv[]) {
                 vol_algos.push_back({"Cheb(fixed)", &cheb_errors[vi]});
                 vol_algos.push_back({"Cheb(adapt)", &cheb_adaptive_errors[vi]});
             }
-            if (run_all || path == "dimensionless")
-                vol_algos.push_back({"Dim3D", &dim3d_errors[vi]});
+            if (run_all || path == "dim3d-bspline")
+                vol_algos.push_back({"Dim3D-BS", &dim3d_bs_errors[vi]});
+            if (run_all || path == "dim3d-chebyshev")
+                vol_algos.push_back({"Dim3D-Ch", &dim3d_ch_errors[vi]});
             if (!vol_algos.empty())
                 print_tvk_comparison(vanilla_prices, vi, vol_algos);
         }
