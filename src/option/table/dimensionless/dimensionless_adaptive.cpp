@@ -278,7 +278,8 @@ build_dimensionless_surface_adaptive(
             if (tp0 < 1e-4) continue;
 
             double true_eep = reference_eep(x0, tp0, lk0, K_ref, params.option_type);
-            double interp_eep = surface->value({x0, tp0, lk0});
+            // Surface stores dollar EEP; reference_eep returns normalized EEP (V/K).
+            double interp_eep = surface->value({x0, tp0, lk0}) / K_ref;
             double err = std::abs(true_eep - interp_eep);
 
             if (err > max_error) {
