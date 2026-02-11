@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/option/table/price_table_axes.hpp"
-#include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/option_spec.hpp"
 #include <array>
-#include <limits>
-#include <memory>
 #include <vector>
 #include <cstddef>
 #include <cstdint>
@@ -22,7 +18,7 @@ struct MultiKRefConfig {
 };
 
 /// Grid specification for IV solver: explicit grid points for each axis.
-/// Requires >= 4 points per axis (B-spline minimum).
+/// Requires >= 4 points per axis (interpolation minimum).
 ///
 /// Defaults cover typical equity option ranges.  When used with adaptive
 /// refinement the values serve as domain bounds; otherwise they are the
@@ -50,7 +46,7 @@ struct AdaptiveGridParams {
 
     /// Minimum moneyness grid points (default: 60)
     /// Moneyness requires higher density than other dimensions due to
-    /// exercise boundary curvature and PDE → B-spline sampling loss.
+    /// exercise boundary curvature and interpolation sampling loss.
     size_t min_moneyness_points = 60;
 
     /// Number of validation FD solves per iteration (default: 64)
@@ -71,6 +67,16 @@ struct AdaptiveGridParams {
     double max_failure_rate = 0.5;
 };
 
+/// Configuration for segmented adaptive grid building
+struct SegmentedAdaptiveConfig {
+    double spot;
+    OptionType option_type;
+    double dividend_yield;
+    std::vector<Dividend> discrete_dividends;
+    double maturity;
+    MultiKRefConfig kref_config;
+};
+
 /// Per-iteration diagnostics
 struct IterationStats {
     size_t iteration = 0;                    ///< Iteration number (0-indexed)
@@ -81,45 +87,6 @@ struct IterationStats {
     double avg_error = 0.0;                  ///< Mean IV error
     int refined_dim = -1;                    ///< Which dim was refined (-1 if none)
     double elapsed_seconds = 0.0;            ///< Wall-clock time for this iteration
-};
-
-/// Final result with full diagnostics
-struct AdaptiveResult {
-    /// The built price table surface
-    std::shared_ptr<const PriceTableSurface> surface = nullptr;
-
-    /// Final axes used for the surface
-    PriceTableAxes axes;
-
-    /// Query price from the surface
-    /// Returns NaN if no surface is available (build failure or not yet built)
-    /// coords: [moneyness, tau, sigma, rate]
-    [[nodiscard]] double value(const std::array<double, 4>& coords) const {
-        return surface ? surface->value(coords)
-                       : std::numeric_limits<double>::quiet_NaN();
-    }
-
-    /// Per-iteration history for diagnostics
-    std::vector<IterationStats> iterations;
-
-    /// Actual max IV error from final validation
-    double achieved_max_error = 0.0;
-
-    /// Actual mean IV error from final validation
-    double achieved_avg_error = 0.0;
-
-    /// True iff achieved_max_error <= target_iv_error
-    bool target_met = false;
-
-    /// Total PDE solves across all iterations (table + validation)
-    size_t total_pde_solves = 0;
-};
-
-/// Result from adaptive segmented grid building (multi-K_ref path)
-struct SegmentedAdaptiveResult {
-    MultiKRefInner surface;
-    IVGrid grid;  ///< The grid sizes adaptive chose
-    int tau_points_per_segment;
 };
 
 }  // namespace mango

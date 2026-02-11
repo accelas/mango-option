@@ -31,10 +31,6 @@ public:
         return eu.vega();
     }
 
-    [[nodiscard]] double scale(double strike, double K_ref) const noexcept {
-        return strike / K_ref;
-    }
-
 private:
     OptionType option_type_;
     double dividend_yield_;

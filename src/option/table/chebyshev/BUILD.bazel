@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "chebyshev_surface",
+    hdrs = ["chebyshev_surface.hpp"],
+    deps = [
+        "//src/math/chebyshev:chebyshev_interpolant",
+        "//src/math/chebyshev:raw_tensor",
+        "//src/math/chebyshev:tucker_tensor",
+        "//src/option/table:price_table",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:eep_layer",
+        "//src/option/table:transform_leaf",
+        "//src/option/table:standard_transform_4d",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/chebyshev",
+    include_prefix = "mango/option/table/chebyshev",
+)
+
+cc_library(
+    name = "chebyshev_pde_cache",
+    hdrs = ["chebyshev_pde_cache.hpp"],
+    deps = [
+        "//src/math:cubic_spline_solver",
+        "//src/option/table:pde_cache",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/chebyshev",
+    include_prefix = "mango/option/table/chebyshev",
+)
+
+cc_library(
+    name = "chebyshev_adaptive",
+    srcs = ["chebyshev_adaptive.cpp"],
+    hdrs = ["chebyshev_adaptive.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    deps = [
+        ":chebyshev_surface",
+        ":chebyshev_pde_cache",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/option:american_option_batch",
+        "//src/option:dividend_utils",
+        "//src/option:option_grid",
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_refinement",
+        "//src/option/table:eep_decomposer",
+        "//src/option/table:multi_kref_split",
+        "//src/option/table:split_surface",
+        "//src/option/table:tau_segment_split",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/chebyshev",
+    include_prefix = "mango/option/table/chebyshev",
+)
+
+cc_library(
+    name = "chebyshev_table_builder",
+    srcs = ["chebyshev_table_builder.cpp"],
+    hdrs = ["chebyshev_table_builder.hpp"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        ":chebyshev_surface",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/math:cubic_spline_solver",
+        "//src/option:american_option_batch",
+        "//src/option/table:eep_decomposer",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/chebyshev",
+    include_prefix = "mango/option/table/chebyshev",
+)

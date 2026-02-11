@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "chebyshev_nodes",
+    hdrs = ["chebyshev_nodes.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/chebyshev",
+    include_prefix = "mango/math/chebyshev",
+)
+
+cc_library(
+    name = "raw_tensor",
+    hdrs = ["raw_tensor.hpp"],
+    copts = ["-fopenmp"],
+    deps = ["//src/support:parallel"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/chebyshev",
+    include_prefix = "mango/math/chebyshev",
+)
+
+cc_library(
+    name = "tucker_tensor",
+    hdrs = ["tucker_tensor.hpp"],
+    copts = ["-fopenmp"],
+    deps = [
+        "//src/support:parallel",
+        "@eigen//:eigen",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/chebyshev",
+    include_prefix = "mango/math/chebyshev",
+)
+
+cc_library(
+    name = "chebyshev_interpolant",
+    hdrs = ["chebyshev_interpolant.hpp"],
+    copts = ["-fopenmp"],
+    deps = [
+        ":chebyshev_nodes",
+        "//src/support:parallel",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/chebyshev",
+    include_prefix = "mango/math/chebyshev",
+)
+
+# Convenience: interpolant + raw storage (no Eigen dep)
+cc_library(
+    name = "chebyshev_tensor",
+    deps = [":chebyshev_interpolant", ":raw_tensor"],
+    visibility = ["//visibility:public"],
+)
+
+# Convenience: interpolant + Tucker storage (pulls Eigen)
+cc_library(
+    name = "chebyshev_tucker",
+    deps = [":chebyshev_interpolant", ":tucker_tensor"],
+    visibility = ["//visibility:public"],
+)

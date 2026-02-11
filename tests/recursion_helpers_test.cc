@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/recursion_helpers.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include <vector>
 
 namespace mango {

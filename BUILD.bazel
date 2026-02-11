@@ -15,9 +15,8 @@ cc_library(
         "//src/option:interpolated_iv_solver",
         "//src/option:option_spec",
         # Price tables
-        "//src/option/table:price_table_builder",
-        "//src/option/table:price_table_surface",
-        "//src/option/table:price_table_axes",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
         # Data source integration (mango::simple namespace)
         "//src/simple",
         # Supporting utilities
