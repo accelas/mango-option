@@ -8,3 +8,23 @@ cc_library(
     strip_include_prefix = "/src/option/table/dimensionless",
     include_prefix = "mango/option/table/dimensionless",
 )
+
+cc_library(
+    name = "dimensionless_builder",
+    srcs = ["dimensionless_builder.cpp"],
+    hdrs = ["dimensionless_builder.hpp"],
+    copts = ["-fopenmp", "-pthread"],
+    linkopts = ["-fopenmp", "-pthread"],
+    deps = [
+        ":dimensionless_european",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option:american_option_batch",
+        "//src/math:bspline_nd_separable",
+        "//src/math:cubic_spline_solver",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)

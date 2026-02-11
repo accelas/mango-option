@@ -1595,3 +1595,18 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "dimensionless_builder_test",
+    size = "medium",
+    srcs = ["dimensionless_builder_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_european",
+        "//src/option:american_option",
+        "//src/option:european_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
