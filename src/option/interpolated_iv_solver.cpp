@@ -37,6 +37,36 @@ template class InterpolatedIVSolver<ChebyshevRawSurface>;
 // Factory internals
 // =====================================================================
 
+/// Surface leaf that wraps a type-erased price_fn and computes vega via FD.
+/// Used for segmented Chebyshev which produces multi-K_ref blended price_fn.
+class FDVegaLeaf {
+public:
+    using PriceFn = std::function<double(double, double, double, double, double)>;
+
+    explicit FDVegaLeaf(PriceFn fn) : fn_(std::move(fn)) {}
+
+    double price(double spot, double strike,
+                 double tau, double sigma, double rate) const {
+        return fn_(spot, strike, tau, sigma, rate);
+    }
+
+    double vega(double spot, double strike,
+                double tau, double sigma, double rate) const {
+        double eps = std::max(1e-4, 0.01 * sigma);
+        double sigma_up = sigma + eps;
+        double sigma_dn = std::max(1e-4, sigma - eps);
+        double eff_eps = (sigma_up - sigma_dn) / 2.0;
+        return (fn_(spot, strike, tau, sigma_up, rate) -
+                fn_(spot, strike, tau, sigma_dn, rate)) / (2.0 * eff_eps);
+    }
+
+private:
+    PriceFn fn_;
+};
+
+using ChebyshevSegmentedSurface = PriceTable<FDVegaLeaf>;
+template class InterpolatedIVSolver<ChebyshevSegmentedSurface>;
+
 namespace {
 
 std::expected<std::vector<double>, ValidationError>
@@ -66,12 +96,16 @@ std::expected<BSplineMultiKRefInner, PriceTableError> build_multi_kref_manual(
     std::vector<double> K_refs = kref_config.K_refs;
     if (K_refs.empty()) {
         // Auto-generate K_refs around spot
-        K_refs.reserve(static_cast<size_t>(kref_config.K_ref_count));
-        double log_low = std::log(spot) - kref_config.K_ref_span;
-        double log_high = std::log(spot) + kref_config.K_ref_span;
-        for (int i = 0; i < kref_config.K_ref_count; ++i) {
-            double t = static_cast<double>(i) / (kref_config.K_ref_count - 1);
-            K_refs.push_back(std::exp(log_low + t * (log_high - log_low)));
+        if (kref_config.K_ref_count == 1) {
+            K_refs.push_back(spot);
+        } else {
+            K_refs.reserve(static_cast<size_t>(kref_config.K_ref_count));
+            double log_low = std::log(spot) - kref_config.K_ref_span;
+            double log_high = std::log(spot) + kref_config.K_ref_span;
+            for (int i = 0; i < kref_config.K_ref_count; ++i) {
+                double t = static_cast<double>(i) / (kref_config.K_ref_count - 1);
+                K_refs.push_back(std::exp(log_low + t * (log_high - log_low)));
+            }
         }
     }
 
@@ -111,12 +145,15 @@ struct GridBounds {
 };
 
 GridBounds extract_bounds(const IVGrid& grid) {
+    if (grid.moneyness.empty() || grid.vol.empty() || grid.rate.empty()) {
+        return {};  // Zero-initialized; caller validates non-empty bounds
+    }
     auto minmax_m = std::minmax_element(grid.moneyness.begin(), grid.moneyness.end());
     auto minmax_v = std::minmax_element(grid.vol.begin(), grid.vol.end());
     auto minmax_r = std::minmax_element(grid.rate.begin(), grid.rate.end());
     // Moneyness must be positive for log conversion
     if (*minmax_m.first <= 0.0) {
-        return {};  // Zero-initialized; caller validates non-empty bounds
+        return {};
     }
     return {
         .m_min = std::log(*minmax_m.first), .m_max = std::log(*minmax_m.second),
@@ -136,7 +173,8 @@ struct AnyIVSolver::Impl {
         InterpolatedIVSolver<BSplinePriceTable>,
         InterpolatedIVSolver<BSplineMultiKRefSurface>,
         InterpolatedIVSolver<ChebyshevSurface>,
-        InterpolatedIVSolver<ChebyshevRawSurface>
+        InterpolatedIVSolver<ChebyshevRawSurface>,
+        InterpolatedIVSolver<ChebyshevSegmentedSurface>
     >;
     SolverVariant solver;
 
@@ -424,10 +462,25 @@ build_chebyshev_segmented(const IVSolverFactoryConfig& config,
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    // Segmented Chebyshev returns a type-erased price_fn (multi-K_ref blending).
-    // It can't be wrapped into AnyIVSolver (needs typed PriceTable for Newton).
-    // Fall back to B-spline segmented path which produces a typed surface.
-    return build_bspline_segmented(config, divs);
+    // Wrap the type-erased price_fn in FDVegaLeaf for Newton-based IV solving
+    auto b = extract_bounds(config.grid);
+    SurfaceBounds bounds{
+        .m_min = b.m_min, .m_max = b.m_max,
+        .tau_min = 0.01, .tau_max = divs.maturity,
+        .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
+        .rate_min = b.rate_min, .rate_max = b.rate_max,
+    };
+
+    FDVegaLeaf leaf(std::move(result->price_fn));
+    ChebyshevSegmentedSurface surface(
+        std::move(leaf), bounds, config.option_type, config.dividend_yield);
+
+    auto solver = InterpolatedIVSolver<ChebyshevSegmentedSurface>::create(
+        std::move(surface), config.solver_config);
+    if (!solver.has_value()) {
+        return std::unexpected(solver.error());
+    }
+    return make_any_solver(std::move(*solver));
 }
 
 // ---------------------------------------------------------------------------
