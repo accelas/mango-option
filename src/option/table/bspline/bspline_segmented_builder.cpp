@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-#include "mango/option/table/segmented_price_table_builder.hpp"
-#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_segmented_builder.hpp"
+#include "mango/option/dividend_utils.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/american_option.hpp"
 #include <algorithm>
 #include <cmath>
@@ -50,30 +51,11 @@ std::vector<double> make_segment_tau_grid(
     return grid;
 }
 
-/// Filter dividends: keep only those strictly inside (0, T).  Sort by
-/// calendar time.  Merge any duplicates at the same date.
+/// Filter dividends: delegates to shared filter_and_merge_dividends().
 std::vector<Dividend> filter_dividends(
     const std::vector<Dividend>& divs, double T)
 {
-    std::vector<Dividend> filtered;
-    for (const auto& div : divs) {
-        if (div.calendar_time > 0.0 && div.calendar_time < T && div.amount > 0.0) {
-            filtered.push_back(div);
-        }
-    }
-    std::sort(filtered.begin(), filtered.end(),
-              [](const Dividend& a, const Dividend& b) { return a.calendar_time < b.calendar_time; });
-
-    // Merge same-date dividends
-    std::vector<Dividend> merged;
-    for (const auto& div : filtered) {
-        if (!merged.empty() && std::abs(merged.back().calendar_time - div.calendar_time) < 1e-12) {
-            merged.back().amount += div.amount;
-        } else {
-            merged.push_back(div);
-        }
-    }
-    return merged;
+    return filter_and_merge_dividends(divs, T);
 }
 
 /// Append an upper guard band sized by cubic-spline support in log-moneyness.
@@ -120,7 +102,7 @@ void append_upper_tail_log_moneyness(std::vector<double>& log_grid,
 
 }  // namespace
 
-std::expected<SegmentedPriceSurface, PriceTableError>
+std::expected<BSplineSegmentedSurface, PriceTableError>
 SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Validate inputs
@@ -241,7 +223,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Build each segment's surface, then assemble into SegmentedSurface.
     // Index 0 = closest to expiry.
-    std::vector<SegmentConfig> segment_configs;
+    std::vector<BSplineSegmentConfig> segment_configs;
     segment_configs.reserve(n_segments);
 
     // The "previous" surface, used to generate chained ICs for earlier segments.
@@ -367,21 +349,16 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         auto coeffs = std::move(fit_result->coefficients);
 
         // 10. Build PriceTableSurfaceND
-        PriceTableMetadata metadata{
-            .K_ref = K_ref,
-            .dividends = {.dividend_yield = config.dividends.dividend_yield},
-            .content = SurfaceContent::NormalizedPrice,
-        };
-
         auto surface = PriceTableSurface::build(
-            axes, std::move(coeffs), metadata);
+            axes, std::move(coeffs), K_ref,
+            DividendSpec{.dividend_yield = config.dividends.dividend_yield, .discrete_dividends = {}});
         if (!surface.has_value()) {
             return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
         }
 
         auto surface_ptr = *surface;
 
-        segment_configs.push_back(SegmentConfig{
+        segment_configs.push_back(BSplineSegmentConfig{
             .surface = surface_ptr,
             .tau_start = tau_start,
             .tau_end = tau_end,
@@ -392,12 +369,85 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Step 5: Assemble SegmentedSurface
     // =====================================================================
-    SegmentedConfig seg_config{
+    BSplineSegmentedConfig seg_config{
         .segments = std::move(segment_configs),
         .K_ref = K_ref,
     };
 
     return build_segmented_surface(std::move(seg_config));
+}
+
+// ===========================================================================
+// Segmented surface assembly
+// ===========================================================================
+
+std::expected<BSplineSegmentedSurface, PriceTableError>
+build_segmented_surface(BSplineSegmentedConfig config) {
+    if (config.segments.empty()) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig, 0, 0});
+    }
+
+    std::vector<double> tau_start;
+    std::vector<double> tau_end;
+    std::vector<double> tau_min;
+    std::vector<double> tau_max;
+    std::vector<BSplineSegmentedLeaf> leaves;
+
+    tau_start.reserve(config.segments.size());
+    tau_end.reserve(config.segments.size());
+    tau_min.reserve(config.segments.size());
+    tau_max.reserve(config.segments.size());
+    leaves.reserve(config.segments.size());
+
+    for (auto& seg : config.segments) {
+        tau_start.push_back(seg.tau_start);
+        tau_end.push_back(seg.tau_end);
+        tau_min.push_back(seg.surface->axes().grids[1].front());
+        tau_max.push_back(seg.surface->axes().grids[1].back());
+
+        SharedBSplineInterp<4> interp(seg.surface);
+        StandardTransform4D xform;
+        leaves.emplace_back(std::move(interp), xform, config.K_ref);
+    }
+
+    TauSegmentSplit split(
+        std::move(tau_start), std::move(tau_end),
+        std::move(tau_min), std::move(tau_max),
+        config.K_ref);
+
+    return BSplineSegmentedSurface(std::move(leaves), std::move(split));
+}
+
+// ===========================================================================
+// Multi-K_ref surface assembly
+// ===========================================================================
+
+std::expected<BSplineMultiKRefInner, PriceTableError>
+build_multi_kref_surface(std::vector<BSplineMultiKRefEntry> entries) {
+    if (entries.empty()) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig, 0, 0});
+    }
+
+    std::sort(entries.begin(), entries.end(),
+              [](const BSplineMultiKRefEntry& a, const BSplineMultiKRefEntry& b) {
+                  return a.K_ref < b.K_ref;
+              });
+
+    std::vector<double> k_refs;
+    std::vector<BSplineSegmentedSurface> slices;
+    k_refs.reserve(entries.size());
+    slices.reserve(entries.size());
+
+    for (auto& entry : entries) {
+        k_refs.push_back(entry.K_ref);
+        slices.push_back(std::move(entry.surface));
+    }
+
+    MultiKRefSplit split(std::move(k_refs));
+
+    return BSplineMultiKRefInner(std::move(slices), std::move(split));
 }
 
 }  // namespace mango

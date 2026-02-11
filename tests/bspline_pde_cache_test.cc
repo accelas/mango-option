@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/slice_cache.hpp"
+#include "mango/option/table/bspline/bspline_pde_cache.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include "mango/option/option_spec.hpp"
@@ -30,8 +30,8 @@ std::shared_ptr<AmericanOptionResult> make_mock_result(double sigma, double rate
     return std::make_shared<AmericanOptionResult>(grid, params);
 }
 
-TEST(SliceCacheTest, AddAndRetrieve) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, AddAndRetrieve) {
+    BSplinePDECache cache;
     auto result = make_mock_result(0.20, 0.05);
 
     cache.add(0.20, 0.05, result);
@@ -41,14 +41,14 @@ TEST(SliceCacheTest, AddAndRetrieve) {
     EXPECT_DOUBLE_EQ(retrieved->volatility(), 0.20);
 }
 
-TEST(SliceCacheTest, MissingKeyReturnsNullptr) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, MissingKeyReturnsNullptr) {
+    BSplinePDECache cache;
     auto retrieved = cache.get(0.30, 0.04);
     EXPECT_EQ(retrieved, nullptr);
 }
 
-TEST(SliceCacheTest, InvalidateOnTauChange) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, InvalidateOnTauChange) {
+    BSplinePDECache cache;
     auto result = make_mock_result(0.20, 0.05);
 
     cache.set_tau_grid({0.1, 0.5, 1.0});
@@ -63,8 +63,8 @@ TEST(SliceCacheTest, InvalidateOnTauChange) {
     EXPECT_EQ(cache.get(0.20, 0.05), nullptr);
 }
 
-TEST(SliceCacheTest, GetMissingPairs) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, GetMissingPairs) {
+    BSplinePDECache cache;
     cache.add(0.20, 0.05, make_mock_result(0.20, 0.05));
     cache.add(0.30, 0.05, make_mock_result(0.30, 0.05));
 
@@ -79,8 +79,8 @@ TEST(SliceCacheTest, GetMissingPairs) {
     EXPECT_EQ(missing.size(), 2);
 }
 
-TEST(SliceCacheTest, GetMissingIndices) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, GetMissingIndices) {
+    BSplinePDECache cache;
     cache.add(0.20, 0.05, make_mock_result(0.20, 0.05));
 
     std::vector<std::pair<double, double>> all_pairs = {
@@ -95,16 +95,16 @@ TEST(SliceCacheTest, GetMissingIndices) {
     EXPECT_EQ(missing_indices[1], 2);
 }
 
-TEST(SliceCacheTest, ContainsMethod) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, ContainsMethod) {
+    BSplinePDECache cache;
     cache.add(0.20, 0.05, make_mock_result(0.20, 0.05));
 
     EXPECT_TRUE(cache.contains(0.20, 0.05));
     EXPECT_FALSE(cache.contains(0.30, 0.05));
 }
 
-TEST(SliceCacheTest, SizeAndClear) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, SizeAndClear) {
+    BSplinePDECache cache;
     EXPECT_EQ(cache.size(), 0);
 
     cache.add(0.20, 0.05, make_mock_result(0.20, 0.05));
@@ -116,8 +116,8 @@ TEST(SliceCacheTest, SizeAndClear) {
     EXPECT_EQ(cache.get(0.20, 0.05), nullptr);
 }
 
-TEST(SliceCacheTest, FloatingPointKeyRounding) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, FloatingPointKeyRounding) {
+    BSplinePDECache cache;
     cache.add(0.200000001, 0.050000001, make_mock_result(0.20, 0.05));
 
     // Should find even with slight floating point differences

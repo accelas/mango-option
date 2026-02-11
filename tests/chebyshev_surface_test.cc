@@ -4,7 +4,6 @@
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include "mango/option/american_option.hpp"
-#include "mango/option/table/price_surface_concept.hpp"
 #include "mango/option/table/surface_concepts.hpp"
 
 using namespace mango;
@@ -12,8 +11,6 @@ using namespace mango;
 // Static assertions
 static_assert(SurfaceInterpolant<ChebyshevInterpolant<4, TuckerTensor<4>>, 4>);
 static_assert(SurfaceInterpolant<ChebyshevInterpolant<4, RawTensor<4>>, 4>);
-static_assert(PriceSurface<ChebyshevSurface>);
-static_assert(PriceSurface<ChebyshevRawSurface>);
 
 TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
     Domain<4> domain{
@@ -26,11 +23,10 @@ TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
         [](std::array<double, 4>) { return 0.05; },
         domain, num_pts, 1e-8);
 
-    ChebyshevLeaf leaf(
-        std::move(interp),
-        StandardTransform4D{},
-        AnalyticalEEP(OptionType::PUT, 0.02),
-        100.0);
+    ChebyshevTransformLeaf tleaf(
+        std::move(interp), StandardTransform4D{}, 100.0);
+    ChebyshevLeaf leaf(std::move(tleaf),
+        AnalyticalEEP(OptionType::PUT, 0.02));
 
     SurfaceBounds bounds{
         .m_min = -0.5, .m_max = 0.5,
@@ -68,7 +64,7 @@ TEST(ChebyshevTableBuilderTest, BuildSucceeds) {
     EXPECT_GT(result->build_seconds, 0.0);
 
     // Query the surface at ATM
-    double p = result->surface.price(100.0, 100.0, 1.0, 0.20, 0.05);
+    double p = result->price(100.0, 100.0, 1.0, 0.20, 0.05);
     EXPECT_GT(p, 0.0);
     EXPECT_LT(p, 50.0);
 }
@@ -100,6 +96,6 @@ TEST(ChebyshevTableBuilderTest, IVRoundTrip) {
     ASSERT_TRUE(ref.has_value());
 
     // Chebyshev price should be close to FDM
-    double cheb_price = result->surface.price(100.0, 100.0, 1.0, 0.20, 0.05);
+    double cheb_price = result->price(100.0, 100.0, 1.0, 0.20, 0.05);
     EXPECT_NEAR(cheb_price, ref->value(), 0.50);  // within $0.50 for initial integration
 }

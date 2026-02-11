@@ -26,7 +26,7 @@ using ChebyshevLeaf = EEPSurfaceAdapter<
     AnalyticalEEP>;
 
 // Full surface with bounds metadata
-using ChebyshevSurface = BoundedSurface<ChebyshevLeaf>;
+using ChebyshevSurface = PriceTable<ChebyshevLeaf>;
 ```
 
 `ChebyshevSurface` satisfies `PriceSurface` and plugs directly into

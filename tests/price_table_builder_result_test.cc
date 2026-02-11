@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/price_table_axes.hpp"
-#include "mango/option/table/price_table_config.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include <cmath>
 
 TEST(PriceTableBuilderResultTest, BuildReturnsDiagnostics) {

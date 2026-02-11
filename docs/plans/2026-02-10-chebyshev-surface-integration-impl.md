@@ -57,7 +57,7 @@ TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
         [](std::array<double, 4>) { return 0.05; },
         domain, num_pts, 1e-8);
 
-    // Compose: interpolant -> EEPSurfaceAdapter -> BoundedSurface
+    // Compose: interpolant -> EEPSurfaceAdapter -> PriceTable
     ChebyshevLeaf leaf(
         std::move(interp),
         StandardTransform4D{},
@@ -132,14 +132,14 @@ using ChebyshevLeaf = EEPSurfaceAdapter<
     StandardTransform4D, AnalyticalEEP>;
 
 // Full surface with bounds metadata (satisfies PriceSurface)
-using ChebyshevSurface = BoundedSurface<ChebyshevLeaf>;
+using ChebyshevSurface = PriceTable<ChebyshevLeaf>;
 
 // Raw (uncompressed) variant
 using ChebyshevRawLeaf = EEPSurfaceAdapter<
     ChebyshevInterpolant<4, RawTensor<4>>,
     StandardTransform4D, AnalyticalEEP>;
 
-using ChebyshevRawSurface = BoundedSurface<ChebyshevRawLeaf>;
+using ChebyshevRawSurface = PriceTable<ChebyshevRawLeaf>;
 
 }  // namespace mango
 ```
@@ -315,7 +315,7 @@ The build pipeline:
    - `eep = am_price / K_ref - eu.value() / K_ref` (normalized, then scaled by K_ref)
    - Apply softplus floor: `eep = softplus(eep)` for non-negativity
 5. Build `ChebyshevInterpolant<4, TuckerTensor<4>>::build_from_values(eep_values, domain, num_pts, tucker_epsilon)`
-6. Wrap in `EEPSurfaceAdapter` + `BoundedSurface`
+6. Wrap in `EEPSurfaceAdapter` + `PriceTable`
 
 Key implementation details:
 - The batch solver groups by (sigma, rate) — one PDE per unique pair
@@ -456,7 +456,7 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
         std::span<const double>(eep_values),
         config.domain, config.num_pts, config.tucker_epsilon);
 
-    // Wrap in EEPSurfaceAdapter + BoundedSurface
+    // Wrap in EEPSurfaceAdapter + PriceTable
     ChebyshevLeaf leaf(
         std::move(interp),
         StandardTransform4D{},

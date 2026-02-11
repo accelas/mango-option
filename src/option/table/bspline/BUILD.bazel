@@ -1,0 +1,137 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "bspline_pde_cache",
+    hdrs = ["bspline_pde_cache.hpp"],
+    deps = [
+        "//src/option:american_option_result",
+        "//src/option/table:pde_cache",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
+    name = "bspline_surface",
+    srcs = ["bspline_surface.cpp"],
+    hdrs = ["bspline_surface.hpp"],
+    deps = [
+        "//src/option:option_spec",
+        "//src/option/table:price_table",
+        "//src/option/table:transform_leaf",
+        "//src/option/table:eep_layer",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:split_surface",
+        "//src/option/table:tau_segment_split",
+        "//src/option/table:multi_kref_split",
+        "//src/option/table:standard_transform_4d",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
+        "//src/math:safe_math",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
+    name = "bspline_builder",
+    srcs = ["bspline_builder.cpp"],
+    hdrs = ["bspline_builder.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    deps = [
+        ":bspline_surface",
+        "//src/option:grid_spec_types",
+        "//src/option:option_spec",
+        "//src/option:option_grid",
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/math:cubic_spline_solver",
+        "//src/math:bspline_nd_separable",
+        "//src/math:bspline_collocation_workspace",
+        "//src/math:safe_math",
+        "//src/support:aligned_allocator",
+        "//src/support:thread_workspace",
+        "//src/support:ivcalc_trace_hdr",
+        "//src/support:parallel",
+        "@mdspan//:mdspan",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
+    name = "bspline_tensor_accessor",
+    hdrs = ["bspline_tensor_accessor.hpp"],
+    deps = [
+        ":bspline_builder",
+        "//src/option:european_option",
+        "//src/option/table:eep_decomposer",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
+    name = "bspline_segmented_builder",
+    srcs = ["bspline_segmented_builder.cpp"],
+    hdrs = ["bspline_segmented_builder.hpp"],
+    deps = [
+        ":bspline_builder",
+        ":bspline_surface",
+        "//src/option/table:adaptive_grid_types",
+        "//src/option:american_option",
+        "//src/option:dividend_utils",
+        "//src/option:grid_spec_types",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
+
+cc_library(
+    name = "bspline_adaptive",
+    srcs = ["bspline_adaptive.cpp"],
+    hdrs = ["bspline_adaptive.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    deps = [
+        ":bspline_builder",
+        ":bspline_segmented_builder",
+        ":bspline_pde_cache",
+        ":bspline_surface",
+        ":bspline_tensor_accessor",
+        "//src/math:cubic_spline_solver",
+        "//src/math:latin_hypercube",
+        "//src/option:american_option_batch",
+        "//src/option:dividend_utils",
+        "//src/option:option_grid",
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_refinement",
+        "//src/option/table:eep_decomposer",
+        "//src/option/table:multi_kref_split",
+        "//src/option/table:split_surface",
+        "//src/pde/core:time_domain",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)
