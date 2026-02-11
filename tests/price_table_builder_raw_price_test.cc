@@ -38,10 +38,10 @@ TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
     auto& [builder, axes] = *setup;
 
     // Build with EEP decomposition
-    EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.0};
     auto result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, 100.0);
+            analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
         });
     ASSERT_TRUE(result.has_value());
     EXPECT_NE(result->surface, nullptr);

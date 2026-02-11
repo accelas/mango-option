@@ -239,10 +239,10 @@ build_bspline(const IVSolverFactoryConfig& config, const BSplineBackend& backend
     auto& [builder, axes] = *setup;
 
     // Standard path: decompose tensor to EEP before B-spline fitting
-    EEPDecomposer decomposer{config.option_type, config.spot, config.dividend_yield};
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, config.spot);
+            analytical_eep_decompose(accessor, config.option_type, config.dividend_yield);
         });
     if (!table_result.has_value()) {
         return std::unexpected(ValidationError{

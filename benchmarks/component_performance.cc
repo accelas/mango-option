@@ -73,10 +73,10 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to create PriceTableBuilderND");
         }
         auto [builder, axes] = std::move(result.value());
-        EEPDecomposer decomposer{OptionType::PUT, 100.0, 0.0};
         auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
-                decomposer.decompose(tensor, a);
+                BSplineTensorAccessor accessor(tensor, a, 100.0);
+                analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
             });
         if (!table) {
             throw std::runtime_error("Failed to build price table");

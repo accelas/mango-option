@@ -30,10 +30,10 @@
  *     dividend).value();
  *
  * // Step 2: Build price table with EEP decomposition (one-time precomputation)
- * EEPDecomposer decomposer{OptionType::PUT, K_ref, dividend};
  * auto result = builder.build(axes,
  *     [&](PriceTensor& tensor, const PriceTableAxes& a) {
- *         decomposer.decompose(tensor, a);
+ *         BSplineTensorAccessor accessor(tensor, a, K_ref);
+ *         analytical_eep_decompose(accessor, OptionType::PUT, dividend);
  *     });
  *
  * // Step 3: Create IV solver from surface
@@ -256,10 +256,10 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     }
     auto [builder, axes] = std::move(builder_axes_result.value());
 
-    EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
     auto price_table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, grid.K_ref);
+            analytical_eep_decompose(accessor, OptionType::PUT, grid.dividend);
         });
 
     if (!price_table_result) {
@@ -375,10 +375,10 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         }
         auto [builder, axes] = std::move(builder_axes_result.value());
 
-        EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
         auto price_table_result = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
-                decomposer.decompose(tensor, a);
+                BSplineTensorAccessor accessor(tensor, a, grid.K_ref);
+                analytical_eep_decompose(accessor, OptionType::PUT, grid.dividend);
             });
 
         if (!price_table_result) {

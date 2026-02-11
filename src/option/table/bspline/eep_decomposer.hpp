@@ -61,17 +61,4 @@ private:
     size_t Nm_, Nt_, Nv_, Nr_;
 };
 
-/// Build-time helper: converts a B-spline tensor of normalized American prices to EEP values.
-struct EEPDecomposer {
-    OptionType option_type;
-    double K_ref;
-    double dividend_yield;
-
-    /// Transform tensor from V/K_ref (normalized American prices) to EEP values.
-    void decompose(PriceTensor& tensor, const PriceTableAxes& axes) const {
-        BSplineTensorAccessor accessor(tensor, axes, K_ref);
-        analytical_eep_decompose(accessor, option_type, dividend_yield);
-    }
-};
-
 }  // namespace mango

@@ -123,10 +123,10 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     auto [builder, axes] = std::move(builder_axes_result.value());
 
     // Pre-compute prices for PUT options with EEP decomposition
-    EEPDecomposer decomposer{OptionType::PUT, 100.0, dividend_yield};
     auto precompute_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, 100.0);
+            analytical_eep_decompose(accessor, OptionType::PUT, dividend_yield);
         });
     ASSERT_TRUE(precompute_result.has_value())
         << "Price table precomputation failed: " << precompute_result.error();

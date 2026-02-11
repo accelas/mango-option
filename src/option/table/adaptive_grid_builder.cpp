@@ -1641,8 +1641,8 @@ AdaptiveGridBuilder::build_cached_surface(
     }
 
     // EEP decomposition: convert normalized prices to early exercise premium
-    EEPDecomposer decomposer{type, K_ref, dividend_yield};
-    decomposer.decompose(extraction.tensor, axes);
+    BSplineTensorAccessor accessor(extraction.tensor, axes, K_ref);
+    analytical_eep_decompose(accessor, type, dividend_yield);
 
     // Fit coefficients
     auto fit_result = builder.fit_coeffs(extraction.tensor, axes);

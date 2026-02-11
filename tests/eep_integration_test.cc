@@ -42,10 +42,10 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
         << "from_vectors failed: code=" << static_cast<int>(setup.error().code);
 
     auto& [builder, axes] = *setup;
-    EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
     auto result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, K_ref);
+            analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
         });
     ASSERT_TRUE(result.has_value())
         << "build failed: code=" << static_cast<int>(result.error().code);
@@ -119,10 +119,10 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
         << "from_vectors failed: code=" << static_cast<int>(setup.error().code);
 
     auto& [builder, axes] = *setup;
-    EEPDecomposer decomposer{OptionType::PUT, K_ref, 0.0};
     auto result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, K_ref);
+            analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
         });
     ASSERT_TRUE(result.has_value())
         << "build failed: code=" << static_cast<int>(result.error().code);

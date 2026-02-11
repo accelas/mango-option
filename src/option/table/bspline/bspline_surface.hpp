@@ -223,7 +223,7 @@ using BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>;
 
 /// Create a BSplinePriceTable from a pre-built EEP surface.
 /// Reads K_ref and dividend_yield from surface fields.
-/// The surface must contain EEP data (built with EEPDecomposer transform).
+/// The surface must contain EEP data (built with analytical_eep_decompose).
 [[nodiscard]] std::expected<BSplinePriceTable, std::string>
 make_bspline_surface(
     std::shared_ptr<const PriceTableSurface> surface,

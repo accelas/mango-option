@@ -506,10 +506,10 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
-    EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, grid.K_ref);
+            analytical_eep_decompose(accessor, OptionType::PUT, grid.dividend);
         });
     ASSERT_TRUE(table_result.has_value());
 

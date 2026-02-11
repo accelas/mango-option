@@ -77,10 +77,10 @@ int main() {
     }
 
     auto& [builder, axes] = *setup;
-    EEPDecomposer decomposer{OptionType::PUT, kSpot, kDivYield};
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, kSpot);
+            analytical_eep_decompose(accessor, OptionType::PUT, kDivYield);
         });
     if (!table_result.has_value()) {
         std::fprintf(stderr, "PriceTableBuilderND build failed: error code %d\n",
@@ -202,10 +202,10 @@ int main() {
         kSpot, high_acc, OptionType::PUT, kDivYield);
     if (setup_hi.has_value()) {
         auto& [builder_hi, axes_hi] = *setup_hi;
-        EEPDecomposer decomposer_hi{OptionType::PUT, kSpot, kDivYield};
         auto result_hi = builder_hi.build(axes_hi,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
-                decomposer_hi.decompose(tensor, a);
+                BSplineTensorAccessor accessor(tensor, a, kSpot);
+                analytical_eep_decompose(accessor, OptionType::PUT, kDivYield);
             });
         if (result_hi.has_value()) {
             double raw_hi = result_hi->surface->value({m, kTau, kSigma, kRate});

@@ -223,10 +223,10 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
             std::abort();
         }
         auto& [ptb, axes] = *setup;
-        EEPDecomposer decomposer{OptionType::PUT, base_K_ref, kDivYield};
         auto result = ptb.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
-                decomposer.decompose(tensor, a);
+                BSplineTensorAccessor accessor(tensor, a, base_K_ref);
+                analytical_eep_decompose(accessor, OptionType::PUT, kDivYield);
             });
         if (!result) {
             std::fprintf(stderr, "PriceTableBuilderND::build failed (scale=%d)\n", scale);
