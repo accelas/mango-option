@@ -1497,6 +1497,17 @@ cc_test(
 )
 
 cc_test(
+    name = "dimensionless_transform_test",
+    size = "small",
+    srcs = ["dimensionless_transform_test.cc"],
+    deps = [
+        "//src/option/table:dimensionless_transform_3d",
+        "//src/option/table:surface_concepts",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "chebyshev_nodes_test",
     size = "small",
     srcs = ["chebyshev_nodes_test.cc"],

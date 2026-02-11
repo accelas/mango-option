@@ -80,6 +80,14 @@ cc_library(
 )
 
 cc_library(
+    name = "dimensionless_transform_3d",
+    hdrs = ["transforms/dimensionless_3d.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "analytical_eep",
     hdrs = ["eep/analytical_eep.hpp"],
     deps = ["//src/option:european_option"],
