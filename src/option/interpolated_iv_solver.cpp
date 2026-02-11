@@ -451,12 +451,6 @@ static std::expected<AnyIVSolver, ValidationError>
 build_chebyshev_segmented(const IVSolverFactoryConfig& config,
                           const ChebyshevBackend& /* backend */,
                           const DiscreteDividendConfig& divs) {
-    // Segmented Chebyshev requires adaptive grid builder
-    if (!config.adaptive.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-
     auto log_m = to_log_moneyness(config.grid.moneyness);
     if (!log_m.has_value()) {
         return std::unexpected(log_m.error());
@@ -472,32 +466,36 @@ build_chebyshev_segmented(const IVSolverFactoryConfig& config,
     };
 
     IVGrid log_grid{std::move(*log_m), config.grid.vol, config.grid.rate};
-    auto result = build_adaptive_chebyshev_segmented(
-        *config.adaptive, seg_config, log_grid);
-    if (!result.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
+
+    if (config.adaptive.has_value()) {
+        auto result = build_adaptive_chebyshev_segmented_typed(
+            *config.adaptive, seg_config, log_grid);
+        if (!result.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+
+        auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
+            std::move(result->surface), config.solver_config);
+        if (!solver.has_value()) {
+            return std::unexpected(solver.error());
+        }
+        return make_any_solver(std::move(*solver));
+    } else {
+        auto surface = build_chebyshev_segmented_manual(
+            seg_config, log_grid);
+        if (!surface.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+
+        auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
+            std::move(*surface), config.solver_config);
+        if (!solver.has_value()) {
+            return std::unexpected(solver.error());
+        }
+        return make_any_solver(std::move(*solver));
     }
-
-    // Wrap the type-erased price_fn in FDVegaLeaf for Newton-based IV solving
-    auto b = extract_bounds(config.grid);
-    SurfaceBounds bounds{
-        .m_min = b.m_min, .m_max = b.m_max,
-        .tau_min = std::min(0.01, divs.maturity * 0.5), .tau_max = divs.maturity,
-        .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
-        .rate_min = b.rate_min, .rate_max = b.rate_max,
-    };
-
-    FDVegaLeaf leaf(std::move(result->price_fn));
-    ChebyshevSegmentedSurface surface(
-        std::move(leaf), bounds, config.option_type, config.dividend_yield);
-
-    auto solver = InterpolatedIVSolver<ChebyshevSegmentedSurface>::create(
-        std::move(surface), config.solver_config);
-    if (!solver.has_value()) {
-        return std::unexpected(solver.error());
-    }
-    return make_any_solver(std::move(*solver));
 }
 
 // ---------------------------------------------------------------------------
