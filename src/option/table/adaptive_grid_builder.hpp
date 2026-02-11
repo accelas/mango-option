@@ -45,15 +45,6 @@ public:
     AdaptiveGridBuilder(AdaptiveGridBuilder&&) noexcept;
     AdaptiveGridBuilder& operator=(AdaptiveGridBuilder&&) noexcept;
 
-    /// Build Chebyshev surface with adaptive CC-level refinement.
-    [[nodiscard]] std::expected<AdaptiveResult, PriceTableError>
-    build_chebyshev(const OptionGrid& chain,
-                    OptionType type = OptionType::PUT);
-
-    /// Build segmented Chebyshev surface with discrete dividend support.
-    [[nodiscard]] std::expected<AdaptiveResult, PriceTableError>
-    build_segmented_chebyshev(const SegmentedAdaptiveConfig& config,
-                              const IVGrid& domain);
 
 private:
     AdaptiveGridParams params_;

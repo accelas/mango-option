@@ -27,6 +27,40 @@ cc_library(
 )
 
 cc_library(
+    name = "chebyshev_adaptive",
+    srcs = ["chebyshev_adaptive.cpp"],
+    hdrs = ["chebyshev_adaptive.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    deps = [
+        ":chebyshev_surface",
+        ":pde_slice_cache",
+        "//src/math:black_scholes_analytics",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/option:american_option_batch",
+        "//src/option:dividend_utils",
+        "//src/option:option_grid",
+        "//src/option/table:adaptive_grid_builder",
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_refinement",
+        "//src/option/table:eep_decomposer",
+        "//src/option/table:multi_kref_split",
+        "//src/option/table:split_surface",
+        "//src/option/table:tau_segment_split",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/chebyshev",
+    include_prefix = "mango/option/table/chebyshev",
+)
+
+cc_library(
     name = "chebyshev_table_builder",
     srcs = ["chebyshev_table_builder.cpp"],
     hdrs = ["chebyshev_table_builder.hpp"],
