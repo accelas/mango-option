@@ -4,12 +4,76 @@
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/american_option_batch.hpp"
-#include "mango/option/european_option.hpp"
+#include "mango/option/table/eep/eep_decomposer.hpp"
 
 #include <chrono>
 #include <cmath>
 
 namespace mango {
+
+namespace {
+
+/// EEP accessor over pre-built cubic splines at CGL nodes.
+///
+/// Flat layout: [m][tau][sigma][rate] (row-major, rate innermost)
+/// to match B-spline tensor layout for cache-friendly access.
+class ChebyshevSplineAccessor {
+public:
+    ChebyshevSplineAccessor(
+        std::span<const double> m_nodes,
+        std::span<const double> tau_nodes,
+        std::span<const double> sigma_nodes,
+        std::span<const double> rate_nodes,
+        // splines[si * n_rate * n_tau + ri * n_tau + ti]
+        std::span<const CubicSpline<double>> splines,
+        double K_ref,
+        std::span<double> out)
+        : m_(m_nodes), tau_(tau_nodes), sigma_(sigma_nodes), rate_(rate_nodes),
+          splines_(splines), K_ref_(K_ref), out_(out),
+          Nm_(m_nodes.size()), Nt_(tau_nodes.size()),
+          Nv_(sigma_nodes.size()), Nr_(rate_nodes.size()) {}
+
+    size_t size() const { return Nm_ * Nt_ * Nv_ * Nr_; }
+    double strike() const { return K_ref_; }
+
+    double american_price(size_t i) const {
+        auto [mi, ti, vi, ri] = to_4d(i);
+        const auto& spline = splines_[vi * Nr_ * Nt_ + ri * Nt_ + ti];
+        return spline.eval(m_[mi]) * K_ref_;
+    }
+
+    double spot(size_t i) const {
+        return std::exp(m_[to_4d(i).mi]) * K_ref_;
+    }
+
+    double tau(size_t i) const { return tau_[to_4d(i).ti]; }
+    double sigma(size_t i) const { return sigma_[to_4d(i).vi]; }
+    double rate(size_t i) const { return rate_[to_4d(i).ri]; }
+
+    void set_value(size_t i, double v) {
+        // Output layout matches input: [m][tau][sigma][rate]
+        out_[i] = v;
+    }
+
+private:
+    struct Idx4D { size_t mi, ti, vi, ri; };
+
+    Idx4D to_4d(size_t flat) const {
+        size_t ri = flat % Nr_;  flat /= Nr_;
+        size_t vi = flat % Nv_;  flat /= Nv_;
+        size_t ti = flat % Nt_;
+        size_t mi = flat / Nt_;
+        return {mi, ti, vi, ri};
+    }
+
+    std::span<const double> m_, tau_, sigma_, rate_;
+    std::span<const CubicSpline<double>> splines_;
+    double K_ref_;
+    std::span<double> out_;
+    size_t Nm_, Nt_, Nv_, Nr_;
+};
+
+}  // namespace
 
 std::expected<ChebyshevTableResult, PriceTableError>
 build_chebyshev_table(const ChebyshevTableConfig& config) {
@@ -19,6 +83,11 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     const size_t n_tau   = config.num_pts[1];
     const size_t n_sigma = config.num_pts[2];
     const size_t n_rate  = config.num_pts[3];
+
+    // CGL nodes require at least 2 points per axis
+    if (n_m < 2 || n_tau < 2 || n_sigma < 2 || n_rate < 2) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
 
     // Generate CGL nodes per axis
     auto m_nodes     = chebyshev_nodes(n_m,     config.domain.lo[0], config.domain.hi[0]);
@@ -52,10 +121,9 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
 
     size_t n_pde_solves = batch.size() - batch_result.failed_count;
 
-    // Extract EEP values at all CGL nodes
-    // Tensor layout (row-major): [m, tau, sigma, rate]
-    size_t total = n_m * n_tau * n_sigma * n_rate;
-    std::vector<double> eep_values(total);
+    // Phase 1: Build cubic splines from PDE solutions.
+    // Layout: splines[si * n_rate * n_tau + ri * n_tau + ti]
+    std::vector<CubicSpline<double>> splines(n_sigma * n_rate * n_tau);
 
     for (size_t si = 0; si < n_sigma; ++si) {
         for (size_t ri = 0; ri < n_rate; ++ri) {
@@ -69,78 +137,31 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
             }
 
             auto grid = res->grid();
-            auto x_grid = grid->x();  // spatial grid in log-moneyness
+            auto x_grid = grid->x();
 
             for (size_t ti = 0; ti < n_tau; ++ti) {
                 auto solution = res->at_time(ti);
-
-                CubicSpline<double> spline;
+                auto& spline = splines[si * n_rate * n_tau + ri * n_tau + ti];
                 auto build_error = spline.build(x_grid, solution);
                 if (build_error.has_value()) {
                     return std::unexpected(PriceTableError{
                         PriceTableErrorCode::ExtractionFailed,
                         batch_idx, ti});
                 }
-
-                for (size_t mi = 0; mi < n_m; ++mi) {
-                    double m = m_nodes[mi];
-                    double spot_node = config.K_ref * std::exp(m);
-                    double tau = tau_nodes[ti];
-                    double sigma = sigma_nodes[si];
-                    double rate = rate_nodes[ri];
-
-                    // American price in dollars (spline returns V/K_ref)
-                    double am_price = spline.eval(m) * config.K_ref;
-
-                    // European price in dollars
-                    EuropeanOptionSolver eu_solver(
-                        OptionSpec{
-                            .spot = spot_node,
-                            .strike = config.K_ref,
-                            .maturity = tau,
-                            .rate = rate,
-                            .dividend_yield = config.dividend_yield,
-                            .option_type = config.option_type},
-                        sigma);
-                    auto eu = eu_solver.solve();
-
-                    double eep_raw = 0.0;
-                    if (eu.has_value()) {
-                        eep_raw = am_price - eu->value();
-                    }
-
-                    // Debiased softplus floor (matches EEPDecomposer)
-                    constexpr double kSharpness = 100.0;
-                    double eep;
-                    if (kSharpness * eep_raw > 500.0) {
-                        eep = eep_raw;
-                    } else {
-                        double sp = std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
-                        double bias = std::log(2.0) / kSharpness;
-                        eep = std::max(0.0, sp - bias);
-                    }
-
-                    size_t flat = mi * (n_tau * n_sigma * n_rate)
-                                + ti * (n_sigma * n_rate)
-                                + si * n_rate
-                                + ri;
-                    eep_values[flat] = eep;
-                }
             }
         }
     }
 
-    // Build Chebyshev interpolant from EEP values
-    auto interp = ChebyshevInterpolant<4, TuckerTensor<4>>::build_from_values(
-        std::span<const double>(eep_values),
-        config.domain, config.num_pts, config.tucker_epsilon);
+    // Phase 2: EEP decomposition via accessor.
+    size_t total = n_m * n_tau * n_sigma * n_rate;
+    std::vector<double> eep_values(total);
 
-    // Wrap in EEPSurfaceAdapter + BoundedSurface
-    ChebyshevLeaf leaf(
-        std::move(interp),
-        StandardTransform4D{},
-        AnalyticalEEP(config.option_type, config.dividend_yield),
-        config.K_ref);
+    AnalyticalEEP eep(config.option_type, config.dividend_yield);
+
+    ChebyshevSplineAccessor accessor(
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes,
+        splines, config.K_ref, eep_values);
+    eep_decompose(accessor, eep);
 
     SurfaceBounds bounds{
         .m_min = config.domain.lo[0], .m_max = config.domain.hi[0],
@@ -149,17 +170,36 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
         .rate_min = config.domain.lo[3], .rate_max = config.domain.hi[3],
     };
 
-    ChebyshevSurface surface(
-        std::move(leaf), bounds, config.option_type, config.dividend_yield);
+    auto eep_span = std::span<const double>(eep_values);
 
-    auto t1 = std::chrono::steady_clock::now();
-    double elapsed = std::chrono::duration<double>(t1 - t0).count();
-
-    return ChebyshevTableResult{
-        .surface = std::move(surface),
-        .n_pde_solves = n_pde_solves,
-        .build_seconds = elapsed,
+    auto make_result = [&](auto surface) {
+        auto t1 = std::chrono::steady_clock::now();
+        double elapsed = std::chrono::duration<double>(t1 - t0).count();
+        return ChebyshevTableResult{
+            .surface = std::move(surface),
+            .n_pde_solves = n_pde_solves,
+            .build_seconds = elapsed,
+        };
     };
+
+    // Build interpolant: Tucker-compressed or raw based on epsilon
+    if (config.tucker_epsilon > 0) {
+        auto interp = ChebyshevInterpolant<4, TuckerTensor<4>>::build_from_values(
+            eep_span, config.domain, config.num_pts, config.tucker_epsilon);
+        ChebyshevTransformLeaf tleaf(std::move(interp), StandardTransform4D{},
+                                     config.K_ref);
+        ChebyshevLeaf leaf(std::move(tleaf), eep);
+        return make_result(ChebyshevSurface(
+            std::move(leaf), bounds, config.option_type, config.dividend_yield));
+    }
+
+    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build_from_values(
+        eep_span, config.domain, config.num_pts);
+    ChebyshevRawTransformLeaf tleaf(std::move(interp), StandardTransform4D{},
+                                    config.K_ref);
+    ChebyshevRawLeaf leaf(std::move(tleaf), eep);
+    return make_result(ChebyshevRawSurface(
+        std::move(leaf), bounds, config.option_type, config.dividend_yield));
 }
 
 }  // namespace mango

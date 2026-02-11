@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/table/price_table_grid_estimator.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/american_option.hpp"
 
 namespace mango {

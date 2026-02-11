@@ -16,12 +16,11 @@
 
 #include <gtest/gtest.h>
 #include <cmath>
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/eep/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/standard_surface.hpp"
 
 using namespace mango;
 
@@ -507,25 +506,25 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
-    EEPDecomposer decomposer{OptionType::PUT, grid.K_ref, grid.dividend};
-    auto table_result = builder.build(axes, SurfaceContent::EarlyExercisePremium,
+    auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            decomposer.decompose(tensor, a);
+            BSplineTensorAccessor accessor(tensor, a, grid.K_ref);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, grid.dividend));
         });
     ASSERT_TRUE(table_result.has_value());
 
-    // Create IV solver from surface via StandardSurface
+    // Create IV solver from surface via BSplinePriceTable
     InterpolatedIVSolverConfig solver_config;
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
-    auto wrapper = make_standard_surface(table_result->surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper.has_value()) << wrapper.error();
-    auto iv_solver_result = DefaultInterpolatedIVSolver::create(
+    auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(
         std::move(wrapper).value(), solver_config);
 
     ASSERT_TRUE(iv_solver_result.has_value())
-        << "DefaultInterpolatedIVSolver::create failed";
+        << "InterpolatedIVSolver<BSplinePriceTable>::create failed";
 
     // Test IV solve at a sample point
     const auto& iv_solver = iv_solver_result.value();
@@ -535,8 +534,8 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     double rate = 0.04;
     double vol = 0.20;
 
-    // Get reconstructed American price from StandardSurface
-    auto wrapper_for_price = make_standard_surface(table_result->surface, OptionType::PUT);
+    // Get reconstructed American price from BSplinePriceTable
+    auto wrapper_for_price = make_bspline_surface(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(wrapper_for_price.has_value()) << wrapper_for_price.error();
     double price = wrapper_for_price->price(spot, strike, maturity, vol, rate);
     EXPECT_GT(price, 0.0);

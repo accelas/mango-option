@@ -25,7 +25,8 @@ protected:
                 .vol = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
                 .rate = {0.02, 0.03, 0.05, 0.07},
             },
-            .path = SegmentedIVPath{
+            .backend = BSplineBackend{},
+            .discrete_dividends = DiscreteDividendConfig{
                 .maturity = 1.0,
                 .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
                 // Use default K_ref config (9 log-spaced points)
@@ -215,7 +216,7 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
             .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.05, 0.07},
         },
-        .path = StandardIVPath{.maturity_grid = {0.1, 0.25, 0.5, 1.0}},
+        .backend = BSplineBackend{.maturity_grid = {0.1, 0.25, 0.5, 1.0}},
     };
     auto solver = make_interpolated_iv_solver(config);
     ASSERT_TRUE(solver.has_value()) << "No-dividend factory should succeed";

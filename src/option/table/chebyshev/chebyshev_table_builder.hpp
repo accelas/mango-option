@@ -6,6 +6,7 @@
 
 #include <array>
 #include <expected>
+#include <variant>
 
 namespace mango {
 
@@ -19,9 +20,23 @@ struct ChebyshevTableConfig {
 };
 
 struct ChebyshevTableResult {
-    ChebyshevSurface surface;
+    std::variant<ChebyshevSurface, ChebyshevRawSurface> surface;
     size_t n_pde_solves;
     double build_seconds;
+
+    double price(double spot, double strike, double tau,
+                 double sigma, double rate) const {
+        return std::visit([&](const auto& s) {
+            return s.price(spot, strike, tau, sigma, rate);
+        }, surface);
+    }
+
+    double vega(double spot, double strike, double tau,
+                double sigma, double rate) const {
+        return std::visit([&](const auto& s) {
+            return s.vega(spot, strike, tau, sigma, rate);
+        }, surface);
+    }
 };
 
 [[nodiscard]] std::expected<ChebyshevTableResult, PriceTableError>

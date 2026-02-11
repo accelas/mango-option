@@ -175,7 +175,7 @@ auto result = solver.solve(query);
 
 **Pattern 2: Price Table Pre-computation and Interpolated IV**
 ```cpp
-#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/standard_surface.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 

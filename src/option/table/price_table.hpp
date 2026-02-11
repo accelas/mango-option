@@ -13,12 +13,12 @@ struct SurfaceBounds {
     double rate_min, rate_max;
 };
 
-/// Adds bounds and metadata to any inner surface that has price()/vega().
-/// Satisfies the PriceSurface concept required by InterpolatedIVSolver.
+/// Top-level queryable price surface with runtime metadata.
+/// Used directly by InterpolatedIVSolver.
 template <typename Inner>
-class BoundedSurface {
+class PriceTable {
 public:
-    BoundedSurface(Inner inner, SurfaceBounds bounds,
+    PriceTable(Inner inner, SurfaceBounds bounds,
                    OptionType option_type, double dividend_yield)
         : inner_(std::move(inner))
         , bounds_(bounds)
