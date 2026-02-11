@@ -10,14 +10,15 @@
 
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
+#include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include <algorithm>
-#include <any>
 #include <cmath>
 #include <variant>
 
@@ -213,17 +214,14 @@ build_bspline_adaptive(const IVSolverFactoryConfig& config,
     // (Fixed 101x500 grid was too coarse, causing ~600 bps IV errors)
     GridAccuracyParams accuracy = make_grid_accuracy(GridAccuracyProfile::High);
 
-    AdaptiveGridBuilder builder(*config.adaptive);
-    auto result = builder.build(chain, accuracy, config.option_type);
+    auto result = build_adaptive_bspline(*config.adaptive, chain, accuracy, config.option_type);
 
     if (!result.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    auto surface = std::any_cast<std::shared_ptr<const PriceTableSurface>>(
-        result->typed_surface);
-    return wrap_surface(std::move(surface), config.option_type, config.solver_config);
+    return wrap_surface(std::move(result->surface), config.option_type, config.solver_config);
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +313,6 @@ build_bspline_segmented(const IVSolverFactoryConfig& config,
     auto b = extract_bounds(grid);
 
     if (config.adaptive.has_value()) {
-        AdaptiveGridBuilder builder(*config.adaptive);
         SegmentedAdaptiveConfig seg_config{
             .spot = config.spot,
             .option_type = config.option_type,
@@ -325,15 +322,14 @@ build_bspline_segmented(const IVSolverFactoryConfig& config,
             .kref_config = kref_config,
         };
 
-        auto result = builder.build_segmented(
-            seg_config, {log_grid.moneyness, log_grid.vol, log_grid.rate});
+        auto result = build_adaptive_bspline_segmented(
+            *config.adaptive, seg_config,
+            {log_grid.moneyness, log_grid.vol, log_grid.rate});
         if (!result.has_value()) {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::InvalidGridSize, 0.0});
         }
-        auto surface = std::any_cast<BSplineMultiKRefInner>(
-            std::move(result->typed_surface));
-        return wrap_multi_kref_surface(std::move(surface),
+        return wrap_multi_kref_surface(std::move(result->surface),
             b, divs.maturity, config.option_type,
             config.dividend_yield, config.solver_config);
     }
@@ -411,7 +407,6 @@ build_chebyshev_segmented(const IVSolverFactoryConfig& config,
         return std::unexpected(log_m.error());
     }
 
-    AdaptiveGridBuilder builder(*config.adaptive);
     SegmentedAdaptiveConfig seg_config{
         .spot = config.spot,
         .option_type = config.option_type,
@@ -422,13 +417,14 @@ build_chebyshev_segmented(const IVSolverFactoryConfig& config,
     };
 
     IVGrid log_grid{std::move(*log_m), config.grid.vol, config.grid.rate};
-    auto result = builder.build_segmented_chebyshev(seg_config, log_grid);
+    auto result = build_adaptive_chebyshev_segmented(
+        *config.adaptive, seg_config, log_grid);
     if (!result.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    // Segmented Chebyshev returns a type-erased price_fn via AdaptiveResult.
+    // Segmented Chebyshev returns a type-erased price_fn via ChebyshevAdaptiveResult.
     // The underlying surface is a split SurfaceHandle, not a typed PriceTable,
     // so it can't be wrapped into AnyIVSolver directly.
     // Fall back to B-spline segmented path which produces a typed surface.

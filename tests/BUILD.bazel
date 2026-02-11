@@ -1227,7 +1227,9 @@ cc_test(
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_builder",
+        "//src/option/table/bspline:bspline_adaptive",
         "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option:american_option_batch",
         "//src/option:option_grid",
         "//src/pde/core:grid",
@@ -1244,7 +1246,7 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
-        "//src/option/table:adaptive_grid_builder",
+        "//src/option/table/bspline:bspline_adaptive",
         "//src/option:option_grid",
         "//src/pde/core:grid",
         "@googletest//:gtest",

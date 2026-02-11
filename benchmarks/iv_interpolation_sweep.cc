@@ -16,7 +16,7 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
@@ -157,7 +157,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
     auto t0 = std::chrono::steady_clock::now();
 
     // 1. Build adaptive base (only for scale=1, reuse axes for larger scales)
-    static AdaptiveResult* base_result = nullptr;
+    static BSplineAdaptiveResult* base_result = nullptr;
     static PriceTableAxes base_axes;
     static double base_K_ref = 0.0;
 
@@ -174,19 +174,19 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
         AdaptiveGridParams params;
         params.target_iv_error = 2e-5;  // 2 bps
 
-        AdaptiveGridBuilder builder(params);
         // High PDE accuracy for table building
         GridAccuracyParams pde_accuracy;
         pde_accuracy.min_spatial_points = 201;
         pde_accuracy.max_spatial_points = 301;
-        auto result = builder.build(chain, PDEGridSpec{pde_accuracy}, OptionType::PUT);
+        auto result = build_adaptive_bspline(params, chain,
+            PDEGridSpec{pde_accuracy}, OptionType::PUT);
         if (!result.has_value()) {
-            std::fprintf(stderr, "AdaptiveGridBuilder::build failed\n");
+            std::fprintf(stderr, "build_adaptive_bspline failed\n");
             std::abort();
         }
-        static AdaptiveResult stored = std::move(*result);
+        static BSplineAdaptiveResult stored = std::move(*result);
         base_result = &stored;
-        base_axes = stored.axes;
+        base_axes = stored.surface->axes();
         base_K_ref = stored.surface->K_ref();
     }
 
