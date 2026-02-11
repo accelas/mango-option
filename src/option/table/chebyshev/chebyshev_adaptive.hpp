@@ -78,4 +78,21 @@ build_chebyshev_segmented_pieces(
     std::span<const double> sigma_nodes,
     std::span<const double> rate_nodes);
 
+/// Result of typed adaptive segmented Chebyshev surface construction.
+struct ChebyshevSegmentedTypedResult {
+    ChebyshevMultiKRefSurface surface;
+    std::vector<IterationStats> iterations;
+    double achieved_max_error = 0.0;
+    double achieved_avg_error = 0.0;
+    bool target_met = false;
+    size_t total_pde_solves = 0;
+};
+
+/// Build typed segmented Chebyshev surface with discrete dividend support.
+/// Returns a fully typed ChebyshevMultiKRefSurface (analytical vega).
+[[nodiscard]] std::expected<ChebyshevSegmentedTypedResult, PriceTableError>
+build_adaptive_chebyshev_segmented_typed(const AdaptiveGridParams& params,
+                                         const SegmentedAdaptiveConfig& config,
+                                         const IVGrid& domain);
+
 }  // namespace mango
