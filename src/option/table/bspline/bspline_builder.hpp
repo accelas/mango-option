@@ -17,6 +17,7 @@
 #include <expected>
 #include <experimental/mdspan>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -619,6 +620,20 @@ private:
     /// Solve batch of options with snapshot registration
     [[nodiscard]] BatchAmericanOptionResult solve_batch(
         const std::vector<PricingParams>& batch,
+        const PriceTableAxesND<N>& axes) const;
+
+    /// Repair partial spline failures via τ-interpolation
+    [[nodiscard]] RepairStats repair_spline_failures(
+        PriceTensorND<N>& tensor,
+        const std::map<std::pair<size_t, size_t>, std::vector<size_t>>& spline_failures_by_slice,
+        size_t Nt,
+        const PriceTableAxesND<N>& axes) const;
+
+    /// Repair full-slice failures (PDE + all-maturity spline) via neighbor copy
+    [[nodiscard]] std::expected<RepairStats, PriceTableError> repair_pde_failures(
+        PriceTensorND<N>& tensor,
+        const std::vector<size_t>& full_slice_failures,
+        std::vector<bool>& slice_valid,
         const PriceTableAxesND<N>& axes) const;
 
     /// Find nearest valid neighbor in (σ,r) grid using Manhattan distance
