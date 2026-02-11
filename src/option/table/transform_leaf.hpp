@@ -36,7 +36,8 @@ public:
         auto w = xform_.vega_weights(spot, strike, tau, sigma, rate);
         double v = 0.0;
         for (size_t i = 0; i < Xform::kDim; ++i)
-            v += w[i] * interp_.partial(i, coords);
+            if (w[i] != 0.0)
+                v += w[i] * interp_.partial(i, coords);
         return v * strike / K_ref_;
     }
 
