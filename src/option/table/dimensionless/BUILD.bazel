@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+
+cc_library(
+    name = "dimensionless_european",
+    hdrs = ["dimensionless_european.hpp"],
+    deps = ["//src/option:option_spec"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/dimensionless",
+    include_prefix = "mango/option/table/dimensionless",
+)
