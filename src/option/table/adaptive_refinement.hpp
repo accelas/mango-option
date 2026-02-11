@@ -269,6 +269,13 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     const ComputeErrorFn& compute_error,
     const InitialGrids& initial_grids = {});
 
+/// Resolve K_ref values from a MultiKRefConfig.
+/// If config.K_refs is non-empty, returns them sorted.
+/// Otherwise generates K_ref_count log-spaced values spanning
+/// [spot*(1-span), spot*(1+span)].
+[[nodiscard]] std::expected<std::vector<double>, PriceTableError>
+resolve_k_refs(const MultiKRefConfig& config, double spot);
+
 /// Extract domain bounds from OptionGrid, expand, and add headroom.
 std::expected<RefinementContext, PriceTableError>
 extract_chain_domain(const OptionGrid& chain);

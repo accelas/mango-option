@@ -1212,6 +1212,91 @@ TEST(ChebyshevSegmentedEquivalence, VegaReasonable) {
 }
 
 // ===========================================================================
+// Tests for resolve_k_refs
+// ===========================================================================
+
+TEST(ResolveKRefsTest, ExplicitKRefs) {
+    MultiKRefConfig config{.K_refs = {120.0, 80.0, 100.0}};
+    auto result = resolve_k_refs(config, 100.0);
+    ASSERT_TRUE(result.has_value());
+    // Should be sorted
+    EXPECT_EQ(result->size(), 3);
+    EXPECT_DOUBLE_EQ(result->at(0), 80.0);
+    EXPECT_DOUBLE_EQ(result->at(1), 100.0);
+    EXPECT_DOUBLE_EQ(result->at(2), 120.0);
+}
+
+TEST(ResolveKRefsTest, ExplicitKRefsSingleValue) {
+    MultiKRefConfig config{.K_refs = {100.0}};
+    auto result = resolve_k_refs(config, 100.0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->size(), 1);
+    EXPECT_DOUBLE_EQ(result->at(0), 100.0);
+}
+
+TEST(ResolveKRefsTest, GeneratedKRefsCount1) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 1, .K_ref_span = 0.3};
+    auto result = resolve_k_refs(config, 100.0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->size(), 1);
+    EXPECT_DOUBLE_EQ(result->at(0), 100.0);  // Single K_ref = spot
+}
+
+TEST(ResolveKRefsTest, GeneratedKRefsMultiple) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 5, .K_ref_span = 0.3};
+    auto result = resolve_k_refs(config, 100.0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->size(), 5);
+    // First should be spot*(1-span) = 70.0
+    EXPECT_NEAR(result->at(0), 100.0 * (1.0 - 0.3), 1e-10);
+    // Last should be spot*(1+span) = 130.0
+    EXPECT_NEAR(result->at(4), 100.0 * (1.0 + 0.3), 1e-10);
+    // Should be sorted
+    for (size_t i = 1; i < result->size(); ++i) {
+        EXPECT_GT(result->at(i), result->at(i - 1));
+    }
+}
+
+TEST(ResolveKRefsTest, GeneratedKRefsLogSpaced) {
+    // Verify the spacing is log-uniform (ratios between consecutive K_refs equal)
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 3, .K_ref_span = 0.3};
+    auto result = resolve_k_refs(config, 100.0);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->size(), 3);
+    double ratio01 = std::log(result->at(1) / result->at(0));
+    double ratio12 = std::log(result->at(2) / result->at(1));
+    EXPECT_NEAR(ratio01, ratio12, 1e-10);
+}
+
+TEST(ResolveKRefsTest, ErrorInvalidCount) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 0, .K_ref_span = 0.3};
+    auto result = resolve_k_refs(config, 100.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(ResolveKRefsTest, ErrorZeroSpan) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 5, .K_ref_span = 0.0};
+    auto result = resolve_k_refs(config, 100.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(ResolveKRefsTest, ErrorNegativeSpan) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 3, .K_ref_span = -0.2};
+    auto result = resolve_k_refs(config, 100.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(ResolveKRefsTest, ErrorSpanTooLarge) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 3, .K_ref_span = 1.0};
+    auto result = resolve_k_refs(config, 100.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+// ===========================================================================
 // Tests for build_chebyshev_segmented_manual (non-adaptive path)
 // ===========================================================================
 

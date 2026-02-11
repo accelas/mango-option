@@ -692,26 +692,11 @@ build_adaptive_bspline_segmented(const AdaptiveGridParams& params,
                                  const IVGrid& domain)
 {
     // 1. Determine full K_ref list
-    std::vector<double> K_refs = config.kref_config.K_refs;
-    if (K_refs.empty()) {
-        const int count = config.kref_config.K_ref_count;
-        const double span = config.kref_config.K_ref_span;
-        if (count < 1 || span <= 0.0) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-        }
-        const double log_lo = std::log(1.0 - span);
-        const double log_hi = std::log(1.0 + span);
-        K_refs.reserve(static_cast<size_t>(count));
-        if (count == 1) {
-            K_refs.push_back(config.spot);
-        } else {
-            for (int i = 0; i < count; ++i) {
-                double t = static_cast<double>(i) / static_cast<double>(count - 1);
-                K_refs.push_back(config.spot * std::exp(log_lo + t * (log_hi - log_lo)));
-            }
-        }
+    auto k_refs_result = resolve_k_refs(config.kref_config, config.spot);
+    if (!k_refs_result.has_value()) {
+        return std::unexpected(k_refs_result.error());
     }
-    std::sort(K_refs.begin(), K_refs.end());
+    auto K_refs = std::move(*k_refs_result);
 
     // 2. Probe, refine, and build all surfaces
     auto result = probe_and_build(params, config, K_refs, domain);

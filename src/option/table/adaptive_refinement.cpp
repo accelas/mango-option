@@ -539,6 +539,42 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     return result;
 }
 
+std::expected<std::vector<double>, PriceTableError>
+resolve_k_refs(const MultiKRefConfig& config, double spot) {
+    // If K_refs explicitly provided, sort and return
+    if (!config.K_refs.empty()) {
+        std::vector<double> sorted = config.K_refs;
+        std::sort(sorted.begin(), sorted.end());
+        return sorted;
+    }
+
+    // Generate from count/span
+    if (config.K_ref_count < 1 || config.K_ref_span <= 0.0
+        || config.K_ref_span >= 1.0) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    const int count = config.K_ref_count;
+    const double span = config.K_ref_span;
+    std::vector<double> K_refs;
+    K_refs.reserve(static_cast<size_t>(count));
+
+    if (count == 1) {
+        K_refs.push_back(spot);
+    } else {
+        const double log_lo = std::log(1.0 - span);
+        const double log_hi = std::log(1.0 + span);
+        for (int i = 0; i < count; ++i) {
+            double t = static_cast<double>(i)
+                     / static_cast<double>(count - 1);
+            K_refs.push_back(spot * std::exp(log_lo + t * (log_hi - log_lo)));
+        }
+    }
+
+    std::sort(K_refs.begin(), K_refs.end());
+    return K_refs;
+}
+
 std::expected<RefinementContext, PriceTableError>
 extract_chain_domain(const OptionGrid& chain) {
     if (chain.strikes.empty() || chain.maturities.empty() ||
