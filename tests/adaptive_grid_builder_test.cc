@@ -5,6 +5,7 @@
 #include "mango/option/table/bspline/bspline_pde_cache.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
+#include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include <algorithm>
 #include <iostream>
@@ -1047,6 +1048,60 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
     EXPECT_GT(p, p_before * 0.2)
         << "Narrow segment price " << p << " is far too low vs "
         << "left-side price " << p_before;
+}
+
+// ===========================================================================
+// Tests for make_tau_split_from_segments
+// ===========================================================================
+
+TEST(MakeTauSplitTest, SingleDividendAbsorbsGap) {
+    std::vector<double> bounds = {0.01, 0.4995, 0.5005, 1.0};
+    std::vector<bool> is_gap = {false, true, false};
+
+    auto split = make_tau_split_from_segments(bounds, is_gap, 100.0);
+
+    auto br_left = split.bracket(100.0, 100.0, 0.3, 0.2, 0.05);
+    EXPECT_EQ(br_left.count, 1u);
+    EXPECT_EQ(br_left.entries[0].index, 0u);
+
+    auto br_right = split.bracket(100.0, 100.0, 0.7, 0.2, 0.05);
+    EXPECT_EQ(br_right.count, 1u);
+    EXPECT_EQ(br_right.entries[0].index, 1u);
+
+    auto br_gap_left = split.bracket(100.0, 100.0, 0.4999, 0.2, 0.05);
+    EXPECT_EQ(br_gap_left.count, 1u);
+    EXPECT_EQ(br_gap_left.entries[0].index, 0u);
+
+    auto br_gap_right = split.bracket(100.0, 100.0, 0.5001, 0.2, 0.05);
+    EXPECT_EQ(br_gap_right.count, 1u);
+    EXPECT_EQ(br_gap_right.entries[0].index, 1u);
+}
+
+TEST(MakeTauSplitTest, TwoDividendsTwoGaps) {
+    std::vector<double> bounds = {0.01, 0.2495, 0.2505, 0.4995, 0.5005, 1.0};
+    std::vector<bool> is_gap = {false, true, false, true, false};
+
+    auto split = make_tau_split_from_segments(bounds, is_gap, 100.0);
+
+    auto br0 = split.bracket(100.0, 100.0, 0.15, 0.2, 0.05);
+    EXPECT_EQ(br0.entries[0].index, 0u);
+
+    auto br1 = split.bracket(100.0, 100.0, 0.375, 0.2, 0.05);
+    EXPECT_EQ(br1.entries[0].index, 1u);
+
+    auto br2 = split.bracket(100.0, 100.0, 0.75, 0.2, 0.05);
+    EXPECT_EQ(br2.entries[0].index, 2u);
+}
+
+TEST(MakeTauSplitTest, NoGaps) {
+    std::vector<double> bounds = {0.01, 1.0};
+    std::vector<bool> is_gap = {false};
+
+    auto split = make_tau_split_from_segments(bounds, is_gap, 100.0);
+
+    auto br = split.bracket(100.0, 100.0, 0.5, 0.2, 0.05);
+    EXPECT_EQ(br.count, 1u);
+    EXPECT_EQ(br.entries[0].index, 0u);
 }
 
 }  // namespace

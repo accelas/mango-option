@@ -41,6 +41,7 @@ cc_library(
     ],
     deps = [
         ":adaptive_grid_types",
+        ":tau_segment_split",
         "//src/option:american_option",
         "//src/option:dividend_utils",
         "//src/option:option_grid",

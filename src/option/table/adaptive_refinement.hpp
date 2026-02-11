@@ -2,6 +2,7 @@
 #pragma once
 
 #include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/support/error_types.hpp"
@@ -218,6 +219,14 @@ double total_discrete_dividends(const std::vector<Dividend>& dividends,
 SegmentBoundaries compute_segment_boundaries(
     const std::vector<Dividend>& dividends, double maturity,
     double tau_min, double tau_max);
+
+/// Collapse gap segments into adjacent real segments for TauSegmentSplit.
+/// Each real segment's range extends to the midpoint of its adjacent gap.
+/// Only real segments are kept; gaps are absorbed.
+TauSegmentSplit make_tau_split_from_segments(
+    const std::vector<double>& bounds,
+    const std::vector<bool>& is_gap,
+    double K_ref);
 
 /// Compute IV error from price error and vega, with floor and cap.
 double compute_iv_error(double price_error, double vega,

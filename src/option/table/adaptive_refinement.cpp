@@ -111,6 +111,45 @@ SegmentBoundaries compute_segment_boundaries(
     return {std::move(bounds), std::move(is_gap)};
 }
 
+TauSegmentSplit make_tau_split_from_segments(
+    const std::vector<double>& bounds,
+    const std::vector<bool>& is_gap,
+    double K_ref)
+{
+    const size_t n_seg = is_gap.size();
+    std::vector<double> tau_start, tau_end, tau_min, tau_max;
+
+    for (size_t s = 0; s < n_seg; ++s) {
+        if (is_gap[s]) continue;
+
+        double start = bounds[s];
+        double end = bounds[s + 1];
+
+        // Absorb gap to the left
+        if (s > 0 && is_gap[s - 1]) {
+            double gap_lo = bounds[s - 1];
+            double gap_hi = bounds[s];
+            start = (gap_lo + gap_hi) * 0.5;
+        }
+
+        // Absorb gap to the right
+        if (s + 1 < n_seg && is_gap[s + 1]) {
+            double gap_lo = bounds[s + 1];
+            double gap_hi = bounds[s + 2];
+            end = (gap_lo + gap_hi) * 0.5;
+        }
+
+        tau_start.push_back(start);
+        tau_end.push_back(end);
+        tau_min.push_back(0.0);
+        tau_max.push_back(bounds[s + 1] - bounds[s]);
+    }
+
+    return TauSegmentSplit(
+        std::move(tau_start), std::move(tau_end),
+        std::move(tau_min), std::move(tau_max), K_ref);
+}
+
 double compute_iv_error(double price_error, double vega,
                         double vega_floor, double target_iv_error) {
     double vega_clamped = std::max(std::abs(vega), vega_floor);
