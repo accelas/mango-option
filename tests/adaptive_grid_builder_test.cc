@@ -842,7 +842,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
     double tau_right = 0.5001;   // right of gap mid
 
     auto pf = [&](double tau) {
-        return result->price_fn(100.0, 100.0, tau, 0.20, 0.05);
+        return result->surface.price(100.0, 100.0, tau, 0.20, 0.05);
     };
 
     double p_left  = pf(tau_left);
@@ -904,7 +904,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
 
     // Should be able to query across the entire tau range
     for (double tau : {0.1, 0.3, 0.5, 0.7, 0.9}) {
-        double p = result->price_fn(100.0, 100.0, tau, 0.20, 0.05);
+        double p = result->surface.price(100.0, 100.0, tau, 0.20, 0.05);
         EXPECT_TRUE(std::isfinite(p))
             << "Price not finite at tau=" << tau;
         EXPECT_GT(p, 0.0) << "Price not positive at tau=" << tau;
@@ -942,7 +942,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
     ASSERT_TRUE(result.has_value())
         << "build_adaptive_chebyshev_segmented failed with nearly-coincident dividends";
 
-    double p = result->price_fn(100.0, 100.0, 0.5, 0.20, 0.05);
+    double p = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(p));
     EXPECT_GT(p, 0.0);
 }
@@ -984,7 +984,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
         << "Narrow real segments should produce valid prices, not errors";
 
     // Price at ATM should be positive
-    double p = result->price_fn(100.0, 100.0, 0.01, 0.20, 0.05);
+    double p = result->surface.price(100.0, 100.0, 0.01, 0.20, 0.05);
     EXPECT_GT(p, 0.0) << "ATM put price should be positive";
 }
 
@@ -1031,7 +1031,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
 
     // Query inside the narrow real segment between the two gaps.
     // tau=0.503 is between the two gap bands.
-    double p = result->price_fn(100.0, 100.0, 0.503, 0.20, 0.05);
+    double p = result->surface.price(100.0, 100.0, 0.503, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(p)) << "Price not finite in narrow real segment";
     EXPECT_GT(p, 0.5)
         << "Price " << p << " is near-zero in narrow real segment — "
@@ -1039,8 +1039,8 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
 
     // Also verify prices at tau values in the wide segments on either
     // side are reasonable for comparison.
-    double p_before = result->price_fn(100.0, 100.0, 0.40, 0.20, 0.05);
-    double p_after  = result->price_fn(100.0, 100.0, 0.60, 0.20, 0.05);
+    double p_before = result->surface.price(100.0, 100.0, 0.40, 0.20, 0.05);
+    double p_after  = result->surface.price(100.0, 100.0, 0.60, 0.20, 0.05);
     EXPECT_GT(p_before, 0.5);
     EXPECT_GT(p_after, 0.5);
 
@@ -1190,7 +1190,7 @@ TEST(ChebyshevSegmentedEquivalence, VegaReasonable) {
     auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
     IVGrid grid{m_domain, {0.10, 0.20, 0.30}, {0.03, 0.05}};
 
-    auto result = build_adaptive_chebyshev_segmented_typed(
+    auto result = build_adaptive_chebyshev_segmented(
         params, seg_config, grid);
     ASSERT_TRUE(result.has_value());
 
