@@ -45,24 +45,6 @@ public:
     AdaptiveGridBuilder(AdaptiveGridBuilder&&) noexcept;
     AdaptiveGridBuilder& operator=(AdaptiveGridBuilder&&) noexcept;
 
-    /// Build price table with adaptive grid refinement
-    [[nodiscard]] std::expected<AdaptiveResult, PriceTableError>
-    build(const OptionGrid& chain,
-          GridSpec<double> grid_spec,
-          size_t n_time,
-          OptionType type = OptionType::PUT);
-
-    /// Build price table with adaptive grid refinement (auto-estimated grid)
-    [[nodiscard]] std::expected<AdaptiveResult, PriceTableError>
-    build(const OptionGrid& chain,
-          PDEGridSpec pde_grid,
-          OptionType type = OptionType::PUT);
-
-    /// Build segmented multi-K_ref surface with adaptive grid refinement.
-    [[nodiscard]] std::expected<SegmentedAdaptiveResult, PriceTableError>
-    build_segmented(const SegmentedAdaptiveConfig& config,
-                    const IVGrid& domain);
-
     /// Build Chebyshev surface with adaptive CC-level refinement.
     [[nodiscard]] std::expected<AdaptiveResult, PriceTableError>
     build_chebyshev(const OptionGrid& chain,
