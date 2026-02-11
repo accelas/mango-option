@@ -222,6 +222,92 @@ TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
 }
 
 // ---------------------------------------------------------------------------
+// Chebyshev backend: continuous and discrete dividend paths
+// ---------------------------------------------------------------------------
+
+TEST(IVSolverFactoryChebyshev, ContinuousBuildsAndSolves) {
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = 100.0,
+        .dividend_yield = 0.02,
+        .grid = IVGrid{
+            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .vol = {0.10, 0.20, 0.30},
+            .rate = {0.03, 0.05},
+        },
+        .backend = ChebyshevBackend{
+            .maturity = 1.0,
+            .num_pts = {9, 9, 7, 5},
+            .tucker_epsilon = 0.0,  // RawTensor for test speed
+        },
+    };
+
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_TRUE(solver.has_value())
+        << "Chebyshev continuous build failed: code "
+        << static_cast<int>(solver.error().code);
+
+    // Round-trip: price an ATM put at known vol, then recover IV
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
+                   .rate = 0.05, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.20);
+    auto ref = solve_american_option(params);
+    ASSERT_TRUE(ref.has_value());
+
+    IVQuery query(static_cast<const OptionSpec&>(params), ref->value());
+    auto result = solver->solve(query);
+    ASSERT_TRUE(result.has_value())
+        << "Chebyshev IV solve failed";
+    EXPECT_NEAR(result->implied_vol, 0.20, 0.02);
+}
+
+TEST(IVSolverFactoryChebyshev, SegmentedBuildsAndSolves) {
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = 100.0,
+        .dividend_yield = 0.02,
+        .grid = IVGrid{
+            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .vol = {0.10, 0.20, 0.30},
+            .rate = {0.03, 0.05},
+        },
+        .adaptive = AdaptiveGridParams{
+            .target_iv_error = 0.005,
+            .max_iter = 2,
+            .validation_samples = 16,
+        },
+        .backend = ChebyshevBackend{},
+        .discrete_dividends = DiscreteDividendConfig{
+            .maturity = 1.0,
+            .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+            .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        },
+    };
+
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_TRUE(solver.has_value())
+        << "Chebyshev segmented build failed: code "
+        << static_cast<int>(solver.error().code);
+
+    IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 0.5;
+    query.rate = RateSpec{0.05};
+    query.dividend_yield = 0.02;
+    query.option_type = OptionType::PUT;
+    query.market_price = 7.0;
+
+    auto result = solver->solve(query);
+    if (result.has_value()) {
+        EXPECT_GT(result->implied_vol, 0.0);
+        EXPECT_LT(result->implied_vol, 3.0);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Side-by-side accuracy comparison
 // ---------------------------------------------------------------------------
 

@@ -16,7 +16,7 @@
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include <benchmark/benchmark.h>
@@ -76,7 +76,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, 100.0);
-                analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
             });
         if (!table) {
             throw std::runtime_error("Failed to build price table");

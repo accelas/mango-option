@@ -5,7 +5,7 @@
 //
 // Sweeps PriceTableGridAccuracyParams.target_iv_error from coarse to fine,
 // measuring interpolated IV accuracy against FDM ground truth.
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/iv_solver.hpp"
@@ -126,7 +126,7 @@ int main() {
         auto table_result = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, spot);
-                analytical_eep_decompose(accessor, OptionType::PUT, div_yield);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, div_yield));
             });
         auto t1 = std::chrono::steady_clock::now();
         double build_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();

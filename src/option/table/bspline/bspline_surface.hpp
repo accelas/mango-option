@@ -3,9 +3,9 @@
 
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/price_table.hpp"
-#include "mango/option/table/eep_surface_adapter.hpp"
+#include "mango/option/table/transform_leaf.hpp"
+#include "mango/option/table/eep/eep_layer.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
-#include "mango/option/table/eep/identity_eep.hpp"
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
@@ -200,16 +200,17 @@ private:
 // B-spline type aliases — concept-based layered architecture
 // ===========================================================================
 
-/// Leaf adapter for standard (EEP) surfaces
-using BSplineLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
-                                        StandardTransform4D, AnalyticalEEP>;
+/// Base transform leaf (coords + interpolation + K/K_ref scaling)
+using BSplineTransformLeaf = TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>;
 
-/// Standard surface (satisfies PriceSurface concept)
+/// Leaf adapter for standard (EEP) surfaces
+using BSplineLeaf = EEPLayer<BSplineTransformLeaf, AnalyticalEEP>;
+
+/// Standard B-spline price table
 using BSplinePriceTable = PriceTable<BSplineLeaf>;
 
 /// Leaf adapter for segmented surfaces (no EEP decomposition)
-using BSplineSegmentedLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
-                                         StandardTransform4D, IdentityEEP>;
+using BSplineSegmentedLeaf = TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>;
 
 /// Tau-segmented surface
 using BSplineSegmentedSurface = SplitSurface<BSplineSegmentedLeaf, TauSegmentSplit>;
@@ -217,13 +218,13 @@ using BSplineSegmentedSurface = SplitSurface<BSplineSegmentedLeaf, TauSegmentSpl
 /// Multi-K_ref surface (outer split over K_refs of segmented inner)
 using BSplineMultiKRefInner = SplitSurface<BSplineSegmentedSurface, MultiKRefSplit>;
 
-/// Multi-K_ref surface (satisfies PriceSurface concept)
+/// Multi-K_ref price table
 using BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>;
 
 
 /// Create a BSplinePriceTable from a pre-built EEP surface.
 /// Reads K_ref and dividend_yield from surface fields.
-/// The surface must contain EEP data (built with analytical_eep_decompose).
+/// The surface must contain EEP data (built with eep_decompose).
 [[nodiscard]] std::expected<BSplinePriceTable, std::string>
 make_bspline_surface(
     std::shared_ptr<const PriceTableSurface> surface,

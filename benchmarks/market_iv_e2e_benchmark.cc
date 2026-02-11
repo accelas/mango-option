@@ -33,7 +33,7 @@
  * auto result = builder.build(axes,
  *     [&](PriceTensor& tensor, const PriceTableAxes& a) {
  *         BSplineTensorAccessor accessor(tensor, a, K_ref);
- *         analytical_eep_decompose(accessor, OptionType::PUT, dividend);
+ *         eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, dividend));
  *     });
  *
  * // Step 3: Create IV solver from surface
@@ -54,7 +54,7 @@
 
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>
@@ -259,7 +259,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     auto price_table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, grid.K_ref);
-            analytical_eep_decompose(accessor, OptionType::PUT, grid.dividend);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, grid.dividend));
         });
 
     if (!price_table_result) {
@@ -378,7 +378,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         auto price_table_result = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, grid.K_ref);
-                analytical_eep_decompose(accessor, OptionType::PUT, grid.dividend);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, grid.dividend));
             });
 
         if (!price_table_result) {

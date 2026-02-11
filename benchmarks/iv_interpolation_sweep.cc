@@ -16,10 +16,11 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/option_grid.hpp"
 #include <benchmark/benchmark.h>
 #include <array>
@@ -48,9 +49,8 @@ static constexpr std::array<double, 7> kStrikes = {
     142.86, 125.0, 111.11, 100.0, 90.91, 83.33, 76.92
 };
 
-// Scales: 1x = adaptive base, 2x = midpoint refinement
-// (4x+ causes B-spline FittingFailed on the 309-point moneyness axis)
-static constexpr std::array<int, 2> kScales = {1, 2};
+// Scales: 1x = adaptive base
+static constexpr std::array<int, 1> kScales = {1};
 
 // ============================================================================
 // Reference prices
@@ -157,7 +157,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
     auto t0 = std::chrono::steady_clock::now();
 
     // 1. Build adaptive base (only for scale=1, reuse axes for larger scales)
-    static AdaptiveResult* base_result = nullptr;
+    static BSplineAdaptiveResult* base_result = nullptr;
     static PriceTableAxes base_axes;
     static double base_K_ref = 0.0;
 
@@ -174,19 +174,19 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
         AdaptiveGridParams params;
         params.target_iv_error = 2e-5;  // 2 bps
 
-        AdaptiveGridBuilder builder(params);
         // High PDE accuracy for table building
         GridAccuracyParams pde_accuracy;
         pde_accuracy.min_spatial_points = 201;
         pde_accuracy.max_spatial_points = 301;
-        auto result = builder.build(chain, PDEGridSpec{pde_accuracy}, OptionType::PUT);
+        auto result = build_adaptive_bspline(params, chain,
+            PDEGridSpec{pde_accuracy}, OptionType::PUT);
         if (!result.has_value()) {
-            std::fprintf(stderr, "AdaptiveGridBuilder::build failed\n");
+            std::fprintf(stderr, "build_adaptive_bspline failed\n");
             std::abort();
         }
-        static AdaptiveResult stored = std::move(*result);
+        static BSplineAdaptiveResult stored = std::move(*result);
         base_result = &stored;
-        base_axes = stored.axes;
+        base_axes = stored.surface->axes();
         base_K_ref = stored.surface->K_ref();
     }
 
@@ -226,7 +226,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
         auto result = ptb.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, base_K_ref);
-                analytical_eep_decompose(accessor, OptionType::PUT, kDivYield);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, kDivYield));
             });
         if (!result) {
             std::fprintf(stderr, "PriceTableBuilderND::build failed (scale=%d)\n", scale);
@@ -328,6 +328,105 @@ BENCHMARK(BM_Adaptive_IV_Scaled)
         benchmark::CreateDenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1),
         benchmark::CreateDenseRange(0, static_cast<int>(kScales.size()) - 1, 1),
     })
+    ->Unit(benchmark::kMicrosecond);
+
+// ============================================================================
+// Chebyshev: build once, benchmark IV query time
+// ============================================================================
+
+struct ChebyshevSolverEntry {
+    std::unique_ptr<InterpolatedIVSolver<ChebyshevRawSurface>> solver;
+    double build_time_ms = 0.0;
+    size_t n_pde_solves = 0;
+    bool target_met = false;
+};
+
+static const ChebyshevSolverEntry& get_chebyshev_solver() {
+    static ChebyshevSolverEntry entry = [] {
+        auto t0 = std::chrono::steady_clock::now();
+
+        OptionGrid chain;
+        chain.spot = kSpot;
+        chain.strikes = {kStrikes.begin(), kStrikes.end()};
+        chain.maturities = {0.25, 0.5, 1.0, 1.5, 2.0};
+        chain.implied_vols = {0.05, 0.10, 0.20, 0.30, 0.50};
+        chain.rates = {0.01, 0.03, 0.05, 0.10};
+        chain.dividend_yield = kDivYield;
+
+        AdaptiveGridParams params;
+        params.target_iv_error = 2e-5;  // 2 bps, same as B-spline
+
+        auto result = build_adaptive_chebyshev(params, chain, OptionType::PUT);
+        if (!result) {
+            std::fprintf(stderr, "build_adaptive_chebyshev failed\n");
+            std::abort();
+        }
+
+        auto solver = InterpolatedIVSolver<ChebyshevRawSurface>::create(
+            std::move(*result->surface));
+        if (!solver) {
+            std::fprintf(stderr, "InterpolatedIVSolver<ChebyshevRawSurface>::create failed\n");
+            std::abort();
+        }
+
+        auto t1 = std::chrono::steady_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+        ChebyshevSolverEntry e;
+        e.solver = std::make_unique<InterpolatedIVSolver<ChebyshevRawSurface>>(
+            std::move(*solver));
+        e.build_time_ms = ms;
+        e.n_pde_solves = result->total_pde_solves;
+        e.target_met = result->target_met;
+        return e;
+    }();
+    return entry;
+}
+
+static void BM_Chebyshev_IV(benchmark::State& state) {
+    size_t si = static_cast<size_t>(state.range(0));
+    double K = kStrikes[si];
+
+    double ref_price = get_reference_prices()[si];
+    if (!std::isfinite(ref_price)) {
+        state.SkipWithError("Reference price not available");
+        return;
+    }
+
+    OptionSpec spec{
+        .spot = kSpot, .strike = K, .maturity = kMaturity,
+        .rate = kRate, .dividend_yield = kDivYield,
+        .option_type = OptionType::PUT
+    };
+    IVQuery query(spec, ref_price);
+
+    const auto& entry = get_chebyshev_solver();
+
+    std::expected<IVSuccess, IVError> last_result;
+    for (auto _ : state) {
+        last_result = entry.solver->solve(query);
+        if (!last_result) {
+            state.SkipWithError("Chebyshev IV solve failed");
+            return;
+        }
+        benchmark::DoNotOptimize(last_result);
+    }
+
+    double iv = last_result->implied_vol;
+    double iv_err_bps = std::abs(iv - kTrueVol) * 10000.0;
+
+    state.SetLabel(std::format("K={:.0f} chebyshev", K));
+    state.counters["strike"] = K;
+    state.counters["iv"] = iv;
+    state.counters["iv_err_bps"] = iv_err_bps;
+    state.counters["iters"] = static_cast<double>(last_result->iterations);
+    state.counters["build_ms"] = entry.build_time_ms;
+    state.counters["n_pde_solves"] = static_cast<double>(entry.n_pde_solves);
+    state.counters["target_met"] = entry.target_met ? 1.0 : 0.0;
+}
+
+BENCHMARK(BM_Chebyshev_IV)
+    ->DenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1)
     ->Unit(benchmark::kMicrosecond);
 
 BENCHMARK_MAIN();

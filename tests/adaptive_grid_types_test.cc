@@ -76,44 +76,5 @@ TEST(IterationStatsTest, SetValues) {
     EXPECT_DOUBLE_EQ(stats.elapsed_seconds, 5.5);
 }
 
-TEST(AdaptiveResultTest, DefaultConstruction) {
-    AdaptiveResult result;
-
-    EXPECT_FALSE(result.typed_surface.has_value());
-    EXPECT_TRUE(result.iterations.empty());
-    EXPECT_DOUBLE_EQ(result.achieved_max_error, 0.0);
-    EXPECT_DOUBLE_EQ(result.achieved_avg_error, 0.0);
-    EXPECT_FALSE(result.target_met);
-    EXPECT_EQ(result.total_pde_solves, 0);
-}
-
-TEST(AdaptiveResultTest, TargetMetFlag) {
-    AdaptiveResult result;
-    result.achieved_max_error = 0.0003;
-    result.target_met = true;
-
-    EXPECT_TRUE(result.target_met);
-    EXPECT_LT(result.achieved_max_error, 0.0005);
-}
-
-TEST(AdaptiveResultTest, IterationsVector) {
-    AdaptiveResult result;
-
-    IterationStats stats1;
-    stats1.iteration = 0;
-    stats1.max_error = 0.001;
-
-    IterationStats stats2;
-    stats2.iteration = 1;
-    stats2.max_error = 0.0005;
-
-    result.iterations.push_back(stats1);
-    result.iterations.push_back(stats2);
-
-    EXPECT_EQ(result.iterations.size(), 2);
-    EXPECT_DOUBLE_EQ(result.iterations[0].max_error, 0.001);
-    EXPECT_DOUBLE_EQ(result.iterations[1].max_error, 0.0005);
-}
-
 }  // namespace
 }  // namespace mango

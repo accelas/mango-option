@@ -18,7 +18,7 @@
 #include <cmath>
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 
@@ -509,7 +509,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, grid.K_ref);
-            analytical_eep_decompose(accessor, OptionType::PUT, grid.dividend);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, grid.dividend));
         });
     ASSERT_TRUE(table_result.has_value());
 

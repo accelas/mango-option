@@ -4,7 +4,7 @@
 
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
 #include <gtest/gtest.h>
@@ -45,7 +45,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     auto result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, K_ref);
-            analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
         });
     ASSERT_TRUE(result.has_value())
         << "build failed: code=" << static_cast<int>(result.error().code);
@@ -122,7 +122,7 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
     auto result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, K_ref);
-            analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
         });
     ASSERT_TRUE(result.has_value())
         << "build failed: code=" << static_cast<int>(result.error().code);
@@ -163,7 +163,7 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
 
 // Note: The old MakeStandardWrapperRejectsNormalizedPrice test was removed.
 // SurfaceContent enum was deleted — the type system now enforces correct
-// EEP reconstruction via AnalyticalEEP vs IdentityEEP template parameters.
+// EEP reconstruction via EEPLayer<..., AnalyticalEEP> vs TransformLeaf.
 
 }  // namespace
 }  // namespace mango

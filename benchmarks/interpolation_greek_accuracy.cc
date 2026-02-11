@@ -15,7 +15,7 @@
 
 #include "mango/option/american_option.hpp"
 #include "mango/option/european_option.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include <benchmark/benchmark.h>
@@ -72,7 +72,7 @@ const EEPFixture& GetEEPFixture() {
         auto table = builder.build(axes,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, K_ref);
-                analytical_eep_decompose(accessor, OptionType::PUT, q);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, q));
             });
         if (!table) {
             throw std::runtime_error("Failed to build price table");

@@ -6,12 +6,12 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/european_option.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 
 using namespace mango;
 
@@ -80,7 +80,7 @@ int main() {
     auto table_result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, kSpot);
-            analytical_eep_decompose(accessor, OptionType::PUT, kDivYield);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, kDivYield));
         });
     if (!table_result.has_value()) {
         std::fprintf(stderr, "PriceTableBuilderND build failed: error code %d\n",
@@ -152,9 +152,9 @@ int main() {
 
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0);
     AdaptiveGridParams params{.target_iv_error = 2e-5};
-    AdaptiveGridBuilder adaptive_builder(params);
 
-    auto adaptive_result = adaptive_builder.build(chain, *grid_spec, 500, OptionType::PUT);
+    auto adaptive_result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{*grid_spec, 500, {}}, OptionType::PUT);
     if (!adaptive_result.has_value()) {
         std::fprintf(stderr, "AdaptiveGridBuilder failed\n");
         return 1;
@@ -205,7 +205,7 @@ int main() {
         auto result_hi = builder_hi.build(axes_hi,
             [&](PriceTensor& tensor, const PriceTableAxes& a) {
                 BSplineTensorAccessor accessor(tensor, a, kSpot);
-                analytical_eep_decompose(accessor, OptionType::PUT, kDivYield);
+                eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, kDivYield));
             });
         if (result_hi.has_value()) {
             double raw_hi = result_hi->surface->value({m, kTau, kSigma, kRate});

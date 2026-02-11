@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 
 using namespace mango;
 
@@ -41,7 +41,7 @@ TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
     auto result = builder.build(axes,
         [&](PriceTensor& tensor, const PriceTableAxes& a) {
             BSplineTensorAccessor accessor(tensor, a, 100.0);
-            analytical_eep_decompose(accessor, OptionType::PUT, 0.0);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
         });
     ASSERT_TRUE(result.has_value());
     EXPECT_NE(result->surface, nullptr);
