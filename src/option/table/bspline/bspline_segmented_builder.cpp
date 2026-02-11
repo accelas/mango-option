@@ -100,6 +100,81 @@ void append_upper_tail_log_moneyness(std::vector<double>& log_grid,
     }
 }
 
+/// Expand a log-moneyness grid to cover dividend-induced downward shifts and
+/// add upper-tail headroom for B-spline support and diffusion.
+///
+/// Returns the expanded, sorted, deduplicated log-moneyness grid, or an error
+/// if the resulting grid is too small or contains non-finite values.
+static std::expected<std::vector<double>, PriceTableError>
+expand_log_moneyness_grid(
+    const std::vector<double>& input_grid,
+    const std::vector<Dividend>& dividends,
+    double K_ref,
+    double sigma_max,
+    double max_segment_width) {
+
+    std::vector<double> expanded_log_m_grid = input_grid;
+    std::sort(expanded_log_m_grid.begin(), expanded_log_m_grid.end());
+    expanded_log_m_grid.erase(
+        std::unique(expanded_log_m_grid.begin(), expanded_log_m_grid.end()),
+        expanded_log_m_grid.end());
+
+    if (expanded_log_m_grid.size() < 2) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InsufficientGridPoints, 0});
+    }
+    if (!std::isfinite(expanded_log_m_grid.front()) ||
+        !std::isfinite(expanded_log_m_grid.back())) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    double total_div = 0.0;
+    for (const auto& div : dividends) {
+        total_div += div.amount;
+    }
+
+    // Expand lower side in moneyness-space, then map back to log-moneyness.
+    const double x_min = expanded_log_m_grid.front();
+    const double m_min = std::exp(x_min);
+    double m_min_expanded = std::max(m_min - total_div / K_ref, 0.01);
+    double x_min_expanded = std::log(m_min_expanded);
+
+    if (x_min_expanded < expanded_log_m_grid.front()) {
+        double step = (expanded_log_m_grid.front() - x_min_expanded) / 3.0;
+        for (int i = 2; i >= 0; --i) {
+            double x = x_min_expanded + step * static_cast<double>(i);
+            if (x < expanded_log_m_grid.front()) {
+                expanded_log_m_grid.insert(expanded_log_m_grid.begin(), x);
+            }
+        }
+    }
+
+    // Add right-tail headroom. Scale by one diffusion length in log-space
+    // (sigma_max * sqrt(max segment width)) and at least one cubic-support
+    // band so the original upper domain stays away from endpoint effects.
+    append_upper_tail_log_moneyness(
+        expanded_log_m_grid, sigma_max, max_segment_width);
+
+    std::sort(expanded_log_m_grid.begin(), expanded_log_m_grid.end());
+    expanded_log_m_grid.erase(
+        std::unique(expanded_log_m_grid.begin(), expanded_log_m_grid.end()),
+        expanded_log_m_grid.end());
+
+    // Ensure at least 4 log-moneyness points
+    if (expanded_log_m_grid.size() < 4) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0});
+    }
+
+    for (double x : expanded_log_m_grid) {
+        if (!std::isfinite(x)) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
+    }
+
+    return expanded_log_m_grid;
+}
+
 }  // namespace
 
 std::expected<BSplineSegmentedSurface, PriceTableError>
@@ -152,45 +227,6 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Step 3: Expand log-moneyness grid downward
     // =====================================================================
-    std::vector<double> expanded_log_m_grid = config.grid.moneyness;
-    std::sort(expanded_log_m_grid.begin(), expanded_log_m_grid.end());
-    expanded_log_m_grid.erase(
-        std::unique(expanded_log_m_grid.begin(), expanded_log_m_grid.end()),
-        expanded_log_m_grid.end());
-
-    if (expanded_log_m_grid.size() < 2) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::InsufficientGridPoints, 0});
-    }
-    if (!std::isfinite(expanded_log_m_grid.front()) ||
-        !std::isfinite(expanded_log_m_grid.back())) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-    }
-
-    double total_div = 0.0;
-    for (const auto& div : dividends) {
-        total_div += div.amount;
-    }
-
-    // Expand lower side in moneyness-space, then map back to log-moneyness.
-    const double x_min = expanded_log_m_grid.front();
-    const double m_min = std::exp(x_min);
-    double m_min_expanded = std::max(m_min - total_div / K_ref, 0.01);
-    double x_min_expanded = std::log(m_min_expanded);
-
-    if (x_min_expanded < expanded_log_m_grid.front()) {
-        double step = (expanded_log_m_grid.front() - x_min_expanded) / 3.0;
-        for (int i = 2; i >= 0; --i) {
-            double x = x_min_expanded + step * static_cast<double>(i);
-            if (x < expanded_log_m_grid.front()) {
-                expanded_log_m_grid.insert(expanded_log_m_grid.begin(), x);
-            }
-        }
-    }
-
-    // Add right-tail headroom. Scale by one diffusion length in log-space
-    // (sigma_max * sqrt(max segment width)) and at least one cubic-support
-    // band so the original upper domain stays away from endpoint effects.
     double sigma_max = *std::max_element(
         config.grid.vol.begin(), config.grid.vol.end());
     double max_segment_width = 0.0;
@@ -198,25 +234,14 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         max_segment_width =
             std::max(max_segment_width, boundaries[i + 1] - boundaries[i]);
     }
-    append_upper_tail_log_moneyness(
-        expanded_log_m_grid, sigma_max, max_segment_width);
 
-    std::sort(expanded_log_m_grid.begin(), expanded_log_m_grid.end());
-    expanded_log_m_grid.erase(
-        std::unique(expanded_log_m_grid.begin(), expanded_log_m_grid.end()),
-        expanded_log_m_grid.end());
-
-    // Ensure at least 4 log-moneyness points
-    if (expanded_log_m_grid.size() < 4) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0});
+    auto grid_result = expand_log_moneyness_grid(
+        config.grid.moneyness, dividends, K_ref,
+        sigma_max, max_segment_width);
+    if (!grid_result.has_value()) {
+        return std::unexpected(grid_result.error());
     }
-
-    for (double x : expanded_log_m_grid) {
-        if (!std::isfinite(x)) {
-            return std::unexpected(PriceTableError{
-                PriceTableErrorCode::InvalidConfig});
-        }
-    }
+    auto expanded_log_m_grid = std::move(*grid_result);
 
     // =====================================================================
     // Step 4: Build segments (last first, then backward)
