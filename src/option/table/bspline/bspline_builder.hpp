@@ -558,6 +558,37 @@ public:
         BSplineFittingStats<double, N> stats;
     };
 
+    /// Result from assemble_surface() — surface + extraction diagnostics
+    struct AssembleSurfaceResult {
+        std::shared_ptr<const PriceTableSurfaceND<N>> surface;
+        BSplineFittingStats<double, N> fitting_stats;
+        size_t failed_pde_slices = 0;
+        size_t failed_spline_points = 0;
+        size_t repaired_full_slices = 0;
+        size_t repaired_partial_points = 0;
+        size_t total_slices = 0;
+    };
+
+    /// Assemble a B-spline surface from batch PDE results.
+    ///
+    /// Runs the common pipeline: extract tensor, repair failures,
+    /// apply optional transform (e.g. EEP decomposition), fit B-spline
+    /// coefficients, and build the immutable surface.
+    ///
+    /// @param batch      Batch PDE solve results
+    /// @param axes       Grid axes for the tensor
+    /// @param K_ref      Reference strike for the surface
+    /// @param dividends  Dividend specification for the surface
+    /// @param transform  Optional tensor transform (e.g. EEP decomposition)
+    /// @return AssembleSurfaceResult on success, or error
+    [[nodiscard]] std::expected<AssembleSurfaceResult, PriceTableError>
+    assemble_surface(
+        const BatchAmericanOptionResult& batch,
+        const PriceTableAxesND<N>& axes,
+        double K_ref,
+        const DividendSpec& dividends,
+        TensorTransformFn transform = nullptr) const;
+
     /// Generate batch of PricingParams from axes
     [[nodiscard]] std::vector<PricingParams> make_batch(
         const PriceTableAxesND<N>& axes) const;

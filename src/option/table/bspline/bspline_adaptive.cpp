@@ -525,50 +525,29 @@ build_cached_surface(
     // Merge cached + fresh results into full batch
     auto merged_results = merge_results(cache, all_params, missing_indices, fresh_results);
 
-    // Extract tensor from merged results
-    auto tensor_result = builder.extract_tensor(merged_results, axes);
-    if (!tensor_result.has_value()) {
-        return std::unexpected(tensor_result.error());
-    }
+    // EEP transform: convert normalized prices to early exercise premium
+    PriceTableBuilder::TensorTransformFn eep_transform =
+        [K_ref, type, dividend_yield](PriceTensor& tensor, const PriceTableAxes& ax) {
+            BSplineTensorAccessor accessor(tensor, ax, K_ref);
+            eep_decompose(accessor, AnalyticalEEP(type, dividend_yield));
+        };
 
-    auto& extraction = tensor_result.value();
-
-    // Repair failed slices if needed
-    if (!extraction.failed_pde.empty() || !extraction.failed_spline.empty()) {
-        auto repair_result = builder.repair_failed_slices(
-            extraction.tensor, extraction.failed_pde,
-            extraction.failed_spline, axes);
-        if (!repair_result.has_value()) {
-            return std::unexpected(repair_result.error());
-        }
-    }
-
-    // EEP decomposition: convert normalized prices to early exercise premium
-    BSplineTensorAccessor accessor(extraction.tensor, axes, K_ref);
-    eep_decompose(accessor, AnalyticalEEP(type, dividend_yield));
-
-    // Fit coefficients
-    auto fit_result = builder.fit_coeffs(extraction.tensor, axes);
-    if (!fit_result.has_value()) {
-        return std::unexpected(fit_result.error());
-    }
-
-    // Build surface
-    auto surface = PriceTableSurface::build(
-        axes, std::move(fit_result->coefficients), K_ref,
-        DividendSpec{.dividend_yield = dividend_yield, .discrete_dividends = {}});
-    if (!surface.has_value()) {
-        return std::unexpected(surface.error());
+    // Assemble surface: extract → repair → EEP → fit → build
+    DividendSpec divs{.dividend_yield = dividend_yield, .discrete_dividends = {}};
+    auto assembly = builder.assemble_surface(
+        merged_results, axes, K_ref, divs, eep_transform);
+    if (!assembly.has_value()) {
+        return std::unexpected(assembly.error());
     }
 
     // Store for later extraction
-    last_surface = surface.value();
+    last_surface = assembly->surface;
     last_axes = axes;
 
     size_t pde_solves = missing_params.size();
 
     // Return a handle that queries the surface (reconstruct full American price)
-    auto surface_ptr = surface.value();
+    auto surface_ptr = assembly->surface;
     auto wrapper = make_bspline_surface(surface_ptr, type);
     if (!wrapper.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});

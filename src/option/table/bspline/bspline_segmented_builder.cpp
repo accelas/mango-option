@@ -327,36 +327,16 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             }
         }
 
-        // 7. Extract tensor
-        auto extraction = builder.extract_tensor(batch_result, axes);
-        if (!extraction.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+        // 7-10. Extract tensor, repair, fit, build surface
+        DividendSpec seg_divs{.dividend_yield = config.dividends.dividend_yield,
+                              .discrete_dividends = {}};
+        auto assembly = builder.assemble_surface(
+            batch_result, axes, K_ref, seg_divs);
+        if (!assembly.has_value()) {
+            return std::unexpected(assembly.error());
         }
 
-        // 8. Repair failures
-        auto repair = builder.repair_failed_slices(
-            extraction->tensor, extraction->failed_pde,
-            extraction->failed_spline, axes);
-        if (!repair.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::RepairFailed});
-        }
-
-        // 9. Fit B-spline coefficients
-        auto fit_result = builder.fit_coeffs(extraction->tensor, axes);
-        if (!fit_result.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
-        }
-        auto coeffs = std::move(fit_result->coefficients);
-
-        // 10. Build PriceTableSurfaceND
-        auto surface = PriceTableSurface::build(
-            axes, std::move(coeffs), K_ref,
-            DividendSpec{.dividend_yield = config.dividends.dividend_yield, .discrete_dividends = {}});
-        if (!surface.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-        }
-
-        auto surface_ptr = *surface;
+        auto surface_ptr = assembly->surface;
 
         segment_configs.push_back(BSplineSegmentConfig{
             .surface = surface_ptr,

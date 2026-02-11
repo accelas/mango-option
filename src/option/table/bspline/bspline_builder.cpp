@@ -102,40 +102,11 @@ PriceTableBuilderND<N>::build(const PriceTableAxesND<N>& axes,
     // Count PDE solves (successful results)
     size_t n_pde_solves = batch_result.results.size() - batch_result.failed_count;
 
-    // Step 4: Extract tensor via interpolation
-    auto extraction = extract_tensor(batch_result, axes);
-    if (!extraction.has_value()) {
-        return std::unexpected(extraction.error());
-    }
-
-    // Step 4b: Repair failed slices
-    auto repair_result = repair_failed_slices(
-        extraction->tensor, extraction->failed_pde, extraction->failed_spline, axes);
-    if (!repair_result.has_value()) {
-        return std::unexpected(repair_result.error());
-    }
-    auto repair_stats = repair_result.value();
-
-    // Step 4c: Apply optional tensor transform (e.g., EEP decomposition)
-    if (transform) {
-        transform(extraction->tensor, axes);
-    }
-
-    // Step 5: Fit B-spline coefficients
-    auto coeffs_result = fit_coeffs(extraction->tensor, axes);
-    if (!coeffs_result.has_value()) {
-        return std::unexpected(coeffs_result.error());
-    }
-
-    auto& fit_result = coeffs_result.value();
-    auto coefficients = std::move(fit_result.coefficients);
-    BSplineFittingStats fitting_stats = fit_result.stats;
-
-    // Step 6: Build immutable surface
-    auto surface_result = PriceTableSurfaceND<N>::build(
-        axes, std::move(coefficients), config_.K_ref, config_.dividends);
-    if (!surface_result.has_value()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+    // Steps 4-6: Extract tensor, repair, transform, fit, build surface
+    auto assembly = assemble_surface(
+        batch_result, axes, config_.K_ref, config_.dividends, transform);
+    if (!assembly.has_value()) {
+        return std::unexpected(assembly.error());
     }
 
     // End timing
@@ -145,16 +116,69 @@ PriceTableBuilderND<N>::build(const PriceTableAxesND<N>& axes,
     // Return full result with diagnostics
     const size_t Nt = axes.grids[1].size();
     return PriceTableResult<N>{
-        .surface = std::move(surface_result.value()),
+        .surface = std::move(assembly->surface),
         .n_pde_solves = n_pde_solves,
         .precompute_time_seconds = elapsed,
-        .fitting_stats = fitting_stats,
+        .fitting_stats = assembly->fitting_stats,
+        .failed_pde_slices = assembly->failed_pde_slices,
+        .failed_spline_points = assembly->failed_spline_points,
+        .repaired_full_slices = assembly->repaired_full_slices,
+        .repaired_partial_points = assembly->repaired_partial_points,
+        .total_slices = assembly->total_slices,
+        .total_points = assembly->total_slices * Nt
+    };
+}
+
+template <size_t N>
+std::expected<typename PriceTableBuilderND<N>::AssembleSurfaceResult, PriceTableError>
+PriceTableBuilderND<N>::assemble_surface(
+    const BatchAmericanOptionResult& batch,
+    const PriceTableAxesND<N>& axes,
+    double K_ref,
+    const DividendSpec& dividends,
+    TensorTransformFn transform) const
+{
+    // Step 1: Extract tensor from batch results
+    auto extraction = extract_tensor(batch, axes);
+    if (!extraction.has_value()) {
+        return std::unexpected(extraction.error());
+    }
+
+    // Step 2: Repair failed slices
+    auto repair_result = repair_failed_slices(
+        extraction->tensor, extraction->failed_pde,
+        extraction->failed_spline, axes);
+    if (!repair_result.has_value()) {
+        return std::unexpected(repair_result.error());
+    }
+    auto repair_stats = repair_result.value();
+
+    // Step 3: Apply optional tensor transform (e.g., EEP decomposition)
+    if (transform) {
+        transform(extraction->tensor, axes);
+    }
+
+    // Step 4: Fit B-spline coefficients
+    auto coeffs_result = fit_coeffs(extraction->tensor, axes);
+    if (!coeffs_result.has_value()) {
+        return std::unexpected(coeffs_result.error());
+    }
+
+    // Step 5: Build immutable surface
+    auto surface_result = PriceTableSurfaceND<N>::build(
+        axes, std::move(coeffs_result->coefficients), K_ref, dividends);
+    if (!surface_result.has_value()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+    }
+
+    return AssembleSurfaceResult{
+        .surface = std::move(surface_result.value()),
+        .fitting_stats = coeffs_result->stats,
         .failed_pde_slices = extraction->failed_pde.size(),
         .failed_spline_points = extraction->failed_spline.size(),
         .repaired_full_slices = repair_stats.repaired_full_slices,
         .repaired_partial_points = repair_stats.repaired_partial_points,
         .total_slices = extraction->total_slices,
-        .total_points = extraction->total_slices * Nt
     };
 }
 
