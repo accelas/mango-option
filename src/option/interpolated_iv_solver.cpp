@@ -21,7 +21,7 @@
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_3d_surface.hpp"
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
-#include "mango/option/table/eep/dimensionless_3d_accessor.hpp"
+#include "mango/option/table/dimensionless/dimensionless_3d_accessor.hpp"
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"

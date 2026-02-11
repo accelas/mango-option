@@ -1608,7 +1608,7 @@ cc_test(
     deps = [
         "//src/option/table/dimensionless:dimensionless_builder",
         "//src/option/table/dimensionless:dimensionless_european",
-        "//src/option/table:dimensionless_3d_accessor",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
         "//src/option/table:analytical_eep",
         "//src/option:american_option",
         "//src/option:european_option",
@@ -1625,7 +1625,7 @@ cc_test(
     deps = [
         "//src/option/table/bspline:bspline_3d_surface",
         "//src/option/table/dimensionless:dimensionless_builder",
-        "//src/option/table:dimensionless_3d_accessor",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
         "//src/option/table:analytical_eep",
         "//src/math:bspline_nd_separable",
         "//src/option:american_option",
