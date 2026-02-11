@@ -55,6 +55,14 @@ cc_library(
 )
 
 cc_library(
+    name = "fd_vega_adapter",
+    hdrs = ["fd_vega_adapter.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "price_table",
     hdrs = ["price_table.hpp"],
     deps = ["//src/option:option_spec"],

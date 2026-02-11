@@ -7,6 +7,7 @@
 #include "mango/option/table/price_table.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
 #include "mango/option/table/eep/eep_layer.hpp"
+#include "mango/option/table/fd_vega_adapter.hpp"
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
@@ -38,7 +39,10 @@ using ChebyshevTauSegmented = SplitSurface<ChebyshevSegmentedLeaf, TauSegmentSpl
 /// Multi-K_ref blended segmented Chebyshev surface
 using ChebyshevMultiKRefInner = SplitSurface<ChebyshevTauSegmented, MultiKRefSplit>;
 
+/// FD vega layer — American options have no analytical vega
+using ChebyshevMultiKRefFDVega = FDVegaAdapter<ChebyshevMultiKRefInner>;
+
 /// Multi-K_ref segmented Chebyshev price table (final queryable surface)
-using ChebyshevMultiKRefSurface = PriceTable<ChebyshevMultiKRefInner>;
+using ChebyshevMultiKRefSurface = PriceTable<ChebyshevMultiKRefFDVega>;
 
 }  // namespace mango

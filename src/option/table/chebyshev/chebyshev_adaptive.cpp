@@ -1201,9 +1201,10 @@ build_adaptive_chebyshev_segmented_typed(
             std::move(pieces->leaves), std::move(pieces->tau_split));
     }
 
-    // 6. Compose with MultiKRefSplit -> PriceTable
+    // 6. Compose with MultiKRefSplit -> FDVegaAdapter -> PriceTable
     ChebyshevMultiKRefInner inner(
         std::move(kref_surfaces), MultiKRefSplit(K_refs));
+    ChebyshevMultiKRefFDVega fd_vega(std::move(inner));
 
     SurfaceBounds bounds{
         .m_min = min_m, .m_max = max_m,
@@ -1213,7 +1214,7 @@ build_adaptive_chebyshev_segmented_typed(
     };
 
     ChebyshevMultiKRefSurface surface(
-        std::move(inner), bounds,
+        std::move(fd_vega), bounds,
         config.option_type, config.dividend_yield);
 
     return ChebyshevSegmentedTypedResult{
@@ -1345,9 +1346,10 @@ build_chebyshev_segmented_manual(
             std::move(pieces->leaves), std::move(pieces->tau_split));
     }
 
-    // 6. Compose with MultiKRefSplit -> PriceTable
+    // 6. Compose with MultiKRefSplit -> FDVegaAdapter -> PriceTable
     ChebyshevMultiKRefInner inner(
         std::move(kref_surfaces), MultiKRefSplit(K_refs));
+    ChebyshevMultiKRefFDVega fd_vega(std::move(inner));
 
     SurfaceBounds bounds{
         .m_min = min_m, .m_max = max_m,
@@ -1357,7 +1359,7 @@ build_chebyshev_segmented_manual(
     };
 
     return ChebyshevMultiKRefSurface(
-        std::move(inner), bounds,
+        std::move(fd_vega), bounds,
         config.option_type, config.dividend_yield);
 }
 
