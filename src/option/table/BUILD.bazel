@@ -9,17 +9,6 @@ filegroup(
 )
 
 cc_library(
-    name = "price_surface_concept",
-    hdrs = ["price_surface_concept.hpp"],
-    deps = [
-        "//src/option:option_spec",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
     name = "adaptive_grid_types",
     hdrs = ["adaptive_grid_types.hpp"],
     deps = [

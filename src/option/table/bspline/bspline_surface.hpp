@@ -204,7 +204,7 @@ private:
 using BSplineLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
                                         StandardTransform4D, AnalyticalEEP>;
 
-/// Standard surface (satisfies PriceSurface concept)
+/// Standard B-spline price table
 using BSplinePriceTable = PriceTable<BSplineLeaf>;
 
 /// Leaf adapter for segmented surfaces (no EEP decomposition)
@@ -217,7 +217,7 @@ using BSplineSegmentedSurface = SplitSurface<BSplineSegmentedLeaf, TauSegmentSpl
 /// Multi-K_ref surface (outer split over K_refs of segmented inner)
 using BSplineMultiKRefInner = SplitSurface<BSplineSegmentedSurface, MultiKRefSplit>;
 
-/// Multi-K_ref surface (satisfies PriceSurface concept)
+/// Multi-K_ref price table
 using BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>;
 
 

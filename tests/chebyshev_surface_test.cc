@@ -4,7 +4,6 @@
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include "mango/option/american_option.hpp"
-#include "mango/option/table/price_surface_concept.hpp"
 #include "mango/option/table/surface_concepts.hpp"
 
 using namespace mango;
@@ -12,8 +11,6 @@ using namespace mango;
 // Static assertions
 static_assert(SurfaceInterpolant<ChebyshevInterpolant<4, TuckerTensor<4>>, 4>);
 static_assert(SurfaceInterpolant<ChebyshevInterpolant<4, RawTensor<4>>, 4>);
-static_assert(PriceSurface<ChebyshevSurface>);
-static_assert(PriceSurface<ChebyshevRawSurface>);
 
 TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
     Domain<4> domain{

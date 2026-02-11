@@ -4,12 +4,12 @@
  * @brief Implied volatility solver using pre-computed price interpolation
  *
  * Provides:
- * - InterpolatedIVSolver<Surface>: Newton-Raphson IV solver on any PriceSurface
+ * - InterpolatedIVSolver<Surface>: Newton-Raphson IV solver on any PriceTable
  * - AnyIVSolver: type-erased wrapper for convenient use
  * - make_interpolated_iv_solver(): factory that builds the price surface and solver
  *
  * Two construction paths:
- * 1. Direct: build your own PriceSurface, then InterpolatedIVSolver::create()
+ * 1. Direct: build your own PriceTable, then InterpolatedIVSolver::create()
  * 2. Factory: fill IVSolverFactoryConfig, call make_interpolated_iv_solver()
  *
  * Grid density is controlled via IVGrid.  When `adaptive` is set, the grid
@@ -21,7 +21,7 @@
 
 #include "mango/option/option_spec.hpp"
 #include "mango/option/iv_result.hpp"
-#include "mango/option/table/price_surface_concept.hpp"
+#include "mango/option/table/price_table.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"
@@ -56,11 +56,11 @@ struct InterpolatedIVSolverConfig {
 /// For full yield curve support, use IVSolver instead.
 /// When rate approximation is used, IVSuccess::used_rate_approximation is set to true.
 ///
-/// @tparam Surface A type satisfying the PriceSurface concept
-template <PriceSurface Surface>
+/// @tparam Surface A PriceTable<Inner> instantiation
+template <typename Surface>
 class InterpolatedIVSolver {
 public:
-    /// Create solver from a PriceSurface
+    /// Create solver from a PriceTable
     ///
     /// The surface must provide price(), vega(), and bounds accessors.
     ///
@@ -183,7 +183,7 @@ struct IVSolverFactoryConfig {
     std::optional<DiscreteDividendConfig> discrete_dividends;
 };
 
-/// Type-erased IV solver wrapping any PriceSurface backend
+/// Type-erased IV solver wrapping any PriceTable backend
 ///
 /// Impl is defined in the .cpp — only the factory can construct instances.
 class AnyIVSolver {
@@ -224,7 +224,7 @@ std::expected<AnyIVSolver, ValidationError> make_interpolated_iv_solver(const IV
 // Template implementation (must be in header for template instantiation)
 // =====================================================================
 
-template <PriceSurface Surface>
+template <typename Surface>
 std::expected<InterpolatedIVSolver<Surface>, ValidationError>
 InterpolatedIVSolver<Surface>::create(
     Surface surface,
@@ -258,7 +258,7 @@ InterpolatedIVSolver<Surface>::create(
         config);
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 double InterpolatedIVSolver<Surface>::eval_price(
     double moneyness, double maturity, double vol, double rate, double strike) const
 {
@@ -266,7 +266,7 @@ double InterpolatedIVSolver<Surface>::eval_price(
     return surface_.price(spot, strike, maturity, vol, rate);
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 double InterpolatedIVSolver<Surface>::compute_vega(
     double moneyness, double maturity, double vol, double rate, double strike) const
 {
@@ -274,7 +274,7 @@ double InterpolatedIVSolver<Surface>::compute_vega(
     return surface_.vega(spot, strike, maturity, vol, rate);
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 std::optional<ValidationError>
 InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
 {
@@ -297,7 +297,7 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
     return std::nullopt;
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 std::pair<double, double>
 InterpolatedIVSolver<Surface>::adaptive_bounds(const IVQuery& query) const
 {
@@ -327,7 +327,7 @@ InterpolatedIVSolver<Surface>::adaptive_bounds(const IVQuery& query) const
     return {sigma_min, sigma_max};
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 std::expected<IVSuccess, IVError>
 InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
 {
@@ -425,7 +425,7 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
     };
 }
 
-template <PriceSurface Surface>
+template <typename Surface>
 BatchIVResult
 InterpolatedIVSolver<Surface>::solve_batch(const std::vector<IVQuery>& queries) const noexcept
 {

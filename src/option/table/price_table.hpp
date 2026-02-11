@@ -14,7 +14,7 @@ struct SurfaceBounds {
 };
 
 /// Top-level queryable price surface with runtime metadata.
-/// Satisfies the PriceSurface concept required by InterpolatedIVSolver.
+/// Used directly by InterpolatedIVSolver.
 template <typename Inner>
 class PriceTable {
 public:

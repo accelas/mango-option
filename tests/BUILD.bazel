@@ -197,19 +197,6 @@ cc_test(
 )
 
 cc_test(
-    name = "price_surface_concept_test",
-    size = "small",
-    srcs = ["price_surface_concept_test.cc"],
-    deps = [
-        "//src/option/table:price_surface_concept",
-        "//src/option/table/bspline:bspline_surface",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
-
-
-cc_test(
     name = "option_concepts_test",
     size = "small",
     srcs = ["option_concepts_test.cc"],
@@ -1503,7 +1490,7 @@ cc_test(
         "//src/option/table:identity_eep",
         "//src/option/table:eep_surface_adapter",
         "//src/option/table:price_table",
-        "//src/option/table:price_surface_concept",
+
         "@googletest//:gtest_main",
     ],
 )
@@ -1566,7 +1553,7 @@ cc_test(
         "//src/option:american_option",
         "//src/option/table/chebyshev:chebyshev_surface",
         "//src/option/table/chebyshev:chebyshev_table_builder",
-        "//src/option/table:price_surface_concept",
+
         "//src/option/table:surface_concepts",
         "@googletest//:gtest",
         "@googletest//:gtest_main",

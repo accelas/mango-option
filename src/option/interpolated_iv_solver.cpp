@@ -161,7 +161,7 @@ BatchIVResult AnyIVSolver::solve_batch(const std::vector<IVQuery>& queries) cons
 }
 
 /// Helper: wrap a typed solver into AnyIVSolver via pimpl
-template <PriceSurface Surface>
+template <typename Surface>
 static AnyIVSolver make_any_solver(InterpolatedIVSolver<Surface> solver) {
     return AnyIVSolver(std::make_unique<AnyIVSolver::Impl>(std::move(solver)));
 }
@@ -429,7 +429,7 @@ build_chebyshev_segmented(const IVSolverFactoryConfig& config,
     }
 
     // Segmented Chebyshev returns a type-erased price_fn via AdaptiveResult.
-    // The underlying surface is a split SurfaceHandle, not a typed PriceSurface,
+    // The underlying surface is a split SurfaceHandle, not a typed PriceTable,
     // so it can't be wrapped into AnyIVSolver directly.
     // Fall back to B-spline segmented path which produces a typed surface.
     return build_bspline_segmented(config, divs);

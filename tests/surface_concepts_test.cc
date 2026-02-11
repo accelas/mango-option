@@ -7,8 +7,6 @@
 #include "mango/option/table/eep/identity_eep.hpp"
 #include "mango/option/table/eep/eep_surface_adapter.hpp"
 #include "mango/option/table/price_table.hpp"
-#include "mango/option/table/price_surface_concept.hpp"
-
 using namespace mango;
 
 TEST(SurfaceConceptsTest, BSplineInterpolantSatisfiesConcept) {
@@ -76,8 +74,3 @@ TEST(AnalyticalEEPTest, EuropeanVegaIsPositive) {
     EXPECT_GT(v, 0.0);
 }
 
-TEST(PriceTableTest, SatisfiesPriceSurfaceConcept) {
-    using StandardAdapter = EEPSurfaceAdapter<SharedBSplineInterp<4>,
-                                               StandardTransform4D, AnalyticalEEP>;
-    static_assert(PriceSurface<PriceTable<StandardAdapter>>);
-}
