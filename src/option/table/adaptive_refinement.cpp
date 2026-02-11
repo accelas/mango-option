@@ -282,6 +282,61 @@ std::vector<double> seed_grid(const std::vector<double>& user_knots,
     return grid;
 }
 
+static std::vector<std::array<double, 4>> generate_validation_samples(
+    const AdaptiveGridParams& params,
+    size_t iteration,
+    const std::array<std::pair<double, double>, 4>& bounds,
+    const std::array<std::vector<size_t>, 4>& focus_bins,
+    bool focus_active) {
+    const size_t total_samples = params.validation_samples;
+    bool has_focus_bins = focus_active;
+    if (focus_active) {
+        has_focus_bins = std::any_of(focus_bins.begin(), focus_bins.end(),
+                                     [](const std::vector<size_t>& bins) { return !bins.empty(); });
+    }
+
+    size_t base_samples = (has_focus_bins && total_samples > 1)
+        ? std::max<size_t>(total_samples / 2, 1)
+        : total_samples;
+    size_t targeted_samples = has_focus_bins ? total_samples - base_samples : 0;
+
+    auto base_unit_samples = latin_hypercube_4d(base_samples,
+                                                params.lhs_seed + iteration);
+
+    std::vector<std::array<double, 4>> samples = scale_lhs_samples(base_unit_samples, bounds);
+
+    if (targeted_samples > 0 && has_focus_bins) {
+        std::mt19937_64 targeted_rng(params.lhs_seed ^ (iteration * 1315423911ULL + 0x9e3779b97f4a7c15ULL));
+        std::uniform_real_distribution<double> uniform(0.0, 1.0);
+
+        std::vector<std::array<double, 4>> targeted_unit;
+        targeted_unit.reserve(targeted_samples);
+
+        for (size_t i = 0; i < targeted_samples; ++i) {
+            std::array<double, 4> point{};
+            for (size_t d = 0; d < 4; ++d) {
+                double u = uniform(targeted_rng);
+                if (!focus_bins[d].empty()) {
+                    const auto& dim_bins = focus_bins[d];
+                    size_t bin = dim_bins[i % dim_bins.size()];
+                    double bin_lo = static_cast<double>(bin) / ErrorBins::N_BINS;
+                    double bin_hi = static_cast<double>(bin + 1) / ErrorBins::N_BINS;
+                    double span = bin_hi - bin_lo;
+                    point[d] = bin_lo + u * span;
+                } else {
+                    point[d] = u;
+                }
+            }
+            targeted_unit.push_back(point);
+        }
+
+        auto targeted_scaled = scale_lhs_samples(targeted_unit, bounds);
+        samples.insert(samples.end(), targeted_scaled.begin(), targeted_scaled.end());
+    }
+
+    return samples;
+}
+
 std::expected<RefinementResult, PriceTableError> run_refinement(
     const AdaptiveGridParams& params,
     BuildFn build_fn,
@@ -375,57 +430,14 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         stats.pde_solves_table = handle.pde_solves;
 
         // b. GENERATE VALIDATION SAMPLE
-        const size_t total_samples = params.validation_samples;
-        bool has_focus_bins = focus_active;
-        if (focus_active) {
-            has_focus_bins = std::any_of(focus_bins.begin(), focus_bins.end(),
-                                         [](const std::vector<size_t>& bins) { return !bins.empty(); });
-        }
-
-        size_t base_samples = (has_focus_bins && total_samples > 1)
-            ? std::max<size_t>(total_samples / 2, 1)
-            : total_samples;
-        size_t targeted_samples = has_focus_bins ? total_samples - base_samples : 0;
-
-        auto base_unit_samples = latin_hypercube_4d(base_samples,
-                                                    params.lhs_seed + iteration);
-
         std::array<std::pair<double, double>, 4> bounds = {{
             {min_moneyness, max_moneyness},
             {min_tau, max_tau},
             {min_vol, max_vol},
             {min_rate, max_rate}
         }};
-        std::vector<std::array<double, 4>> samples = scale_lhs_samples(base_unit_samples, bounds);
-
-        if (targeted_samples > 0 && has_focus_bins) {
-            std::mt19937_64 targeted_rng(params.lhs_seed ^ (iteration * 1315423911ULL + 0x9e3779b97f4a7c15ULL));
-            std::uniform_real_distribution<double> uniform(0.0, 1.0);
-
-            std::vector<std::array<double, 4>> targeted_unit;
-            targeted_unit.reserve(targeted_samples);
-
-            for (size_t i = 0; i < targeted_samples; ++i) {
-                std::array<double, 4> point{};
-                for (size_t d = 0; d < 4; ++d) {
-                    double u = uniform(targeted_rng);
-                    if (!focus_bins[d].empty()) {
-                        const auto& dim_bins = focus_bins[d];
-                        size_t bin = dim_bins[i % dim_bins.size()];
-                        double bin_lo = static_cast<double>(bin) / ErrorBins::N_BINS;
-                        double bin_hi = static_cast<double>(bin + 1) / ErrorBins::N_BINS;
-                        double span = bin_hi - bin_lo;
-                        point[d] = bin_lo + u * span;
-                    } else {
-                        point[d] = u;
-                    }
-                }
-                targeted_unit.push_back(point);
-            }
-
-            auto targeted_scaled = scale_lhs_samples(targeted_unit, bounds);
-            samples.insert(samples.end(), targeted_scaled.begin(), targeted_scaled.end());
-        }
+        auto samples = generate_validation_samples(
+            params, iteration, bounds, focus_bins, focus_active);
 
         // c. VALIDATE AGAINST FRESH FD SOLVES
         double max_error = 0.0;
