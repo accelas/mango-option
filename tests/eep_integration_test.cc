@@ -4,7 +4,7 @@
 
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
 #include <gtest/gtest.h>

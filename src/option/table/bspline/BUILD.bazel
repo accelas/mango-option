@@ -88,8 +88,8 @@ cc_library(
 )
 
 cc_library(
-    name = "eep_decomposer",
-    hdrs = ["eep_decomposer.hpp"],
+    name = "bspline_tensor_accessor",
+    hdrs = ["bspline_tensor_accessor.hpp"],
     deps = [
         ":bspline_builder",
         "//src/option:european_option",

@@ -14,7 +14,7 @@
 #include "tests/quantlib_validation_framework.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

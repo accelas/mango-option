@@ -5,7 +5,7 @@
 //
 // Sweeps PriceTableGridAccuracyParams.target_iv_error from coarse to fine,
 // measuring interpolated IV accuracy against FDM ground truth.
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/iv_solver.hpp"

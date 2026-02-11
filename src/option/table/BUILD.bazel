@@ -45,7 +45,7 @@ cc_library(
     deps = [
         ":adaptive_grid_types",
         "//src/option:dividend_utils",
-        "//src/option/table/bspline:eep_decomposer",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         ":identity_eep",
         ":multi_kref_split",
         "//src/option/table/bspline:bspline_builder",

@@ -896,7 +896,7 @@ cc_test(
         "//src/option:interpolated_iv_solver",
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table/bspline:eep_decomposer",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],
@@ -1119,7 +1119,7 @@ cc_test(
         "//src/option:interpolated_iv_solver",
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table/bspline:eep_decomposer",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "@googletest//:gtest_main",
     ],
 )
@@ -1284,7 +1284,7 @@ cc_test(
     deps = [
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table/bspline:eep_decomposer",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "//src/option:american_option_batch",
         "//src/option:interpolated_iv_solver",
         "//src/pde/core:grid",
@@ -1371,7 +1371,7 @@ cc_test(
     deps = [
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
-        "//src/option/table/bspline:eep_decomposer",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "//src/option:american_option",
         "//src/pde/core:pde_workspace",
         "@googletest//:gtest",
@@ -1417,7 +1417,7 @@ cc_test(
     srcs = ["price_table_builder_raw_price_test.cc"],
     deps = [
         "//src/option/table/bspline:bspline_builder",
-        "//src/option/table/bspline:eep_decomposer",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "@googletest//:gtest_main",
     ],
 )

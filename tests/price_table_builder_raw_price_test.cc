@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 
 using namespace mango;
 

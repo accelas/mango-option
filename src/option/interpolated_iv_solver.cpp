@@ -11,7 +11,7 @@
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/adaptive_grid_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/bspline/eep_decomposer.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
