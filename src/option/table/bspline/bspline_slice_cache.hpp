@@ -15,7 +15,7 @@ namespace mango {
 
 /// Cache for (sigma, r) -> AmericanOptionResult mappings
 ///
-/// Used by AdaptiveGridBuilder to avoid re-solving PDE for unchanged slices.
+/// Used by build_adaptive_bspline() to avoid re-solving PDE for unchanged slices.
 /// Cache is invalidated when tau grid changes (PDE solve depends on maturity).
 class SliceCache {
 public:

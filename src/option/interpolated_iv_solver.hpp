@@ -213,7 +213,7 @@ private:
 ///   - Chebyshev + continuous → Chebyshev tensor surface
 ///   - Chebyshev + discrete → segmented Chebyshev surface (requires adaptive)
 ///
-/// When adaptive is set, uses AdaptiveGridBuilder to automatically refine
+/// When adaptive is set, uses adaptive refinement to automatically refine
 /// grid density until the target IV error is met.
 ///
 /// @param config Solver configuration

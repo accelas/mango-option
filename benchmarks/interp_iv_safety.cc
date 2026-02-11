@@ -702,7 +702,11 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
                       "Chebyshev Adaptive IV Error (bps) — σ=%.0f%%",
                       kVols[vi] * 100);
         all_errors[vi] = compute_errors_from_price_fn(
-            prices, result->price_fn, vi);
+            prices,
+            [&](double spot, double strike, double tau, double sigma, double rate) {
+                return result->surface->price(spot, strike, tau, sigma, rate);
+            },
+            vi);
         print_heatmap(title, all_errors[vi]);
     }
     return all_errors;

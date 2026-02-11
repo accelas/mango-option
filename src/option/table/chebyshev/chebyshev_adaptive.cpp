@@ -2,9 +2,9 @@
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
-#include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/option_spec.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/pde_slice_cache.hpp"
@@ -37,13 +37,15 @@ struct ChebyshevBuildConfig {
     double dividend_yield = 0.0;
 };
 
-/// State for Chebyshev CC-level refinement
+/// State for Chebyshev CC-level refinement.
+/// All 4 dimensions use Clenshaw-Curtis levels for nested node placement.
+/// Node count at level l = 2^l + 1.
 struct ChebyshevRefinementState {
+    size_t m_level = 5;       // CC level for moneyness (initial: 33 nodes)
+    size_t tau_level = 3;     // CC level for tau (initial: 9 nodes)
     size_t sigma_level = 2;   // CC level for sigma (initial: 5 nodes)
     size_t rate_level = 1;    // CC level for rate (initial: 3 nodes)
-    size_t num_m = 40;        // CGL node count for moneyness
-    size_t num_tau = 15;      // CGL node count for tau
-    size_t max_level = 6;     // ceiling (2^6+1 = 65 nodes)
+    size_t max_level = 7;     // ceiling per dimension (2^7+1 = 129 nodes)
     // Frozen extended domain bounds
     double m_lo, m_hi, tau_lo, tau_hi;
     double sigma_lo, sigma_hi, rate_lo, rate_hi;
@@ -63,14 +65,16 @@ struct SegmentedChebyshevBuildConfig {
 
 /// Create a BuildFn for the adaptive refinement loop that builds Chebyshev surfaces.
 /// Reuses PDE solutions across refinement iterations via PDESliceCache.
+/// The last_surface side-channel captures the typed surface from each build.
 static BuildFn make_chebyshev_build_fn(
     PDESliceCache& cache,
-    const ChebyshevBuildConfig& config)
+    const ChebyshevBuildConfig& config,
+    std::shared_ptr<ChebyshevRawSurface>& last_surface)
 {
     // Track tau grid size to detect tau refinement (requires full re-solve)
     auto last_tau_size = std::make_shared<size_t>(0);
 
-    return [&cache, config, last_tau_size](
+    return [&cache, config, last_tau_size, &last_surface](
         std::span<const double> m_nodes,
         std::span<const double> tau_nodes,
         std::span<const double> sigma_nodes,
@@ -186,6 +190,7 @@ static BuildFn make_chebyshev_build_fn(
         auto shared = std::make_shared<ChebyshevRawSurface>(
             std::move(leaf), bounds,
             config.option_type, config.dividend_yield);
+        last_surface = shared;
 
         return SurfaceHandle{
             .price = [shared](double spot, double strike, double tau,
@@ -416,9 +421,12 @@ static BuildFn make_segmented_chebyshev_build_fn(
 }
 
 /// Create a RefineFn for Chebyshev CC-level refinement.
-/// Bumps CC levels on sigma/rate, increases CGL counts on m/tau.
-/// When worst_dim is maxed out, falls through to the next dimension
-/// in priority order (0->1->2->3) to avoid premature termination.
+/// All 4 dimensions use nested CC levels (2^l+1 nodes at level l).
+///
+/// Balanced strategy: use error_bins worst_dim as primary signal, but
+/// prevent runaway anisotropy by refusing to bump a dimension that is
+/// already >2 levels ahead of the minimum.  Falls back to bumping the
+/// dimension with the lowest current level.
 static RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state) {
     return [&state](size_t worst_dim, const ErrorBins& /*error_bins*/,
                     std::vector<double>& moneyness,
@@ -426,48 +434,52 @@ static RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state) {
                     std::vector<double>& vol,
                     std::vector<double>& rate) -> bool
     {
-        // Try worst_dim first, then cycle through remaining dims
-        for (size_t attempt = 0; attempt < 4; ++attempt) {
-            size_t dim = (worst_dim + attempt) % 4;
-            switch (dim) {
-            case 0: {  // moneyness: grow CGL count by ~30%
-                size_t new_n = std::min(
-                    static_cast<size_t>(state.num_m * 1.3), size_t{80});
-                if (new_n <= state.num_m) break;
-                state.num_m = new_n;
-                moneyness = chebyshev_nodes(new_n, state.m_lo, state.m_hi);
-                return true;
-            }
-            case 1: {  // tau: grow CGL count by ~30%
-                size_t new_n = std::min(
-                    static_cast<size_t>(state.num_tau * 1.3), size_t{30});
-                if (new_n <= state.num_tau) break;
-                state.num_tau = new_n;
-                tau = chebyshev_nodes(new_n, state.tau_lo, state.tau_hi);
-                return true;
-            }
-            case 2: {  // sigma: bump CC level
-                if (state.sigma_level >= state.max_level) break;
-                state.sigma_level++;
-                vol = cc_level_nodes(
-                    state.sigma_level, state.sigma_lo, state.sigma_hi);
-                return true;
-            }
-            case 3: {  // rate: bump CC level
-                if (state.rate_level >= state.max_level) break;
-                state.rate_level++;
-                rate = cc_level_nodes(
-                    state.rate_level, state.rate_lo, state.rate_hi);
-                return true;
-            }
-            }
+        std::array<size_t*, 4> levels = {
+            &state.m_level, &state.tau_level,
+            &state.sigma_level, &state.rate_level
+        };
+        std::array<std::vector<double>*, 4> grids = {
+            &moneyness, &tau, &vol, &rate
+        };
+        std::array<double, 4> lo = {
+            state.m_lo, state.tau_lo, state.sigma_lo, state.rate_lo
+        };
+        std::array<double, 4> hi = {
+            state.m_hi, state.tau_hi, state.sigma_hi, state.rate_hi
+        };
+
+        // Find minimum CC level across all dimensions
+        size_t min_level = state.max_level;
+        for (size_t d = 0; d < 4; ++d) {
+            min_level = std::min(min_level, *levels[d]);
         }
-        return false;  // All dimensions maxed out
+
+        // Try worst_dim first if it isn't too far ahead
+        constexpr size_t kMaxSpread = 2;
+        size_t dim = worst_dim;
+        if (*levels[dim] >= state.max_level ||
+            *levels[dim] > min_level + kMaxSpread) {
+            // Fall back: find lowest-level dimension that can be bumped
+            dim = 4;  // sentinel
+            size_t lowest = state.max_level;
+            for (size_t d = 0; d < 4; ++d) {
+                if (*levels[d] < state.max_level && *levels[d] < lowest) {
+                    lowest = *levels[d];
+                    dim = d;
+                }
+            }
+            if (dim == 4) return false;  // All maxed out
+        }
+
+        (*levels[dim])++;
+        *grids[dim] = cc_level_nodes(*levels[dim], lo[dim], hi[dim]);
+        return true;
     };
 }
 
 /// Create a RefineFn for segmented Chebyshev CC-level refinement.
-/// Tau refinement generates per-segment CGL nodes instead of a single range.
+/// Tau refinement generates per-segment CC-level nodes instead of a single
+/// range.  Uses the same balanced strategy as the vanilla refine function.
 static RefineFn make_segmented_chebyshev_refine_fn(
     ChebyshevRefinementState& state)
 {
@@ -477,55 +489,63 @@ static RefineFn make_segmented_chebyshev_refine_fn(
                     std::vector<double>& vol,
                     std::vector<double>& rate) -> bool
     {
-        for (size_t attempt = 0; attempt < 4; ++attempt) {
-            size_t dim = (worst_dim + attempt) % 4;
-            switch (dim) {
-            case 0: {
-                size_t new_n = std::min(
-                    static_cast<size_t>(state.num_m * 1.3), size_t{80});
-                if (new_n <= state.num_m) break;
-                state.num_m = new_n;
-                moneyness = chebyshev_nodes(new_n, state.m_lo, state.m_hi);
-                return true;
-            }
-            case 1: {
-                // Lower cap per segment (15) -- higher counts cause Chebyshev
-                // oscillation near exercise boundary due to tensor product.
-                size_t new_n = std::min(
-                    static_cast<size_t>(state.num_tau * 1.3), size_t{15});
-                if (new_n <= state.num_tau) break;
-                state.num_tau = new_n;
-                tau.clear();
-                for (size_t s = 0; s + 1 < state.seg_boundaries.size(); ++s) {
-                    if (state.seg_is_gap[s]) continue;
-                    double lo = state.seg_boundaries[s];
-                    double hi = state.seg_boundaries[s + 1];
-                    for (double t : chebyshev_nodes(new_n, lo, hi))
-                        tau.push_back(t);
-                }
-                std::sort(tau.begin(), tau.end());
-                tau.erase(std::unique(tau.begin(), tau.end(),
-                    [](double a, double b) { return std::abs(a - b) < 1e-10; }),
-                    tau.end());
-                return true;
-            }
-            case 2: {
-                if (state.sigma_level >= state.max_level) break;
-                state.sigma_level++;
-                vol = cc_level_nodes(
-                    state.sigma_level, state.sigma_lo, state.sigma_hi);
-                return true;
-            }
-            case 3: {
-                if (state.rate_level >= state.max_level) break;
-                state.rate_level++;
-                rate = cc_level_nodes(
-                    state.rate_level, state.rate_lo, state.rate_hi);
-                return true;
-            }
-            }
+        std::array<size_t*, 4> levels = {
+            &state.m_level, &state.tau_level,
+            &state.sigma_level, &state.rate_level
+        };
+
+        // Find minimum CC level
+        size_t min_level = state.max_level;
+        for (size_t d = 0; d < 4; ++d) {
+            min_level = std::min(min_level, *levels[d]);
         }
-        return false;
+
+        // Balanced dimension selection (same as vanilla)
+        constexpr size_t kMaxSpread = 2;
+        size_t dim = worst_dim;
+        if (*levels[dim] >= state.max_level ||
+            *levels[dim] > min_level + kMaxSpread) {
+            dim = 4;
+            size_t lowest = state.max_level;
+            for (size_t d = 0; d < 4; ++d) {
+                if (*levels[d] < state.max_level && *levels[d] < lowest) {
+                    lowest = *levels[d];
+                    dim = d;
+                }
+            }
+            if (dim == 4) return false;
+        }
+
+        (*levels[dim])++;
+
+        switch (dim) {
+        case 0:
+            moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
+            break;
+        case 1: {
+            // Per-segment CC-level tau nodes
+            tau.clear();
+            for (size_t s = 0; s + 1 < state.seg_boundaries.size(); ++s) {
+                if (state.seg_is_gap[s]) continue;
+                double seg_lo = state.seg_boundaries[s];
+                double seg_hi = state.seg_boundaries[s + 1];
+                for (double t : cc_level_nodes(state.tau_level, seg_lo, seg_hi))
+                    tau.push_back(t);
+            }
+            std::sort(tau.begin(), tau.end());
+            tau.erase(std::unique(tau.begin(), tau.end(),
+                [](double a, double b) { return std::abs(a - b) < 1e-10; }),
+                tau.end());
+            break;
+        }
+        case 2:
+            vol = cc_level_nodes(state.sigma_level, state.sigma_lo, state.sigma_hi);
+            break;
+        case 3:
+            rate = cc_level_nodes(state.rate_level, state.rate_lo, state.rate_hi);
+            break;
+        }
+        return true;
     };
 }
 
@@ -547,20 +567,30 @@ build_adaptive_chebyshev(
     auto ctx = std::move(*domain);
     ctx.option_type = type;
 
-    // Frozen headroom computed from reference CC node counts
+    // Initial CC levels for each dimension
+    constexpr size_t kInitMLevel = 5;      // 33 nodes
+    constexpr size_t kInitTauLevel = 3;    // 9 nodes
+    constexpr size_t kInitSigmaLevel = 2;  // 5 nodes
+    constexpr size_t kInitRateLevel = 1;   // 3 nodes
+
+    // Frozen headroom computed from initial CC node counts
     auto hfn = [](double lo, double hi, size_t n) {
         return 3.0 * (hi - lo)
              / static_cast<double>(std::max(n, size_t{4}) - 1);
     };
-    double hm = hfn(ctx.min_moneyness, ctx.max_moneyness, 40);
-    double ht = hfn(ctx.min_tau, ctx.max_tau, 15);
-    double hs = hfn(ctx.min_vol, ctx.max_vol, 15);
-    double hr = hfn(ctx.min_rate, ctx.max_rate, 9);
+    double hm = hfn(ctx.min_moneyness, ctx.max_moneyness,
+                     (1u << kInitMLevel) + 1);
+    double ht = hfn(ctx.min_tau, ctx.max_tau,
+                     (1u << kInitTauLevel) + 1);
+    double hs = hfn(ctx.min_vol, ctx.max_vol,
+                     (1u << kInitSigmaLevel) + 1);
+    double hr = hfn(ctx.min_rate, ctx.max_rate,
+                     (1u << kInitRateLevel) + 1);
 
     ChebyshevRefinementState state{
-        .sigma_level = 2, .rate_level = 1,
-        .num_m = 40, .num_tau = 15,
-        .max_level = 6,
+        .m_level = kInitMLevel, .tau_level = kInitTauLevel,
+        .sigma_level = kInitSigmaLevel, .rate_level = kInitRateLevel,
+        .max_level = 7,
         .m_lo = ctx.min_moneyness - hm,
         .m_hi = ctx.max_moneyness + hm,
         .tau_lo = std::max(ctx.min_tau - ht, 1e-4),
@@ -584,21 +614,20 @@ build_adaptive_chebyshev(
         .dividend_yield = chain.dividend_yield,
     };
 
-    auto build_fn = make_chebyshev_build_fn(pde_cache, build_cfg);
+    std::shared_ptr<ChebyshevRawSurface> last_surface;
+    auto build_fn = make_chebyshev_build_fn(pde_cache, build_cfg, last_surface);
     auto refine_fn = make_chebyshev_refine_fn(state);
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
 
-    // BS European vega: O(1), never fails, avoids 2 extra PDE solves per
-    // validation sample that the FD American vega path requires.
-    auto compute_error_fn = make_bs_vega_error_fn(params);
+    auto compute_error_fn = make_fd_vega_error_fn(params, validate_fn, type);
 
-    // Seed initial grids: CGL nodes for m/tau, CC-level nodes for sigma/rate
+    // Seed initial grids: CC-level nodes for all dimensions (nested)
     InitialGrids initial;
-    initial.moneyness = chebyshev_nodes(state.num_m, state.m_lo, state.m_hi);
-    initial.tau = chebyshev_nodes(state.num_tau, state.tau_lo, state.tau_hi);
+    initial.moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
+    initial.tau = cc_level_nodes(state.tau_level, state.tau_lo, state.tau_hi);
     initial.vol = cc_level_nodes(state.sigma_level, state.sigma_lo, state.sigma_hi);
     initial.rate = cc_level_nodes(state.rate_level, state.rate_lo, state.rate_hi);
-    initial.exact = true;  // Preserve CGL node placement
+    initial.exact = true;  // Preserve CC node placement
 
     auto grid_result = run_refinement(
         params, build_fn, validate_fn, refine_fn, ctx,
@@ -609,26 +638,26 @@ build_adaptive_chebyshev(
 
     auto& grids = grid_result.value();
 
-    // Build final Chebyshev surface from the converged grids
-    auto final_surface = build_fn(grids.moneyness, grids.tau,
-                                  grids.vol, grids.rate);
-    if (!final_surface.has_value()) {
-        return std::unexpected(final_surface.error());
+    // Build final Chebyshev surface from the converged grids.
+    // The side-channel last_surface captures the typed ChebyshevRawSurface.
+    auto final_handle = build_fn(grids.moneyness, grids.tau,
+                                 grids.vol, grids.rate);
+    if (!final_handle.has_value()) {
+        return std::unexpected(final_handle.error());
     }
 
     ChebyshevAdaptiveResult result;
-    result.price_fn = std::move(final_surface->price);
+    result.surface = std::move(last_surface);
     result.iterations = std::move(grids.iterations);
     result.achieved_max_error = grids.achieved_max_error;
     result.achieved_avg_error = grids.achieved_avg_error;
     result.target_met = grids.target_met;
     result.total_pde_solves = pde_cache.total_pde_solves();
-    // BS European vega is O(1) -- no extra PDE solves per validation sample
 
     return result;
 }
 
-std::expected<ChebyshevAdaptiveResult, PriceTableError>
+std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
 build_adaptive_chebyshev_segmented(
     const AdaptiveGridParams& params,
     const SegmentedAdaptiveConfig& config,
@@ -687,15 +716,21 @@ build_adaptive_chebyshev_segmented(
     expand_domain_bounds(min_tau, max_tau, 0.1, kMinPositive);
     max_tau = std::min(max_tau, config.maturity);
 
-    // Chebyshev headroom
+    // Initial CC levels for segmented path
+    constexpr size_t kInitMLevel = 5;      // 33 nodes
+    constexpr size_t kInitTauLevel = 3;    // 9 nodes per segment
+    constexpr size_t kInitSigmaLevel = 2;  // 5 nodes
+    constexpr size_t kInitRateLevel = 1;   // 3 nodes
+
+    // Chebyshev headroom from initial CC node counts
     auto hfn = [](double lo, double hi, size_t n) {
         return 3.0 * (hi - lo)
              / static_cast<double>(std::max(n, size_t{4}) - 1);
     };
-    double hm = hfn(min_m, max_m, 40);
-    double ht = hfn(min_tau, max_tau, 15);
-    double hs = hfn(min_vol, max_vol, 15);
-    double hr = hfn(min_rate, max_rate, 9);
+    double hm = hfn(min_m, max_m, (1u << kInitMLevel) + 1);
+    double ht = hfn(min_tau, max_tau, (1u << kInitTauLevel) + 1);
+    double hs = hfn(min_vol, max_vol, (1u << kInitSigmaLevel) + 1);
+    double hr = hfn(min_rate, max_rate, (1u << kInitRateLevel) + 1);
 
     // 3. Compute segment boundaries
     auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(
@@ -703,9 +738,9 @@ build_adaptive_chebyshev_segmented(
 
     // 4. Adaptive refinement at probe K_ref = spot
     ChebyshevRefinementState state{
-        .sigma_level = 2, .rate_level = 1,
-        .num_m = 40, .num_tau = 10,
-        .max_level = 6,
+        .m_level = kInitMLevel, .tau_level = kInitTauLevel,
+        .sigma_level = kInitSigmaLevel, .rate_level = kInitRateLevel,
+        .max_level = 7,
         .m_lo = min_m - hm,
         .m_hi = max_m + hm,
         .tau_lo = std::max(min_tau - ht, 1e-4),
@@ -732,17 +767,18 @@ build_adaptive_chebyshev_segmented(
     auto refine_fn = make_segmented_chebyshev_refine_fn(state);
     auto validate_fn = make_validate_fn(
         config.dividend_yield, config.option_type, config.discrete_dividends);
-    auto compute_error_fn = make_bs_vega_error_fn(params);
+    auto compute_error_fn = make_fd_vega_error_fn(
+        params, validate_fn, config.option_type);
 
-    // Seed initial tau: union of per-segment CGL nodes (skip gap segments)
+    // Seed initial tau: union of per-segment CC-level nodes (skip gap segments)
     InitialGrids initial;
-    initial.moneyness = chebyshev_nodes(state.num_m, state.m_lo, state.m_hi);
+    initial.moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
     initial.tau.clear();
     for (size_t s = 0; s + 1 < seg_bounds.size(); ++s) {
         if (seg_is_gap[s]) continue;
-        double lo = seg_bounds[s];
-        double hi = seg_bounds[s + 1];
-        for (double t : chebyshev_nodes(state.num_tau, lo, hi))
+        double seg_lo = seg_bounds[s];
+        double seg_hi = seg_bounds[s + 1];
+        for (double t : cc_level_nodes(state.tau_level, seg_lo, seg_hi))
             initial.tau.push_back(t);
     }
     if (initial.tau.empty()) {
@@ -803,7 +839,7 @@ build_adaptive_chebyshev_segmented(
     }
 
     // 6. Assemble multi-K_ref
-    ChebyshevAdaptiveResult result;
+    ChebyshevSegmentedAdaptiveResult result;
 
     if (K_refs.size() == 1) {
         result.price_fn = std::move(kref_fns[0]);

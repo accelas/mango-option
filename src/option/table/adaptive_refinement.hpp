@@ -47,10 +47,10 @@ struct RefinementResult {
     std::vector<double> tau;
     std::vector<double> vol;
     std::vector<double> rate;
-    int tau_points;
-    double achieved_max_error;
-    double achieved_avg_error;
-    bool target_met;
+    int tau_points = 0;
+    double achieved_max_error = 0.0;
+    double achieved_avg_error = 0.0;
+    bool target_met = false;
     std::vector<IterationStats> iterations;
 };
 
@@ -223,8 +223,12 @@ SegmentBoundaries compute_segment_boundaries(
 double compute_iv_error(double price_error, double vega,
                         double vega_floor, double target_iv_error);
 
-/// Error function using BS European vega (cheap, for segmented path).
-ComputeErrorFn make_bs_vega_error_fn(const AdaptiveGridParams& params);
+/// Error function using FD American vega with TV/K filter.
+/// 2 extra PDE solves per validation sample — acceptable at build time.
+/// Skips points where TV/K < 1e-4 (IV undefined, error metric meaningless).
+ComputeErrorFn make_fd_vega_error_fn(const AdaptiveGridParams& params,
+                                      const ValidateFn& validate_fn,
+                                      OptionType option_type);
 
 /// Create a ValidateFn that solves a single American option via FD.
 ValidateFn make_validate_fn(double dividend_yield,

@@ -185,6 +185,8 @@ cc_binary(
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/bspline:bspline_segmented_builder",
         "//src/option/table/bspline:bspline_tensor_accessor",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/chebyshev:chebyshev_surface",
         "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],

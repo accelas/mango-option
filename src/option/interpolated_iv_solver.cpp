@@ -424,9 +424,8 @@ build_chebyshev_segmented(const IVSolverFactoryConfig& config,
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    // Segmented Chebyshev returns a type-erased price_fn via ChebyshevAdaptiveResult.
-    // The underlying surface is a split SurfaceHandle, not a typed PriceTable,
-    // so it can't be wrapped into AnyIVSolver directly.
+    // Segmented Chebyshev returns a type-erased price_fn (multi-K_ref blending).
+    // It can't be wrapped into AnyIVSolver (needs typed PriceTable for Newton).
     // Fall back to B-spline segmented path which produces a typed surface.
     return build_bspline_segmented(config, divs);
 }

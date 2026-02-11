@@ -41,7 +41,6 @@ cc_library(
     deps = [
         ":chebyshev_surface",
         ":pde_slice_cache",
-        "//src/math:black_scholes_analytics",
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:american_option_batch",
         "//src/option:dividend_utils",

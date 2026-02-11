@@ -505,6 +505,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
+    params.min_moneyness_points = 10;  // Use smaller grid for test speed
 
     // spot=100, K_refs sorted: {100, 110, 120, 130}
     // Lowest=100, highest=130, ATM=100 (closest to spot)

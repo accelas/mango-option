@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/adaptive_refinement.hpp"
-#include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/latin_hypercube.hpp"
 #include "mango/option/american_option.hpp"
+#include "mango/option/option_spec.hpp"
 #include "mango/option/dividend_utils.hpp"
 #include <algorithm>
 #include <cmath>
@@ -122,16 +122,39 @@ double compute_iv_error(double price_error, double vega,
     return iv_error;
 }
 
-ComputeErrorFn make_bs_vega_error_fn(const AdaptiveGridParams& params) {
+ComputeErrorFn make_fd_vega_error_fn(const AdaptiveGridParams& params,
+                                      const ValidateFn& validate_fn,
+                                      OptionType option_type) {
     double vega_floor = params.vega_floor;
     double target = params.target_iv_error;
-    return [vega_floor, target](
+    // Copy validate_fn by value so the returned lambda is self-contained.
+    return [vega_floor, target, validate_fn, option_type](
         double interp, double ref_price,
         double spot, double strike, double tau,
-        double sigma, double rate, double div_yield) -> double
+        double sigma, double rate, double /*div_yield*/) -> double
     {
+        // TV/K filter: skip points where IV is undefined
+        constexpr double kTVKThreshold = 1e-4;
+        double intrinsic = intrinsic_value(spot, strike, option_type);
+        if ((ref_price - intrinsic) / strike < kTVKThreshold) {
+            return 0.0;
+        }
+
         double price_error = std::abs(interp - ref_price);
-        double vega = bs_vega(spot, strike, tau, sigma, rate, div_yield);
+
+        // FD American vega via central difference
+        double eps = std::max(1e-4, 0.01 * sigma);
+        double sigma_dn = std::max(1e-4, sigma - eps);
+        double sigma_up = sigma + eps;
+        double effective_eps = (sigma_up - sigma_dn) / 2.0;
+
+        auto fd_up = validate_fn(spot, strike, tau, sigma_up, rate);
+        auto fd_dn = validate_fn(spot, strike, tau, sigma_dn, rate);
+
+        double vega = 0.0;
+        if (fd_up.has_value() && fd_dn.has_value() && effective_eps > 1e-6) {
+            vega = (fd_up.value() - fd_dn.value()) / (2.0 * effective_eps);
+        }
         return compute_iv_error(price_error, vega, vega_floor, target);
     };
 }

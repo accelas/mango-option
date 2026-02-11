@@ -11,8 +11,8 @@
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/option_spec.hpp"
 #include "mango/option/dividend_utils.hpp"
-#include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/math/latin_hypercube.hpp"
 #include "mango/pde/core/time_domain.hpp"
@@ -260,7 +260,8 @@ probe_and_build(
             config.dividend_yield, config.option_type,
             config.discrete_dividends);
 
-        auto compute_error_fn = make_bs_vega_error_fn(params);
+        auto compute_error_fn = make_fd_vega_error_fn(
+            params, validate_fn, config.option_type);
 
         RefinementContext ctx{
             .spot = config.spot,
@@ -403,13 +404,6 @@ BatchAmericanOptionResult solve_missing_slices(
 
     // Should not reach here -- PDEGridSpec is a variant with two alternatives
     return {};
-}
-
-/// Compute IV error metric from price error and vega
-static double compute_error_metric(const AdaptiveGridParams& params,
-                                   double price_error, double vega) {
-    return compute_iv_error(price_error, vega,
-                            params.vega_floor, params.target_iv_error);
 }
 
 static BatchAmericanOptionResult merge_results(
@@ -664,37 +658,7 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
 
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
 
-    // compute_error: FD American vega for standard path
-    auto compute_error_fn = [&params, &validate_fn](
-        double interp_price, double ref_price,
-        double spot, double strike, double tau,
-        double sigma, double rate,
-        double /*dividend_yield*/) -> double
-    {
-        double price_error = std::abs(interp_price - ref_price);
-
-        // Compute American vega via central finite difference
-        double eps = std::max(1e-4, 0.01 * sigma);
-
-        // Ensure sigma - eps stays positive (minimum 1e-4)
-        double sigma_dn = std::max(1e-4, sigma - eps);
-        double sigma_up = sigma + eps;
-
-        // Adjust eps if we had to clamp sigma_dn
-        double effective_eps = (sigma_up - sigma_dn) / 2.0;
-
-        auto fd_up = validate_fn(spot, strike, tau, sigma_up, rate);
-        auto fd_dn = validate_fn(spot, strike, tau, sigma_dn, rate);
-
-        double vega;
-        if (fd_up.has_value() && fd_dn.has_value() && effective_eps > 1e-6) {
-            vega = (fd_up.value() - fd_dn.value()) / (2.0 * effective_eps);
-        } else {
-            // FD bump failed or eps too small -- clamp to floor inside compute_error_metric
-            vega = 0.0;
-        }
-        return compute_error_metric(params, price_error, vega);
-    };
+    auto compute_error_fn = make_fd_vega_error_fn(params, validate_fn, type);
 
     auto refine_fn = make_bspline_refine_fn(params);
     auto grid_result = run_refinement(params, build_fn, validate_fn,
@@ -767,6 +731,12 @@ build_adaptive_bspline_segmented(const AdaptiveGridParams& params,
     }
 
     // 4. Final multi-K_ref validation at arbitrary strikes
+    auto final_validate_fn = make_validate_fn(
+        config.dividend_yield, config.option_type,
+        config.discrete_dividends);
+    auto final_error_fn = make_fd_vega_error_fn(
+        params, final_validate_fn, config.option_type);
+
     auto final_samples = latin_hypercube_4d(
         params.validation_samples, params.lhs_seed + 999);
 
@@ -787,25 +757,17 @@ build_adaptive_bspline_segmented(const AdaptiveGridParams& params,
 
         double interp = surface->price(config.spot, strike, tau, sigma, rate);
 
-        PricingParams pp;
-        pp.spot = config.spot;
-        pp.strike = strike;
-        pp.maturity = tau;
-        pp.rate = rate;
-        pp.dividend_yield = config.dividend_yield;
-        pp.option_type = config.option_type;
-        pp.volatility = sigma;
-        pp.discrete_dividends = config.discrete_dividends;
-
-        auto fd = solve_american_option(pp);
+        auto fd = final_validate_fn(config.spot, strike, tau, sigma, rate);
         if (!fd.has_value()) continue;
 
-        double price_error = std::abs(interp - fd->value());
-        double vega = bs_vega(config.spot, strike, tau, sigma, rate, config.dividend_yield);
-        double err = compute_error_metric(params, price_error, vega);
+        double ref_price = fd.value();
+        double err = final_error_fn(
+            interp, ref_price,
+            config.spot, strike, tau, sigma, rate,
+            config.dividend_yield);
 
         final_max_error = std::max(final_max_error, err);
-        valid++;
+        if (err > 0.0) valid++;
     }
 
     if (valid > 0 && final_max_error > params.target_iv_error) {
