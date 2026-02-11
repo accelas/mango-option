@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/math/bspline_nd.hpp"
 #include "mango/math/bspline_basis.hpp"
 #include <algorithm>
@@ -9,10 +9,12 @@ namespace mango {
 template <size_t N>
 PriceTableSurfaceND<N>::PriceTableSurfaceND(
     PriceTableAxesND<N> axes,
-    PriceTableMetadata metadata,
+    double K_ref,
+    DividendSpec dividends,
     std::unique_ptr<BSplineND<double, N>> spline)
     : axes_(std::move(axes))
-    , meta_(std::move(metadata))
+    , K_ref_(K_ref)
+    , dividends_(std::move(dividends))
     , spline_(std::move(spline)) {}
 
 template <size_t N>
@@ -20,20 +22,12 @@ std::expected<std::shared_ptr<const PriceTableSurfaceND<N>>, PriceTableError>
 PriceTableSurfaceND<N>::build(
     PriceTableAxesND<N> axes,
     std::vector<double> coeffs,
-    PriceTableMetadata metadata)
+    double K_ref,
+    DividendSpec dividends)
 {
     // Validate axes
     if (auto valid = axes.validate(); !valid.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-    }
-
-    // Store log-moneyness bounds in metadata
-    // Axis 0 is log-moneyness ln(S/K)
-    if constexpr (N >= 1) {
-        if (!axes.grids[0].empty()) {
-            metadata.m_min = axes.grids[0].front();
-            metadata.m_max = axes.grids[0].back();
-        }
     }
 
     // Check coefficient size matches axes
@@ -67,7 +61,7 @@ PriceTableSurfaceND<N>::build(
     auto spline = std::make_unique<BSplineND<double, N>>(std::move(spline_result.value()));
 
     auto surface = std::shared_ptr<const PriceTableSurfaceND<N>>(
-        new PriceTableSurfaceND<N>(std::move(axes), std::move(metadata), std::move(spline)));
+        new PriceTableSurfaceND<N>(std::move(axes), K_ref, std::move(dividends), std::move(spline)));
 
     return surface;
 }
@@ -92,5 +86,46 @@ template class PriceTableSurfaceND<2>;
 template class PriceTableSurfaceND<3>;
 template class PriceTableSurfaceND<4>;
 template class PriceTableSurfaceND<5>;
+
+std::expected<BSplinePriceTable, std::string>
+make_bspline_surface(
+    std::shared_ptr<const PriceTableSurface> surface,
+    OptionType type)
+{
+    if (!surface) {
+        return std::unexpected(std::string("null surface"));
+    }
+
+    if (!surface->dividends().discrete_dividends.empty()) {
+        return std::unexpected(std::string("discrete dividends not supported; use segmented path"));
+    }
+
+    if (surface->K_ref() <= 0.0) {
+        return std::unexpected(std::string("invalid K_ref"));
+    }
+
+    double K_ref = surface->K_ref();
+    double dividend_yield = surface->dividends().dividend_yield;
+    const auto& axes = surface->axes();
+
+    SharedBSplineInterp<4> interp(surface);
+    StandardTransform4D xform;
+    AnalyticalEEP eep(type, dividend_yield);
+    BSplineTransformLeaf tleaf(std::move(interp), xform, K_ref);
+    BSplineLeaf leaf(std::move(tleaf), eep);
+
+    SurfaceBounds bounds{
+        .m_min = surface->m_min(),
+        .m_max = surface->m_max(),
+        .tau_min = axes.grids[1].front(),
+        .tau_max = axes.grids[1].back(),
+        .sigma_min = axes.grids[2].front(),
+        .sigma_max = axes.grids[2].back(),
+        .rate_min = axes.grids[3].front(),
+        .rate_max = axes.grids[3].back(),
+    };
+
+    return BSplinePriceTable(std::move(leaf), bounds, type, dividend_yield);
+}
 
 } // namespace mango

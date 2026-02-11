@@ -969,7 +969,7 @@ git commit -m "Add SplitSurface framework and split policies"
 
 ---
 
-### Task 5: BoundedSurface wrapper and new type aliases
+### Task 5: PriceTable wrapper and new type aliases
 
 **Files:**
 - Create: `src/option/table/bounded_surface.hpp`
@@ -984,14 +984,14 @@ Append to `tests/surface_concepts_test.cc`:
 #include "mango/option/table/bounded_surface.hpp"
 #include "mango/option/table/price_surface_concept.hpp"
 
-TEST(BoundedSurfaceTest, SatisfiesPriceSurfaceConcept) {
+TEST(PriceTableTest, SatisfiesPriceSurfaceConcept) {
     using StandardAdapter = EEPSurfaceAdapter<SharedBSplineInterp<4>,
                                                StandardTransform4D, AnalyticalEEP>;
-    static_assert(PriceSurface<BoundedSurface<StandardAdapter>>);
+    static_assert(PriceSurface<PriceTable<StandardAdapter>>);
 }
 ```
 
-**Step 2: Write BoundedSurface**
+**Step 2: Write PriceTable**
 
 ```cpp
 // src/option/table/bounded_surface.hpp
@@ -1013,9 +1013,9 @@ struct SurfaceBounds {
 /// Adds bounds and metadata to any inner surface that has price()/vega().
 /// Satisfies the PriceSurface concept required by InterpolatedIVSolver.
 template <typename Inner>
-class BoundedSurface {
+class PriceTable {
 public:
-    BoundedSurface(Inner inner, SurfaceBounds bounds,
+    PriceTable(Inner inner, SurfaceBounds bounds,
                    OptionType option_type, double dividend_yield)
         : inner_(std::move(inner))
         , bounds_(bounds)
@@ -1066,7 +1066,7 @@ Expected: ALL PASS
 ```bash
 git add src/option/table/bounded_surface.hpp \
         tests/surface_concepts_test.cc src/option/table/BUILD.bazel
-git commit -m "Add BoundedSurface wrapper"
+git commit -m "Add PriceTable wrapper"
 ```
 
 ---
@@ -1117,7 +1117,7 @@ using StandardLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
                                         StandardTransform4D, AnalyticalEEP>;
 
 /// Standard surface wrapper (satisfies PriceSurface concept)
-using StandardSurface = BoundedSurface<StandardLeaf>;
+using StandardSurface = PriceTable<StandardLeaf>;
 
 /// Leaf adapter for segmented surfaces (no EEP decomposition)
 using SegmentedLeaf = EEPSurfaceAdapter<SharedBSplineInterp<4>,
@@ -1130,7 +1130,7 @@ using SegmentedPriceSurface = SplitSurface<SegmentedLeaf, TauSegmentSplit>;
 using MultiKRefInner = SplitSurface<SegmentedPriceSurface, MultiKRefSplit>;
 
 /// Multi-K_ref wrapper (satisfies PriceSurface concept)
-using MultiKRefPriceSurface = BoundedSurface<MultiKRefInner>;
+using MultiKRefPriceSurface = PriceTable<MultiKRefInner>;
 
 // ===========================================================================
 // Legacy aliases for gradual migration
@@ -1142,7 +1142,7 @@ using StandardSurface = StandardLeaf;
 
 /// Create a StandardSurface from a pre-built EEP surface.
 [[nodiscard]] std::expected<StandardSurface, std::string>
-make_standard_surface(
+make_bspline_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type);
 
@@ -1154,11 +1154,11 @@ using DefaultInterpolatedIVSolver = InterpolatedIVSolver<StandardSurface>;
 
 Wait — `DefaultInterpolatedIVSolver` is defined in `interpolated_iv_solver.hpp`, not here. Don't move it. Just update the aliases.
 
-**Step 2: Rewrite make_standard_surface in standard_surface.cpp**
+**Step 2: Rewrite make_bspline_surface in standard_surface.cpp**
 
 ```cpp
 std::expected<StandardSurface, std::string>
-make_standard_surface(
+make_bspline_surface(
     std::shared_ptr<const PriceTableSurface> surface,
     OptionType type)
 {
@@ -1206,7 +1206,7 @@ Expected: ALL 116 PASS
 This is the highest-risk step. If tests fail, check:
 - `StandardSurface` still satisfies `PriceSurface` concept
 - `SplitSurface` `price()/vega()` produce identical values to `SplicedSurface`
-- `BoundedSurface` forwards all methods correctly
+- `PriceTable` forwards all methods correctly
 - `SegmentedPriceSurface` tau routing matches `SegmentLookup`
 - `MultiKRefInner` K_ref bracketing matches `KRefBracket`
 
@@ -1245,14 +1245,14 @@ In `interpolated_iv_solver.hpp`:
 - Template instantiations stay the same
 
 In `interpolated_iv_solver.cpp`:
-- `wrap_surface()` uses `make_standard_surface()` (already updated)
+- `wrap_surface()` uses `make_bspline_surface()` (already updated)
 - `wrap_multi_kref_surface()` constructs `MultiKRefPriceSurface` using new types
 - `build_multi_kref_manual()` uses new `SegmentedLeaf` + `TauSegmentSplit`
 
 **Step 2: Update adaptive_grid_builder**
 
 - `adaptive_grid_types.hpp`: `AdaptiveResult.surface` stays as `shared_ptr<const PriceTableSurface>` (the B-spline surface is still built by the builder)
-- `adaptive_grid_builder.cpp`: surface wrapping at the end uses `make_standard_surface()`
+- `adaptive_grid_builder.cpp`: surface wrapping at the end uses `make_bspline_surface()`
 
 **Step 3: Update segmented_price_table_builder**
 
@@ -1262,7 +1262,7 @@ Uses `build_segmented_surface()` which is already updated in Task 6.
 
 Most test files include `standard_surface.hpp` which now pulls in the new headers. Tests that directly reference old types (e.g., `SplicedSurface` in `spliced_surface_test.cc`) need updating:
 - `spliced_surface_test.cc` — test the new `SplitSurface` type instead
-- `price_surface_concept_test.cc` — already satisfied by `BoundedSurface`
+- `price_surface_concept_test.cc` — already satisfied by `PriceTable`
 
 **Step 5: Run ALL tests**
 

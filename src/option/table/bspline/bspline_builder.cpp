@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/recursion_helpers.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/support/ivcalc_trace.h"
@@ -26,7 +25,6 @@ PriceTableBuilderND<N>::PriceTableBuilderND(PriceTableConfig config)
 template <size_t N>
 std::expected<PriceTableResult<N>, PriceTableError>
 PriceTableBuilderND<N>::build(const PriceTableAxesND<N>& axes,
-                            SurfaceContent content,
                             TensorTransformFn transform) {
     static_assert(N == 4, "PriceTableBuilderND only supports N=4");
 
@@ -133,15 +131,9 @@ PriceTableBuilderND<N>::build(const PriceTableAxesND<N>& axes,
     auto coefficients = std::move(fit_result.coefficients);
     BSplineFittingStats fitting_stats = fit_result.stats;
 
-    // Step 6: Create metadata
-    PriceTableMetadata metadata{
-        .K_ref = config_.K_ref,
-        .dividends = config_.dividends,
-        .content = content,
-    };
-
-    // Step 7: Build immutable surface
-    auto surface_result = PriceTableSurfaceND<N>::build(axes, std::move(coefficients), metadata);
+    // Step 6: Build immutable surface
+    auto surface_result = PriceTableSurfaceND<N>::build(
+        axes, std::move(coefficients), config_.K_ref, config_.dividends);
     if (!surface_result.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
     }

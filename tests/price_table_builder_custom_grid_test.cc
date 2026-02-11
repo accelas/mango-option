@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include <cmath>
-#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
 #include "tests/price_table_builder_test_access.hpp"
 #include "mango/pde/core/time_domain.hpp"
 
