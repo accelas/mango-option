@@ -14,6 +14,15 @@ namespace mango {
 
 namespace {
 constexpr double kMinPositive = 1e-6;
+
+struct ValidationResult {
+    double max_error;
+    double avg_error;
+    size_t valid_samples;
+    size_t pde_solves_validation;
+    ErrorBins error_bins;
+};
+
 }  // namespace
 
 void expand_domain_bounds(double& lo, double& hi, double min_spread,
@@ -337,6 +346,75 @@ static std::vector<std::array<double, 4>> generate_validation_samples(
     return samples;
 }
 
+static std::expected<ValidationResult, PriceTableError>
+evaluate_samples(
+    const std::vector<std::array<double, 4>>& samples,
+    const SurfaceHandle& handle,
+    const ValidateFn& validate_fn,
+    const ComputeErrorFn& compute_error,
+    const RefinementContext& ctx,
+    double target_iv_error) {
+    double max_error = 0.0;
+    double sum_error = 0.0;
+    size_t valid_samples = 0;
+    size_t pde_solves_validation = 0;
+    ErrorBins error_bins;
+
+    for (const auto& sample : samples) {
+        double m = sample[0];
+        double tau = sample[1];
+        double sigma = sample[2];
+        double rate = sample[3];
+
+        // Interpolated price from surface via callback
+        double strike = ctx.spot * std::exp(-m);
+        double interp_price = handle.price(ctx.spot, strike, tau, sigma, rate);
+
+        // Fresh FD solve for reference via callback
+        auto fd_result = validate_fn(ctx.spot, strike, tau, sigma, rate);
+
+        if (!fd_result.has_value()) {
+            continue;  // Skip failed solves
+        }
+
+        pde_solves_validation++;
+
+        double ref_price = fd_result.value();
+        double iv_error = compute_error(
+            interp_price, ref_price,
+            ctx.spot, strike, tau, sigma, rate,
+            ctx.dividend_yield);
+        max_error = std::max(max_error, iv_error);
+        sum_error += iv_error;
+        valid_samples++;
+
+        // Normalize position for error bins
+        std::array<double, 4> norm_pos = {{
+            (m - ctx.min_moneyness) / (ctx.max_moneyness - ctx.min_moneyness),
+            (tau - ctx.min_tau) / (ctx.max_tau - ctx.min_tau),
+            (sigma - ctx.min_vol) / (ctx.max_vol - ctx.min_vol),
+            (rate - ctx.min_rate) / (ctx.max_rate - ctx.min_rate)
+        }};
+        error_bins.record_error(norm_pos, iv_error, target_iv_error);
+    }
+
+    if (valid_samples == 0) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::ExtractionFailed, /*axis=*/0, /*detail=*/0
+        });
+    }
+
+    double avg_error = sum_error / valid_samples;
+
+    return ValidationResult{
+        .max_error = max_error,
+        .avg_error = avg_error,
+        .valid_samples = valid_samples,
+        .pde_solves_validation = pde_solves_validation,
+        .error_bins = std::move(error_bins),
+    };
+}
+
 std::expected<RefinementResult, PriceTableError> run_refinement(
     const AdaptiveGridParams& params,
     BuildFn build_fn,
@@ -440,56 +518,17 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             params, iteration, bounds, focus_bins, focus_active);
 
         // c. VALIDATE AGAINST FRESH FD SOLVES
-        double max_error = 0.0;
-        double sum_error = 0.0;
-        size_t valid_samples = 0;
-        ErrorBins error_bins;
-
-        for (const auto& sample : samples) {
-            double m = sample[0];
-            double tau = sample[1];
-            double sigma = sample[2];
-            double rate = sample[3];
-
-            // Interpolated price from surface via callback
-            double strike = ctx.spot * std::exp(-m);
-            double interp_price = handle.price(ctx.spot, strike, tau, sigma, rate);
-
-            // Fresh FD solve for reference via callback
-            auto fd_result = validate_fn(ctx.spot, strike, tau, sigma, rate);
-
-            if (!fd_result.has_value()) {
-                continue;  // Skip failed solves
-            }
-
-            stats.pde_solves_validation++;
-
-            double ref_price = fd_result.value();
-            double iv_error = compute_error(
-                interp_price, ref_price,
-                ctx.spot, strike, tau, sigma, rate,
-                ctx.dividend_yield);
-            max_error = std::max(max_error, iv_error);
-            sum_error += iv_error;
-            valid_samples++;
-
-            // Normalize position for error bins
-            std::array<double, 4> norm_pos = {{
-                (m - min_moneyness) / (max_moneyness - min_moneyness),
-                (tau - min_tau) / (max_tau - min_tau),
-                (sigma - min_vol) / (max_vol - min_vol),
-                (rate - min_rate) / (max_rate - min_rate)
-            }};
-            error_bins.record_error(norm_pos, iv_error, params.target_iv_error);
+        auto eval_result = evaluate_samples(
+            samples, handle, validate_fn, compute_error,
+            ctx, params.target_iv_error);
+        if (!eval_result.has_value()) {
+            return std::unexpected(eval_result.error());
         }
-
-        if (valid_samples == 0) {
-            return std::unexpected(PriceTableError{
-                PriceTableErrorCode::ExtractionFailed, /*axis=*/0, /*detail=*/0
-            });
-        }
-
-        double avg_error = sum_error / valid_samples;
+        auto& vr = eval_result.value();
+        double max_error = vr.max_error;
+        double avg_error = vr.avg_error;
+        auto& error_bins = vr.error_bins;
+        stats.pde_solves_validation = vr.pde_solves_validation;
 
         stats.max_error = max_error;
         stats.avg_error = avg_error;
