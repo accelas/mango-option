@@ -485,6 +485,7 @@ cc_binary(
     linkopts = ["-fopenmp"],
     linkstatic = True,
     deps = [
+        "//src/option:american_option",
         "//src/option:interpolated_iv_solver",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table/chebyshev:chebyshev_adaptive",

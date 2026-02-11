@@ -10,6 +10,7 @@
  */
 
 #include "iv_benchmark_common.hpp"
+#include "mango/option/american_option.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
@@ -307,6 +308,120 @@ static void compare_raw_query_time() {
 }
 
 // ============================================================================
+// Accuracy comparison: both paths vs FDM reference
+// ============================================================================
+
+static void compare_accuracy() {
+    std::printf("\n================================================================\n");
+    std::printf("ACCURACY: IV error vs FDM reference (bps)\n");
+    std::printf("================================================================\n\n");
+
+    auto seg_config = make_seg_config();
+    auto domain = make_log_domain();
+    AdaptiveGridParams params;
+    params.target_iv_error = 5e-4;
+    params.max_iter = 3;
+
+    auto old_result = build_adaptive_chebyshev_segmented(params, seg_config, domain);
+    auto new_result = build_adaptive_chebyshev_segmented_typed(params, seg_config, domain);
+
+    if (!old_result.has_value() || !new_result.has_value()) {
+        std::printf("Build failed\n");
+        return;
+    }
+
+    auto divs = make_div_schedule(1.0);
+
+    std::printf("  %6s %5s %5s | %10s %10s %10s | %8s %8s\n",
+                "K", "tau", "sigma", "FDM_price", "OLD_price", "NEW_price",
+                "OLD_bps", "NEW_bps");
+    std::printf("  %s\n", std::string(80, '-').c_str());
+
+    double old_max_bps = 0, new_max_bps = 0;
+    double old_sum_bps = 0, new_sum_bps = 0;
+    size_t count = 0;
+
+    for (double K : {85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0}) {
+        for (double tau : {0.1, 0.3, 0.7, 0.9}) {
+            for (double sigma : {0.15, 0.25, 0.40}) {
+                // FDM reference
+                PricingParams pp;
+                pp.spot = kSpot; pp.strike = K; pp.maturity = tau;
+                pp.rate = kRate; pp.dividend_yield = kDivYield;
+                pp.option_type = OptionType::PUT; pp.volatility = sigma;
+                pp.discrete_dividends = divs;
+                // Filter dividends to those in the future
+                std::vector<Dividend> future_divs;
+                double surface_maturity = 1.0;
+                double cal_now = surface_maturity - tau;
+                for (const auto& d : divs) {
+                    if (d.calendar_time > cal_now)
+                        future_divs.push_back(
+                            Dividend{.calendar_time = d.calendar_time - cal_now,
+                                     .amount = d.amount});
+                }
+                pp.discrete_dividends = future_divs;
+                pp.maturity = tau;
+
+                auto fdm = solve_american_option(pp);
+                if (!fdm.has_value()) continue;
+                double ref_price = fdm->value();
+                if (ref_price < 0.01) continue;
+
+                // Old surface price
+                double old_price = old_result->price_fn(kSpot, K, tau, sigma, kRate);
+
+                // New surface price
+                double new_price = new_result->surface.price(kSpot, K, tau, sigma, kRate);
+
+                // Recover IV from both via Brent, compare to FDM IV
+                double fdm_iv = brent_solve_iv(
+                    [&](double vol) -> double {
+                        PricingParams p2 = pp;
+                        p2.volatility = vol;
+                        auto r = solve_american_option(p2);
+                        return r.has_value() ? r->value() : std::nan("");
+                    },
+                    ref_price);
+
+                double old_iv = brent_solve_iv(
+                    [&](double vol) {
+                        return old_result->price_fn(kSpot, K, tau, vol, kRate);
+                    },
+                    ref_price);
+
+                double new_iv = brent_solve_iv(
+                    [&](double vol) {
+                        return new_result->surface.price(kSpot, K, tau, vol, kRate);
+                    },
+                    ref_price);
+
+                if (!std::isfinite(fdm_iv) || !std::isfinite(old_iv) || !std::isfinite(new_iv))
+                    continue;
+
+                double old_err_bps = std::abs(old_iv - fdm_iv) * 1e4;
+                double new_err_bps = std::abs(new_iv - fdm_iv) * 1e4;
+
+                std::printf("  %6.0f %5.1f %5.2f | %10.4f %10.4f %10.4f | %8.1f %8.1f\n",
+                            K, tau, sigma, ref_price, old_price, new_price,
+                            old_err_bps, new_err_bps);
+
+                old_max_bps = std::max(old_max_bps, old_err_bps);
+                new_max_bps = std::max(new_max_bps, new_err_bps);
+                old_sum_bps += old_err_bps;
+                new_sum_bps += new_err_bps;
+                ++count;
+            }
+        }
+    }
+
+    std::printf("  %s\n", std::string(80, '-').c_str());
+    std::printf("  N=%zu  OLD: max=%.1f bps  avg=%.1f bps  |  NEW: max=%.1f bps  avg=%.1f bps\n",
+                count, old_max_bps, old_sum_bps / count,
+                new_max_bps, new_sum_bps / count);
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -316,6 +431,7 @@ int main() {
                 kSpot, kRate, kDivYield);
 
     compare_build_time();
+    compare_accuracy();
     compare_raw_query_time();
     compare_query_time();
 
