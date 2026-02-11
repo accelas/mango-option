@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/option/european_option.hpp"
-#include "mango/option/option_spec.hpp"
+#include "mango/option/table/eep/analytical_eep.hpp"
+#include "mango/option/table/surface_concepts.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -29,22 +29,6 @@ inline double eep_floor(double eep_raw) {
     return std::max(0.0, softplus - bias);
 }
 
-/// Per-point analytical EEP: European via Black-Scholes + softplus floor.
-///
-/// Use for call sites that don't fit the accessor pattern (e.g. cache-based
-/// extraction with per-slice spline lookup).
-inline double compute_eep(double american_price, double spot, double strike,
-                          double tau, double sigma, double rate,
-                          double dividend_yield, OptionType option_type) {
-    auto eu = EuropeanOptionSolver(
-        OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
-            .rate = rate, .dividend_yield = dividend_yield,
-            .option_type = option_type}, sigma).solve();
-
-    double eep_raw = eu.has_value() ? american_price - eu->value() : 0.0;
-    return eep_floor(eep_raw);
-}
-
 /// Accessor concept for EEP decomposition.
 ///
 /// Backends implement this to adapt their storage (mdspan tensor, flat vector
@@ -63,32 +47,54 @@ concept EEPAccessor = requires(const A a, size_t i) {
     a.set_value(i, v);
 };
 
-/// Apply analytical EEP decomposition over any accessor.
-///
-/// Iterates all points, computes European price via Black-Scholes,
-/// subtracts from American, and applies the softplus floor.
+// ===========================================================================
+// Generic strategy-based API
+// ===========================================================================
+
+/// Decompose American prices to EEP using any EEP strategy.
+/// The strategy's european_price() is the single source of truth.
+template <EEPAccessor A, EEPStrategy EEP>
+void eep_decompose(A&& accessor, const EEP& eep) {
+    const size_t n = accessor.size();
+    const double strike = accessor.strike();
+    for (size_t i = 0; i < n; ++i) {
+        double am = accessor.american_price(i);
+        double eu = eep.european_price(accessor.spot(i), strike,
+                        accessor.tau(i), accessor.sigma(i), accessor.rate(i));
+        accessor.set_value(i, eep_floor(am - eu));
+    }
+}
+
+/// Per-point EEP using any EEP strategy.
+template <EEPStrategy EEP>
+double compute_eep(double american_price, double spot, double strike,
+                   double tau, double sigma, double rate, const EEP& eep) {
+    return eep_floor(american_price
+                     - eep.european_price(spot, strike, tau, sigma, rate));
+}
+
+// ===========================================================================
+// Backward-compatible wrappers (delegate to generic API)
+// ===========================================================================
+
+/// Convenience wrapper: construct AnalyticalEEP internally.
 template <EEPAccessor A>
 void analytical_eep_decompose(A&& accessor,
                               OptionType option_type,
                               double dividend_yield) {
-    const size_t n = accessor.size();
-    const double strike = accessor.strike();
+    AnalyticalEEP eep(option_type, dividend_yield);
+    eep_decompose(std::forward<A>(accessor), eep);
+}
 
-    for (size_t i = 0; i < n; ++i) {
-        double am = accessor.american_price(i);
-        double spot = accessor.spot(i);
-        double tau = accessor.tau(i);
-        double sigma = accessor.sigma(i);
-        double rate = accessor.rate(i);
-
-        auto eu = EuropeanOptionSolver(
-            OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
-                .rate = rate, .dividend_yield = dividend_yield,
-                .option_type = option_type}, sigma).solve();
-
-        double eep_raw = eu.has_value() ? am - eu->value() : 0.0;
-        accessor.set_value(i, eep_floor(eep_raw));
-    }
+/// Per-point analytical EEP: European via Black-Scholes + softplus floor.
+///
+/// Use for call sites that don't fit the accessor pattern (e.g. cache-based
+/// extraction with per-slice spline lookup).
+inline double compute_eep(double american_price, double spot, double strike,
+                          double tau, double sigma, double rate,
+                          double dividend_yield, OptionType option_type) {
+    AnalyticalEEP eep(option_type, dividend_yield);
+    return compute_eep(american_price, spot, strike, tau, sigma, rate, eep);
 }
 
 }  // namespace mango

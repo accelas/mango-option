@@ -108,6 +108,8 @@ cc_library(
     name = "eep_decomposer",
     hdrs = ["eep/eep_decomposer.hpp"],
     deps = [
+        ":analytical_eep",
+        ":surface_concepts",
         "//src/option:european_option",
         "//src/option:option_spec",
     ],
