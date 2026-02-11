@@ -78,3 +78,20 @@ cc_library(
     strip_include_prefix = "/src/option/table/chebyshev",
     include_prefix = "mango/option/table/chebyshev",
 )
+
+cc_library(
+    name = "chebyshev_3d_surface",
+    hdrs = ["chebyshev_3d_surface.hpp"],
+    deps = [
+        "//src/math/chebyshev:chebyshev_interpolant",
+        "//src/math/chebyshev:tucker_tensor",
+        "//src/option/table:transform_leaf",
+        "//src/option/table:eep_layer",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:price_table",
+        "//src/option/table:dimensionless_transform_3d",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/chebyshev",
+    include_prefix = "mango/option/table/chebyshev",
+)

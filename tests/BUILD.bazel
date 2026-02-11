@@ -1573,6 +1573,18 @@ cc_test(
 )
 
 cc_test(
+    name = "surface_3d_concepts_test",
+    size = "small",
+    srcs = ["surface_3d_concepts_test.cc"],
+    deps = [
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+        "//src/option/table:surface_concepts",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "dimensionless_european_test",
     size = "small",
     srcs = ["dimensionless_european_test.cc"],
