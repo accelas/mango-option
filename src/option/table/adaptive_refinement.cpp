@@ -346,6 +346,28 @@ static std::vector<std::array<double, 4>> generate_validation_samples(
     return samples;
 }
 
+static void save_refinement_result(
+    RefinementResult& result,
+    IterationStats& stats,
+    const std::vector<double>& moneyness_grid,
+    const std::vector<double>& maturity_grid,
+    const std::vector<double>& vol_grid,
+    const std::vector<double>& rate_grid,
+    double max_error,
+    double avg_error,
+    bool target_met) {
+    stats.refined_dim = -1;
+    result.iterations.push_back(stats);
+    result.moneyness = moneyness_grid;
+    result.tau = maturity_grid;
+    result.vol = vol_grid;
+    result.rate = rate_grid;
+    result.tau_points = static_cast<int>(maturity_grid.size());
+    result.achieved_max_error = max_error;
+    result.achieved_avg_error = avg_error;
+    result.target_met = target_met;
+}
+
 static std::expected<ValidationResult, PriceTableError>
 evaluate_samples(
     const std::vector<std::array<double, 4>>& samples,
@@ -541,16 +563,10 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 
         if (converged || iteration == params.max_iter - 1) {
             // Final iteration - save results
-            stats.refined_dim = -1;  // No refinement on final iteration
-            result.iterations.push_back(stats);
-            result.moneyness = moneyness_grid;
-            result.tau = maturity_grid;
-            result.vol = vol_grid;
-            result.rate = rate_grid;
-            result.tau_points = static_cast<int>(maturity_grid.size());
-            result.achieved_max_error = max_error;
-            result.achieved_avg_error = avg_error;
-            result.target_met = converged;
+            save_refinement_result(result, stats,
+                                   moneyness_grid, maturity_grid,
+                                   vol_grid, rate_grid,
+                                   max_error, avg_error, converged);
             break;
         }
 
@@ -562,16 +578,10 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
                                  vol_grid, rate_grid);
         if (!refined) {
             // Maxed out — treat as final iteration
-            stats.refined_dim = -1;
-            result.iterations.push_back(stats);
-            result.moneyness = moneyness_grid;
-            result.tau = maturity_grid;
-            result.vol = vol_grid;
-            result.rate = rate_grid;
-            result.tau_points = static_cast<int>(maturity_grid.size());
-            result.achieved_max_error = max_error;
-            result.achieved_avg_error = avg_error;
-            result.target_met = false;
+            save_refinement_result(result, stats,
+                                   moneyness_grid, maturity_grid,
+                                   vol_grid, rate_grid,
+                                   max_error, avg_error, false);
             break;
         }
 
