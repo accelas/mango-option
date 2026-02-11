@@ -1327,5 +1327,88 @@ TEST(ChebyshevSegmentedManual, BasicPricing) {
     EXPECT_GT(v, 0.0);
 }
 
+// ===========================================================================
+// Tests for expand_segmented_domain
+// ===========================================================================
+
+TEST(ExpandSegmentedDomainTest, NoDividends) {
+    IVGrid domain{
+        .moneyness = to_log_m({0.8, 1.0, 1.2}),
+        .vol = {0.20, 0.30},
+        .rate = {0.03, 0.05}
+    };
+    double maturity = 1.0;
+    std::vector<Dividend> divs;
+    auto result = expand_segmented_domain(domain, maturity, 0.02, divs, 100.0);
+    ASSERT_TRUE(result.has_value());
+    // Verify expansion by standard spreads
+    // log(0.8) ~ -0.223, log(1.2) ~ 0.182 → width > 0.10, so expand_domain_bounds
+    // just ensures spread >= 0.10 (already satisfied), no extra push
+    EXPECT_LE(result->min_m, std::log(0.8));
+    EXPECT_GE(result->max_m, std::log(1.2));
+    // Vol: [0.20, 0.30] width=0.10, exactly spread → no extra push
+    EXPECT_LE(result->min_vol, 0.20);
+    EXPECT_GE(result->max_vol, 0.30);
+    // Rate: [0.03, 0.05] width=0.02 < 0.04 → should expand to 0.04 wide
+    EXPECT_LT(result->min_rate, 0.03);
+    EXPECT_GT(result->max_rate, 0.05);
+    // Tau: min(0.01, 0.5) = 0.01, max=1.0; width=0.99 > 0.1 → no extra push
+    // Tau capped at maturity
+    EXPECT_LE(result->max_tau, maturity);
+    EXPECT_GT(result->min_tau, 0.0);
+}
+
+TEST(ExpandSegmentedDomainTest, WithDividends) {
+    IVGrid domain{
+        .moneyness = to_log_m({0.8, 1.0, 1.2}),
+        .vol = {0.20},
+        .rate = {0.05}
+    };
+    std::vector<Dividend> divs = {Dividend{.calendar_time = 0.25, .amount = 2.0}};
+    auto result = expand_segmented_domain(domain, 1.0, 0.0, divs, 100.0);
+    ASSERT_TRUE(result.has_value());
+    // Dividend expansion: total_div=2.0, min_K_ref=100.0 → expansion=0.02
+    // min_m starts at log(0.8), expanded by shifting exp(log(0.8))-0.02 = 0.78
+    // min_m becomes log(0.78) < log(0.8)
+    double orig_min_m = std::log(0.8);
+    EXPECT_LT(result->min_m, orig_min_m);
+}
+
+TEST(ExpandSegmentedDomainTest, EmptyDomain) {
+    IVGrid empty_domain{.moneyness = {}, .vol = {}, .rate = {}};
+    auto result = expand_segmented_domain(empty_domain, 1.0, 0.0, {}, 100.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(ExpandSegmentedDomainTest, TauCappedAtMaturity) {
+    // Short maturity: expansion should not exceed maturity
+    IVGrid domain{
+        .moneyness = to_log_m({0.9, 1.0, 1.1}),
+        .vol = {0.20, 0.30},
+        .rate = {0.03, 0.05}
+    };
+    double maturity = 0.05;
+    auto result = expand_segmented_domain(domain, maturity, 0.0, {}, 100.0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_LE(result->max_tau, maturity);
+}
+
+TEST(ExpandSegmentedDomainTest, LargeDividendClamps) {
+    // Large dividend relative to K_ref should clamp moneyness floor at 0.01
+    IVGrid domain{
+        .moneyness = to_log_m({0.5, 1.0, 1.5}),
+        .vol = {0.20},
+        .rate = {0.05}
+    };
+    // total_div = 50, min_K_ref = 50 → expansion = 1.0
+    // exp(log(0.5)) = 0.5, 0.5 - 1.0 = -0.5, clamped to 0.01
+    std::vector<Dividend> divs = {Dividend{.calendar_time = 0.25, .amount = 50.0}};
+    auto result = expand_segmented_domain(domain, 1.0, 0.0, divs, 50.0);
+    ASSERT_TRUE(result.has_value());
+    // min_m should be log(0.01) after clamping
+    EXPECT_GE(result->min_m, std::log(0.01) - 0.1);
+}
+
 }  // namespace
 }  // namespace mango

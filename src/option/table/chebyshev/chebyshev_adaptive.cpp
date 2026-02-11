@@ -24,8 +24,6 @@ namespace mango {
 
 namespace {
 
-constexpr double kMinPositive = 1e-6;
-
 // ============================================================================
 // Chebyshev refinement and build strategies
 // ============================================================================
@@ -826,35 +824,13 @@ build_adaptive_chebyshev_segmented(
     auto K_refs = std::move(*k_refs_result);
 
     // 2. Domain setup
-    if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    auto dom = expand_segmented_domain(
+        domain, config.maturity, config.dividend_yield,
+        config.discrete_dividends, K_refs.front());
+    if (!dom.has_value()) {
+        return std::unexpected(dom.error());
     }
-
-    double min_m = domain.moneyness.front();
-    double max_m = domain.moneyness.back();
-
-    double total_div = total_discrete_dividends(config.discrete_dividends, config.maturity);
-    double ref_min = K_refs.front();
-    double expansion = (ref_min > 0.0) ? total_div / ref_min : 0.0;
-    if (expansion > 0.0) {
-        double m_min_money = std::exp(min_m);
-        double expanded = std::max(m_min_money - expansion, 0.01);
-        min_m = std::log(expanded);
-    }
-
-    double min_vol = domain.vol.front();
-    double max_vol = domain.vol.back();
-    double min_rate = domain.rate.front();
-    double max_rate = domain.rate.back();
-
-    expand_domain_bounds(min_m, max_m, 0.10);
-    expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
-    expand_domain_bounds(min_rate, max_rate, 0.04);
-
-    double min_tau = std::min(0.01, config.maturity * 0.5);
-    double max_tau = config.maturity;
-    expand_domain_bounds(min_tau, max_tau, 0.1, kMinPositive);
-    max_tau = std::min(max_tau, config.maturity);
+    auto [min_m, max_m, min_tau, max_tau, min_vol, max_vol, min_rate, max_rate] = *dom;
 
     // Initial CC levels for segmented path
     constexpr size_t kInitMLevel = 5;      // 33 nodes
@@ -1006,35 +982,13 @@ build_chebyshev_segmented_manual(
     auto K_refs = std::move(*k_refs_result);
 
     // 2. Domain setup
-    if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    auto dom = expand_segmented_domain(
+        domain, config.maturity, config.dividend_yield,
+        config.discrete_dividends, K_refs.front());
+    if (!dom.has_value()) {
+        return std::unexpected(dom.error());
     }
-
-    double min_m = domain.moneyness.front();
-    double max_m = domain.moneyness.back();
-
-    double total_div = total_discrete_dividends(config.discrete_dividends, config.maturity);
-    double ref_min = K_refs.front();
-    double expansion = (ref_min > 0.0) ? total_div / ref_min : 0.0;
-    if (expansion > 0.0) {
-        double m_min_money = std::exp(min_m);
-        double expanded = std::max(m_min_money - expansion, 0.01);
-        min_m = std::log(expanded);
-    }
-
-    double min_vol = domain.vol.front();
-    double max_vol = domain.vol.back();
-    double min_rate = domain.rate.front();
-    double max_rate = domain.rate.back();
-
-    expand_domain_bounds(min_m, max_m, 0.10);
-    expand_domain_bounds(min_vol, max_vol, 0.10, 1e-6);
-    expand_domain_bounds(min_rate, max_rate, 0.04);
-
-    double min_tau = std::min(0.01, config.maturity * 0.5);
-    double max_tau = config.maturity;
-    expand_domain_bounds(min_tau, max_tau, 0.1, 1e-6);
-    max_tau = std::min(max_tau, config.maturity);
+    auto [min_m, max_m, min_tau, max_tau, min_vol, max_vol, min_rate, max_rate] = *dom;
 
     // Headroom from CC node counts
     auto hfn = [](double lo, double hi, size_t n) {

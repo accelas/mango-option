@@ -27,8 +27,6 @@ namespace mango {
 
 namespace {
 
-constexpr double kMinPositive = 1e-6;
-
 /// Build a SegmentedPriceTableBuilder::Config from a SegmentedAdaptiveConfig.
 /// K_ref is set to 0 -- caller must set it or use build_segmented_surfaces().
 SegmentedPriceTableBuilder::Config make_seg_config(
@@ -187,44 +185,18 @@ probe_and_build(
     auto probes = select_probes(ref_values, config.spot);
 
     // 2. Expand domain bounds
-    if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    auto dom = expand_segmented_domain(
+        domain, config.maturity, config.dividend_yield,
+        config.discrete_dividends, ref_values.front());
+    if (!dom.has_value()) {
+        return std::unexpected(dom.error());
     }
+    auto [min_m, max_m, min_tau, max_tau, min_vol, max_vol, min_rate, max_rate] = *dom;
 
-    // domain.moneyness is log(S/K) -- callers convert from S/K at the
-    // user API boundary (see interpolated_iv_solver.cpp).
-    double min_m = domain.moneyness.front();
-    double max_m = domain.moneyness.back();
-
-    // Expand lower bound in moneyness-space to account for cumulative
-    // discrete-dividend spot shifts, then map back to log-moneyness.
-    double total_div = total_discrete_dividends(
-        config.discrete_dividends, config.maturity);
-    double ref_min = ref_values.front();
-    double expansion = (ref_min > 0.0) ? total_div / ref_min : 0.0;
-    if (expansion > 0.0) {
-        double m_min_money = std::exp(min_m);
-        double expanded = std::max(m_min_money - expansion, 0.01);
-        min_m = std::log(expanded);
-    }
-
-    double min_vol = domain.vol.front();
-    double max_vol = domain.vol.back();
-    double min_rate = domain.rate.front();
-    double max_rate = domain.rate.back();
-
-    expand_domain_bounds(min_m, max_m, 0.10);
+    // B-spline support headroom on moneyness
     double h = spline_support_headroom(max_m - min_m, domain.moneyness.size());
     min_m -= h;
     max_m += h;
-
-    expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
-    expand_domain_bounds(min_rate, max_rate, 0.04);
-
-    double min_tau = std::min(0.01, config.maturity * 0.5);
-    double max_tau = config.maturity;
-    expand_domain_bounds(min_tau, max_tau, 0.1, kMinPositive);
-    max_tau = std::min(max_tau, config.maturity);
 
     // 3. Run adaptive refinement per probe
     std::vector<RefinementResult> probe_results;

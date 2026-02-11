@@ -575,6 +575,52 @@ resolve_k_refs(const MultiKRefConfig& config, double spot) {
     return K_refs;
 }
 
+std::expected<DomainBounds, PriceTableError>
+expand_segmented_domain(const IVGrid& domain,
+                        double maturity,
+                        double /*dividend_yield*/,
+                        const std::vector<Dividend>& discrete_dividends,
+                        double min_K_ref) {
+    if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    // domain.moneyness is already log(S/K) — take min/max directly
+    double min_m = domain.moneyness.front();
+    double max_m = domain.moneyness.back();
+
+    // Expand lower bound for cumulative discrete-dividend spot shifts
+    double total_div = total_discrete_dividends(discrete_dividends, maturity);
+    double expansion = (min_K_ref > 0.0) ? total_div / min_K_ref : 0.0;
+    if (expansion > 0.0) {
+        double m_min_money = std::exp(min_m);
+        double expanded = std::max(m_min_money - expansion, 0.01);
+        min_m = std::log(expanded);
+    }
+
+    double min_vol = domain.vol.front();
+    double max_vol = domain.vol.back();
+    double min_rate = domain.rate.front();
+    double max_rate = domain.rate.back();
+
+    // Apply standard minimum spreads
+    expand_domain_bounds(min_m, max_m, 0.10);
+    expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
+    expand_domain_bounds(min_rate, max_rate, 0.04);
+
+    double min_tau = std::min(0.01, maturity * 0.5);
+    double max_tau = maturity;
+    expand_domain_bounds(min_tau, max_tau, 0.1, kMinPositive);
+    max_tau = std::min(max_tau, maturity);
+
+    return DomainBounds{
+        .min_m = min_m, .max_m = max_m,
+        .min_tau = min_tau, .max_tau = max_tau,
+        .min_vol = min_vol, .max_vol = max_vol,
+        .min_rate = min_rate, .max_rate = max_rate,
+    };
+}
+
 std::expected<RefinementContext, PriceTableError>
 extract_chain_domain(const OptionGrid& chain) {
     if (chain.strikes.empty() || chain.maturities.empty() ||
