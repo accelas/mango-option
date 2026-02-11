@@ -1211,5 +1211,36 @@ TEST(ChebyshevSegmentedEquivalence, VegaReasonable) {
         << "Analytical vega=" << vega << " vs FD vega=" << fd_vega;
 }
 
+// ===========================================================================
+// Tests for build_chebyshev_segmented_manual (non-adaptive path)
+// ===========================================================================
+
+TEST(ChebyshevSegmentedManual, BasicPricing) {
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    };
+
+    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    IVGrid grid{m_domain, {0.10, 0.20, 0.30}, {0.03, 0.05}};
+
+    auto result = build_chebyshev_segmented_manual(seg_config, grid);
+    ASSERT_TRUE(result.has_value()) << "Manual build failed";
+
+    // ATM put: price should be positive and finite
+    double p = result->price(100.0, 100.0, 0.5, 0.20, 0.05);
+    EXPECT_TRUE(std::isfinite(p));
+    EXPECT_GT(p, 0.0);
+
+    // Vega should be positive
+    double v = result->vega(100.0, 100.0, 0.5, 0.20, 0.05);
+    EXPECT_TRUE(std::isfinite(v));
+    EXPECT_GT(v, 0.0);
+}
+
 }  // namespace
 }  // namespace mango

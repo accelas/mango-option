@@ -95,4 +95,12 @@ build_adaptive_chebyshev_segmented_typed(const AdaptiveGridParams& params,
                                          const SegmentedAdaptiveConfig& config,
                                          const IVGrid& domain);
 
+/// Build typed segmented Chebyshev surface from explicit CC levels (no adaptive refinement).
+/// Used for benchmarking with fixed grid sizes.
+[[nodiscard]] std::expected<ChebyshevMultiKRefSurface, PriceTableError>
+build_chebyshev_segmented_manual(
+    const SegmentedAdaptiveConfig& config,
+    const IVGrid& domain,
+    std::array<size_t, 4> cc_levels = {5, 3, 2, 1});
+
 }  // namespace mango

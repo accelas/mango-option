@@ -1226,4 +1226,139 @@ build_adaptive_chebyshev_segmented_typed(
     };
 }
 
+std::expected<ChebyshevMultiKRefSurface, PriceTableError>
+build_chebyshev_segmented_manual(
+    const SegmentedAdaptiveConfig& config,
+    const IVGrid& domain,
+    std::array<size_t, 4> cc_levels)
+{
+    // 1. Determine K_refs
+    std::vector<double> K_refs = config.kref_config.K_refs;
+    if (K_refs.empty()) {
+        const int count = config.kref_config.K_ref_count;
+        const double span = config.kref_config.K_ref_span;
+        if (count < 1 || span <= 0.0) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+        const double log_lo = std::log(1.0 - span);
+        const double log_hi = std::log(1.0 + span);
+        K_refs.reserve(static_cast<size_t>(count));
+        if (count == 1) {
+            K_refs.push_back(config.spot);
+        } else {
+            for (int i = 0; i < count; ++i) {
+                double t = static_cast<double>(i) / static_cast<double>(count - 1);
+                K_refs.push_back(config.spot * std::exp(log_lo + t * (log_hi - log_lo)));
+            }
+        }
+    }
+    std::sort(K_refs.begin(), K_refs.end());
+
+    // 2. Domain setup
+    if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    double min_m = domain.moneyness.front();
+    double max_m = domain.moneyness.back();
+
+    double total_div = total_discrete_dividends(config.discrete_dividends, config.maturity);
+    double ref_min = K_refs.front();
+    double expansion = (ref_min > 0.0) ? total_div / ref_min : 0.0;
+    if (expansion > 0.0) {
+        double m_min_money = std::exp(min_m);
+        double expanded = std::max(m_min_money - expansion, 0.01);
+        min_m = std::log(expanded);
+    }
+
+    double min_vol = domain.vol.front();
+    double max_vol = domain.vol.back();
+    double min_rate = domain.rate.front();
+    double max_rate = domain.rate.back();
+
+    expand_domain_bounds(min_m, max_m, 0.10);
+    expand_domain_bounds(min_vol, max_vol, 0.10, 1e-6);
+    expand_domain_bounds(min_rate, max_rate, 0.04);
+
+    double min_tau = std::min(0.01, config.maturity * 0.5);
+    double max_tau = config.maturity;
+    expand_domain_bounds(min_tau, max_tau, 0.1, 1e-6);
+    max_tau = std::min(max_tau, config.maturity);
+
+    // Headroom from CC node counts
+    auto hfn = [](double lo, double hi, size_t n) {
+        return 3.0 * (hi - lo)
+             / static_cast<double>(std::max(n, size_t{4}) - 1);
+    };
+    double hm = hfn(min_m, max_m, (1u << cc_levels[0]) + 1);
+    double ht = hfn(min_tau, max_tau, (1u << cc_levels[1]) + 1);
+    double hs = hfn(min_vol, max_vol, (1u << cc_levels[2]) + 1);
+    double hr = hfn(min_rate, max_rate, (1u << cc_levels[3]) + 1);
+
+    double m_lo = min_m - hm;
+    double m_hi = max_m + hm;
+    (void)ht;  // tau headroom unused — tau nodes come from per-segment CC grids
+    double sigma_lo = std::max(min_vol - hs, 0.01);
+    double sigma_hi = max_vol + hs;
+    double rate_lo = std::max(min_rate - hr, -0.05);
+    double rate_hi = max_rate + hr;
+
+    // 3. Compute segment boundaries
+    auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(
+        config.discrete_dividends, config.maturity, min_tau, max_tau);
+
+    // 4. Generate CGL grids at fixed CC levels
+    auto m_nodes = cc_level_nodes(cc_levels[0], m_lo, m_hi);
+    auto sigma_nodes = cc_level_nodes(cc_levels[2], sigma_lo, sigma_hi);
+    auto rate_nodes = cc_level_nodes(cc_levels[3], rate_lo, rate_hi);
+
+    // Per-segment tau nodes: union of cc_level_nodes per real segment, then sort+dedup
+    std::vector<double> tau_nodes;
+    for (size_t s = 0; s + 1 < seg_bounds.size(); ++s) {
+        if (seg_is_gap[s]) continue;
+        double seg_lo_t = seg_bounds[s];
+        double seg_hi_t = seg_bounds[s + 1];
+        for (double t : cc_level_nodes(cc_levels[1], seg_lo_t, seg_hi_t))
+            tau_nodes.push_back(t);
+    }
+    if (tau_nodes.empty()) {
+        return std::unexpected(
+            PriceTableError(PriceTableErrorCode::InvalidConfig));
+    }
+    std::sort(tau_nodes.begin(), tau_nodes.end());
+    tau_nodes.erase(std::unique(tau_nodes.begin(), tau_nodes.end(),
+        [](double a, double b) { return std::abs(a - b) < 1e-10; }),
+        tau_nodes.end());
+
+    // 5. Build all K_refs -> typed pieces
+    std::vector<ChebyshevTauSegmented> kref_surfaces;
+
+    for (double k_ref : K_refs) {
+        auto pieces = build_chebyshev_segmented_pieces(
+            k_ref, config.option_type, config.dividend_yield,
+            config.discrete_dividends, seg_bounds, seg_is_gap,
+            m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+        if (!pieces.has_value()) {
+            return std::unexpected(pieces.error());
+        }
+        kref_surfaces.emplace_back(
+            std::move(pieces->leaves), std::move(pieces->tau_split));
+    }
+
+    // 6. Compose with MultiKRefSplit -> PriceTable
+    ChebyshevMultiKRefInner inner(
+        std::move(kref_surfaces), MultiKRefSplit(K_refs));
+
+    SurfaceBounds bounds{
+        .m_min = min_m, .m_max = max_m,
+        .tau_min = min_tau, .tau_max = max_tau,
+        .sigma_min = min_vol, .sigma_max = max_vol,
+        .rate_min = min_rate, .rate_max = max_rate,
+    };
+
+    return ChebyshevMultiKRefSurface(
+        std::move(inner), bounds,
+        config.option_type, config.dividend_yield);
+}
+
 }  // namespace mango
