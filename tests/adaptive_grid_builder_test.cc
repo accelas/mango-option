@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
-#include "mango/option/table/bspline/bspline_slice_cache.hpp"
+#include "mango/option/table/bspline/bspline_pde_cache.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/american_option_batch.hpp"
@@ -93,11 +93,11 @@ TEST(AdaptiveGridBuilderTest, EmptyChainReturnsError) {
 }
 
 // ===========================================================================
-// SliceCache unit tests
+// BSplinePDECache unit tests
 // ===========================================================================
 
-TEST(SliceCacheTest, AddAndRetrieve) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, AddAndRetrieve) {
+    BSplinePDECache cache;
 
     // Create a result using the auto solver
     auto result_ptr = make_dummy_result();
@@ -113,8 +113,8 @@ TEST(SliceCacheTest, AddAndRetrieve) {
     EXPECT_EQ(missed, nullptr);
 }
 
-TEST(SliceCacheTest, ContainsCheck) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, ContainsCheck) {
+    BSplinePDECache cache;
 
     EXPECT_FALSE(cache.contains(0.20, 0.05));
 
@@ -126,8 +126,8 @@ TEST(SliceCacheTest, ContainsCheck) {
     EXPECT_FALSE(cache.contains(0.25, 0.05));
 }
 
-TEST(SliceCacheTest, GetMissingIndices) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, GetMissingIndices) {
+    BSplinePDECache cache;
 
     // Add some pairs
     auto dummy = make_dummy_result();
@@ -149,8 +149,8 @@ TEST(SliceCacheTest, GetMissingIndices) {
     EXPECT_EQ(missing[1], 3);  // Index of (0.20, 0.06)
 }
 
-TEST(SliceCacheTest, InvalidateOnTauChange) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, InvalidateOnTauChange) {
+    BSplinePDECache cache;
 
     auto dummy = make_dummy_result();
     ASSERT_NE(dummy, nullptr);
@@ -173,8 +173,8 @@ TEST(SliceCacheTest, InvalidateOnTauChange) {
     EXPECT_EQ(cache.size(), 0);
 }
 
-TEST(SliceCacheTest, CachePreservedOnMChange) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, CachePreservedOnMChange) {
+    BSplinePDECache cache;
 
     auto dummy = make_dummy_result();
     ASSERT_NE(dummy, nullptr);
@@ -194,8 +194,8 @@ TEST(SliceCacheTest, CachePreservedOnMChange) {
     EXPECT_TRUE(cache.contains(0.25, 0.05));
 }
 
-TEST(SliceCacheTest, Clear) {
-    SliceCache cache;
+TEST(BSplinePDECacheTest, Clear) {
+    BSplinePDECache cache;
 
     auto dummy = make_dummy_result();
     ASSERT_NE(dummy, nullptr);

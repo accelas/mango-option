@@ -18,9 +18,12 @@ cc_library(
 )
 
 cc_library(
-    name = "pde_slice_cache",
-    hdrs = ["pde_slice_cache.hpp"],
-    deps = ["//src/math:cubic_spline_solver"],
+    name = "chebyshev_pde_cache",
+    hdrs = ["chebyshev_pde_cache.hpp"],
+    deps = [
+        "//src/math:cubic_spline_solver",
+        "//src/option/table:pde_cache",
+    ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table/chebyshev",
     include_prefix = "mango/option/table/chebyshev",
@@ -40,7 +43,7 @@ cc_library(
     ],
     deps = [
         ":chebyshev_surface",
-        ":pde_slice_cache",
+        ":chebyshev_pde_cache",
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:american_option_batch",
         "//src/option:dividend_utils",

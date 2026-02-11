@@ -4,7 +4,7 @@
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
-#include "mango/option/table/bspline/bspline_slice_cache.hpp"
+#include "mango/option/table/bspline/bspline_pde_cache.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
@@ -407,7 +407,7 @@ BatchAmericanOptionResult solve_missing_slices(
 }
 
 static BatchAmericanOptionResult merge_results(
-    const SliceCache& cache,
+    const BSplinePDECache& cache,
     const std::vector<PricingParams>& all_params,
     const std::vector<size_t>& fresh_indices,
     const BatchAmericanOptionResult& fresh_results)
@@ -472,7 +472,7 @@ static BatchAmericanOptionResult merge_results(
 static std::expected<SurfaceHandle, PriceTableError>
 build_cached_surface(
     const AdaptiveGridParams& params,
-    SliceCache& cache,
+    BSplinePDECache& cache,
     const std::vector<double>& m_grid,
     const std::vector<double>& tau_grid,
     const std::vector<double>& v_grid,
@@ -623,8 +623,8 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
                        PDEGridSpec pde_grid,
                        OptionType type)
 {
-    // Create a fresh SliceCache for this build
-    SliceCache cache;
+    // Create a fresh BSplinePDECache for this build
+    BSplinePDECache cache;
 
     auto domain = extract_chain_domain(chain);
     if (!domain.has_value()) {

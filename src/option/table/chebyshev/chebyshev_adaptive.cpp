@@ -7,7 +7,7 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
-#include "mango/option/table/chebyshev/pde_slice_cache.hpp"
+#include "mango/option/table/chebyshev/chebyshev_pde_cache.hpp"
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/dividend_utils.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
@@ -64,10 +64,10 @@ struct SegmentedChebyshevBuildConfig {
 };
 
 /// Create a BuildFn for the adaptive refinement loop that builds Chebyshev surfaces.
-/// Reuses PDE solutions across refinement iterations via PDESliceCache.
+/// Reuses PDE solutions across refinement iterations via ChebyshevPDECache.
 /// The last_surface side-channel captures the typed surface from each build.
 static BuildFn make_chebyshev_build_fn(
-    PDESliceCache& cache,
+    ChebyshevPDECache& cache,
     const ChebyshevBuildConfig& config,
     std::shared_ptr<ChebyshevRawSurface>& last_surface)
 {
@@ -206,7 +206,7 @@ static BuildFn make_chebyshev_build_fn(
 /// Stores V/K_ref directly (TransformLeaf, no EEP decomposition) with local
 /// tau coordinates per segment.
 static BuildFn make_segmented_chebyshev_build_fn(
-    PDESliceCache& cache,
+    ChebyshevPDECache& cache,
     const SegmentedChebyshevBuildConfig& config,
     const ChebyshevRefinementState& state)
 {
@@ -607,7 +607,7 @@ build_adaptive_chebyshev(
     // region.  The CGL/CC grid nodes extend beyond ctx via state.*_lo/hi,
     // and initial.exact=true prevents seed_grid() from clipping them.
 
-    PDESliceCache pde_cache;
+    ChebyshevPDECache pde_cache;
     ChebyshevBuildConfig build_cfg{
         .K_ref = chain.spot,
         .option_type = type,
@@ -753,7 +753,7 @@ build_adaptive_chebyshev_segmented(
         .seg_is_gap = seg_is_gap,
     };
 
-    PDESliceCache pde_cache;
+    ChebyshevPDECache pde_cache;
     SegmentedChebyshevBuildConfig build_cfg{
         .K_ref = config.spot,
         .option_type = config.option_type,
@@ -817,7 +817,7 @@ build_adaptive_chebyshev_segmented(
     kref_fns.reserve(K_refs.size());
 
     for (double k_ref : K_refs) {
-        PDESliceCache kref_cache;
+        ChebyshevPDECache kref_cache;
         SegmentedChebyshevBuildConfig kref_cfg{
             .K_ref = k_ref,
             .option_type = config.option_type,

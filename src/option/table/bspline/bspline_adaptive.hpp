@@ -32,7 +32,7 @@ struct BSplineSegmentedAdaptiveResult {
 
 /// Build B-spline price table with adaptive grid refinement.
 ///
-/// Uses cached PDE solver (SliceCache) for incremental builds.
+/// Uses cached PDE solver (BSplinePDECache) for incremental builds.
 /// Grid is iteratively refined via run_refinement() until target IV error is met.
 [[nodiscard]] std::expected<BSplineAdaptiveResult, PriceTableError>
 build_adaptive_bspline(const AdaptiveGridParams& params,
