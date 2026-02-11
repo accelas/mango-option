@@ -40,6 +40,7 @@ template class InterpolatedIVSolver<BSplinePriceTable>;
 template class InterpolatedIVSolver<BSplineMultiKRefSurface>;
 template class InterpolatedIVSolver<ChebyshevSurface>;
 template class InterpolatedIVSolver<ChebyshevRawSurface>;
+template class InterpolatedIVSolver<ChebyshevMultiKRefSurface>;
 template class InterpolatedIVSolver<BSpline3DPriceTable>;
 template class InterpolatedIVSolver<Chebyshev3DPriceTable>;
 
@@ -187,7 +188,8 @@ struct AnyIVSolver::Impl {
         InterpolatedIVSolver<BSplineMultiKRefSurface>,
         InterpolatedIVSolver<ChebyshevSurface>,
         InterpolatedIVSolver<ChebyshevRawSurface>,
-        InterpolatedIVSolver<ChebyshevSegmentedSurface>,
+        InterpolatedIVSolver<ChebyshevSegmentedSurface>,    // OLD -- keep for now
+        InterpolatedIVSolver<ChebyshevMultiKRefSurface>,    // NEW
         InterpolatedIVSolver<BSpline3DPriceTable>,
         InterpolatedIVSolver<Chebyshev3DPriceTable>
     >;
