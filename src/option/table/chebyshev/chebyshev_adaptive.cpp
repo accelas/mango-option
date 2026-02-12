@@ -61,6 +61,165 @@ struct SegmentedChebyshevBuildConfig {
     std::vector<bool> seg_is_gap;  ///< true for synthetic dividend gap segments
 };
 
+/// Batch-solve PDE for missing (sigma, rate) pairs, storing results in cache.
+/// Returns the number of successful new PDE solves.
+static size_t solve_missing_pde_pairs(
+    ChebyshevPDECache& cache,
+    double K_ref,
+    OptionType option_type,
+    double dividend_yield,
+    const std::vector<Dividend>& discrete_dividends,
+    std::span<const double> tau_nodes,
+    std::span<const double> sigma_nodes,
+    std::span<const double> rate_nodes)
+{
+    auto missing = cache.missing_pairs(sigma_nodes, rate_nodes);
+    if (missing.empty()) return 0;
+
+    std::vector<PricingParams> batch;
+    batch.reserve(missing.size());
+    for (auto [si, ri] : missing) {
+        PricingParams p(
+            OptionSpec{.spot = K_ref, .strike = K_ref,
+                       .maturity = tau_nodes.back() * 1.01,
+                       .rate = rate_nodes[ri],
+                       .dividend_yield = dividend_yield,
+                       .option_type = option_type},
+            sigma_nodes[si]);
+        p.discrete_dividends = discrete_dividends;
+        batch.push_back(std::move(p));
+    }
+
+    BatchAmericanOptionSolver solver;
+    solver.set_grid_accuracy(make_grid_accuracy(GridAccuracyProfile::Ultra));
+    std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
+    solver.set_snapshot_times(std::span<const double>(tau_vec));
+    auto batch_result = solver.solve_batch(
+        std::span<const PricingParams>(batch), /*use_shared_grid=*/true);
+
+    for (size_t bi = 0; bi < missing.size(); ++bi) {
+        auto [si, ri] = missing[bi];
+        if (!batch_result.results[bi].has_value()) continue;
+        const auto& result = batch_result.results[bi].value();
+        auto grid = result.grid();
+        auto x_grid = grid->x();
+        for (size_t j = 0; j < tau_nodes.size(); ++j) {
+            auto spatial = result.at_time(j);
+            cache.store_slice(sigma_nodes[si], rate_nodes[ri],
+                              j, x_grid, spatial);
+        }
+    }
+
+    return batch.size() - batch_result.failed_count;
+}
+
+/// Build per-segment Chebyshev leaves from cached PDE slices.
+/// @param include_gaps If true, gap segments get minimal placeholder leaves
+///                     (needed for direct-index routing in SurfaceHandle).
+///                     If false, gap segments are skipped entirely.
+static std::vector<ChebyshevSegmentedLeaf>
+build_segment_leaves(
+    ChebyshevPDECache& cache,
+    double K_ref,
+    const std::vector<double>& seg_bounds,
+    const std::vector<bool>& seg_is_gap,
+    bool include_gaps,
+    std::span<const double> m_nodes,
+    std::span<const double> tau_nodes,
+    std::span<const double> sigma_nodes,
+    std::span<const double> rate_nodes)
+{
+    // Map tau nodes to segments (skip gaps in mapping)
+    const size_t n_seg = seg_bounds.size() - 1;
+    std::vector<std::vector<size_t>> seg_tau_indices(n_seg);
+    for (size_t ti = 0; ti < tau_nodes.size(); ++ti) {
+        double t = tau_nodes[ti];
+        size_t s = 0;
+        for (size_t k = 0; k < n_seg; ++k) {
+            if (seg_is_gap[k]) continue;
+            if (t >= seg_bounds[k] && t <= seg_bounds[k + 1]) {
+                s = k;
+                break;
+            }
+        }
+        seg_tau_indices[s].push_back(ti);
+    }
+
+    // Build per-segment Chebyshev tensors (V/K_ref, no EEP)
+    const size_t Nm = m_nodes.size();
+    const size_t Ns = sigma_nodes.size();
+    const size_t Nr = rate_nodes.size();
+
+    std::vector<ChebyshevSegmentedLeaf> leaves;
+    leaves.reserve(n_seg);
+
+    for (size_t s = 0; s < n_seg; ++s) {
+        if (!include_gaps && seg_is_gap[s]) continue;
+
+        const auto& tau_idx = seg_tau_indices[s];
+        const size_t Nt_seg = tau_idx.size();
+
+        if (Nt_seg == 0) {
+            // No tau nodes — minimal placeholder leaf
+            Domain<4> domain{
+                .lo = {m_nodes.front(), 0.0,
+                       sigma_nodes.front(), rate_nodes.front()},
+                .hi = {m_nodes.back(), seg_bounds[s + 1] - seg_bounds[s],
+                       sigma_nodes.back(), rate_nodes.back()},
+            };
+            std::array<size_t, 4> num_pts = {2, 2, 2, 2};
+            std::vector<double> zeros(16, 0.0);
+            auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
+                build_from_values(std::span<const double>(zeros),
+                                  domain, num_pts);
+            leaves.emplace_back(std::move(interp), StandardTransform4D{},
+                                K_ref);
+            continue;
+        }
+
+        std::vector<double> local_tau(Nt_seg);
+        for (size_t j = 0; j < Nt_seg; ++j) {
+            local_tau[j] = tau_nodes[tau_idx[j]] - seg_bounds[s];
+        }
+
+        std::vector<double> values(Nm * Nt_seg * Ns * Nr, 0.0);
+        for (size_t si = 0; si < Ns; ++si) {
+            double sigma = sigma_nodes[si];
+            for (size_t ri = 0; ri < Nr; ++ri) {
+                double rate = rate_nodes[ri];
+                for (size_t jt = 0; jt < Nt_seg; ++jt) {
+                    auto* spline = cache.get_slice(
+                        sigma, rate, tau_idx[jt]);
+                    if (!spline) continue;
+                    for (size_t mi = 0; mi < Nm; ++mi) {
+                        double v_over_k = spline->eval(m_nodes[mi]);
+                        size_t flat =
+                            mi * (Nt_seg * Ns * Nr)
+                            + jt * (Ns * Nr)
+                            + si * Nr + ri;
+                        values[flat] = v_over_k;
+                    }
+                }
+            }
+        }
+
+        Domain<4> domain{
+            .lo = {m_nodes.front(), local_tau.front(),
+                   sigma_nodes.front(), rate_nodes.front()},
+            .hi = {m_nodes.back(), local_tau.back(),
+                   sigma_nodes.back(), rate_nodes.back()},
+        };
+        std::array<size_t, 4> num_pts = {Nm, Nt_seg, Ns, Nr};
+        auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
+            build_from_values(std::span<const double>(values),
+                              domain, num_pts);
+        leaves.emplace_back(std::move(interp), StandardTransform4D{},
+                            K_ref);
+    }
+
+    return leaves;
+}
+
 /// Create a BuildFn for the adaptive refinement loop that builds Chebyshev surfaces.
 /// Reuses PDE solutions across refinement iterations via ChebyshevPDECache.
 /// The last_surface side-channel captures the typed surface from each build.
@@ -222,144 +381,25 @@ static BuildFn make_segmented_chebyshev_build_fn(
             *last_tau_size = tau_nodes.size();
         }
 
-        // 1. Batch-solve missing (sigma, rate) pairs
-        auto missing = cache.missing_pairs(sigma_nodes, rate_nodes);
-        size_t new_solves = 0;
-        if (!missing.empty()) {
-            std::vector<PricingParams> batch;
-            batch.reserve(missing.size());
-            for (auto [si, ri] : missing) {
-                PricingParams p(
-                    OptionSpec{.spot = config.K_ref, .strike = config.K_ref,
-                               .maturity = tau_nodes.back() * 1.01,
-                               .rate = rate_nodes[ri],
-                               .dividend_yield = config.dividend_yield,
-                               .option_type = config.option_type},
-                    sigma_nodes[si]);
-                p.discrete_dividends = config.discrete_dividends;
-                batch.push_back(std::move(p));
-            }
+        size_t new_solves = solve_missing_pde_pairs(
+            cache, config.K_ref, config.option_type, config.dividend_yield,
+            config.discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
+        cache.record_pde_solves(new_solves);
 
-            BatchAmericanOptionSolver solver;
-            solver.set_grid_accuracy(
-                make_grid_accuracy(GridAccuracyProfile::Ultra));
-            std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
-            solver.set_snapshot_times(std::span<const double>(tau_vec));
-            auto batch_result = solver.solve_batch(
-                std::span<const PricingParams>(batch), true);
-            new_solves = batch.size() - batch_result.failed_count;
+        auto leaves = build_segment_leaves(
+            cache, config.K_ref, config.seg_boundaries, config.seg_is_gap,
+            /*include_gaps=*/true,
+            m_nodes, tau_nodes, sigma_nodes, rate_nodes);
 
-            for (size_t bi = 0; bi < missing.size(); ++bi) {
-                auto [si, ri] = missing[bi];
-                if (!batch_result.results[bi].has_value()) continue;
-                const auto& result = batch_result.results[bi].value();
-                auto grid = result.grid();
-                auto x_grid = grid->x();
-                for (size_t j = 0; j < tau_nodes.size(); ++j) {
-                    auto spatial = result.at_time(j);
-                    cache.store_slice(sigma_nodes[si], rate_nodes[ri],
-                                      j, x_grid, spatial);
-                }
-            }
-            cache.record_pde_solves(new_solves);
-        }
-
-        // 2. Map tau nodes to segments
-        const auto& seg = config.seg_boundaries;
-        const size_t n_seg = seg.size() - 1;
-        std::vector<std::vector<size_t>> seg_tau_indices(n_seg);
-        for (size_t ti = 0; ti < tau_nodes.size(); ++ti) {
-            double t = tau_nodes[ti];
-            size_t s = 0;
-            for (size_t k = 0; k < n_seg; ++k) {
-                // Skip gap segments -- CGL nodes at boundaries belong
-                // to the adjacent real segment, not the narrow gap.
-                if (config.seg_is_gap[k]) continue;
-                if (t >= seg[k] && t <= seg[k + 1]) {
-                    s = k;
-                    break;
-                }
-            }
-            seg_tau_indices[s].push_back(ti);
-        }
-
-        // 3. Build per-segment Chebyshev tensors (V/K_ref, no EEP)
-        const size_t Nm = m_nodes.size();
-        const size_t Ns = sigma_nodes.size();
-        const size_t Nr = rate_nodes.size();
-
-        std::vector<ChebyshevSegmentedLeaf> leaves;
-        leaves.reserve(n_seg);
-
-        for (size_t s = 0; s < n_seg; ++s) {
-            const auto& tau_idx = seg_tau_indices[s];
-            const size_t Nt_seg = tau_idx.size();
-
-            if (Nt_seg == 0) {
-                Domain<4> domain{
-                    .lo = {m_nodes.front(), seg[s],
-                           sigma_nodes.front(), rate_nodes.front()},
-                    .hi = {m_nodes.back(), seg[s + 1],
-                           sigma_nodes.back(), rate_nodes.back()},
-                };
-                std::array<size_t, 4> num_pts = {2, 2, 2, 2};
-                std::vector<double> zeros(16, 0.0);
-                auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
-                    build_from_values(std::span<const double>(zeros),
-                                      domain, num_pts);
-                leaves.emplace_back(std::move(interp), StandardTransform4D{},
-                                    config.K_ref);
-                continue;
-            }
-
-            std::vector<double> local_tau(Nt_seg);
-            for (size_t j = 0; j < Nt_seg; ++j) {
-                local_tau[j] = tau_nodes[tau_idx[j]] - seg[s];
-            }
-
-            std::vector<double> values(Nm * Nt_seg * Ns * Nr, 0.0);
-            for (size_t si = 0; si < Ns; ++si) {
-                double sigma = sigma_nodes[si];
-                for (size_t ri = 0; ri < Nr; ++ri) {
-                    double rate = rate_nodes[ri];
-                    for (size_t jt = 0; jt < Nt_seg; ++jt) {
-                        auto* spline = cache.get_slice(
-                            sigma, rate, tau_idx[jt]);
-                        if (!spline) continue;
-                        for (size_t mi = 0; mi < Nm; ++mi) {
-                            double v_over_k = spline->eval(m_nodes[mi]);
-                            size_t flat =
-                                mi * (Nt_seg * Ns * Nr)
-                                + jt * (Ns * Nr)
-                                + si * Nr + ri;
-                            values[flat] = v_over_k;
-                        }
-                    }
-                }
-            }
-
-            Domain<4> domain{
-                .lo = {m_nodes.front(), local_tau.front(),
-                       sigma_nodes.front(), rate_nodes.front()},
-                .hi = {m_nodes.back(), local_tau.back(),
-                       sigma_nodes.back(), rate_nodes.back()},
-            };
-            std::array<size_t, 4> num_pts = {Nm, Nt_seg, Ns, Nr};
-            auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
-                build_from_values(std::span<const double>(values),
-                                  domain, num_pts);
-            leaves.emplace_back(std::move(interp), StandardTransform4D{},
-                                config.K_ref);
-        }
-
-        // 4. Direct evaluation lambda.
+        // Direct evaluation lambda with gap routing.
         // TransformLeaf: leaf.price() = interp(log(S/K), tau, sigma, r) * K/K_ref
         // Multiply by K_ref to get V * K/K_ref (homogeneity scaling).
+        const size_t n_seg = config.seg_boundaries.size() - 1;
         auto leaves_shared =
             std::make_shared<std::vector<ChebyshevSegmentedLeaf>>(
                 std::move(leaves));
         auto seg_copy = std::make_shared<std::vector<double>>(
-            seg.begin(), seg.end());
+            config.seg_boundaries.begin(), config.seg_boundaries.end());
         auto gap_copy = std::make_shared<std::vector<bool>>(
             config.seg_is_gap.begin(), config.seg_is_gap.end());
         double K_ref = config.K_ref;
@@ -566,136 +606,17 @@ build_chebyshev_segmented_pieces(
     std::span<const double> sigma_nodes,
     std::span<const double> rate_nodes)
 {
-    // 1. Create PDE cache, find missing (sigma, rate) pairs, batch-solve
     ChebyshevPDECache cache;
+    solve_missing_pde_pairs(
+        cache, K_ref, option_type, dividend_yield,
+        discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
 
-    auto missing = cache.missing_pairs(sigma_nodes, rate_nodes);
-    if (!missing.empty()) {
-        std::vector<PricingParams> batch;
-        batch.reserve(missing.size());
-        for (auto [si, ri] : missing) {
-            PricingParams p(
-                OptionSpec{.spot = K_ref, .strike = K_ref,
-                           .maturity = tau_nodes.back() * 1.01,
-                           .rate = rate_nodes[ri],
-                           .dividend_yield = dividend_yield,
-                           .option_type = option_type},
-                sigma_nodes[si]);
-            p.discrete_dividends = discrete_dividends;
-            batch.push_back(std::move(p));
-        }
+    auto leaves = build_segment_leaves(
+        cache, K_ref, seg_bounds, seg_is_gap,
+        /*include_gaps=*/false,
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
 
-        BatchAmericanOptionSolver solver;
-        solver.set_grid_accuracy(
-            make_grid_accuracy(GridAccuracyProfile::Ultra));
-        std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
-        solver.set_snapshot_times(std::span<const double>(tau_vec));
-        auto batch_result = solver.solve_batch(
-            std::span<const PricingParams>(batch), true);
-
-        for (size_t bi = 0; bi < missing.size(); ++bi) {
-            auto [si, ri] = missing[bi];
-            if (!batch_result.results[bi].has_value()) continue;
-            const auto& result = batch_result.results[bi].value();
-            auto grid = result.grid();
-            auto x_grid = grid->x();
-            for (size_t j = 0; j < tau_nodes.size(); ++j) {
-                auto spatial = result.at_time(j);
-                cache.store_slice(sigma_nodes[si], rate_nodes[ri],
-                                  j, x_grid, spatial);
-            }
-        }
-    }
-
-    // 2. Map tau nodes to segments (skip gap segments)
-    const size_t n_seg = seg_bounds.size() - 1;
-    std::vector<std::vector<size_t>> seg_tau_indices(n_seg);
-    for (size_t ti = 0; ti < tau_nodes.size(); ++ti) {
-        double t = tau_nodes[ti];
-        size_t s = 0;
-        for (size_t k = 0; k < n_seg; ++k) {
-            if (seg_is_gap[k]) continue;
-            if (t >= seg_bounds[k] && t <= seg_bounds[k + 1]) {
-                s = k;
-                break;
-            }
-        }
-        seg_tau_indices[s].push_back(ti);
-    }
-
-    // 3. Build per-segment Chebyshev tensors (V/K_ref, no EEP) — real segments only
-    const size_t Nm = m_nodes.size();
-    const size_t Ns = sigma_nodes.size();
-    const size_t Nr = rate_nodes.size();
-
-    std::vector<ChebyshevSegmentedLeaf> leaves;
-    leaves.reserve(n_seg);  // upper bound; only real segments get leaves
-
-    for (size_t s = 0; s < n_seg; ++s) {
-        if (seg_is_gap[s]) continue;  // skip gap segments entirely
-
-        const auto& tau_idx = seg_tau_indices[s];
-        const size_t Nt_seg = tau_idx.size();
-
-        if (Nt_seg == 0) {
-            // Degenerate real segment with no tau nodes — minimal placeholder
-            Domain<4> domain{
-                .lo = {m_nodes.front(), 0.0,
-                       sigma_nodes.front(), rate_nodes.front()},
-                .hi = {m_nodes.back(), seg_bounds[s + 1] - seg_bounds[s],
-                       sigma_nodes.back(), rate_nodes.back()},
-            };
-            std::array<size_t, 4> num_pts = {2, 2, 2, 2};
-            std::vector<double> zeros(16, 0.0);
-            auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
-                build_from_values(std::span<const double>(zeros),
-                                  domain, num_pts);
-            leaves.emplace_back(std::move(interp), StandardTransform4D{},
-                                K_ref);
-            continue;
-        }
-
-        std::vector<double> local_tau(Nt_seg);
-        for (size_t j = 0; j < Nt_seg; ++j) {
-            local_tau[j] = tau_nodes[tau_idx[j]] - seg_bounds[s];
-        }
-
-        std::vector<double> values(Nm * Nt_seg * Ns * Nr, 0.0);
-        for (size_t si = 0; si < Ns; ++si) {
-            double sigma = sigma_nodes[si];
-            for (size_t ri = 0; ri < Nr; ++ri) {
-                double rate = rate_nodes[ri];
-                for (size_t jt = 0; jt < Nt_seg; ++jt) {
-                    auto* spline = cache.get_slice(
-                        sigma, rate, tau_idx[jt]);
-                    if (!spline) continue;
-                    for (size_t mi = 0; mi < Nm; ++mi) {
-                        double v_over_k = spline->eval(m_nodes[mi]);
-                        size_t flat =
-                            mi * (Nt_seg * Ns * Nr)
-                            + jt * (Ns * Nr)
-                            + si * Nr + ri;
-                        values[flat] = v_over_k;
-                    }
-                }
-            }
-        }
-
-        Domain<4> domain{
-            .lo = {m_nodes.front(), local_tau.front(),
-                   sigma_nodes.front(), rate_nodes.front()},
-            .hi = {m_nodes.back(), local_tau.back(),
-                   sigma_nodes.back(), rate_nodes.back()},
-        };
-        std::array<size_t, 4> num_pts = {Nm, Nt_seg, Ns, Nr};
-        auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
-            build_from_values(std::span<const double>(values),
-                              domain, num_pts);
-        leaves.emplace_back(std::move(interp), StandardTransform4D{},
-                            K_ref);
-    }
-
-    // 4. Build TauSegmentSplit from segment boundaries (absorbs gaps)
+    // Build TauSegmentSplit from segment boundaries (absorbs gaps)
     auto tau_split = make_tau_split_from_segments(seg_bounds, seg_is_gap, K_ref);
 
     return ChebyshevSegmentedPieces{
