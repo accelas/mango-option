@@ -319,7 +319,7 @@ build_cached_surface(
     const PDEGridSpec& pde_grid,
     OptionType type,
     size_t& build_iteration,
-    std::shared_ptr<const PriceTableSurface>& last_surface,
+    std::shared_ptr<const BSplineND<double, 4>>& last_spline,
     PriceTableAxes& last_axes)
 {
     auto builder_result = PriceTableBuilder::from_vectors(
@@ -406,14 +406,13 @@ build_cached_surface(
     }
 
     // Store for later extraction
-    last_surface = assembly->surface;
+    last_spline = assembly->spline;
     last_axes = axes;
 
     size_t pde_solves = missing_params.size();
 
     // Return a handle that queries the surface (reconstruct full American price)
-    auto surface_ptr = assembly->surface;
-    auto wrapper = make_bspline_surface(surface_ptr, type);
+    auto wrapper = make_bspline_surface(assembly->spline, K_ref, dividend_yield, type);
     if (!wrapper.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
@@ -449,8 +448,8 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
     auto ctx = std::move(*domain);
     ctx.option_type = type;
 
-    // Shared state for the last surface built (so we can extract it after refinement)
-    std::shared_ptr<const PriceTableSurface> last_surface;
+    // Shared state for the last spline built (so we can extract it after refinement)
+    std::shared_ptr<const BSplineND<double, 4>> last_spline;
     PriceTableAxes last_axes;
 
     // Iteration counter for cache management (set_tau_grid vs invalidate_if_tau_changed)
@@ -469,7 +468,7 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
             {r_grid.begin(), r_grid.end()},
             chain.spot, chain.dividend_yield,
             pde_grid, type,
-            build_iteration, last_surface, last_axes);
+            build_iteration, last_spline, last_axes);
     };
 
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
@@ -487,7 +486,10 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
     auto& grids = grid_result.value();
 
     BSplineAdaptiveResult result;
-    result.surface = last_surface;
+    result.spline = last_spline;
+    result.axes = last_axes;
+    result.K_ref = chain.spot;
+    result.dividend_yield = chain.dividend_yield;
     result.iterations = std::move(grids.iterations);
     result.achieved_max_error = grids.achieved_max_error;
     result.achieved_avg_error = grids.achieved_avg_error;

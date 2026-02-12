@@ -379,7 +379,10 @@ template <size_t N> struct PriceTableBuilderAccess;
 /// Result from price table build with diagnostics
 template <size_t N>
 struct PriceTableResult {
-    std::shared_ptr<const PriceTableSurfaceND<N>> surface = nullptr;  ///< Immutable surface
+    std::shared_ptr<const BSplineND<double, N>> spline;  ///< Fitted B-spline
+    PriceTableAxesND<N> axes;                   ///< Grid axes used for building
+    double K_ref = 0.0;                         ///< Reference strike
+    DividendSpec dividends;                     ///< Dividend specification
     size_t n_pde_solves = 0;                    ///< Number of PDE solves performed
     double precompute_time_seconds = 0.0;       ///< Wall-clock build time
     BSplineFittingStats<double, N> fitting_stats;  ///< B-spline fitting diagnostics
@@ -410,7 +413,7 @@ struct RepairStats {
 /// Builder for N-dimensional price table surfaces
 ///
 /// Orchestrates PDE solves across grid points, fits B-spline coefficients,
-/// and constructs immutable PriceTableSurfaceND.
+/// and constructs an immutable BSplineND.
 ///
 /// @tparam N Number of dimensions
 template <size_t N>
@@ -559,9 +562,9 @@ public:
         BSplineFittingStats<double, N> stats;
     };
 
-    /// Result from assemble_surface() — surface + extraction diagnostics
+    /// Result from assemble_surface() — spline + extraction diagnostics
     struct AssembleSurfaceResult {
-        std::shared_ptr<const PriceTableSurfaceND<N>> surface;
+        std::shared_ptr<const BSplineND<double, N>> spline;
         BSplineFittingStats<double, N> fitting_stats;
         size_t failed_pde_slices = 0;
         size_t failed_spline_points = 0;

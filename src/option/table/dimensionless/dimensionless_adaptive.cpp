@@ -4,6 +4,7 @@
 #include "mango/option/table/dimensionless/dimensionless_3d_accessor.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline_basis.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/grid_spec_types.hpp"
@@ -116,21 +117,26 @@ build_segment(const SegmentDomain& dom,
         return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
     }
 
-    // 4. Build surface with actual K_ref
-    PriceTableAxesND<3> surface_axes;
-    surface_axes.grids[0] = axes.log_moneyness;
-    surface_axes.grids[1] = axes.tau_prime;
-    surface_axes.grids[2] = axes.ln_kappa;
-    surface_axes.names = {"log_moneyness", "tau_prime", "ln_kappa"};
-
-    auto surface = PriceTableSurfaceND<3>::build(
-        std::move(surface_axes), std::move(fit_result->coefficients), K_ref);
-    if (!surface.has_value()) {
+    // 4. Build BSplineND<3> directly
+    typename BSplineND<double, 3>::KnotArray knots;
+    typename BSplineND<double, 3>::GridArray grids_3d;
+    grids_3d[0] = axes.log_moneyness;
+    grids_3d[1] = axes.tau_prime;
+    grids_3d[2] = axes.ln_kappa;
+    for (size_t dim = 0; dim < 3; ++dim) {
+        knots[dim] = clamped_knots_cubic(grids_3d[dim]);
+    }
+    auto spline_result = BSplineND<double, 3>::create(
+        std::move(grids_3d), std::move(knots),
+        std::move(fit_result->coefficients));
+    if (!spline_result.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
     }
+    auto spline = std::make_shared<const BSplineND<double, 3>>(
+        std::move(spline_result.value()));
 
     return SegmentBuildResult{
-        .segment = {.surface = std::move(surface.value()), .lk_min = dom.lk_min_phys, .lk_max = dom.lk_max_phys},
+        .segment = {.spline = std::move(spline), .lk_min = dom.lk_min_phys, .lk_max = dom.lk_max_phys},
         .n_pde_solves = pde->n_pde_solves,
     };
 }
@@ -147,7 +153,7 @@ double SegmentedDimensionlessSurface::value(
     double lk = coords[2];
 
     if (segments_.size() == 1) {
-        return std::max(segments_[0].surface->value(coords), 0.0);
+        return std::max(segments_[0].spline->eval(coords), 0.0);
     }
 
     // Check blend zones at segment boundaries.  Each segment's B-spline is
@@ -164,8 +170,8 @@ double SegmentedDimensionlessSurface::value(
         if (lk >= boundary - blend_half && lk <= boundary + blend_half
             && blend_half > 1e-10) {
             double t = (lk - (boundary - blend_half)) / (2.0 * blend_half);
-            double v0 = segments_[i].surface->value(coords);
-            double v1 = segments_[i + 1].surface->value(coords);
+            double v0 = segments_[i].spline->eval(coords);
+            double v1 = segments_[i + 1].spline->eval(coords);
             return std::max((1.0 - t) * v0 + t * v1, 0.0);
         }
     }
@@ -173,11 +179,11 @@ double SegmentedDimensionlessSurface::value(
     // Not in any blend zone — find owning segment
     for (size_t i = 0; i < segments_.size() - 1; ++i) {
         if (lk <= segments_[i].lk_max) {
-            return std::max(segments_[i].surface->value(coords), 0.0);
+            return std::max(segments_[i].spline->eval(coords), 0.0);
         }
     }
 
-    return std::max(segments_.back().surface->value(coords), 0.0);
+    return std::max(segments_.back().spline->eval(coords), 0.0);
 }
 
 // ===========================================================================
@@ -307,7 +313,7 @@ build_dimensionless_surface_adaptive(
         if (converged || iter == params.max_iter - 1) {
             // Build final_axes as union of all segment lk grids
             for (const auto& seg : surface->segments()) {
-                auto& lk_ax = seg.surface->axes().grids[2];
+                const auto& lk_ax = seg.spline->grid(2);
                 for (double v : lk_ax) {
                     if (v >= lk_min_phys && v <= lk_max_phys)
                         final_axes.ln_kappa.push_back(v);
@@ -346,7 +352,7 @@ build_dimensionless_surface_adaptive(
         }
 
         auto& seg = surface->segments()[worst_seg];
-        size_t cur_lk = seg.surface->axes().grids[2].size();
+        size_t cur_lk = seg.spline->grid(2).size();
         size_t new_lk = std::min(
             static_cast<size_t>(static_cast<double>(cur_lk) * params.refinement_factor),
             params.max_points_per_dim);
@@ -372,7 +378,7 @@ build_dimensionless_surface_adaptive(
         std::vector<SegmentedDimensionlessSurface::Segment> new_segments;
         for (size_t s = 0; s < n_seg; ++s) {
             size_t lk_pts = (s == worst_seg) ? new_lk :
-                surface->segments()[s].surface->axes().grids[2].size();
+                surface->segments()[s].spline->grid(2).size();
             auto seg_result = build_segment(
                 seg_domains[s], x_grid, tp_grid, lk_pts, K_ref, params.option_type);
             if (!seg_result.has_value()) {

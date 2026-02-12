@@ -17,7 +17,7 @@ namespace mango {
 // ===========================================================================
 
 struct BSplineSegmentConfig {
-    std::shared_ptr<const PriceTableSurface> surface;
+    std::shared_ptr<const BSplineND<double, 4>> spline;
     double tau_start;
     double tau_end;
 };
@@ -94,7 +94,7 @@ private:
     /// For later segments, chains from the previous segment's surface
     /// with a dividend-adjusted initial condition.
     ///
-    /// On success, updates @p prev_surface to the newly built segment's surface.
+    /// On success, updates @p prev_spline to the newly built segment's spline.
     static std::expected<BSplineSegmentConfig, PriceTableError>
     build_segment(
         size_t seg_idx,
@@ -103,7 +103,7 @@ private:
         const std::vector<double>& expanded_log_m_grid,
         double K_ref,
         const std::vector<Dividend>& dividends,
-        std::shared_ptr<const PriceTableSurface>& prev_surface);
+        std::shared_ptr<const BSplineND<double, 4>>& prev_spline);
 };
 
 }  // namespace mango

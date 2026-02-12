@@ -15,7 +15,10 @@ namespace mango {
 
 /// Result of adaptive B-spline surface construction
 struct BSplineAdaptiveResult {
-    std::shared_ptr<const PriceTableSurface> surface;
+    std::shared_ptr<const BSplineND<double, 4>> spline;
+    PriceTableAxesND<4> axes;
+    double K_ref = 0.0;
+    double dividend_yield = 0.0;
     std::vector<IterationStats> iterations;
     double achieved_max_error = 0.0;
     double achieved_avg_error = 0.0;
