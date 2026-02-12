@@ -333,7 +333,7 @@ public:
     /// Contract with per-axis coefficient vectors (length shape[d] each).
     /// Internally: projected[d] = factors[d]^T * coeffs[d] (length ranks[d])
     /// Then contract core tensor via sequential axis reduction with SIMD.
-    MANGO_TARGET_CLONES("default", "avx2", "avx512f")
+    MANGO_TARGET_CLONES("default", "avx2")
     [[nodiscard]] double
     contract(const std::array<std::vector<double>, N>& coeffs) const {
         // Step 1: Project each coefficient vector into the rank-space
