@@ -1661,3 +1661,14 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "greek_types_test",
+    size = "small",
+    srcs = ["greek_types_test.cc"],
+    deps = [
+        "//src/option/table:greek_types",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+

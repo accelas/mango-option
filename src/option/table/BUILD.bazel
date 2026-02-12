@@ -64,6 +64,14 @@ cc_library(
 )
 
 cc_library(
+    name = "greek_types",
+    hdrs = ["greek_types.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "surface_concepts",
     hdrs = ["surface_concepts.hpp"],
     visibility = ["//visibility:public"],
