@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
+#include "mango/option/table/greek_types.hpp"
 #include "mango/option/table/surface_concepts.hpp"
 #include <cmath>
 
@@ -28,7 +29,7 @@ TEST(DimensionlessTransform3DTest, ToCoordsOTM) {
 TEST(DimensionlessTransform3DTest, VegaWeights) {
     DimensionlessTransform3D xform;
     double tau = 1.0, sigma = 0.20;
-    auto w = xform.vega_weights(100.0, 100.0, tau, sigma, 0.05);
+    auto w = xform.greek_weights(Greek::Vega, 100.0, 100.0, tau, sigma, 0.05);
     EXPECT_EQ(w[0], 0.0);
     EXPECT_NEAR(w[1], sigma * tau, 1e-14);
     EXPECT_NEAR(w[2], -2.0 / sigma, 1e-14);

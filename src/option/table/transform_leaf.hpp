@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "mango/option/table/greek_types.hpp"
 #include "mango/option/table/surface_concepts.hpp"
 #include <algorithm>
 
@@ -33,7 +34,7 @@ public:
         auto coords = xform_.to_coords(spot, strike, tau, sigma, rate);
         double raw = interp_.eval(coords);
         if (raw <= 0.0) return 0.0;
-        auto w = xform_.vega_weights(spot, strike, tau, sigma, rate);
+        auto w = xform_.greek_weights(Greek::Vega, spot, strike, tau, sigma, rate);
         double v = 0.0;
         for (size_t i = 0; i < Xform::kDim; ++i)
             if (w[i] != 0.0)

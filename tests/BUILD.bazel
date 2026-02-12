@@ -1495,8 +1495,10 @@ cc_test(
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option/table:surface_concepts",
+        "//src/option/table:greek_types",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table:standard_transform_4d",
+        "//src/option/table:dimensionless_transform_3d",
         "//src/option/table:analytical_eep",
         "//src/option/table:price_table",
 
@@ -1510,6 +1512,7 @@ cc_test(
     srcs = ["dimensionless_transform_test.cc"],
     deps = [
         "//src/option/table:dimensionless_transform_3d",
+        "//src/option/table:greek_types",
         "//src/option/table:surface_concepts",
         "@googletest//:gtest_main",
     ],
