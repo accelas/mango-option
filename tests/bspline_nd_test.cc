@@ -7,6 +7,7 @@
 #include "mango/math/bspline_nd.hpp"
 #include "mango/math/bspline_basis.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/surface_concepts.hpp"
 #include <gtest/gtest.h>
 #include <vector>
@@ -380,4 +381,53 @@ TEST_F(BSplineNDTest, BoundaryClamping) {
     // Should not crash and should return reasonable values
     EXPECT_TRUE(std::isfinite(val_below));
     EXPECT_TRUE(std::isfinite(val_above));
+}
+
+// ===========================================================================
+// SharedBSplineInterp forwarding tests
+// ===========================================================================
+
+/// Verify SharedBSplineInterp::eval_second_partial forwards to BSplineND
+TEST(SharedBSplineInterpTest, EvalSecondPartialForwards) {
+    // Reuse the 2D quadratic setup: f(x,y) = x^2 * y
+    auto make_grid = [](double lo, double hi, size_t n) {
+        std::vector<double> g(n);
+        for (size_t i = 0; i < n; ++i)
+            g[i] = lo + (hi - lo) * i / (n - 1);
+        return g;
+    };
+
+    auto grid_x = make_grid(0.0, 2.0, 8);
+    auto grid_y = make_grid(0.0, 2.0, 8);
+
+    std::vector<double> values(grid_x.size() * grid_y.size());
+    for (size_t i = 0; i < grid_x.size(); ++i)
+        for (size_t j = 0; j < grid_y.size(); ++j)
+            values[i * grid_y.size() + j] = grid_x[i] * grid_x[i] * grid_y[j];
+
+    auto fitter = BSplineNDSeparable<double, 2>::create({grid_x, grid_y});
+    ASSERT_TRUE(fitter.has_value());
+    auto fit = fitter->fit(values);
+    ASSERT_TRUE(fit.has_value());
+
+    auto knots_x = clamped_knots_cubic(grid_x);
+    auto knots_y = clamped_knots_cubic(grid_y);
+    auto spline = BSplineND<double, 2>::create(
+        {grid_x, grid_y}, {knots_x, knots_y}, fit->coefficients);
+    ASSERT_TRUE(spline.has_value());
+
+    // Wrap in SharedBSplineInterp
+    auto shared = std::make_shared<const BSplineND<double, 2>>(std::move(*spline));
+    SharedBSplineInterp<2> interp(shared);
+
+    // Verify forwarding at several interior points
+    for (double x : {0.5, 1.0, 1.5}) {
+        for (double y : {0.5, 1.0, 1.5}) {
+            std::array<double, 2> coords = {x, y};
+            double direct = shared->eval_second_partial(0, coords);
+            double via_interp = interp.eval_second_partial(0, coords);
+            EXPECT_DOUBLE_EQ(direct, via_interp)
+                << "Mismatch at (" << x << ", " << y << ")";
+        }
+    }
 }
