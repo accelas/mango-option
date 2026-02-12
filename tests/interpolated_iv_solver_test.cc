@@ -10,6 +10,8 @@
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
+#include "mango/math/bspline_nd.hpp"
+#include "mango/math/bspline_basis.hpp"
 
 namespace mango {
 namespace {
@@ -34,21 +36,21 @@ protected:
                 eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
             });
         ASSERT_TRUE(table.has_value()) << "Failed to build table";
-        surface_ = table->surface;
+        spline_ = table->spline;
     }
 
     /// Helper to create a BSplinePriceTable for IV solver tests
     BSplinePriceTable make_wrapper() {
-        auto result = make_bspline_surface(surface_, OptionType::PUT);
+        auto result = make_bspline_surface(spline_, K_ref_, 0.0, OptionType::PUT);
         return std::move(*result);
     }
 
-    std::shared_ptr<const PriceTableSurface> surface_;
+    std::shared_ptr<const BSplineND<double, 4>> spline_;
     static constexpr double K_ref_ = 100.0;
 };
 
 TEST_F(InterpolatedIVSolverTest, CreateFromBSplinePriceTable) {
-    auto wrapper_result = make_bspline_surface(surface_, OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(spline_, K_ref_, 0.0, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
@@ -214,19 +216,28 @@ TEST_F(InterpolatedIVSolverTest, ConvergenceWithinIterations) {
 }
 
 TEST_F(InterpolatedIVSolverTest, SolveWithEEPSurface) {
-    // Build an EEP surface (axis 0 is log-moneyness)
-    PriceTableAxes eep_axes;
-    eep_axes.grids[0] = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
-    eep_axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
-    eep_axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
-    eep_axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
+    // Build a BSplineND<double, 4> directly (axis 0 is log-moneyness)
+    std::array<std::vector<double>, 4> eep_grids = {{
+        {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)},
+        {0.25, 0.5, 1.0, 2.0},
+        {0.10, 0.20, 0.30, 0.40},
+        {0.02, 0.04, 0.06, 0.08},
+    }};
+    std::array<std::vector<double>, 4> eep_knots;
+    for (size_t i = 0; i < 4; ++i) {
+        eep_knots[i] = clamped_knots_cubic(eep_grids[i]);
+    }
 
     std::vector<double> eep_coeffs(5 * 4 * 4 * 4, 2.0);
 
-    auto eep_surface = PriceTableSurface::build(eep_axes, eep_coeffs, 100.0);
-    ASSERT_TRUE(eep_surface.has_value());
+    auto eep_spline = BSplineND<double, 4>::create(
+        eep_grids, std::move(eep_knots), std::move(eep_coeffs));
+    ASSERT_TRUE(eep_spline.has_value());
 
-    auto wrapper_result = make_bspline_surface(eep_surface.value(), OptionType::PUT);
+    auto eep_spline_ptr = std::make_shared<const BSplineND<double, 4>>(
+        std::move(eep_spline.value()));
+
+    auto wrapper_result = make_bspline_surface(eep_spline_ptr, 100.0, 0.0, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
@@ -269,7 +280,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
         });
     ASSERT_TRUE(table.has_value());
 
-    auto wrapper_result = make_bspline_surface(table->surface, OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(table->spline, K_ref, 0.0, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));
@@ -309,7 +320,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
         });
     ASSERT_TRUE(table.has_value());
 
-    auto wrapper_result = make_bspline_surface(table->surface, OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(table->spline, K_ref, div_yield, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value());
 
     auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper_result));

@@ -166,7 +166,8 @@ cc_test(
     size = "small",
     srcs = ["price_table_surface_test.cc"],
     deps = [
-        "//src/option/table/bspline:bspline_surface",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -1099,6 +1100,8 @@ cc_test(
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/bspline:bspline_tensor_accessor",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
         "@googletest//:gtest_main",
     ],
 )
@@ -1628,7 +1631,9 @@ cc_test(
         "//src/option/table/dimensionless:dimensionless_builder",
         "//src/option/table/dimensionless:dimensionless_3d_accessor",
         "//src/option/table:analytical_eep",
+        "//src/math:bspline_nd",
         "//src/math:bspline_nd_separable",
+        "//src/math:bspline_basis",
         "//src/option:american_option",
         "@googletest//:gtest_main",
     ],
