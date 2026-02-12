@@ -267,6 +267,44 @@ cc_binary(
 )
 
 cc_binary(
+    name = "greek_latency",
+    srcs = ["greek_latency.cc"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+    ],
+    linkopts = [
+        "-fopenmp",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/math:bspline_basis",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_nd_separable",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/option:option_spec",
+        "//src/option/table:greek_types",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_tensor_accessor",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
     name = "interpolation_greek_accuracy",
     srcs = ["interpolation_greek_accuracy.cc"],
     copts = [
