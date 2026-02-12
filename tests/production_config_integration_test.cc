@@ -129,8 +129,8 @@ TEST(ProductionConfig, PriceTableBuilder_SmallGrid_51Points) {
         << ", axis_index=" << result.error().axis_index
         << ", count=" << result.error().count;
 
-    // Verify surface is usable
-    EXPECT_NE(result->surface, nullptr);
+    // Verify spline is usable
+    EXPECT_NE(result->spline, nullptr);
 }
 
 TEST(ProductionConfig, PriceTableBuilder_VerySmallGrid_31Points) {
@@ -207,8 +207,8 @@ TEST(ProductionConfig, PriceTableBuilder_FullMarketGrid) {
     ASSERT_TRUE(result.has_value())
         << "Full market grid build failed";
 
-    // Verify surface dimensions match input
-    EXPECT_NE(result->surface, nullptr);
+    // Verify spline dimensions match input
+    EXPECT_NE(result->spline, nullptr);
 }
 
 // ============================================================================
@@ -480,7 +480,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_BuildPriceTable) {
         << static_cast<int>(result.error().code);
 
     // Verify result structure
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_NE(result->spline, nullptr);
     EXPECT_GT(result->n_pde_solves, 0);
     EXPECT_EQ(result->failed_pde_slices, 0)
         << "PDE slices failed - indicates solver configuration issue";
@@ -518,7 +518,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
-    auto wrapper = make_bspline_surface(table_result->surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(table_result->spline, table_result->K_ref, table_result->dividends.dividend_yield, OptionType::PUT);
     ASSERT_TRUE(wrapper.has_value()) << wrapper.error();
     auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(
         std::move(wrapper).value(), solver_config);
@@ -535,7 +535,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     double vol = 0.20;
 
     // Get reconstructed American price from BSplinePriceTable
-    auto wrapper_for_price = make_bspline_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_for_price = make_bspline_surface(table_result->spline, table_result->K_ref, table_result->dividends.dividend_yield, OptionType::PUT);
     ASSERT_TRUE(wrapper_for_price.has_value()) << wrapper_for_price.error();
     double price = wrapper_for_price->price(spot, strike, maturity, vol, rate);
     EXPECT_GT(price, 0.0);

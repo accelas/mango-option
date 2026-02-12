@@ -5,7 +5,7 @@
  */
 
 #include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/math/bspline_basis.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <iostream>
@@ -37,7 +37,7 @@ TEST(PriceTable4DIntegrationTest, FastPathEligible) {
     EXPECT_EQ(result->n_pde_solves, 4 * 4);  // Nv × Nr = 16
 
     // Spot check: ATM put with 1y maturity, σ=20%, r=5% (ATM: log-moneyness = 0.0)
-    double price = result->surface->value({0.0, 1.0, 0.20, 0.05});
+    double price = result->spline->eval({0.0, 1.0, 0.20, 0.05});
     EXPECT_GT(price, 0.0);
     EXPECT_LT(price, 100.0);  // Put value < strike for ATM
 
@@ -69,8 +69,8 @@ TEST(PriceTable4DIntegrationTest, FallbackWideRange) {
     EXPECT_EQ(result->n_pde_solves, 4 * 4);  // Nv × Nr = 16
 
     // Verify prices at extremes (log-moneyness)
-    double price_deep_itm = result->surface->value({std::log(0.5), 1.0, 0.20, 0.05});
-    double price_deep_otm = result->surface->value({std::log(1.5), 1.0, 0.20, 0.05});
+    double price_deep_itm = result->spline->eval({std::log(0.5), 1.0, 0.20, 0.05});
+    double price_deep_otm = result->spline->eval({std::log(1.5), 1.0, 0.20, 0.05});
 
     EXPECT_GT(price_deep_itm, price_deep_otm);  // ITM > OTM
 }
@@ -115,8 +115,8 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackConsistency) {
         for (double tau : {0.5, 1.0}) {
             for (double sigma : {0.20, 0.25}) {
                 for (double r : {0.04, 0.06}) {
-                    double price_fast = result_fast->surface->value({m, tau, sigma, r});
-                    double price_fallback = result_fallback->surface->value({m, tau, sigma, r});
+                    double price_fast = result_fast->spline->eval({m, tau, sigma, r});
+                    double price_fallback = result_fallback->spline->eval({m, tau, sigma, r});
 
                     // Use relative error: |fast - fallback| / |fallback| < 1%
                     // This catches scaling bugs that absolute tolerance misses
@@ -176,8 +176,8 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackNormalizedPriceEquivalence) 
 
     // Compare raw precomputed prices at EVERY grid point
     // This is stricter than interpolation comparison
-    const auto& prices_fast = result_fast->surface->tensor().data();
-    const auto& prices_fallback = result_fallback->surface->tensor().data();
+    const auto& prices_fast = result_fast->spline->coefficients();
+    const auto& prices_fallback = result_fallback->spline->coefficients();
 
     ASSERT_EQ(prices_fast.size(), prices_fallback.size());
     ASSERT_EQ(prices_fast.size(), Nm * Nt * Nv * Nr);
@@ -264,33 +264,24 @@ TEST(PriceTable4DIntegrationTest, PerformanceFastPath) {
     EXPECT_LT(duration_sec, 60.0);  // Complete within 1 minute
 }
 
-TEST(PriceTableSurfaceND, ConstructsFromAxes) {
+TEST(BSplineND4D, ConstructsFromGrids) {
     std::vector<double> m = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1)};
     std::vector<double> tau = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.04, 0.05};
 
-    PriceTableAxes axes;
-    axes.grids = {m, tau, sigma, r};
-
-    PriceTensor tensor(axes);
-    // Fill with test data
-    for (size_t i = 0; i < tensor.data().size(); ++i) {
-        tensor.data()[i] = 10.0;
+    std::array<std::vector<double>, 4> grids = {m, tau, sigma, r};
+    std::array<std::vector<double>, 4> knots;
+    for (size_t i = 0; i < 4; ++i) {
+        knots[i] = clamped_knots_cubic(grids[i]);
     }
 
-    PriceTableMetadata meta{
-        .K_ref = 100.0,
-        .dividends = {.dividend_yield = 0.015},
-    };
+    // 4*4*4*4 = 256 coefficients
+    std::vector<double> coeffs(256, 10.0);
 
-    auto surface = PriceTableSurface::create(axes, std::move(tensor), meta);
-    ASSERT_TRUE(surface.has_value());
+    auto spline = BSplineND<double, 4>::create(grids, std::move(knots), std::move(coeffs));
+    ASSERT_TRUE(spline.has_value());
 
-    EXPECT_DOUBLE_EQ(surface->metadata().K_ref, 100.0);
-    EXPECT_DOUBLE_EQ(surface->metadata().dividends.dividend_yield, 0.015);
-
-    const auto& grids = surface->axes().grids;
-    EXPECT_DOUBLE_EQ(grids[0].front(), std::log(0.8));
-    EXPECT_DOUBLE_EQ(grids[0].back(), std::log(1.1));
+    EXPECT_DOUBLE_EQ(spline->grid(0).front(), std::log(0.8));
+    EXPECT_DOUBLE_EQ(spline->grid(0).back(), std::log(1.1));
 }

@@ -66,7 +66,7 @@ struct DimensionlessAdaptiveParams {
 class SegmentedDimensionlessSurface {
 public:
     struct Segment {
-        std::shared_ptr<const PriceTableSurfaceND<3>> surface;
+        std::shared_ptr<const BSplineND<double, 3>> spline;
         double lk_min, lk_max;  ///< Physical ln kappa range (no headroom)
     };
 

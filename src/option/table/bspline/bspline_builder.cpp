@@ -2,6 +2,7 @@
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline_basis.hpp"
 #include "mango/support/ivcalc_trace.h"
 #include "mango/pde/core/time_domain.hpp"
 #include "mango/support/parallel.hpp"
@@ -116,7 +117,10 @@ PriceTableBuilderND<N>::build(const PriceTableAxesND<N>& axes,
     // Return full result with diagnostics
     const size_t Nt = axes.grids[1].size();
     return PriceTableResult<N>{
-        .surface = std::move(assembly->surface),
+        .spline = std::move(assembly->spline),
+        .axes = axes,
+        .K_ref = config_.K_ref,
+        .dividends = config_.dividends,
         .n_pde_solves = n_pde_solves,
         .precompute_time_seconds = elapsed,
         .fitting_stats = assembly->fitting_stats,
@@ -164,15 +168,24 @@ PriceTableBuilderND<N>::assemble_surface(
         return std::unexpected(coeffs_result.error());
     }
 
-    // Step 5: Build immutable surface
-    auto surface_result = PriceTableSurfaceND<N>::build(
-        axes, std::move(coeffs_result->coefficients), K_ref, dividends);
-    if (!surface_result.has_value()) {
+    // Step 5: Build BSplineND directly
+    typename BSplineND<double, N>::KnotArray knots;
+    typename BSplineND<double, N>::GridArray grids_copy;
+    for (size_t dim = 0; dim < N; ++dim) {
+        knots[dim] = clamped_knots_cubic(axes.grids[dim]);
+        grids_copy[dim] = axes.grids[dim];
+    }
+    auto spline_result = BSplineND<double, N>::create(
+        std::move(grids_copy), std::move(knots),
+        std::move(coeffs_result->coefficients));
+    if (!spline_result.has_value()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
     }
+    auto spline = std::make_shared<const BSplineND<double, N>>(
+        std::move(spline_result.value()));
 
     return AssembleSurfaceResult{
-        .surface = std::move(surface_result.value()),
+        .spline = std::move(spline),
         .fitting_stats = coeffs_result->stats,
         .failed_pde_slices = extraction->failed_pde.size(),
         .failed_spline_points = extraction->failed_spline.size(),
@@ -475,7 +488,7 @@ PriceTableBuilderND<N>::fit_coeffs(
     static_assert(N == 4, "PriceTableBuilderND only supports N=4");
 
     // Extract grids for BSplineNDSeparable
-    // Axis 0 is already log-moneyness, matching PriceTableSurfaceND's coordinate system.
+    // Axis 0 is already log-moneyness, matching the B-spline coordinate system.
     std::array<std::vector<double>, N> grids;
     for (size_t i = 0; i < N; ++i) {
         grids[i] = axes.grids[i];

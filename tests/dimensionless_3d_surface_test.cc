@@ -6,7 +6,10 @@
 #include "mango/option/table/eep/analytical_eep.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline_nd.hpp"
+#include "mango/math/bspline_basis.hpp"
 #include <cmath>
+#include <memory>
 
 namespace mango {
 namespace {
@@ -36,19 +39,22 @@ protected:
         auto fit = fitter->fit(std::move(pde->values));
         ASSERT_TRUE(fit.has_value());
 
-        // 4. Build surface with actual K_ref
-        PriceTableAxesND<3> surface_axes;
-        surface_axes.grids[0] = axes.log_moneyness;
-        surface_axes.grids[1] = axes.tau_prime;
-        surface_axes.grids[2] = axes.ln_kappa;
-        surface_axes.names = {"log_moneyness", "tau_prime", "ln_kappa"};
+        // 4. Build BSplineND<double, 3> with fitted coefficients
+        std::array<std::vector<double>, 3> bspline_grids = {
+            axes.log_moneyness, axes.tau_prime, axes.ln_kappa};
+        std::array<std::vector<double>, 3> bspline_knots;
+        for (size_t i = 0; i < 3; ++i) {
+            bspline_knots[i] = clamped_knots_cubic(bspline_grids[i]);
+        }
+        auto spline = BSplineND<double, 3>::create(
+            bspline_grids, std::move(bspline_knots), std::move(fit->coefficients));
+        ASSERT_TRUE(spline.has_value());
 
-        auto surface = PriceTableSurfaceND<3>::build(
-            std::move(surface_axes), std::move(fit->coefficients), K_ref_);
-        ASSERT_TRUE(surface.has_value());
+        auto spline_ptr = std::make_shared<const BSplineND<double, 3>>(
+            std::move(spline.value()));
 
         // 5. Wrap in layered PriceTable
-        SharedBSplineInterp<3> interp(std::move(surface.value()));
+        SharedBSplineInterp<3> interp(std::move(spline_ptr));
         DimensionlessTransform3D xform;
         BSpline3DTransformLeaf leaf(std::move(interp), xform, K_ref_);
         AnalyticalEEP eep(OptionType::PUT, 0.0);

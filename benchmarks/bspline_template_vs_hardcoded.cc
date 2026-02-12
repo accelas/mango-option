@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // OBSOLETE: This benchmark compared BSpline4D (removed) vs BSplineND template.
-// BSpline4D was dead code - production now uses PriceTableSurface directly.
+// BSpline4D was dead code - production now uses BSplineND directly.
 // Kept for historical reference but no longer builds.
 
 #include <benchmark/benchmark.h>
@@ -66,7 +66,7 @@ struct BSplineTestData {
     }
 };
 
-// REMOVED: BSpline4D was dead code, removed in favor of PriceTableSurface
+// REMOVED: BSpline4D was dead code, removed in favor of BSplineND
 // void BM_BSpline4D_Eval(benchmark::State& state) {
 //     ...
 // }

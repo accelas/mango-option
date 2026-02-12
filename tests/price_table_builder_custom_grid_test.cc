@@ -207,18 +207,18 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridCoversWideMoneyness) {
     EXPECT_EQ(result->failed_spline_points, 0)
         << "Spline failures indicate extrapolation outside PDE domain";
 
-    // Verify surface returns sensible prices at extreme moneyness
-    auto& surface = result->surface;
-    ASSERT_NE(surface, nullptr);
+    // Verify spline returns sensible prices at extreme moneyness
+    auto& spline = result->spline;
+    ASSERT_NE(spline, nullptr);
 
     // Deep ITM put (ln(0.5) → spot/strike=0.5 → strike >> spot): high price
-    double deep_itm = surface->value({std::log(0.5), 0.17, 0.14, 0.05});
+    double deep_itm = spline->eval({std::log(0.5), 0.17, 0.14, 0.05});
     EXPECT_GT(deep_itm, 0.0) << "Deep ITM put should have positive price";
     EXPECT_FALSE(std::isnan(deep_itm)) << "Deep ITM should not be NaN";
 
     // Deep OTM put (ln(2.0) → spot/strike=2.0 → spot >> strike): near zero
     // Debiased softplus can produce tiny negative values (~1e-34) due to FP precision
-    double deep_otm = surface->value({std::log(2.0), 0.17, 0.14, 0.05});
+    double deep_otm = spline->eval({std::log(2.0), 0.17, 0.14, 0.05});
     EXPECT_GE(deep_otm, -1e-10) << "Put price should be non-negative (within FP tolerance)";
     EXPECT_FALSE(std::isnan(deep_otm)) << "Deep OTM should not be NaN";
 }
@@ -265,8 +265,8 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
     EXPECT_EQ(result_fine->failed_pde_slices, 0);
 
     // ATM put prices from both (log-moneyness 0.0 = ATM)
-    double price_coarse = result_coarse->surface->value({0.0, 0.5, 0.20, 0.05});
-    double price_fine   = result_fine->surface->value({0.0, 0.5, 0.20, 0.05});
+    double price_coarse = result_coarse->spline->eval({0.0, 0.5, 0.20, 0.05});
+    double price_fine   = result_fine->spline->eval({0.0, 0.5, 0.20, 0.05});
 
     // Both should be reasonable ATM put prices
     EXPECT_GT(price_coarse, 0.0);
@@ -329,14 +329,14 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
     EXPECT_EQ(result->failed_spline_points, 0)
         << "Spline failures indicate fallback grid under-coverage";
 
-    auto& surface = result->surface;
-    ASSERT_NE(surface, nullptr);
+    auto& spline = result->spline;
+    ASSERT_NE(spline, nullptr);
 
-    double deep_itm = surface->value({std::log(0.5), 0.17, 0.14, 0.05});
+    double deep_itm = spline->eval({std::log(0.5), 0.17, 0.14, 0.05});
     EXPECT_GT(deep_itm, 0.0);
     EXPECT_FALSE(std::isnan(deep_itm));
 
-    double deep_otm = surface->value({std::log(2.0), 0.17, 0.14, 0.05});
+    double deep_otm = spline->eval({std::log(2.0), 0.17, 0.14, 0.05});
     EXPECT_GE(deep_otm, 0.0);
     EXPECT_FALSE(std::isnan(deep_otm));
 }

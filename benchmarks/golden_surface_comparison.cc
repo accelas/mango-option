@@ -10,6 +10,8 @@
 
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/math/bspline_nd.hpp"
+#include "mango/math/bspline_basis.hpp"
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -32,18 +34,22 @@ SegmentedDimensionlessSurface::Segment build_golden_segment(
     const double* coeffs, size_t nc,
     double lk_min, double lk_max)
 {
-    PriceTableAxesND<3> axes;
-    axes.grids[0].assign(x, x + nx);
-    axes.grids[1].assign(tp, tp + ntp);
-    axes.grids[2].assign(lk, lk + nlk);
-    axes.names = {"log_moneyness", "tau_prime", "ln_kappa"};
+    std::array<std::vector<double>, 3> grids;
+    grids[0].assign(x, x + nx);
+    grids[1].assign(tp, tp + ntp);
+    grids[2].assign(lk, lk + nlk);
 
-    auto surface = PriceTableSurfaceND<3>::build(
-        std::move(axes),
-        std::vector<double>(coeffs, coeffs + nc),
-        100.0).value();
+    std::array<std::vector<double>, 3> knots;
+    knots[0] = clamped_knots_cubic<double>(grids[0]);
+    knots[1] = clamped_knots_cubic<double>(grids[1]);
+    knots[2] = clamped_knots_cubic<double>(grids[2]);
 
-    return {.surface = std::move(surface), .lk_min = lk_min, .lk_max = lk_max};
+    auto spline = BSplineND<double, 3>::create(
+        grids, knots,
+        std::vector<double>(coeffs, coeffs + nc)).value();
+
+    return {.spline = std::make_shared<const BSplineND<double, 3>>(std::move(spline)),
+            .lk_min = lk_min, .lk_max = lk_max};
 }
 
 std::shared_ptr<SegmentedDimensionlessSurface> load_golden() {
@@ -108,16 +114,16 @@ int main() {
         "Seg", "Nx", "Ntp", "Nlk", "lk_min", "lk_max");
     for (size_t s = 0; s < golden->num_segments(); ++s) {
         const auto& gs = golden->segments()[s];
-        const auto& ga = gs.surface->axes();
+        const auto& sp = *gs.spline;
         std::printf("  gold[%zu]  %6zu  %6zu  %6zu  %10.3f  %10.3f\n",
-            s, ga.grids[0].size(), ga.grids[1].size(), ga.grids[2].size(),
+            s, sp.grid(0).size(), sp.grid(1).size(), sp.grid(2).size(),
             gs.lk_min, gs.lk_max);
     }
     for (size_t s = 0; s < current->num_segments(); ++s) {
         const auto& cs = current->segments()[s];
-        const auto& ca = cs.surface->axes();
+        const auto& sp = *cs.spline;
         std::printf("  curr[%zu]  %6zu  %6zu  %6zu  %10.3f  %10.3f\n",
-            s, ca.grids[0].size(), ca.grids[1].size(), ca.grids[2].size(),
+            s, sp.grid(0).size(), sp.grid(1).size(), sp.grid(2).size(),
             cs.lk_min, cs.lk_max);
     }
 
@@ -132,14 +138,14 @@ int main() {
         std::printf("\n");
     };
     {
-        const auto& ga = golden->segments()[0].surface->axes();
-        const auto& ca = current->segments()[0].surface->axes();
-        print_grid("gold x  ", ga.grids[0]);
-        print_grid("curr x  ", ca.grids[0]);
-        print_grid("gold tp ", ga.grids[1]);
-        print_grid("curr tp ", ca.grids[1]);
-        print_grid("gold lk ", ga.grids[2]);
-        print_grid("curr lk ", ca.grids[2]);
+        const auto& gs = *golden->segments()[0].spline;
+        const auto& cs = *current->segments()[0].spline;
+        print_grid("gold x  ", gs.grid(0));
+        print_grid("curr x  ", cs.grid(0));
+        print_grid("gold tp ", gs.grid(1));
+        print_grid("curr tp ", cs.grid(1));
+        print_grid("gold lk ", gs.grid(2));
+        print_grid("curr lk ", cs.grid(2));
     }
     std::printf("\n");
 

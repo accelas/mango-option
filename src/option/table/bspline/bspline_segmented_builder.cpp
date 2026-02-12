@@ -13,9 +13,9 @@ namespace {
 
 constexpr int kCubicSplineDegree = 3;
 
-/// Context for sampling a previous segment's surface as an initial condition.
+/// Context for sampling a previous segment's spline as an initial condition.
 struct ChainedICContext {
-    std::shared_ptr<const PriceTableSurface> prev_surface;
+    std::shared_ptr<const BSplineND<double, 4>> prev_spline;
     double K_ref;
     double prev_tau_end;   ///< Previous segment's local τ at its far boundary
     double boundary_div;   ///< Discrete dividend amount at this boundary
@@ -251,13 +251,13 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     std::vector<BSplineSegmentConfig> segment_configs;
     segment_configs.reserve(n_segments);
 
-    // The "previous" surface, used to generate chained ICs for earlier segments.
-    std::shared_ptr<const PriceTableSurface> prev_surface;
+    // The "previous" spline, used to generate chained ICs for earlier segments.
+    std::shared_ptr<const BSplineND<double, 4>> prev_spline;
 
     for (size_t seg_idx = 0; seg_idx < n_segments; ++seg_idx) {
         auto seg_result = build_segment(
             seg_idx, boundaries, config, expanded_log_m_grid,
-            K_ref, dividends, prev_surface);
+            K_ref, dividends, prev_spline);
         if (!seg_result.has_value()) {
             return std::unexpected(seg_result.error());
         }
@@ -283,7 +283,7 @@ SegmentedPriceTableBuilder::build_segment(
     const std::vector<double>& expanded_log_m_grid,
     double K_ref,
     const std::vector<Dividend>& dividends,
-    std::shared_ptr<const PriceTableSurface>& prev_surface)
+    std::shared_ptr<const BSplineND<double, 4>>& prev_spline)
 {
     double tau_start = boundaries[seg_idx];
     double tau_end = boundaries[seg_idx + 1];
@@ -336,7 +336,7 @@ SegmentedPriceTableBuilder::build_segment(
         double boundary_div = dividends[dividends.size() - seg_idx].amount;
 
         ChainedICContext ic_ctx{
-            .prev_surface = prev_surface,
+            .prev_spline = prev_spline,
             .K_ref = K_ref,
             .prev_tau_end = prev_seg_tau_local_end,
             .boundary_div = boundary_div,
@@ -358,7 +358,7 @@ SegmentedPriceTableBuilder::build_segment(
                         double spot = ic_ctx.K_ref * std::exp(x[i]);
                         double spot_adj = std::max(spot - ic_ctx.boundary_div, 1e-8);
                         double x_adj = std::log(spot_adj / ic_ctx.K_ref);
-                        double raw = ic_ctx.prev_surface->value(
+                        double raw = ic_ctx.prev_spline->eval(
                             {x_adj, ic_ctx.prev_tau_end, sigma, rate});
                         u[i] = raw;
                     }
@@ -391,11 +391,11 @@ SegmentedPriceTableBuilder::build_segment(
         return std::unexpected(assembly.error());
     }
 
-    auto surface_ptr = assembly->surface;
-    prev_surface = surface_ptr;
+    auto spline_ptr = assembly->spline;
+    prev_spline = spline_ptr;
 
     return BSplineSegmentConfig{
-        .surface = surface_ptr,
+        .spline = spline_ptr,
         .tau_start = tau_start,
         .tau_end = tau_end,
     };
@@ -427,10 +427,10 @@ build_segmented_surface(BSplineSegmentedConfig config) {
     for (auto& seg : config.segments) {
         tau_start.push_back(seg.tau_start);
         tau_end.push_back(seg.tau_end);
-        tau_min.push_back(seg.surface->axes().grids[1].front());
-        tau_max.push_back(seg.surface->axes().grids[1].back());
+        tau_min.push_back(seg.spline->grid(1).front());
+        tau_max.push_back(seg.spline->grid(1).back());
 
-        SharedBSplineInterp<4> interp(seg.surface);
+        SharedBSplineInterp<4> interp(seg.spline);
         StandardTransform4D xform;
         leaves.emplace_back(std::move(interp), xform, config.K_ref);
     }

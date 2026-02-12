@@ -24,6 +24,7 @@
 #include "mango/option/table/dimensionless/dimensionless_3d_accessor.hpp"
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline_basis.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/math/chebyshev/tucker_tensor.hpp"
 #include <algorithm>
@@ -196,10 +197,12 @@ static AnyInterpIVSolver make_any_solver(InterpolatedIVSolver<Surface> solver) {
 // ---------------------------------------------------------------------------
 
 static std::expected<AnyInterpIVSolver, ValidationError>
-wrap_surface(std::shared_ptr<const PriceTableSurface> surface,
+wrap_surface(std::shared_ptr<const BSplineND<double, 4>> spline,
+             double K_ref,
+             double dividend_yield,
              OptionType option_type,
              const InterpolatedIVSolverConfig& solver_config) {
-    auto wrapper = make_bspline_surface(surface, option_type);
+    auto wrapper = make_bspline_surface(spline, K_ref, dividend_yield, option_type);
     if (!wrapper.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
@@ -316,8 +319,9 @@ build_bspline_continuous(const IVSolverFactoryConfig& config,
             return std::unexpected(ValidationError{
                 ValidationErrorCode::InvalidGridSize, 0.0});
         }
-        return wrap_surface(std::move(result->surface), config.option_type,
-                            config.solver_config);
+        return wrap_surface(std::move(result->spline),
+                            chain.spot, chain.dividend_yield,
+                            config.option_type, config.solver_config);
     }
 
     auto log_m = to_log_moneyness(config.grid.moneyness);
@@ -343,7 +347,9 @@ build_bspline_continuous(const IVSolverFactoryConfig& config,
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
-    return wrap_surface(table_result->surface, config.option_type, config.solver_config);
+    return wrap_surface(table_result->spline,
+                        config.spot, config.dividend_yield,
+                        config.option_type, config.solver_config);
 }
 
 // ---------------------------------------------------------------------------
@@ -544,22 +550,27 @@ build_dimensionless_bspline(const IVSolverFactoryConfig& config,
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    // 4. Build surface with actual K_ref
-    PriceTableAxesND<3> surface_axes;
-    surface_axes.grids[0] = axes.log_moneyness;
-    surface_axes.grids[1] = axes.tau_prime;
-    surface_axes.grids[2] = axes.ln_kappa;
-    surface_axes.names = {"log_moneyness", "tau_prime", "ln_kappa"};
-
-    auto surface = PriceTableSurfaceND<3>::build(
-        std::move(surface_axes), std::move(fit_result->coefficients), config.spot);
-    if (!surface.has_value()) {
+    // 4. Build BSplineND<3> directly
+    typename BSplineND<double, 3>::KnotArray knots;
+    typename BSplineND<double, 3>::GridArray grids_3d;
+    grids_3d[0] = axes.log_moneyness;
+    grids_3d[1] = axes.tau_prime;
+    grids_3d[2] = axes.ln_kappa;
+    for (size_t dim = 0; dim < 3; ++dim) {
+        knots[dim] = clamped_knots_cubic(grids_3d[dim]);
+    }
+    auto spline_result = BSplineND<double, 3>::create(
+        std::move(grids_3d), std::move(knots),
+        std::move(fit_result->coefficients));
+    if (!spline_result.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
+    auto spline_ptr = std::make_shared<const BSplineND<double, 3>>(
+        std::move(spline_result.value()));
 
     // 5. Wrap in layered PriceTable (K_ref = config.spot)
-    SharedBSplineInterp<3> interp(std::move(surface.value()));
+    SharedBSplineInterp<3> interp(spline_ptr);
     DimensionlessTransform3D xform;
     BSpline3DTransformLeaf leaf(std::move(interp), xform, config.spot);
     AnalyticalEEP eep(config.option_type, 0.0);

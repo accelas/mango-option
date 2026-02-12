@@ -88,19 +88,20 @@ int main() {
         return 1;
     }
 
-    auto surface = table_result->surface;
+    auto spline = table_result->spline;
+    double table_K_ref = table_result->K_ref;
     std::printf("  Surface content: EEP (type-enforced)\n");
-    std::printf("  K_ref: %.2f\n", surface->K_ref());
+    std::printf("  K_ref: %.2f\n", table_K_ref);
 
     // Query the raw surface at our test point
     double m = kSpot / kStrike;  // = 1.0 for ATM
-    double raw_value = surface->value({m, kTau, kSigma, kRate});
+    double raw_value = spline->eval({m, kTau, kSigma, kRate});
     std::printf("  Raw surface value at (m=%.2f, tau=%.2f, sigma=%.2f, rate=%.2f): %.6f\n",
                 m, kTau, kSigma, kRate, raw_value);
 
     // Layer 4: BSplinePriceTable reconstruction
     std::printf("\n--- Layer 4: BSplinePriceTable Reconstruction ---\n");
-    auto wrapper = make_bspline_surface(surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(spline, table_K_ref, kDivYield, OptionType::PUT);
     if (!wrapper.has_value()) {
         std::fprintf(stderr, "make_bspline_surface failed\n");
         return 1;
@@ -113,7 +114,7 @@ int main() {
                 std::abs(wrapper_price - fdm_price) * 10000 / fdm_price);
 
     // Compute what the reconstruction formula gives
-    double reconstructed = raw_value * (kStrike / surface->K_ref()) + eu_price;
+    double reconstructed = raw_value * (kStrike / table_K_ref) + eu_price;
     std::printf("  Manual reconstruction (EEP * K/Kref + Eu): %.6f\n", reconstructed);
 
     // Layer 5: Check if interpolation is the issue
@@ -160,14 +161,16 @@ int main() {
         return 1;
     }
 
-    auto adaptive_surface = adaptive_result->surface;
+    auto adaptive_spline = adaptive_result->spline;
+    double adaptive_K_ref = adaptive_result->K_ref;
     std::printf("  Surface content: EEP (type-enforced)\n");
-    std::printf("  K_ref: %.2f\n", adaptive_surface->K_ref());
+    std::printf("  K_ref: %.2f\n", adaptive_K_ref);
 
-    double adaptive_raw = adaptive_surface->value({m, kTau, kSigma, kRate});
+    double adaptive_raw = adaptive_spline->eval({m, kTau, kSigma, kRate});
     std::printf("  Raw surface value: %.6f\n", adaptive_raw);
 
-    auto adaptive_wrapper = make_bspline_surface(adaptive_surface, OptionType::PUT);
+    auto adaptive_wrapper = make_bspline_surface(adaptive_spline, adaptive_K_ref,
+        adaptive_result->dividend_yield, OptionType::PUT);
     if (!adaptive_wrapper.has_value()) {
         std::fprintf(stderr, "make_bspline_surface failed for adaptive\n");
         return 1;
@@ -208,11 +211,12 @@ int main() {
                 eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, kDivYield));
             });
         if (result_hi.has_value()) {
-            double raw_hi = result_hi->surface->value({m, kTau, kSigma, kRate});
+            double raw_hi = result_hi->spline->eval({m, kTau, kSigma, kRate});
             std::printf("  High-accuracy raw EEP (tol=1e-6): %.6f\n", raw_hi);
             std::printf("  Error vs expected: %.6f\n", std::abs(eep - raw_hi));
 
-            auto wrapper_hi = make_bspline_surface(result_hi->surface, OptionType::PUT);
+            auto wrapper_hi = make_bspline_surface(result_hi->spline, result_hi->K_ref,
+                result_hi->dividends.dividend_yield, OptionType::PUT);
             if (wrapper_hi.has_value()) {
                 double price_hi = wrapper_hi->price(kSpot, kStrike, kTau, kSigma, kRate);
                 std::printf("  High-accuracy price: %.6f\n", price_hi);
@@ -264,8 +268,8 @@ int main() {
     double off_grid_m = 0.95;  // Between 0.9 and 1.0
     double off_grid_tau = 0.75;  // Between 0.5 and 1.0
 
-    double on_grid_val = surface->value({m, kTau, kSigma, kRate});
-    double off_grid_val = surface->value({off_grid_m, off_grid_tau, kSigma, kRate});
+    double on_grid_val = spline->eval({m, kTau, kSigma, kRate});
+    double off_grid_val = spline->eval({off_grid_m, off_grid_tau, kSigma, kRate});
 
     std::printf("  On-grid value (m=1.0, tau=1.0): %.6f\n", on_grid_val);
     std::printf("  Off-grid value (m=0.95, tau=0.75): %.6f\n", off_grid_val);
@@ -474,16 +478,16 @@ int main() {
     auto result2 = builder2.build(axes2);
     if (result2.has_value()) {
         auto& res = result2.value();
-        auto surf = res.surface;
+        auto surf = res.spline;
 
         // Query at the on-grid point
-        double surf_val = surf->value({m, kTau, kSigma, kRate});
+        double surf_val = surf->eval({m, kTau, kSigma, kRate});
         std::printf("  Surface value at (1.0, 1.0, 0.20, 0.05): %.6f\n", surf_val);
 
         // Unfortunately we can't access the tensor directly from outside
         // But we CAN check the fitting stats
         std::printf("  Surface metadata content: EEP (type-enforced)\n");
-        std::printf("  K_ref: %.2f\n", surf->K_ref());
+        std::printf("  K_ref: %.2f\n", res.K_ref);
 
         // Check if this differs from the direct batch solve
         std::printf("  Expected from batch solve: 0.324765\n");

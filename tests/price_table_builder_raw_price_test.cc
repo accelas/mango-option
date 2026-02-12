@@ -22,7 +22,7 @@ TEST(PriceTableBuilderTest, DefaultBuildProducesNormalizedPrice) {
     ASSERT_TRUE(result.has_value());
 
     // Default build produces NormalizedPrice
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_NE(result->spline, nullptr);
 }
 
 TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
@@ -44,5 +44,5 @@ TEST(PriceTableBuilderTest, BuildWithEEPTransform) {
             eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
         });
     ASSERT_TRUE(result.has_value());
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_NE(result->spline, nullptr);
 }

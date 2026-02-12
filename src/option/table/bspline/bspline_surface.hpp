@@ -101,99 +101,27 @@ struct PriceTableAxesND {
 /// Convenience alias for the common 4D case.
 using PriceTableAxes = PriceTableAxesND<kPriceTableDim>;
 
-/// Immutable N-dimensional price surface with B-spline interpolation
-///
-/// Provides fast interpolation queries and partial derivatives.
-/// Thread-safe after construction.
-///
-/// @tparam N Number of dimensions
-template <size_t N>
-class PriceTableSurfaceND {
-public:
-    /// Build surface from axes, coefficients, and individual fields
-    ///
-    /// @param axes Grid points and names for each dimension
-    /// @param coeffs Flattened B-spline coefficients (row-major)
-    /// @param K_ref Reference strike price
-    /// @param dividends Continuous yield + discrete dividend schedule
-    /// @return Shared pointer to surface or error
-    [[nodiscard]] static std::expected<std::shared_ptr<const PriceTableSurfaceND<N>>, PriceTableError>
-    build(PriceTableAxesND<N> axes, std::vector<double> coeffs,
-          double K_ref, DividendSpec dividends = {});
-
-    /// Access axes
-    [[nodiscard]] const PriceTableAxesND<N>& axes() const noexcept { return axes_; }
-
-    /// Reference strike price
-    [[nodiscard]] double K_ref() const noexcept { return K_ref_; }
-
-    /// Dividend specification
-    [[nodiscard]] const DividendSpec& dividends() const noexcept { return dividends_; }
-
-    /// Minimum log-moneyness (from axes grid)
-    [[nodiscard]] double m_min() const noexcept { return axes_.grids[0].front(); }
-
-    /// Maximum log-moneyness (from axes grid)
-    [[nodiscard]] double m_max() const noexcept { return axes_.grids[0].back(); }
-
-    /// Evaluate price at query point
-    ///
-    /// Queries outside grid bounds are clamped to boundary values.
-    /// For accurate results, ensure query points lie within grid bounds.
-    ///
-    /// @param coords N-dimensional coordinates (axis 0 = log-moneyness)
-    /// @return Interpolated value (clamped at boundaries)
-    [[nodiscard]] double value(const std::array<double, N>& coords) const;
-
-    /// Partial derivative along specified axis
-    ///
-    /// @param axis Axis index (0 to N-1)
-    /// @param coords N-dimensional coordinates (axis 0 = log-moneyness)
-    /// @return Partial derivative estimate
-    [[nodiscard]] double partial(size_t axis, const std::array<double, N>& coords) const;
-
-    /// Second partial derivative along specified axis
-    ///
-    /// @param axis Axis index (0 to N-1)
-    /// @param coords N-dimensional coordinates (axis 0 = log-moneyness)
-    /// @return Second partial derivative estimate
-    [[nodiscard]] double second_partial(size_t axis, const std::array<double, N>& coords) const;
-
-private:
-    PriceTableSurfaceND(PriceTableAxesND<N> axes, double K_ref,
-                     DividendSpec dividends,
-                     std::unique_ptr<BSplineND<double, N>> spline);
-
-    PriceTableAxesND<N> axes_;
-    double K_ref_;
-    DividendSpec dividends_;
-    std::unique_ptr<BSplineND<double, N>> spline_;
-};
-
-/// Convenience alias for the common 4D case.
-using PriceTableSurface = PriceTableSurfaceND<kPriceTableDim>;
-
-/// Adapter that wraps shared_ptr<PriceTableSurfaceND<N>> to satisfy
+/// Adapter that wraps shared_ptr<BSplineND<double, N>> to satisfy
 /// SurfaceInterpolant. Preserves shared ownership semantics.
 template <size_t N>
 class SharedBSplineInterp {
 public:
-    explicit SharedBSplineInterp(std::shared_ptr<const PriceTableSurfaceND<N>> surface)
-        : surface_(std::move(surface)) {}
+    explicit SharedBSplineInterp(std::shared_ptr<const BSplineND<double, N>> spline)
+        : spline_(std::move(spline)) {}
 
     [[nodiscard]] double eval(const std::array<double, N>& coords) const {
-        return surface_->value(coords);
+        return spline_->eval(coords);
     }
 
     [[nodiscard]] double partial(size_t axis, const std::array<double, N>& coords) const {
-        return surface_->partial(axis, coords);
+        return spline_->partial(axis, coords);
     }
 
-    /// Access underlying surface (for metadata, axes, etc.)
-    [[nodiscard]] const PriceTableSurfaceND<N>& surface() const { return *surface_; }
+    /// Access underlying spline
+    [[nodiscard]] const BSplineND<double, N>& spline() const { return *spline_; }
 
 private:
-    std::shared_ptr<const PriceTableSurfaceND<N>> surface_;
+    std::shared_ptr<const BSplineND<double, N>> spline_;
 };
 
 // ===========================================================================
@@ -222,12 +150,14 @@ using BSplineMultiKRefInner = SplitSurface<BSplineSegmentedSurface, MultiKRefSpl
 using BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>;
 
 
-/// Create a BSplinePriceTable from a pre-built EEP surface.
-/// Reads K_ref and dividend_yield from surface fields.
-/// The surface must contain EEP data (built with eep_decompose).
+/// Create a BSplinePriceTable from a pre-built EEP B-spline.
+/// K_ref and dividend_yield are passed explicitly.
+/// The spline must contain EEP data (built with eep_decompose).
 [[nodiscard]] std::expected<BSplinePriceTable, std::string>
 make_bspline_surface(
-    std::shared_ptr<const PriceTableSurface> surface,
+    std::shared_ptr<const BSplineND<double, 4>> spline,
+    double K_ref,
+    double dividend_yield,
     OptionType type);
 
 } // namespace mango

@@ -7,7 +7,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
-#include <sstream>
 #include "mango/option/option_spec.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
@@ -504,7 +503,7 @@ PYBIND11_MODULE(mango_option, m) {
             )pbdoc");
 
     // =========================================================================
-    // PriceTableSurfaceND (4D B-spline interpolation)
+    // PriceTableAxes (4D grid metadata)
     // =========================================================================
 
     // PriceTableAxes
@@ -551,189 +550,8 @@ PYBIND11_MODULE(mango_option, m) {
             return py::make_tuple(s[0], s[1], s[2], s[3]);
         });
 
-    // PriceTableSurface
-    // Note: We use shared_ptr<mango::PriceTableSurface> as holder, even though
-    // the C++ API returns shared_ptr<const ...>. pybind11 will handle the const conversion.
-    py::class_<mango::PriceTableSurface, std::shared_ptr<mango::PriceTableSurface>>(
-        m, "PriceTableSurface")
-        .def_static("build",
-            [](mango::PriceTableAxes axes, py::array_t<double> coeffs,
-               double K_ref, double dividend_yield) {
-                std::vector<double> coeffs_vec(coeffs.data(), coeffs.data() + coeffs.size());
-                auto result = mango::PriceTableSurface::build(
-                    std::move(axes), std::move(coeffs_vec), K_ref,
-                    mango::DividendSpec{.dividend_yield = dividend_yield, .discrete_dividends = {}});
-                if (!result.has_value()) {
-                    throw py::value_error("Failed to build surface: error code " +
-                        std::to_string(static_cast<int>(result.error().code)));
-                }
-                return result.value();
-            },
-            py::arg("axes"), py::arg("coefficients"), py::arg("K_ref"),
-            py::arg("dividend_yield") = 0.0,
-            R"pbdoc(
-                Build a 4D price table surface from axes and coefficients.
-
-                Args:
-                    axes: PriceTableAxes with grid points for each dimension
-                    coefficients: B-spline coefficients (flattened, row-major)
-                    K_ref: Reference strike price
-                    dividend_yield: Continuous dividend yield (default: 0.0)
-
-                Returns:
-                    PriceTableSurface instance
-
-                Raises:
-                    ValueError: If building fails
-            )pbdoc")
-        .def("value",
-            [](const mango::PriceTableSurface& self, double m, double tau, double sigma, double r) {
-                return self.value({m, tau, sigma, r});
-            },
-            py::arg("log_moneyness"), py::arg("maturity"), py::arg("volatility"), py::arg("rate"),
-            R"pbdoc(
-                Evaluate price at query point.
-
-                Args:
-                    log_moneyness: ln(S/K)
-                    maturity: Time to maturity (years)
-                    volatility: Implied volatility
-                    rate: Risk-free rate
-
-                Returns:
-                    Interpolated option price
-            )pbdoc")
-        .def("partial",
-            [](const mango::PriceTableSurface& self, size_t axis,
-               double m, double tau, double sigma, double r) {
-                return self.partial(axis, {m, tau, sigma, r});
-            },
-            py::arg("axis"), py::arg("log_moneyness"), py::arg("maturity"),
-            py::arg("volatility"), py::arg("rate"),
-            R"pbdoc(
-                Compute partial derivative along specified axis.
-
-                Args:
-                    axis: 0=log_moneyness, 1=maturity, 2=volatility, 3=rate
-                    log_moneyness: ln(S/K)
-                    maturity: Time to maturity (years)
-                    volatility: Implied volatility
-                    rate: Risk-free rate
-
-                Returns:
-                    Partial derivative estimate
-            )pbdoc")
-        .def_property_readonly("axes", &mango::PriceTableSurface::axes)
-        .def_property_readonly("K_ref", &mango::PriceTableSurface::K_ref)
-        .def_property_readonly("dividends", &mango::PriceTableSurface::dividends)
-        .def_property_readonly("m_min", &mango::PriceTableSurface::m_min)
-        .def_property_readonly("m_max", &mango::PriceTableSurface::m_max);
-
-    // =========================================================================
-    // Price table builder convenience wrapper (auto-grid profiles)
-    // =========================================================================
-    m.def("build_price_table_surface_from_grid_auto_profile",
-        [](double spot,
-           const std::vector<double>& strikes,
-           const std::vector<double>& maturities,
-           const std::vector<double>& implied_vols,
-           const std::vector<double>& rates,
-           double dividend_yield,
-           mango::OptionType type,
-           mango::PriceTableGridProfile grid_profile,
-           mango::GridAccuracyProfile pde_profile) {
-            mango::OptionGrid chain;
-            chain.spot = spot;
-            chain.strikes = strikes;
-            chain.maturities = maturities;
-            chain.implied_vols = implied_vols;
-            chain.rates = rates;
-            chain.dividend_yield = dividend_yield;
-
-            auto builder_axes = mango::PriceTableBuilder::from_grid_auto_profile(
-                chain, grid_profile, pde_profile, type);
-            if (!builder_axes.has_value()) {
-                std::ostringstream oss;
-                oss << "from_grid_auto_profile failed: " << builder_axes.error();
-                throw py::value_error(oss.str());
-            }
-
-            auto [builder, axes] = std::move(builder_axes.value());
-            auto build_result = builder.build(axes);
-            if (!build_result.has_value()) {
-                std::ostringstream oss;
-                oss << "price table build failed: " << build_result.error();
-                throw py::value_error(oss.str());
-            }
-
-            return build_result.value().surface;
-        },
-        py::arg("spot"),
-        py::arg("strikes"),
-        py::arg("maturities"),
-        py::arg("implied_vols"),
-        py::arg("rates"),
-        py::arg("dividend_yield") = 0.0,
-        py::arg("option_type") = mango::OptionType::PUT,
-        py::arg("grid_profile") = mango::PriceTableGridProfile::High,
-        py::arg("pde_profile") = mango::GridAccuracyProfile::High,
-        R"pbdoc(
-            Build a 4D price table surface from an option chain using auto-grid profiles.
-
-            Args:
-                spot: Underlying spot price
-                strikes: Strike prices
-                maturities: Times to expiration (years)
-                implied_vols: Implied volatility samples for grid bounds
-                rates: Risk-free rates
-                dividend_yield: Continuous dividend yield (default 0.0)
-                option_type: OptionType.PUT or OptionType.CALL
-                grid_profile: PriceTableGridProfile (LOW/MEDIUM/HIGH/ULTRA)
-                pde_profile: GridAccuracyProfile for PDE grid/time steps
-
-            Returns:
-                PriceTableSurface instance
-        )pbdoc");
-
-    m.def("build_price_table_surface_from_grid",
-        [](const mango::OptionGrid& chain,
-           mango::OptionType type,
-           mango::PriceTableGridProfile grid_profile,
-           mango::GridAccuracyProfile pde_profile) {
-            auto builder_axes = mango::PriceTableBuilder::from_grid_auto_profile(
-                chain, grid_profile, pde_profile, type);
-            if (!builder_axes.has_value()) {
-                std::ostringstream oss;
-                oss << "from_grid_auto_profile failed: " << builder_axes.error();
-                throw py::value_error(oss.str());
-            }
-
-            auto [builder, axes] = std::move(builder_axes.value());
-            auto build_result = builder.build(axes);
-            if (!build_result.has_value()) {
-                std::ostringstream oss;
-                oss << "price table build failed: " << build_result.error();
-                throw py::value_error(oss.str());
-            }
-
-            return build_result.value().surface;
-        },
-        py::arg("chain"),
-        py::arg("option_type") = mango::OptionType::PUT,
-        py::arg("grid_profile") = mango::PriceTableGridProfile::High,
-        py::arg("pde_profile") = mango::GridAccuracyProfile::High,
-        R"pbdoc(
-            Build a 4D price table surface from an OptionGrid using auto-grid profiles.
-
-            Args:
-                chain: OptionGrid with spot, strikes, maturities, implied_vols, rates
-                option_type: OptionType.PUT or OptionType.CALL
-                grid_profile: PriceTableGridProfile (LOW/MEDIUM/HIGH/ULTRA)
-                pde_profile: GridAccuracyProfile for PDE grid/time steps
-
-            Returns:
-                PriceTableSurface instance
-        )pbdoc");
+    // PriceTableSurface and builder convenience wrappers removed.
+    // Use make_interpolated_iv_solver() for interpolation-based IV solving.
 
     // =========================================================================
     // InterpolatedIVSolver (fast IV solving using B-spline interpolation)

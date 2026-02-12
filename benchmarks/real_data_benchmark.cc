@@ -133,7 +133,8 @@ double analytic_bs_price(double S, double K, double tau, double sigma, double r,
 // Fixture for B-spline interpolation surface
 struct AnalyticSurfaceFixture {
     double K_ref;
-    std::shared_ptr<const PriceTableSurface> surface;
+    double dividend_yield;
+    std::shared_ptr<const BSplineND<double, 4>> spline;
 };
 
 const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
@@ -161,7 +162,8 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         if (!table) {
             throw std::runtime_error("Failed to build price table");
         }
-        fixture_ptr->surface = table->surface;
+        fixture_ptr->spline = table->spline;
+        fixture_ptr->dividend_yield = DIVIDEND_YIELD;
 
         return fixture_ptr.release();
     }();
@@ -336,7 +338,7 @@ BENCHMARK(BM_RealData_IV_FDM)
 static void BM_RealData_IV_BSpline(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    auto wrapper = make_bspline_surface(surf.surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(surf.spline, surf.K_ref, surf.dividend_yield, OptionType::PUT);
     if (!wrapper) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
@@ -386,7 +388,7 @@ static void BM_RealData_PriceTableInterpolation(benchmark::State& state) {
     const double rate = RISK_FREE_RATE;
 
     auto run_once = [&]() {
-        double price = surf.surface->value({moneyness, maturity, sigma, rate});
+        double price = surf.spline->eval({moneyness, maturity, sigma, rate});
         benchmark::DoNotOptimize(price);
     };
 
@@ -415,13 +417,13 @@ static void BM_RealData_PriceTableGreeks(benchmark::State& state) {
     constexpr double m_eps = 5e-3;
 
     auto run_once = [&]() {
-        const double base = surf.surface->value({moneyness, maturity, sigma, rate});
-        const double price_up_sigma = surf.surface->value({moneyness, maturity, sigma + sigma_eps, rate});
-        const double price_dn_sigma = surf.surface->value({moneyness, maturity, sigma - sigma_eps, rate});
+        const double base = surf.spline->eval({moneyness, maturity, sigma, rate});
+        const double price_up_sigma = surf.spline->eval({moneyness, maturity, sigma + sigma_eps, rate});
+        const double price_dn_sigma = surf.spline->eval({moneyness, maturity, sigma - sigma_eps, rate});
         double vega = (price_up_sigma - price_dn_sigma) / (2.0 * sigma_eps);
 
-        const double price_up_m = surf.surface->value({moneyness + m_eps, maturity, sigma, rate});
-        const double price_dn_m = surf.surface->value({moneyness - m_eps, maturity, sigma, rate});
+        const double price_up_m = surf.spline->eval({moneyness + m_eps, maturity, sigma, rate});
+        const double price_dn_m = surf.spline->eval({moneyness - m_eps, maturity, sigma, rate});
         double gamma = (price_up_m - 2.0 * base + price_dn_m) / (m_eps * m_eps);
 
         benchmark::DoNotOptimize(vega);
@@ -518,7 +520,7 @@ static void BM_RealData_IVSmile_BuildTable(benchmark::State& state) {
             throw std::runtime_error("Failed to build price table");
         }
 
-        benchmark::DoNotOptimize(table_result->surface);
+        benchmark::DoNotOptimize(table_result->spline);
         n_pde_solves = table_result->n_pde_solves;
     }
 
@@ -560,7 +562,8 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     }
 
     // Create IV solver
-    auto wrapper_query = make_bspline_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_query = make_bspline_surface(table_result->spline, table_result->K_ref,
+        table_result->dividends.dividend_yield, OptionType::PUT);
     if (!wrapper_query) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
@@ -662,7 +665,8 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     }
 
     // Create interpolated IV solver
-    auto wrapper_acc = make_bspline_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_acc = make_bspline_surface(table_result->spline, table_result->K_ref,
+        table_result->dividends.dividend_yield, OptionType::PUT);
     if (!wrapper_acc) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }
@@ -828,7 +832,8 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     }
 
     // Create interpolated IV solver
-    auto wrapper_dense = make_bspline_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_dense = make_bspline_surface(table_result->spline, table_result->K_ref,
+        table_result->dividends.dividend_yield, OptionType::PUT);
     if (!wrapper_dense) {
         state.SkipWithError("Failed to create BSplinePriceTable");
         return;
@@ -939,7 +944,8 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     }
 
     // Create interpolated IV solver
-    auto wrapper_est = make_bspline_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_est = make_bspline_surface(table_result->spline, table_result->K_ref,
+        table_result->dividends.dividend_yield, OptionType::PUT);
     if (!wrapper_est) {
         state.SkipWithError("Failed to create BSplinePriceTable");
         return;
@@ -1060,7 +1066,8 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
         return;
     }
 
-    auto wrapper_prof = make_bspline_surface(table_result->surface, OptionType::PUT);
+    auto wrapper_prof = make_bspline_surface(table_result->spline, table_result->K_ref,
+        table_result->dividends.dividend_yield, OptionType::PUT);
     if (!wrapper_prof) {
         state.SkipWithError("Failed to create BSplinePriceTable");
         return;

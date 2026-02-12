@@ -12,7 +12,9 @@
  * Run with: bazel run -c opt //benchmarks:iv_interpolation_profile -- --benchmark_filter="Vega"
  */
 
+#include "mango/math/bspline_nd.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline_basis.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <memory>
@@ -48,7 +50,7 @@ struct AnalyticSurfaceFixture {
     std::vector<double> tau_grid;
     std::vector<double> sigma_grid;
     std::vector<double> rate_grid;
-    std::shared_ptr<const PriceTableSurface> surface;
+    std::shared_ptr<const BSplineND<double, 4>> spline;
 };
 
 const AnalyticSurfaceFixture& GetSurface() {
@@ -102,21 +104,23 @@ const AnalyticSurfaceFixture& GetSurface() {
             throw std::runtime_error("Failed to fit B-spline surface");
         }
 
-        // Create PriceTableAxesND
-        PriceTableAxes axes;
-        axes.grids = {
+        // Create BSplineND directly
+        std::array<std::vector<double>, 4> grids = {
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
             fixture_ptr->sigma_grid,
             fixture_ptr->rate_grid
         };
-
-        // Create surface with coefficients directly
-        auto surface_result = PriceTableSurface::build(axes, fit_result->coefficients, fixture_ptr->K_ref);
-        if (!surface_result.has_value()) {
-            throw std::runtime_error("Failed to create surface");
+        std::array<std::vector<double>, 4> knots;
+        for (size_t d = 0; d < 4; ++d) {
+            knots[d] = clamped_knots_cubic<double>(grids[d]);
         }
-        fixture_ptr->surface = std::move(surface_result.value());
+
+        auto spline_result = BSplineND<double, 4>::create(grids, knots, fit_result->coefficients);
+        if (!spline_result.has_value()) {
+            throw std::runtime_error("Failed to create BSplineND");
+        }
+        fixture_ptr->spline = std::make_shared<const BSplineND<double, 4>>(std::move(*spline_result));
 
         return fixture_ptr.release();
     }();
@@ -139,7 +143,7 @@ static void BM_BSpline_Eval(benchmark::State& state) {
     constexpr double r = 0.05;
 
     for (auto _ : state) {
-        double price = surf.surface->value({m, tau, sigma, r});
+        double price = surf.spline->eval({m, tau, sigma, r});
         benchmark::DoNotOptimize(price);
     }
 
@@ -215,8 +219,8 @@ static void BM_BSpline_VegaAnalytic(benchmark::State& state) {
 
     for (auto _ : state) {
         // Use analytic partial derivative with respect to sigma (dimension 2)
-        double price = surf.surface->value({m, tau, sigma, r});
-        double vega = surf.surface->partial(2, {m, tau, sigma, r});
+        double price = surf.spline->eval({m, tau, sigma, r});
+        double vega = surf.spline->partial(2, {m, tau, sigma, r});
         benchmark::DoNotOptimize(price);
         benchmark::DoNotOptimize(vega);
     }

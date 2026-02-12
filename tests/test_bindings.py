@@ -229,39 +229,6 @@ def test_batch_solver_per_option_grids():
     print("✓ Per-option grid batch works")
 
 
-def test_price_table_surface():
-    """Test PriceTableSurface build and query"""
-    import math
-    print("Testing PriceTableSurface...")
-
-    # Create axes
-    axes = mango_option.PriceTableAxes()
-    axes.grids = [
-        np.array([math.log(0.8), math.log(0.9), math.log(1.0), math.log(1.1), math.log(1.2)]),  # log-moneyness
-        np.array([0.1, 0.25, 0.5, 1.0]),       # maturity
-        np.array([0.1, 0.2, 0.3, 0.4]),        # volatility
-        np.array([0.01, 0.03, 0.05, 0.07])     # rate
-    ]
-    axes.names = ["log_moneyness", "maturity", "volatility", "rate"]
-
-    # Create coefficients
-    shape = axes.shape()
-    n_coeffs = shape[0] * shape[1] * shape[2] * shape[3]
-    coeffs = np.random.rand(n_coeffs) * 10.0
-
-    # Build surface
-    surface = mango_option.PriceTableSurface.build(axes, coeffs, K_ref=100.0, dividend_yield=0.02)
-    print(f"✓ Built surface")
-
-    # Query value at ATM (log(1.0) = 0.0)
-    price = surface.value(0.0, 0.5, 0.2, 0.05)
-    print(f"✓ Value at ATM: {price:.4f}")
-
-    # Query partial derivative (vega = axis 2)
-    vega = surface.partial(2, 0.0, 0.5, 0.2, 0.05)
-    print(f"✓ Vega: {vega:.4f}")
-
-
 def test_iv_solver_interpolated():
     """Test InterpolatedIVSolver via make_interpolated_iv_solver factory"""
     print("Testing InterpolatedIVSolver...")
@@ -361,7 +328,6 @@ if __name__ == "__main__":
         test_american_option_yield_curve,
         test_batch_solver,
         test_batch_solver_per_option_grids,
-        test_price_table_surface,
         test_iv_solver_interpolated,
         test_error_handling,
         test_iv_solver_config_defaults,

@@ -38,7 +38,7 @@ namespace {
 
 struct EEPFixture {
     BSplinePriceTable wrapper;
-    std::shared_ptr<const PriceTableSurface> surface;
+    std::shared_ptr<const BSplineND<double, 4>> spline;
     double K_ref;
     double dividend_yield;
     OptionType type;
@@ -78,12 +78,12 @@ const EEPFixture& GetEEPFixture() {
             throw std::runtime_error("Failed to build price table");
         }
 
-        auto wrapper = make_bspline_surface(table->surface, OptionType::PUT);
+        auto wrapper = make_bspline_surface(table->spline, table->K_ref, q, OptionType::PUT);
         if (!wrapper) {
             throw std::runtime_error("Failed to create BSplinePriceTable");
         }
 
-        return new EEPFixture{std::move(*wrapper), table->surface, K_ref, q, OptionType::PUT};
+        return new EEPFixture{std::move(*wrapper), table->spline, K_ref, q, OptionType::PUT};
     }();
 
     return *fixture;
@@ -190,7 +190,7 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
     // EEP Greek helpers: inline the EEP decomposition formulas.
     // The wrapper has price() but not delta/gamma/theta, so we compute
     // those from the B-spline partials + European Greeks directly.
-    const auto& surf = *fix.surface;
+    const auto& surf = *fix.spline;
     const double K_ref = fix.K_ref;
     const double q = fix.dividend_yield;
     const OptionType type = fix.type;
@@ -216,7 +216,7 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
                          double sig, double r) -> double {
         double x = std::log(S / K);
         double dEdx = surf.partial(0, {x, tau_val, sig, r});
-        double d2Edx2 = surf.second_partial(0, {x, tau_val, sig, r});
+        double d2Edx2 = surf.eval_second_partial(0, {x, tau_val, sig, r});
         double g = (K / K_ref) * (d2Edx2 - dEdx) / (S * S);
         auto eu = make_european(S, K, tau_val, sig, r);
         return g + eu.gamma();
