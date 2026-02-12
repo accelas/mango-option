@@ -615,7 +615,7 @@ build_chebyshev_segmented_pieces(
     std::span<const double> rate_nodes)
 {
     ChebyshevPDECache cache;
-    solve_missing_pde_pairs(
+    size_t pde_solves = solve_missing_pde_pairs(
         cache, K_ref, option_type, dividend_yield,
         discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
 
@@ -630,6 +630,7 @@ build_chebyshev_segmented_pieces(
     return ChebyshevSegmentedPieces{
         .leaves = std::move(leaves),
         .tau_split = std::move(tau_split),
+        .pde_solves = pde_solves,
     };
 }
 
@@ -803,20 +804,22 @@ ChebyshevSegmentedBuilder::compute_headroom(
     };
 }
 
-std::expected<ChebyshevMultiKRefSurface, PriceTableError>
-ChebyshevSegmentedBuilder::assemble(
+std::expected<ChebyshevSegmentedBuilder::AssembleResult, PriceTableError>
+ChebyshevSegmentedBuilder::build_all_krefs(
     std::span<const double> m_nodes,
     std::span<const double> tau_nodes,
     std::span<const double> sigma_nodes,
     std::span<const double> rate_nodes) const
 {
     std::vector<ChebyshevTauSegmented> kref_surfaces;
+    size_t total_pde_solves = 0;
     for (double k_ref : K_refs_) {
         auto pieces = build_chebyshev_segmented_pieces(
             k_ref, config_.option_type, config_.dividend_yield,
             config_.discrete_dividends, seg_bounds_, seg_is_gap_,
             m_nodes, tau_nodes, sigma_nodes, rate_nodes);
         if (!pieces) return std::unexpected(pieces.error());
+        total_pde_solves += pieces->pde_solves;
         kref_surfaces.emplace_back(
             std::move(pieces->leaves), std::move(pieces->tau_split));
     }
@@ -831,9 +834,12 @@ ChebyshevSegmentedBuilder::assemble(
         .rate_min = domain_.min_rate, .rate_max = domain_.max_rate,
     };
 
-    return ChebyshevMultiKRefSurface(
-        std::move(inner), bounds,
-        config_.option_type, config_.dividend_yield);
+    return AssembleResult{
+        .surface = ChebyshevMultiKRefSurface(
+            std::move(inner), bounds,
+            config_.option_type, config_.dividend_yield),
+        .pde_solves = total_pde_solves,
+    };
 }
 
 std::expected<ChebyshevMultiKRefSurface, PriceTableError>
@@ -850,7 +856,10 @@ ChebyshevSegmentedBuilder::build(std::array<size_t, 4> cc_levels) const
             PriceTableError(PriceTableErrorCode::InvalidConfig));
     }
 
-    return assemble(m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+    auto assembled = build_all_krefs(
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+    if (!assembled) return std::unexpected(assembled.error());
+    return std::move(assembled->surface);
 }
 
 std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
@@ -926,16 +935,18 @@ ChebyshevSegmentedBuilder::build_adaptive(
     auto& grids = *grid_result;
 
     // Assemble final surface from converged grids
-    auto surface = assemble(grids.moneyness, grids.tau, grids.vol, grids.rate);
+    auto surface = build_all_krefs(
+        grids.moneyness, grids.tau, grids.vol, grids.rate);
     if (!surface) return std::unexpected(surface.error());
 
     return ChebyshevSegmentedAdaptiveResult{
-        .surface = std::move(*surface),
+        .surface = std::move(surface->surface),
         .iterations = std::move(grids.iterations),
         .achieved_max_error = grids.achieved_max_error,
         .achieved_avg_error = grids.achieved_avg_error,
         .target_met = grids.target_met,
-        .total_pde_solves = pde_cache.total_pde_solves(),
+        .total_pde_solves =
+            pde_cache.total_pde_solves() + surface->pde_solves,
     };
 }
 

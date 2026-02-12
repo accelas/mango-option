@@ -49,6 +49,7 @@ build_adaptive_chebyshev(const AdaptiveGridParams& params,
 struct ChebyshevSegmentedPieces {
     std::vector<ChebyshevSegmentedLeaf> leaves;  ///< One leaf per real segment
     TauSegmentSplit tau_split;                    ///< Gap-absorbed tau routing
+    size_t pde_solves = 0;                        ///< PDE solves used for this K_ref
 };
 
 /// Build typed Chebyshev segmented pieces from converged grids.
@@ -96,6 +97,11 @@ public:
     build_adaptive(const AdaptiveGridParams& params) const;
 
 private:
+    struct AssembleResult {
+        ChebyshevMultiKRefSurface surface;
+        size_t pde_solves = 0;
+    };
+
     ChebyshevSegmentedBuilder(
         SegmentedAdaptiveConfig config,
         std::vector<double> K_refs,
@@ -103,11 +109,12 @@ private:
         std::vector<double> seg_bounds,
         std::vector<bool> seg_is_gap);
 
-    [[nodiscard]] std::expected<ChebyshevMultiKRefSurface, PriceTableError>
-    assemble(std::span<const double> m_nodes,
-             std::span<const double> tau_nodes,
-             std::span<const double> sigma_nodes,
-             std::span<const double> rate_nodes) const;
+    /// Build all K_ref surfaces (includes per-K_ref PDE solves) and compose.
+    [[nodiscard]] std::expected<AssembleResult, PriceTableError>
+    build_all_krefs(std::span<const double> m_nodes,
+                    std::span<const double> tau_nodes,
+                    std::span<const double> sigma_nodes,
+                    std::span<const double> rate_nodes) const;
 
     [[nodiscard]] std::vector<double> generate_tau_nodes(size_t tau_level) const;
 
