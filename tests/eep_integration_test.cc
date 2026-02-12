@@ -49,11 +49,11 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
         });
     ASSERT_TRUE(result.has_value())
         << "build failed: code=" << static_cast<int>(result.error().code);
-    ASSERT_NE(result->surface, nullptr);
+    ASSERT_NE(result->spline, nullptr);
 
 
     // Wrap in BSplinePriceTable for reconstruction
-    auto wrapper_result = make_bspline_surface(result->surface, OptionType::PUT);
+    auto wrapper_result = make_bspline_surface(result->spline, result->K_ref, result->dividends.dividend_yield, OptionType::PUT);
     ASSERT_TRUE(wrapper_result.has_value())
         << "make_bspline_surface failed: " << wrapper_result.error();
     auto wrapper = std::move(*wrapper_result);
@@ -126,23 +126,22 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
         });
     ASSERT_TRUE(result.has_value())
         << "build failed: code=" << static_cast<int>(result.error().code);
-    ASSERT_NE(result->surface, nullptr);
+    ASSERT_NE(result->spline, nullptr);
 
 
-    // Query the raw EEP surface at every grid point combination.
+    // Query the raw EEP spline at every grid point combination.
     // The B-spline is fitted to softplus-floored data, so values at
     // grid points should be non-negative (or very close due to fitting error).
-    const auto& surface = *result->surface;
-    const auto& g = surface.axes().grids;
+    const auto& spline = *result->spline;
 
     size_t negative_count = 0;
     double most_negative = 0.0;
 
-    for (double m : g[0]) {
-        for (double tau : g[1]) {
-            for (double sigma : g[2]) {
-                for (double r : g[3]) {
-                    double val = surface.value({m, tau, sigma, r});
+    for (double m : spline.grid(0)) {
+        for (double tau : spline.grid(1)) {
+            for (double sigma : spline.grid(2)) {
+                for (double r : spline.grid(3)) {
+                    double val = spline.eval({m, tau, sigma, r});
                     if (val < -1e-10) {
                         ++negative_count;
                         most_negative = std::min(most_negative, val);

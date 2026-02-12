@@ -28,7 +28,7 @@ TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {
     // Full pipeline should succeed (4×4=16 PDE solves, ~1s)
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value()) << "Build failed: " << result.error();
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_NE(result->spline, nullptr);
 }
 
 // Note: N≠4 tests removed - PriceTableBuilderND uses static_assert(N == 4)
@@ -419,7 +419,7 @@ TEST(PriceTableBuilderTest, DefaultModeProducesNormalizedPriceMetadata) {
 
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value()) << "Build failed: " << result.error();
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_NE(result->spline, nullptr);
 }
 
 } // namespace

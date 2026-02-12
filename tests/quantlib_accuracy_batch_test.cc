@@ -140,7 +140,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
         .sigma_min = 0.05,
         .sigma_max = 2.0
     };
-    auto wrapper = make_bspline_surface(price_table_result.surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(price_table_result.spline, price_table_result.K_ref, price_table_result.dividends.dividend_yield, OptionType::PUT);
     ASSERT_TRUE(wrapper.has_value()) << "Failed to create wrapper: " << wrapper.error();
     auto iv_solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper), iv_config);
     ASSERT_TRUE(iv_solver_result.has_value())

@@ -70,8 +70,8 @@ TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
     // Should have at least one iteration
     EXPECT_GE(result->iterations.size(), 1);
 
-    // Surface should be populated
-    EXPECT_NE(result->surface, nullptr);
+    // Spline should be populated
+    EXPECT_NE(result->spline, nullptr);
 
     // Should have done some PDE solves
     EXPECT_GT(result->total_pde_solves, 0);
@@ -292,8 +292,8 @@ TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
         << "Single-value axes should be expanded to valid ranges. "
         << "Error code: " << (result.has_value() ? 0 : static_cast<int>(result.error().code));
 
-    // Surface should be usable
-    EXPECT_NE(result->surface, nullptr);
+    // Spline should be usable
+    EXPECT_NE(result->spline, nullptr);
 }
 
 // Regression: Cache should clear on new build
@@ -763,8 +763,8 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
     auto result = build_adaptive_bspline(params, chain, accuracy, OptionType::PUT);
     ASSERT_TRUE(result.has_value()) << "Adaptive build failed";
 
-    // Wrap surface for price queries
-    auto wrapper = make_bspline_surface(result->surface, OptionType::PUT);
+    // Wrap spline for price queries
+    auto wrapper = make_bspline_surface(result->spline, result->K_ref, result->dividend_yield, OptionType::PUT);
     ASSERT_TRUE(wrapper.has_value()) << wrapper.error();
 
     // Query at K=80, T=1y, σ=15% — this was 1574 bps error before the fix

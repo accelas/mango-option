@@ -23,7 +23,7 @@ TEST(PriceTableBuilderResultTest, BuildReturnsDiagnostics) {
     ASSERT_TRUE(result.has_value()) << "Build failed: " << result.error();
 
     // Check diagnostics are populated
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_NE(result->spline, nullptr);
     EXPECT_GT(result->n_pde_solves, 0);
     EXPECT_GT(result->precompute_time_seconds, 0.0);
     // Fitting stats should be populated (exact values depend on data)

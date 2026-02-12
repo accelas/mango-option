@@ -97,7 +97,7 @@ TEST_F(PriceTableEndToEndPerformanceTest, BandedSolverSpeedup) {
         std::cout << "  Throughput: " << (result->n_pde_solves * 1000.0 / duration_ms) << " PDEs/sec\n";
 
         // Verify prices are sensible (ATM: log-moneyness = 0.0)
-        double price_atm = result->surface->value({0.0, 1.0, 0.20, 0.05});
+        double price_atm = result->spline->eval({0.0, 1.0, 0.20, 0.05});
         EXPECT_GT(price_atm, 0.0);
         EXPECT_LT(price_atm, 100.0);
 

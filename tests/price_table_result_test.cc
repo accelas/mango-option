@@ -4,7 +4,7 @@
 
 TEST(PriceTableResultTest, DefaultConstruction) {
     mango::PriceTableResult<4> result;
-    EXPECT_EQ(result.surface, nullptr);
+    EXPECT_EQ(result.spline, nullptr);
     EXPECT_EQ(result.n_pde_solves, 0);
     EXPECT_EQ(result.precompute_time_seconds, 0.0);
     EXPECT_EQ(result.fitting_stats.max_residual_overall, 0.0);

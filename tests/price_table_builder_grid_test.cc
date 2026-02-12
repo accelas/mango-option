@@ -24,7 +24,7 @@ TEST(PriceTableBuilderGridTest, RespectsUserGridBounds) {
 
     // Should succeed because grid bounds cover moneyness range
     ASSERT_TRUE(result.has_value()) << "Build failed: " << result.error();
-    EXPECT_NE(result->surface, nullptr);
+    EXPECT_NE(result->spline, nullptr);
 }
 
 TEST(PriceTableBuilderGridTest, RejectsInsufficientGridBounds) {
