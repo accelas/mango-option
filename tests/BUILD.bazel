@@ -1680,6 +1680,25 @@ cc_test(
 )
 
 cc_test(
+    name = "greeks_accuracy_test",
+    size = "medium",
+    srcs = ["greeks_accuracy_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_tensor_accessor",
+        "//src/option/table:greek_types",
+        "//src/option:american_option",
+        "//src/option:european_option",
+        "//src/option:option_spec",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "greek_types_test",
     size = "small",
     srcs = ["greek_types_test.cc"],
