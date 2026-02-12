@@ -9,7 +9,16 @@
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
+#include "mango/option/table/bspline/bspline_segmented_builder.hpp"
+#include "mango/option/table/bspline/bspline_3d_surface.hpp"
+#include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
+#include "mango/option/table/dimensionless/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless/dimensionless_3d_accessor.hpp"
+#include "mango/option/table/eep/analytical_eep.hpp"
 #include "mango/option/table/greek_types.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline_nd.hpp"
+#include "mango/math/bspline_basis.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/european_option.hpp"
 #include "mango/option/option_spec.hpp"
@@ -379,4 +388,358 @@ TEST_F(GreeksAccuracyTest, RhoConsistentWithFiniteDifference) {
     double tol = std::abs(fd_rho) * 0.10;
     EXPECT_NEAR(*surface_rho, fd_rho, std::max(tol, 0.01))
         << "Surface rho=" << *surface_rho << " FD rho=" << fd_rho;
+}
+
+// ===========================================================================
+// Fixture 2: Chebyshev 4D surface Greeks
+// Exercises the FD fallback path for gamma (ChebyshevInterpolant has no
+// eval_second_partial).
+// ===========================================================================
+
+class Chebyshev4DGreeksTest : public ::testing::Test {
+protected:
+    static void SetUpTestSuite() {
+        ChebyshevTableConfig config{
+            .num_pts = {12, 8, 8, 5},
+            .domain = Domain<4>{
+                .lo = {-0.30, 0.02, 0.05, 0.01},
+                .hi = { 0.30, 2.00, 0.50, 0.10},
+            },
+            .K_ref = 100.0,
+            .option_type = OptionType::PUT,
+            .dividend_yield = 0.02,
+            // tucker_epsilon=0 forces RawTensor (no Tucker decomposition).
+            // Tucker uses Eigen SVD which triggers the known AVX-512 alignment
+            // bug when linked with -march=native translation units (see MEMORY.md).
+            .tucker_epsilon = 0.0,
+        };
+        auto result = build_chebyshev_table(config);
+        ASSERT_TRUE(result.has_value())
+            << "build_chebyshev_table failed";
+        surface_ = std::make_unique<ChebyshevTableResult>(std::move(*result));
+    }
+
+    static PricingParams atm_put() {
+        return PricingParams(
+            OptionSpec{
+                .spot = 100.0, .strike = 100.0, .maturity = 0.5,
+                .rate = 0.05, .dividend_yield = 0.02,
+                .option_type = OptionType::PUT},
+            0.20);
+    }
+
+    static std::unique_ptr<ChebyshevTableResult> surface_;
+};
+
+std::unique_ptr<ChebyshevTableResult> Chebyshev4DGreeksTest::surface_;
+
+TEST_F(Chebyshev4DGreeksTest, DeltaMatchesFDM) {
+    auto params = atm_put();
+
+    auto surface_delta = surface_->delta(params);
+    ASSERT_TRUE(surface_delta.has_value()) << "Chebyshev delta failed";
+
+    auto fdm = solve_american_option(params);
+    ASSERT_TRUE(fdm.has_value());
+    double fdm_delta = fdm->delta();
+
+    // Chebyshev is less accurate than B-spline: allow 2% relative error
+    double tol = std::abs(fdm_delta) * 0.02;
+    EXPECT_NEAR(*surface_delta, fdm_delta, tol)
+        << "Chebyshev delta=" << *surface_delta << " FDM delta=" << fdm_delta
+        << " rel_err=" << std::abs(*surface_delta - fdm_delta) / std::abs(fdm_delta);
+}
+
+TEST_F(Chebyshev4DGreeksTest, GammaIsPositiveATM) {
+    auto params = atm_put();
+
+    auto surface_gamma = surface_->gamma(params);
+    ASSERT_TRUE(surface_gamma.has_value())
+        << "Chebyshev gamma failed (FD fallback)";
+
+    EXPECT_GT(*surface_gamma, 0.0)
+        << "Gamma should be positive for ATM put";
+}
+
+TEST_F(Chebyshev4DGreeksTest, GammaMatchesFDM) {
+    auto params = atm_put();
+
+    auto surface_gamma = surface_->gamma(params);
+    ASSERT_TRUE(surface_gamma.has_value()) << "Chebyshev gamma failed";
+
+    auto fdm = solve_american_option(params);
+    ASSERT_TRUE(fdm.has_value());
+    double fdm_gamma = fdm->gamma();
+
+    // FD fallback for gamma is noisier: allow 10% relative error
+    double tol = std::abs(fdm_gamma) * 0.10;
+    EXPECT_NEAR(*surface_gamma, fdm_gamma, tol)
+        << "Chebyshev gamma=" << *surface_gamma << " FDM gamma=" << fdm_gamma
+        << " rel_err=" << std::abs(*surface_gamma - fdm_gamma) / std::abs(fdm_gamma);
+}
+
+TEST_F(Chebyshev4DGreeksTest, ThetaIsNegative) {
+    auto params = atm_put();
+
+    auto surface_theta = surface_->theta(params);
+    ASSERT_TRUE(surface_theta.has_value()) << "Chebyshev theta failed";
+
+    EXPECT_LT(*surface_theta, 0.0)
+        << "Put theta should be negative (time decay)";
+}
+
+TEST_F(Chebyshev4DGreeksTest, RhoIsNegativeForPut) {
+    auto params = atm_put();
+
+    auto surface_rho = surface_->rho(params);
+    ASSERT_TRUE(surface_rho.has_value()) << "Chebyshev rho failed";
+
+    EXPECT_LT(*surface_rho, 0.0)
+        << "Put rho should be negative";
+}
+
+// ===========================================================================
+// Fixture 3: Dimensionless 3D B-spline surface Greeks
+// Exercises DimensionlessTransform3D chain rule weights.
+// ===========================================================================
+
+class Dimensionless3DGreeksTest : public ::testing::Test {
+protected:
+    static void SetUpTestSuite() {
+        DimensionlessAxes axes;
+        axes.log_moneyness = {-0.30, -0.20, -0.10, -0.05, 0.0, 0.05, 0.10, 0.20, 0.30};
+        axes.tau_prime = {0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.12, 0.16};
+        axes.ln_kappa = {-2.5, -1.5, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 2.8};
+
+        // 1. PDE solve
+        auto pde = solve_dimensionless_pde(axes, K_ref_, OptionType::PUT);
+        ASSERT_TRUE(pde.has_value())
+            << "PDE solve failed: code=" << static_cast<int>(pde.error().code);
+
+        // 2. EEP decompose
+        Dimensionless3DAccessor accessor(pde->values, axes, K_ref_);
+        eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
+
+        // 3. Fit B-spline
+        std::array<std::vector<double>, 3> grids = {
+            axes.log_moneyness, axes.tau_prime, axes.ln_kappa};
+        auto fitter = BSplineNDSeparable<double, 3>::create(grids);
+        ASSERT_TRUE(fitter.has_value());
+        auto fit = fitter->fit(std::move(pde->values));
+        ASSERT_TRUE(fit.has_value());
+
+        // 4. Build BSplineND<double, 3>
+        std::array<std::vector<double>, 3> bspline_grids = {
+            axes.log_moneyness, axes.tau_prime, axes.ln_kappa};
+        std::array<std::vector<double>, 3> bspline_knots;
+        for (size_t i = 0; i < 3; ++i) {
+            bspline_knots[i] = clamped_knots_cubic(bspline_grids[i]);
+        }
+        auto spline = BSplineND<double, 3>::create(
+            bspline_grids, std::move(bspline_knots), std::move(fit->coefficients));
+        ASSERT_TRUE(spline.has_value());
+
+        auto spline_ptr = std::make_shared<const BSplineND<double, 3>>(
+            std::move(spline.value()));
+
+        // 5. Wrap in layered PriceTable
+        SharedBSplineInterp<3> interp(std::move(spline_ptr));
+        DimensionlessTransform3D xform;
+        BSpline3DTransformLeaf leaf(std::move(interp), xform, K_ref_);
+        AnalyticalEEP eep(OptionType::PUT, 0.0);
+        BSpline3DLeaf eep_leaf(std::move(leaf), std::move(eep));
+
+        const double sigma_min = 0.10;
+        const double sigma_max = 0.80;
+        SurfaceBounds bounds{
+            .m_min = axes.log_moneyness.front(),
+            .m_max = axes.log_moneyness.back(),
+            .tau_min = 2.0 * axes.tau_prime.front() / (sigma_max * sigma_max),
+            .tau_max = 2.0 * axes.tau_prime.back() / (sigma_min * sigma_min),
+            .sigma_min = sigma_min,
+            .sigma_max = sigma_max,
+            .rate_min = 0.005,
+            .rate_max = 0.10,
+        };
+
+        table_ = std::make_unique<BSpline3DPriceTable>(
+            std::move(eep_leaf), bounds, OptionType::PUT, 0.0);
+    }
+
+    /// ATM put with dividend_yield=0.0 (matching the 3D surface)
+    static PricingParams atm_put() {
+        return PricingParams(
+            OptionSpec{
+                .spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                .rate = 0.05, .dividend_yield = 0.0,
+                .option_type = OptionType::PUT},
+            0.20);
+    }
+
+    static constexpr double K_ref_ = 100.0;
+    static std::unique_ptr<BSpline3DPriceTable> table_;
+};
+
+std::unique_ptr<BSpline3DPriceTable> Dimensionless3DGreeksTest::table_;
+
+TEST_F(Dimensionless3DGreeksTest, DeltaMatchesFDM) {
+    auto params = atm_put();
+
+    auto surface_delta = table_->delta(params);
+    ASSERT_TRUE(surface_delta.has_value()) << "3D delta failed";
+
+    auto fdm = solve_american_option(params);
+    ASSERT_TRUE(fdm.has_value());
+    double fdm_delta = fdm->delta();
+
+    // 3D approximation has ~312 bps coupling error: allow 5% relative error
+    double tol = std::abs(fdm_delta) * 0.05;
+    EXPECT_NEAR(*surface_delta, fdm_delta, tol)
+        << "3D delta=" << *surface_delta << " FDM delta=" << fdm_delta
+        << " rel_err=" << std::abs(*surface_delta - fdm_delta) / std::abs(fdm_delta);
+}
+
+TEST_F(Dimensionless3DGreeksTest, GammaIsPositive) {
+    auto params = atm_put();
+
+    auto surface_gamma = table_->gamma(params);
+    ASSERT_TRUE(surface_gamma.has_value()) << "3D gamma failed";
+
+    EXPECT_GT(*surface_gamma, 0.0)
+        << "Gamma should be positive for ATM put";
+}
+
+TEST_F(Dimensionless3DGreeksTest, GammaMatchesFDM) {
+    auto params = atm_put();
+
+    auto surface_gamma = table_->gamma(params);
+    ASSERT_TRUE(surface_gamma.has_value()) << "3D gamma failed";
+
+    auto fdm = solve_american_option(params);
+    ASSERT_TRUE(fdm.has_value());
+    double fdm_gamma = fdm->gamma();
+
+    // Broader tolerance for 3D surface: 10% relative error
+    double tol = std::abs(fdm_gamma) * 0.10;
+    EXPECT_NEAR(*surface_gamma, fdm_gamma, tol)
+        << "3D gamma=" << *surface_gamma << " FDM gamma=" << fdm_gamma
+        << " rel_err=" << std::abs(*surface_gamma - fdm_gamma) / std::abs(fdm_gamma);
+}
+
+TEST_F(Dimensionless3DGreeksTest, ThetaIsNegative) {
+    auto params = atm_put();
+
+    auto surface_theta = table_->theta(params);
+    ASSERT_TRUE(surface_theta.has_value()) << "3D theta failed";
+
+    EXPECT_LT(*surface_theta, 0.0)
+        << "Put theta should be negative (time decay)";
+}
+
+TEST_F(Dimensionless3DGreeksTest, AllGreeksAreFinite) {
+    auto params = atm_put();
+
+    auto d = table_->delta(params);
+    auto g = table_->gamma(params);
+    auto t = table_->theta(params);
+    auto r = table_->rho(params);
+
+    ASSERT_TRUE(d.has_value()) << "delta failed";
+    ASSERT_TRUE(g.has_value()) << "gamma failed";
+    ASSERT_TRUE(t.has_value()) << "theta failed";
+    ASSERT_TRUE(r.has_value()) << "rho failed";
+
+    EXPECT_TRUE(std::isfinite(*d)) << "delta=" << *d;
+    EXPECT_TRUE(std::isfinite(*g)) << "gamma=" << *g;
+    EXPECT_TRUE(std::isfinite(*t)) << "theta=" << *t;
+    EXPECT_TRUE(std::isfinite(*r)) << "rho=" << *r;
+}
+
+// ===========================================================================
+// Fixture 4: Segmented surface Greeks (discrete dividends)
+// Exercises SplitSurface routing with TauSegmentSplit.
+// ===========================================================================
+
+namespace {
+
+std::vector<double> log_m_grid_helper(std::initializer_list<double> moneyness) {
+    std::vector<double> out;
+    out.reserve(moneyness.size());
+    for (double m : moneyness) {
+        out.push_back(std::log(m));
+    }
+    return out;
+}
+
+}  // namespace
+
+class SegmentedGreeksTest : public ::testing::Test {
+protected:
+    static void SetUpTestSuite() {
+        SegmentedPriceTableBuilder::Config config{
+            .K_ref = 100.0,
+            .option_type = OptionType::PUT,
+            .dividends = {
+                .dividend_yield = 0.0,
+                .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
+            },
+            .grid = IVGrid{
+                .moneyness = log_m_grid_helper({0.80, 0.85, 0.90, 0.95, 1.00,
+                                                1.05, 1.10, 1.15, 1.20}),
+                .vol = {0.15, 0.20, 0.25, 0.30, 0.40},
+                .rate = {0.03, 0.05, 0.07, 0.09},
+            },
+            .maturity = 1.0,
+        };
+
+        auto result = SegmentedPriceTableBuilder::build(config);
+        ASSERT_TRUE(result.has_value()) << "Segmented build failed";
+        surface_ = std::make_unique<BSplineSegmentedSurface>(std::move(*result));
+    }
+
+    /// ATM put querying across the dividend boundary (tau=0.8 > t_div=0.5)
+    static PricingParams atm_put() {
+        return PricingParams(
+            OptionSpec{
+                .spot = 100.0, .strike = 100.0, .maturity = 0.8,
+                .rate = 0.05, .dividend_yield = 0.0,
+                .option_type = OptionType::PUT},
+            0.20);
+    }
+
+    static std::unique_ptr<BSplineSegmentedSurface> surface_;
+};
+
+std::unique_ptr<BSplineSegmentedSurface> SegmentedGreeksTest::surface_;
+
+TEST_F(SegmentedGreeksTest, DeltaIsNegativeForPut) {
+    auto params = atm_put();
+
+    auto delta = surface_->greek(Greek::Delta, params);
+    ASSERT_TRUE(delta.has_value()) << "Segmented delta failed";
+
+    EXPECT_LT(*delta, 0.0)
+        << "Put delta should be negative, got " << *delta;
+}
+
+TEST_F(SegmentedGreeksTest, GammaIsPositive) {
+    auto params = atm_put();
+
+    auto gamma = surface_->gamma(params);
+    ASSERT_TRUE(gamma.has_value()) << "Segmented gamma failed";
+
+    EXPECT_GT(*gamma, 0.0)
+        << "Gamma should be positive for ATM put, got " << *gamma;
+}
+
+TEST_F(SegmentedGreeksTest, PriceIsFiniteAndPositive) {
+    auto params = atm_put();
+    double rate = get_zero_rate(params.rate, params.maturity);
+
+    double price = surface_->price(
+        params.spot, params.strike, params.maturity,
+        params.volatility, rate);
+
+    EXPECT_TRUE(std::isfinite(price)) << "Price must be finite";
+    EXPECT_GT(price, 0.0) << "ATM put price must be positive";
 }
