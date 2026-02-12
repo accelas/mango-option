@@ -1677,6 +1677,22 @@ cc_test(
 )
 
 cc_test(
+    name = "eep_greeks_test",
+    size = "small",
+    srcs = ["eep_greeks_test.cc"],
+    deps = [
+        "//src/option/table:analytical_eep",
+        "//src/option/table:eep_layer",
+        "//src/option/table:surface_concepts",
+        "//src/option/table:greek_types",
+        "//src/option:european_option",
+        "//src/option:option_spec",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "transform_leaf_greeks_test",
     size = "medium",
     srcs = ["transform_leaf_greeks_test.cc"],

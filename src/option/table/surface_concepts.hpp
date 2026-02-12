@@ -28,13 +28,17 @@ concept CoordinateTransform = requires(const T& t, double spot, double strike,
         -> std::same_as<std::array<double, T::kDim>>;
 };
 
-/// European price/vega for EEP decomposition: American = leaf + European.
+/// European price/vega/Greeks for EEP decomposition: American = leaf + European.
 /// Implementation: AnalyticalEEP.
 template <typename E>
 concept EEPStrategy = requires(const E& e, double spot, double strike,
                                 double tau, double sigma, double rate) {
     { e.european_price(spot, strike, tau, sigma, rate) } -> std::same_as<double>;
     { e.european_vega(spot, strike, tau, sigma, rate) } -> std::same_as<double>;
+    { e.european_delta(spot, strike, tau, sigma, rate) } -> std::same_as<double>;
+    { e.european_gamma(spot, strike, tau, sigma, rate) } -> std::same_as<double>;
+    { e.european_theta(spot, strike, tau, sigma, rate) } -> std::same_as<double>;
+    { e.european_rho(spot, strike, tau, sigma, rate) } -> std::same_as<double>;
 };
 
 }  // namespace mango
