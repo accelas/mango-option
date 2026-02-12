@@ -31,6 +31,14 @@ struct BSplineSegmentedAdaptiveResult {
     BSplineMultiKRefInner surface;
     IVGrid grid;
     int tau_points_per_segment;
+
+    // Convergence stats (aggregated across probe K_refs)
+    std::vector<IterationStats> iterations;  ///< Per-probe worst-case iterations
+    double achieved_max_error = 0.0;         ///< Max error from final LHS validation
+    double achieved_avg_error = 0.0;
+    bool target_met = false;
+    size_t total_pde_solves = 0;
+    bool used_retry = false;                 ///< True if bumped-grid retry was used
 };
 
 /// Build B-spline price table with adaptive grid refinement.

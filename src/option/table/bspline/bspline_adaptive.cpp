@@ -618,8 +618,18 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         probe_results.push_back(std::move(*sizes));
     }
 
-    // 3. Aggregate max grid sizes across probes
+    // 3. Aggregate max grid sizes and convergence stats across probes
     auto gsz = aggregate_max_sizes(probe_results);
+
+    // Worst-case convergence stats across probes
+    std::vector<IterationStats> all_iterations;
+    size_t total_pde = 0;
+    for (const auto& pr : probe_results) {
+        for (const auto& it : pr.iterations) {
+            all_iterations.push_back(it);
+            total_pde += it.pde_solves_table + it.pde_solves_validation;
+        }
+    }
 
     // 4. Build final uniform grids and all surfaces
     auto final_m = linspace(domain_.min_m, domain_.max_m, gsz.moneyness);
@@ -654,6 +664,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     auto scaled = scale_lhs_samples(final_samples, final_bounds);
 
     double final_max_error = 0.0;
+    double final_sum_error = 0.0;
     size_t valid = 0;
 
     for (const auto& sample : scaled) {
@@ -672,8 +683,10 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             config_.dividend_yield);
 
         final_max_error = std::max(final_max_error, err);
+        final_sum_error += err;
         if (err > 0.0) valid++;
     }
+    double final_avg_error = valid > 0 ? final_sum_error / static_cast<double>(valid) : 0.0;
 
     // 7. Optional retry with bumped grids
     if (valid > 0 && final_max_error > params.target_iv_error) {
@@ -696,15 +709,28 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
                     .surface = std::move(*retry_surface),
                     .grid = {.moneyness = retry_m, .vol = retry_v, .rate = retry_r},
                     .tau_points_per_segment = bumped_tau,
+                    .iterations = std::move(all_iterations),
+                    .achieved_max_error = final_max_error,
+                    .achieved_avg_error = final_avg_error,
+                    .target_met = false,  // retry means target wasn't met
+                    .total_pde_solves = total_pde,
+                    .used_retry = true,
                 };
             }
         }
     }
 
+    bool met = (valid == 0) || (final_max_error <= params.target_iv_error);
     return BSplineSegmentedAdaptiveResult{
         .surface = std::move(*surface),
         .grid = seg_template.grid,
         .tau_points_per_segment = max_tau_pts,
+        .iterations = std::move(all_iterations),
+        .achieved_max_error = final_max_error,
+        .achieved_avg_error = final_avg_error,
+        .target_met = met,
+        .total_pde_solves = total_pde,
+        .used_retry = false,
     };
 }
 

@@ -25,6 +25,9 @@
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
+#include "mango/option/table/bspline/bspline_adaptive.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/price_table.hpp"
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
 #include <array>
@@ -150,35 +153,67 @@ static AnyInterpIVSolver build_vanilla_solver() {
     return std::move(*solver);
 }
 
-// Dividends: one solver per maturity via BSpline + discrete dividends + adaptive grid
-static std::vector<std::pair<size_t, AnyInterpIVSolver>> build_div_solvers() {
-    std::vector<std::pair<size_t, AnyInterpIVSolver>> solvers;
+using BSplineDivSolver = InterpolatedIVSolver<BSplineMultiKRefSurface>;
+
+// Dividends: one solver per maturity via BSpline + discrete dividends + adaptive grid.
+// Uses the lower-level builder directly to capture convergence stats.
+static std::vector<std::pair<size_t, BSplineDivSolver>> build_div_solvers() {
+    std::vector<std::pair<size_t, BSplineDivSolver>> solvers;
+
+    // S/K moneyness → log-moneyness for the builder
+    const std::vector<double> sk_moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30};
+    std::vector<double> log_m;
+    log_m.reserve(sk_moneyness.size());
+    for (double m : sk_moneyness) log_m.push_back(std::log(m));
+
+    const std::vector<double> vols = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50};
+    const std::vector<double> rates = {0.01, 0.03, 0.05, 0.10};
+    const AdaptiveGridParams adaptive{.target_iv_error = 2e-5};
 
     for (size_t ti = 0; ti < kNT; ++ti) {
         double mat = kMaturities[ti];
         auto divs = make_div_schedule(mat);
 
-        IVSolverFactoryConfig config{
-            .option_type = OptionType::PUT,
+        SegmentedAdaptiveConfig seg_config{
             .spot = kSpot,
+            .option_type = OptionType::PUT,
             .dividend_yield = kDivYield,
-            .grid = IVGrid{
-                .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
-                .vol = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50},
-                .rate = {0.01, 0.03, 0.05, 0.10},
-            },
-            .adaptive = AdaptiveGridParams{.target_iv_error = 2e-5},
-            .backend = BSplineBackend{},
-            .discrete_dividends = DiscreteDividendConfig{
-                .maturity = mat,
-                .discrete_dividends = divs,
-                .kref_config = {.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end())},
-            },
+            .discrete_dividends = divs,
+            .maturity = mat,
+            .kref_config = {.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end())},
         };
 
-        auto solver = make_interpolated_iv_solver(config);
+        auto result = build_adaptive_bspline_segmented(
+            adaptive, seg_config, {log_m, vols, rates});
+        if (!result.has_value()) {
+            std::fprintf(stderr, "  [skip] T=%s — adaptive build failed\n",
+                         kMatLabels[ti]);
+            continue;
+        }
+
+        // Print convergence stats
+        std::printf("  T=%s: iters=%zu target_met=%s max_err=%.1f bps "
+                    "avg_err=%.1f bps PDE=%zu%s\n",
+                    kMatLabels[ti],
+                    result->iterations.size(),
+                    result->target_met ? "yes" : "no",
+                    result->achieved_max_error * 1e4,
+                    result->achieved_avg_error * 1e4,
+                    result->total_pde_solves,
+                    result->used_retry ? " (retry)" : "");
+
+        // Wrap in BSplineMultiKRefSurface → InterpolatedIVSolver
+        SurfaceBounds bounds{
+            .m_min = log_m.front(), .m_max = log_m.back(),
+            .tau_min = 0.0, .tau_max = mat,
+            .sigma_min = vols.front(), .sigma_max = vols.back(),
+            .rate_min = rates.front(), .rate_max = rates.back(),
+        };
+        auto wrapper = BSplineMultiKRefSurface(
+            std::move(result->surface), bounds, OptionType::PUT, kDivYield);
+        auto solver = BSplineDivSolver::create(std::move(wrapper));
         if (!solver.has_value()) {
-            std::fprintf(stderr, "  [skip] T=%s — solver build failed\n",
+            std::fprintf(stderr, "  [skip] T=%s — solver wrap failed\n",
                          kMatLabels[ti]);
             continue;
         }
@@ -279,9 +314,10 @@ static ErrorTable compute_errors_vanilla(const PriceGrid& prices,
     return errors;
 }
 
+template <typename Solver>
 static ErrorTable compute_errors_div(
     const PriceGrid& prices,
-    const std::vector<std::pair<size_t, AnyInterpIVSolver>>& div_solvers,
+    const std::vector<std::pair<size_t, Solver>>& div_solvers,
     size_t vol_idx) {
     ErrorTable errors{};
 
