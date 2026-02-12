@@ -2,6 +2,8 @@
 #pragma once
 
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
+#include "mango/option/table/greek_types.hpp"
+#include "mango/option/option_spec.hpp"
 #include "mango/support/error_types.hpp"
 
 #include <array>
@@ -36,6 +38,19 @@ struct ChebyshevTableResult {
         return std::visit([&](const auto& s) {
             return s.vega(spot, strike, tau, sigma, rate);
         }, surface);
+    }
+
+    std::expected<double, GreekError> delta(const PricingParams& params) const {
+        return std::visit([&](const auto& s) { return s.delta(params); }, surface);
+    }
+    std::expected<double, GreekError> gamma(const PricingParams& params) const {
+        return std::visit([&](const auto& s) { return s.gamma(params); }, surface);
+    }
+    std::expected<double, GreekError> theta(const PricingParams& params) const {
+        return std::visit([&](const auto& s) { return s.theta(params); }, surface);
+    }
+    std::expected<double, GreekError> rho(const PricingParams& params) const {
+        return std::visit([&](const auto& s) { return s.rho(params); }, surface);
     }
 };
 

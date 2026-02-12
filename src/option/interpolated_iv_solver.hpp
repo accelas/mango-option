@@ -41,6 +41,14 @@ struct InterpolatedIVSolverConfig {
     double tolerance = 1e-6;       ///< Price convergence tolerance
     double sigma_min = 0.01;       ///< Minimum volatility (1%)
     double sigma_max = 3.0;        ///< Maximum volatility (300%)
+
+    /// Minimum vega to attempt IV solve.  Evaluates surface vega at
+    /// three representative vols (10%, 25%, 50%) and takes the max.
+    /// If below threshold, the option has near-zero sensitivity to
+    /// volatility and IV is effectively undefined.  Returns VegaTooSmall
+    /// immediately (~600 ns) instead of running a doomed Brent search.
+    /// Set to 0 to disable.
+    double vega_threshold = 1e-4;
 };
 
 /// Interpolation-based IV Solver
@@ -372,12 +380,35 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
     const bool rate_is_curve = is_yield_curve(query.rate);
     double rate_value = get_zero_rate(query.rate, query.maturity);
 
+    // Vega pre-check: reject queries where the option has near-zero
+    // sensitivity to volatility.  Evaluates surface vega at three
+    // representative vols (~600 ns) to avoid a doomed Brent search.
+    // Using 10%, 25%, 50% covers the typical market vol range where
+    // vega differences between ATM and deep OTM/ITM are visible.
+    if (config_.vega_threshold > 0.0) {
+        static constexpr double kProbeVols[] = {0.10, 0.25, 0.50};
+        double max_vega = 0.0;
+        for (double sv : kProbeVols) {
+            double v = std::abs(surface_.vega(query.spot, query.strike,
+                                              query.maturity, sv, rate_value));
+            if (v > max_vega) max_vega = v;
+        }
+        if (max_vega < config_.vega_threshold) {
+            return std::unexpected(IVError{
+                .code = IVErrorCode::VegaTooSmall,
+                .iterations = 0,
+                .final_error = max_vega,
+                .last_vol = std::nullopt
+            });
+        }
+    }
+
     // Define objective function: f(s) = Price(s) - Market_Price
     auto objective = [&](double sigma) -> double {
         return eval_price(moneyness, query.maturity, sigma, rate_value, query.strike) - query.market_price;
     };
 
-    // Brent's method — no vega needed
+    // Brent's method
     RootFindingConfig brent_config{
         .max_iter = config_.max_iter,
         .brent_tol_abs = config_.tolerance

@@ -910,6 +910,7 @@ cc_test(
         "//src/math:bspline_basis",
         "//src/math:bspline_nd_separable",
         "//src/option/table:surface_concepts",
+        "//src/option/table/bspline:bspline_surface",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -1495,8 +1496,10 @@ cc_test(
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option/table:surface_concepts",
+        "//src/option/table:greek_types",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table:standard_transform_4d",
+        "//src/option/table:dimensionless_transform_3d",
         "//src/option/table:analytical_eep",
         "//src/option/table:price_table",
 
@@ -1510,6 +1513,7 @@ cc_test(
     srcs = ["dimensionless_transform_test.cc"],
     deps = [
         "//src/option/table:dimensionless_transform_3d",
+        "//src/option/table:greek_types",
         "//src/option/table:surface_concepts",
         "@googletest//:gtest_main",
     ],
@@ -1657,6 +1661,89 @@ cc_test(
     srcs = ["dimensionless_adaptive_test.cc"],
     deps = [
         "//src/option/table/dimensionless:dimensionless_adaptive",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "price_table_greeks_test",
+    size = "medium",
+    srcs = ["price_table_greeks_test.cc"],
+    deps = [
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table:greek_types",
+        "//src/option:option_spec",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "greeks_accuracy_test",
+    size = "large",
+    srcs = ["greeks_accuracy_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_tensor_accessor",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:greek_types",
+        "//src/math:bspline_nd_separable",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
+        "//src/option:american_option",
+        "//src/option:european_option",
+        "//src/option:option_spec",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "greek_types_test",
+    size = "small",
+    srcs = ["greek_types_test.cc"],
+    deps = [
+        "//src/option/table:greek_types",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "eep_greeks_test",
+    size = "small",
+    srcs = ["eep_greeks_test.cc"],
+    deps = [
+        "//src/option/table:analytical_eep",
+        "//src/option/table:eep_layer",
+        "//src/option/table:surface_concepts",
+        "//src/option/table:greek_types",
+        "//src/option:european_option",
+        "//src/option:option_spec",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "transform_leaf_greeks_test",
+    size = "medium",
+    srcs = ["transform_leaf_greeks_test.cc"],
+    deps = [
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table:greek_types",
+        "//src/option:option_spec",
+        "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
 )

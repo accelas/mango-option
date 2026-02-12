@@ -57,7 +57,18 @@ cc_library(
 cc_library(
     name = "price_table",
     hdrs = ["price_table.hpp"],
-    deps = ["//src/option:option_spec"],
+    deps = [
+        ":greek_types",
+        "//src/option:option_spec",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
+    name = "greek_types",
+    hdrs = ["greek_types.hpp"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
@@ -66,6 +77,7 @@ cc_library(
 cc_library(
     name = "surface_concepts",
     hdrs = ["surface_concepts.hpp"],
+    deps = [":greek_types"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
@@ -75,6 +87,7 @@ cc_library(
 cc_library(
     name = "standard_transform_4d",
     hdrs = ["transforms/standard_4d.hpp"],
+    deps = [":greek_types"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
@@ -83,6 +96,7 @@ cc_library(
 cc_library(
     name = "dimensionless_transform_3d",
     hdrs = ["transforms/dimensionless_3d.hpp"],
+    deps = [":greek_types"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
@@ -114,7 +128,7 @@ cc_library(
 cc_library(
     name = "transform_leaf",
     hdrs = ["transform_leaf.hpp"],
-    deps = [":surface_concepts"],
+    deps = [":greek_types", ":surface_concepts", "//src/option:option_spec"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
@@ -123,7 +137,11 @@ cc_library(
 cc_library(
     name = "eep_layer",
     hdrs = ["eep/eep_layer.hpp"],
-    deps = [":surface_concepts"],
+    deps = [
+        ":greek_types",
+        ":surface_concepts",
+        "//src/option:option_spec",
+    ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
@@ -132,6 +150,10 @@ cc_library(
 cc_library(
     name = "split_surface",
     hdrs = ["split_surface.hpp"],
+    deps = [
+        ":greek_types",
+        "//src/option:option_spec",
+    ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",

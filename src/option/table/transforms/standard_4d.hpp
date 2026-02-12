@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "mango/option/table/greek_types.hpp"
 #include <array>
 #include <cmath>
 
@@ -16,10 +17,16 @@ struct StandardTransform4D {
         return {std::log(spot / strike), tau, sigma, rate};
     }
 
-    [[nodiscard]] std::array<double, 4> vega_weights(
-        double /*spot*/, double /*strike*/, double /*tau*/,
+    [[nodiscard]] std::array<double, 4> greek_weights(
+        Greek greek, double spot, double /*strike*/, double /*tau*/,
         double /*sigma*/, double /*rate*/) const noexcept {
-        return {0.0, 0.0, 1.0, 0.0};
+        switch (greek) {
+            case Greek::Delta: return {1.0 / spot, 0.0, 0.0, 0.0};
+            case Greek::Vega:  return {0.0, 0.0, 1.0, 0.0};
+            case Greek::Theta: return {0.0, -1.0, 0.0, 0.0};
+            case Greek::Rho:   return {0.0, 0.0, 0.0, 1.0};
+        }
+        __builtin_unreachable();
     }
 };
 

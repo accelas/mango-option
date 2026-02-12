@@ -117,6 +117,10 @@ public:
         return spline_->partial(axis, coords);
     }
 
+    [[nodiscard]] double eval_second_partial(size_t axis, const std::array<double, N>& coords) const {
+        return spline_->eval_second_partial(axis, coords);
+    }
+
     /// Access underlying spline
     [[nodiscard]] const BSplineND<double, N>& spline() const { return *spline_; }
 

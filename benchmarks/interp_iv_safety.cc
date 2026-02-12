@@ -25,6 +25,9 @@
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
+#include "mango/option/table/bspline/bspline_adaptive.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/price_table.hpp"
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
 #include <array>
@@ -150,35 +153,67 @@ static AnyInterpIVSolver build_vanilla_solver() {
     return std::move(*solver);
 }
 
-// Dividends: one solver per maturity via BSpline + discrete dividends + adaptive grid
-static std::vector<std::pair<size_t, AnyInterpIVSolver>> build_div_solvers() {
-    std::vector<std::pair<size_t, AnyInterpIVSolver>> solvers;
+using BSplineDivSolver = InterpolatedIVSolver<BSplineMultiKRefSurface>;
+
+// Dividends: one solver per maturity via BSpline + discrete dividends + adaptive grid.
+// Uses the lower-level builder directly to capture convergence stats.
+static std::vector<std::pair<size_t, BSplineDivSolver>> build_div_solvers() {
+    std::vector<std::pair<size_t, BSplineDivSolver>> solvers;
+
+    // S/K moneyness → log-moneyness for the builder
+    const std::vector<double> sk_moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30};
+    std::vector<double> log_m;
+    log_m.reserve(sk_moneyness.size());
+    for (double m : sk_moneyness) log_m.push_back(std::log(m));
+
+    const std::vector<double> vols = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50};
+    const std::vector<double> rates = {0.01, 0.03, 0.05, 0.10};
+    const AdaptiveGridParams adaptive{.target_iv_error = 2e-5};
 
     for (size_t ti = 0; ti < kNT; ++ti) {
         double mat = kMaturities[ti];
         auto divs = make_div_schedule(mat);
 
-        IVSolverFactoryConfig config{
-            .option_type = OptionType::PUT,
+        SegmentedAdaptiveConfig seg_config{
             .spot = kSpot,
+            .option_type = OptionType::PUT,
             .dividend_yield = kDivYield,
-            .grid = IVGrid{
-                .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
-                .vol = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50},
-                .rate = {0.01, 0.03, 0.05, 0.10},
-            },
-            .adaptive = AdaptiveGridParams{.target_iv_error = 2e-5},
-            .backend = BSplineBackend{},
-            .discrete_dividends = DiscreteDividendConfig{
-                .maturity = mat,
-                .discrete_dividends = divs,
-                .kref_config = {.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end())},
-            },
+            .discrete_dividends = divs,
+            .maturity = mat,
+            .kref_config = {.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end())},
         };
 
-        auto solver = make_interpolated_iv_solver(config);
+        auto result = build_adaptive_bspline_segmented(
+            adaptive, seg_config, {log_m, vols, rates});
+        if (!result.has_value()) {
+            std::fprintf(stderr, "  [skip] T=%s — adaptive build failed\n",
+                         kMatLabels[ti]);
+            continue;
+        }
+
+        // Print convergence stats
+        std::printf("  T=%s: iters=%zu target_met=%s max_err=%.1f bps "
+                    "avg_err=%.1f bps PDE=%zu%s\n",
+                    kMatLabels[ti],
+                    result->iterations.size(),
+                    result->target_met ? "yes" : "no",
+                    result->achieved_max_error * 1e4,
+                    result->achieved_avg_error * 1e4,
+                    result->total_pde_solves,
+                    result->used_retry ? " (retry)" : "");
+
+        // Wrap in BSplineMultiKRefSurface → InterpolatedIVSolver
+        SurfaceBounds bounds{
+            .m_min = log_m.front(), .m_max = log_m.back(),
+            .tau_min = 0.0, .tau_max = mat,
+            .sigma_min = vols.front(), .sigma_max = vols.back(),
+            .rate_min = rates.front(), .rate_max = rates.back(),
+        };
+        auto wrapper = BSplineMultiKRefSurface(
+            std::move(result->surface), bounds, OptionType::PUT, kDivYield);
+        auto solver = BSplineDivSolver::create(std::move(wrapper));
         if (!solver.has_value()) {
-            std::fprintf(stderr, "  [skip] T=%s — solver build failed\n",
+            std::fprintf(stderr, "  [skip] T=%s — solver wrap failed\n",
                          kMatLabels[ti]);
             continue;
         }
@@ -279,9 +314,10 @@ static ErrorTable compute_errors_vanilla(const PriceGrid& prices,
     return errors;
 }
 
+template <typename Solver>
 static ErrorTable compute_errors_div(
     const PriceGrid& prices,
-    const std::vector<std::pair<size_t, AnyInterpIVSolver>>& div_solvers,
+    const std::vector<std::pair<size_t, Solver>>& div_solvers,
     size_t vol_idx) {
     ErrorTable errors{};
 
@@ -442,7 +478,6 @@ static void print_tvk_comparison(const PriceGrid& prices, size_t vol_idx,
     for (size_t fi = 0; fi < 4; ++fi) {
         auto mask = compute_tvk_mask(prices, vol_idx, kThresholds[fi]);
 
-        // Count cells passing the TV/K filter
         size_t mask_count = 0;
         for (size_t ti = 0; ti < kNT; ++ti)
             for (size_t si = 0; si < kNS; ++si)
@@ -500,15 +535,18 @@ static ChebyshevTableResult build_chebyshev_surface() {
     return std::move(*result);
 }
 
-static ErrorTable compute_errors_chebyshev(
+/// Generic error computation via any InterpolatedIVSolver.
+/// The solver's built-in vega pre-check handles edge-case filtering.
+template <typename Solver>
+static ErrorTable compute_errors_via_solver(
     const PriceGrid& prices,
-    const ChebyshevTableResult& surface,
-    size_t vol_idx) {
+    const Solver& interp_solver,
+    size_t vol_idx,
+    double div_yield = kDivYield) {
     ErrorTable errors{};
     IVSolverConfig fdm_config;
     IVSolver fdm_solver(fdm_config);
 
-    // Batch FDM IV
     std::vector<IVQuery> queries;
     std::vector<std::pair<size_t, size_t>> query_map;
     queries.reserve(kNT * kNS);
@@ -526,7 +564,7 @@ static ErrorTable compute_errors_chebyshev(
             q.strike = kStrikes[si];
             q.maturity = kMaturities[ti];
             q.rate = kRate;
-            q.dividend_yield = kDivYield;
+            q.dividend_yield = div_yield;
             q.option_type = OptionType::PUT;
             q.market_price = price;
             queries.push_back(q);
@@ -535,32 +573,20 @@ static ErrorTable compute_errors_chebyshev(
     }
 
     auto fdm_results = fdm_solver.solve_batch(queries);
+    auto interp_results = interp_solver.solve_batch(queries);
 
-    // Chebyshev IV via Brent
     for (size_t i = 0; i < queries.size(); ++i) {
         auto [ti, si] = query_map[i];
 
-        if (!fdm_results.results[i].has_value()) {
+        if (!fdm_results.results[i].has_value() ||
+            !interp_results.results[i].has_value()) {
             errors[ti][si] = std::nan("");
             continue;
         }
 
         double fdm_iv = fdm_results.results[i]->implied_vol;
-        double strike = kStrikes[si];
-        double maturity = kMaturities[ti];
-
-        double cheb_iv = brent_solve_iv(
-            [&](double vol) {
-                return surface.price(kSpot, strike, maturity, vol, kRate);
-            },
-            queries[i].market_price);
-
-        if (std::isnan(cheb_iv)) {
-            errors[ti][si] = std::nan("");
-            continue;
-        }
-
-        errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
+        double interp_iv = interp_results.results[i]->implied_vol;
+        errors[ti][si] = std::abs(interp_iv - fdm_iv) * 10000.0;
     }
 
     return errors;
@@ -575,86 +601,33 @@ run_chebyshev_4d(const PriceGrid& prices) {
     std::printf("--- Building Chebyshev 4D surface...\n");
     auto surface = build_chebyshev_surface();
 
+    // Wrap in InterpolatedIVSolver for consistent vega pre-check
     std::array<ErrorTable, kNV> all_errors{};
     std::printf("--- Computing Chebyshev IV errors...\n");
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        char title[128];
-        std::snprintf(title, sizeof(title),
-                      "Chebyshev 4D IV Error (bps) — σ=%.0f%%",
-                      kVols[vi] * 100);
-        all_errors[vi] = compute_errors_chebyshev(prices, surface, vi);
-        print_heatmap(title, all_errors[vi]);
-    }
+
+    bool ok = false;
+    std::visit([&](auto s) {
+        auto solver = InterpolatedIVSolver<std::decay_t<decltype(s)>>::create(
+            std::move(s));
+        if (!solver.has_value()) return;
+        ok = true;
+        for (size_t vi = 0; vi < kNV; ++vi) {
+            char title[128];
+            std::snprintf(title, sizeof(title),
+                          "Chebyshev 4D IV Error (bps) — σ=%.0f%%",
+                          kVols[vi] * 100);
+            all_errors[vi] = compute_errors_via_solver(prices, *solver, vi);
+            print_heatmap(title, all_errors[vi]);
+        }
+    }, std::move(surface.surface));
+
+    if (!ok) std::fprintf(stderr, "Chebyshev 4D solver creation failed\n");
     return all_errors;
 }
 
 // ============================================================================
 // Chebyshev Adaptive — CC-level refinement via AdaptiveGridBuilder
 // ============================================================================
-
-static ErrorTable compute_errors_from_price_fn(
-    const PriceGrid& prices,
-    const std::function<double(double, double, double, double, double)>& price_fn,
-    size_t vol_idx) {
-    ErrorTable errors{};
-    IVSolverConfig fdm_config;
-    IVSolver fdm_solver(fdm_config);
-
-    std::vector<IVQuery> queries;
-    std::vector<std::pair<size_t, size_t>> query_map;
-    queries.reserve(kNT * kNS);
-
-    for (size_t ti = 0; ti < kNT; ++ti) {
-        for (size_t si = 0; si < kNS; ++si) {
-            double price = prices[vol_idx][ti][si];
-            if (std::isnan(price) || price <= 0) {
-                errors[ti][si] = std::nan("");
-                continue;
-            }
-
-            IVQuery q;
-            q.spot = kSpot;
-            q.strike = kStrikes[si];
-            q.maturity = kMaturities[ti];
-            q.rate = kRate;
-            q.dividend_yield = kDivYield;
-            q.option_type = OptionType::PUT;
-            q.market_price = price;
-            queries.push_back(q);
-            query_map.emplace_back(ti, si);
-        }
-    }
-
-    auto fdm_results = fdm_solver.solve_batch(queries);
-
-    for (size_t i = 0; i < queries.size(); ++i) {
-        auto [ti, si] = query_map[i];
-
-        if (!fdm_results.results[i].has_value()) {
-            errors[ti][si] = std::nan("");
-            continue;
-        }
-
-        double fdm_iv = fdm_results.results[i]->implied_vol;
-        double strike = kStrikes[si];
-        double maturity = kMaturities[ti];
-
-        double cheb_iv = brent_solve_iv(
-            [&](double vol) {
-                return price_fn(kSpot, strike, maturity, vol, kRate);
-            },
-            queries[i].market_price);
-
-        if (std::isnan(cheb_iv)) {
-            errors[ti][si] = std::nan("");
-            continue;
-        }
-
-        errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
-    }
-
-    return errors;
-}
 
 static std::array<ErrorTable, kNV>
 run_chebyshev_adaptive(const PriceGrid& prices) {
@@ -700,6 +673,14 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
                     it.pde_solves_table);
     }
 
+    // Wrap in InterpolatedIVSolver for consistent vega pre-check
+    auto solver = InterpolatedIVSolver<ChebyshevRawSurface>::create(
+        std::move(*result->surface));
+    if (!solver.has_value()) {
+        std::fprintf(stderr, "Chebyshev adaptive solver creation failed\n");
+        return {};
+    }
+
     std::array<ErrorTable, kNV> all_errors{};
     std::printf("--- Computing adaptive Chebyshev IV errors...\n");
     for (size_t vi = 0; vi < kNV; ++vi) {
@@ -707,12 +688,7 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
         std::snprintf(title, sizeof(title),
                       "Chebyshev Adaptive IV Error (bps) — σ=%.0f%%",
                       kVols[vi] * 100);
-        all_errors[vi] = compute_errors_from_price_fn(
-            prices,
-            [&](double spot, double strike, double tau, double sigma, double rate) {
-                return result->surface->price(spot, strike, tau, sigma, rate);
-            },
-            vi);
+        all_errors[vi] = compute_errors_via_solver(prices, *solver, vi);
         print_heatmap(title, all_errors[vi]);
     }
     return all_errors;
@@ -794,13 +770,17 @@ run_chebyshev_dividends(const PriceGrid& prices) {
         }
     }
 
+    // Wrap in InterpolatedIVSolver for consistent vega pre-check
+    auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
+        std::move(result->surface));
+    if (!solver.has_value()) {
+        std::fprintf(stderr, "Chebyshev dividend solver creation failed\n");
+        return {};
+    }
+
     // Compute IV errors at each maturity using dividend-aware FDM reference.
     // The surface was built for maturity=1.0 with make_div_schedule(1.0).
-    // At tau=T, the surface gives the value of the 1-year option with T time
-    // remaining. For the reference, we solve the FDM with the same dividends.
-    // Only dividends with calendar_time ≤ (maturity - tau_query) have been
-    // "applied" at the query point, so the FDM reference with maturity=tau
-    // needs the dividends that are still in the option's future.
+    // FDM reference needs dividends still in the option's future at each tau.
     auto all_divs = make_div_schedule(1.0);
     double surface_maturity = 1.0;
 
@@ -816,10 +796,6 @@ run_chebyshev_dividends(const PriceGrid& prices) {
             double tau = kMaturities[ti];
             if (tau > surface_maturity + 0.01) continue;
 
-            // Filter dividends: keep those still in the future at this tau.
-            // In the 1-year option at tau remaining, a dividend at cal_time t
-            // is in the future if t > (surface_maturity - tau), i.e., the
-            // calendar time hasn't passed yet.
             double cal_now = surface_maturity - tau;
             std::vector<Dividend> future_divs;
             for (const auto& d : all_divs) {
@@ -838,16 +814,19 @@ run_chebyshev_dividends(const PriceGrid& prices) {
                     kStrikes[si], tau, price, future_divs);
                 if (std::isnan(fdm_iv)) continue;
 
-                // Surface IV via Brent inversion
-                double cheb_iv = brent_solve_iv(
-                    [&](double vol) {
-                        return result->surface.price(
-                            kSpot, kStrikes[si], tau, vol, kRate);
-                    },
-                    price);
-                if (std::isnan(cheb_iv)) continue;
+                // Surface IV via InterpolatedIVSolver (vega pre-check built in)
+                IVQuery q;
+                q.spot = kSpot;
+                q.strike = kStrikes[si];
+                q.maturity = tau;
+                q.rate = kRate;
+                q.dividend_yield = kDivYield;
+                q.option_type = OptionType::PUT;
+                q.market_price = price;
+                auto iv_result = solver->solve(q);
+                if (!iv_result.has_value()) continue;
 
-                errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
+                errors[ti][si] = std::abs(iv_result->implied_vol - fdm_iv) * 10000.0;
             }
         }
 
@@ -933,7 +912,7 @@ int main(int argc, char* argv[]) {
     std::printf("===================================\n");
     std::printf("S=%.0f, r=%.2f, q=%.2f, PUT\n", kSpot, kRate, kDivYield);
     std::printf("Reference prices: BatchAmericanOptionSolver (chain mode)\n");
-    std::printf("Interpolated IV:  adaptive IVGrid + make_interpolated_iv_solver\n");
+    std::printf("Interpolated IV:  InterpolatedIVSolver (all backends, vega pre-check)\n");
     std::printf("FDM reference IV: IVSolver (vanilla) / Brent solver (dividends)\n");
     std::printf("Error = |interp_iv - fdm_iv| in basis points\n\n");
 
