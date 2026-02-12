@@ -821,17 +821,19 @@ PriceTableBuilderND<N>::repair_spline_failures(
             if (τ_before && τ_after) {
                 double t = static_cast<double>(τ_idx - *τ_before) /
                            static_cast<double>(*τ_after - *τ_before);
-                #pragma omp simd
+                MANGO_PRAGMA_SIMD
                 for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] =
                         (1.0 - t) * tensor.view[i, *τ_before, σ_idx, r_idx] +
                         t * tensor.view[i, *τ_after, σ_idx, r_idx];
                 }
             } else if (τ_before) {
+                MANGO_PRAGMA_SIMD
                 for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_before, σ_idx, r_idx];
                 }
             } else {
+                MANGO_PRAGMA_SIMD
                 for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_after, σ_idx, r_idx];
                 }
@@ -872,6 +874,7 @@ PriceTableBuilderND<N>::repair_pde_failures(
 
         // Copy entire (m,τ) surface from neighbor
         for (size_t i = 0; i < Nm; ++i) {
+            MANGO_PRAGMA_SIMD
             for (size_t j = 0; j < Nt; ++j) {
                 tensor.view[i, j, σ_idx, r_idx] = tensor.view[i, j, nσ, nr];
             }
