@@ -149,10 +149,10 @@ GridBounds extract_bounds(const IVGrid& grid) {
 }  // anonymous namespace
 
 // =====================================================================
-// AnyIVSolver: pimpl implementation
+// AnyInterpIVSolver: pimpl implementation
 // =====================================================================
 
-struct AnyIVSolver::Impl {
+struct AnyInterpIVSolver::Impl {
     using SolverVariant = std::variant<
         InterpolatedIVSolver<BSplinePriceTable>,
         InterpolatedIVSolver<BSplineMultiKRefSurface>,
@@ -168,34 +168,34 @@ struct AnyIVSolver::Impl {
     explicit Impl(T s) : solver(std::move(s)) {}
 };
 
-AnyIVSolver::AnyIVSolver(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
-AnyIVSolver::AnyIVSolver(AnyIVSolver&&) noexcept = default;
-AnyIVSolver& AnyIVSolver::operator=(AnyIVSolver&&) noexcept = default;
-AnyIVSolver::~AnyIVSolver() = default;
+AnyInterpIVSolver::AnyInterpIVSolver(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+AnyInterpIVSolver::AnyInterpIVSolver(AnyInterpIVSolver&&) noexcept = default;
+AnyInterpIVSolver& AnyInterpIVSolver::operator=(AnyInterpIVSolver&&) noexcept = default;
+AnyInterpIVSolver::~AnyInterpIVSolver() = default;
 
-std::expected<IVSuccess, IVError> AnyIVSolver::solve(const IVQuery& query) const {
+std::expected<IVSuccess, IVError> AnyInterpIVSolver::solve(const IVQuery& query) const {
     return std::visit([&](const auto& solver) {
         return solver.solve(query);
     }, impl_->solver);
 }
 
-BatchIVResult AnyIVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
+BatchIVResult AnyInterpIVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
     return std::visit([&](const auto& solver) {
         return solver.solve_batch(queries);
     }, impl_->solver);
 }
 
-/// Helper: wrap a typed solver into AnyIVSolver via pimpl
+/// Helper: wrap a typed solver into AnyInterpIVSolver via pimpl
 template <typename Surface>
-static AnyIVSolver make_any_solver(InterpolatedIVSolver<Surface> solver) {
-    return AnyIVSolver(std::make_unique<AnyIVSolver::Impl>(std::move(solver)));
+static AnyInterpIVSolver make_any_solver(InterpolatedIVSolver<Surface> solver) {
+    return AnyInterpIVSolver(std::make_unique<AnyInterpIVSolver::Impl>(std::move(solver)));
 }
 
 // ---------------------------------------------------------------------------
-// Helper: wrap surface into AnyIVSolver
+// Helper: wrap surface into AnyInterpIVSolver
 // ---------------------------------------------------------------------------
 
-static std::expected<AnyIVSolver, ValidationError>
+static std::expected<AnyInterpIVSolver, ValidationError>
 wrap_surface(std::shared_ptr<const PriceTableSurface> surface,
              OptionType option_type,
              const InterpolatedIVSolverConfig& solver_config) {
@@ -216,84 +216,11 @@ wrap_surface(std::shared_ptr<const PriceTableSurface> surface,
 }
 
 // ---------------------------------------------------------------------------
-// Factory: B-spline + continuous (adaptive)
+// Factory: B-spline helpers
 // ---------------------------------------------------------------------------
 
-static std::expected<AnyIVSolver, ValidationError>
-build_bspline_adaptive(const IVSolverFactoryConfig& config,
-                       const BSplineBackend& backend) {
-    OptionGrid chain;
-    chain.spot = config.spot;
-    chain.dividend_yield = config.dividend_yield;
-
-    chain.strikes.reserve(config.grid.moneyness.size());
-    for (double m : config.grid.moneyness) {
-        chain.strikes.push_back(config.spot / m);
-    }
-    chain.maturities = backend.maturity_grid;
-    chain.implied_vols = config.grid.vol;
-    chain.rates = config.grid.rate;
-
-    // Use auto-estimated grid with High profile for better accuracy
-    // (Fixed 101x500 grid was too coarse, causing ~600 bps IV errors)
-    GridAccuracyParams accuracy = make_grid_accuracy(GridAccuracyProfile::High);
-
-    auto result = build_adaptive_bspline(*config.adaptive, chain, accuracy, config.option_type);
-
-    if (!result.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-
-    return wrap_surface(std::move(result->surface), config.option_type, config.solver_config);
-}
-
-// ---------------------------------------------------------------------------
-// Factory: B-spline + continuous (dispatch manual vs adaptive)
-// ---------------------------------------------------------------------------
-
-static std::expected<AnyIVSolver, ValidationError>
-build_bspline(const IVSolverFactoryConfig& config, const BSplineBackend& backend) {
-    if (config.adaptive.has_value()) {
-        return build_bspline_adaptive(config, backend);
-    }
-
-    // Manual grid: build price table directly
-    auto log_m = to_log_moneyness(config.grid.moneyness);
-    if (!log_m.has_value()) {
-        return std::unexpected(log_m.error());
-    }
-    auto setup = PriceTableBuilder::from_vectors(
-        std::move(*log_m), backend.maturity_grid, config.grid.vol, config.grid.rate,
-        config.spot, GridAccuracyParams{}, config.option_type,
-        config.dividend_yield);
-    if (!setup.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-
-    auto& [builder, axes] = *setup;
-
-    // Standard path: decompose tensor to EEP before B-spline fitting
-    auto table_result = builder.build(axes,
-        [&](PriceTensor& tensor, const PriceTableAxes& a) {
-            BSplineTensorAccessor accessor(tensor, a, config.spot);
-            eep_decompose(accessor, AnalyticalEEP(config.option_type, config.dividend_yield));
-        });
-    if (!table_result.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-
-    return wrap_surface(table_result->surface, config.option_type, config.solver_config);
-}
-
-// ---------------------------------------------------------------------------
-// Factory: B-spline + discrete dividends helpers
-// ---------------------------------------------------------------------------
-
-/// Wrap a BSplineMultiKRefInner into AnyIVSolver
-static std::expected<AnyIVSolver, ValidationError>
+/// Wrap a BSplineMultiKRefInner into AnyInterpIVSolver
+static std::expected<AnyInterpIVSolver, ValidationError>
 wrap_multi_kref_surface(BSplineMultiKRefInner surface,
                         const GridBounds& b, double maturity,
                         OptionType option_type, double dividend_yield,
@@ -317,24 +244,17 @@ wrap_multi_kref_surface(BSplineMultiKRefInner surface,
     return make_any_solver(std::move(*solver));
 }
 
-// ---------------------------------------------------------------------------
-// Factory: B-spline + discrete dividends
-// ---------------------------------------------------------------------------
-
-static std::expected<AnyIVSolver, ValidationError>
+static std::expected<AnyInterpIVSolver, ValidationError>
 build_bspline_segmented(const IVSolverFactoryConfig& config,
                         const DiscreteDividendConfig& divs) {
-    const auto& kref_config = divs.kref_config;
-    const auto& grid = config.grid;
-
-    auto log_m = to_log_moneyness(grid.moneyness);
+    auto log_m = to_log_moneyness(config.grid.moneyness);
     if (!log_m.has_value()) {
         return std::unexpected(log_m.error());
     }
-    IVGrid log_grid = grid;
+    IVGrid log_grid = config.grid;
     log_grid.moneyness = std::move(*log_m);
 
-    auto b = extract_bounds(grid);
+    auto b = extract_bounds(config.grid);
 
     if (config.adaptive.has_value()) {
         SegmentedAdaptiveConfig seg_config{
@@ -343,7 +263,7 @@ build_bspline_segmented(const IVSolverFactoryConfig& config,
             .dividend_yield = config.dividend_yield,
             .discrete_dividends = divs.discrete_dividends,
             .maturity = divs.maturity,
-            .kref_config = kref_config,
+            .kref_config = divs.kref_config,
         };
 
         auto result = build_adaptive_bspline_segmented(
@@ -365,7 +285,7 @@ build_bspline_segmented(const IVSolverFactoryConfig& config,
 
     auto surface = build_multi_kref_manual(
         config.spot, config.option_type, dividends,
-        log_grid, divs.maturity, kref_config);
+        log_grid, divs.maturity, divs.kref_config);
     if (!surface.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
@@ -375,13 +295,114 @@ build_bspline_segmented(const IVSolverFactoryConfig& config,
         config.dividend_yield, config.solver_config);
 }
 
+static std::expected<AnyInterpIVSolver, ValidationError>
+build_bspline_continuous(const IVSolverFactoryConfig& config,
+                         const BSplineBackend& backend) {
+    if (config.adaptive.has_value()) {
+        OptionGrid chain;
+        chain.spot = config.spot;
+        chain.dividend_yield = config.dividend_yield;
+        chain.strikes.reserve(config.grid.moneyness.size());
+        for (double m : config.grid.moneyness)
+            chain.strikes.push_back(config.spot / m);
+        chain.maturities = backend.maturity_grid;
+        chain.implied_vols = config.grid.vol;
+        chain.rates = config.grid.rate;
+
+        auto result = build_adaptive_bspline(
+            *config.adaptive, chain,
+            make_grid_accuracy(GridAccuracyProfile::High), config.option_type);
+        if (!result.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+        return wrap_surface(std::move(result->surface), config.option_type,
+                            config.solver_config);
+    }
+
+    auto log_m = to_log_moneyness(config.grid.moneyness);
+    if (!log_m.has_value()) {
+        return std::unexpected(log_m.error());
+    }
+    auto setup = PriceTableBuilder::from_vectors(
+        std::move(*log_m), backend.maturity_grid, config.grid.vol, config.grid.rate,
+        config.spot, GridAccuracyParams{}, config.option_type,
+        config.dividend_yield);
+    if (!setup.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+
+    auto& [builder, axes] = *setup;
+    auto table_result = builder.build(axes,
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
+            BSplineTensorAccessor accessor(tensor, a, config.spot);
+            eep_decompose(accessor, AnalyticalEEP(config.option_type, config.dividend_yield));
+        });
+    if (!table_result.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+    return wrap_surface(table_result->surface, config.option_type, config.solver_config);
+}
+
 // ---------------------------------------------------------------------------
-// Factory: Chebyshev + continuous
+// Factory: B-spline
 // ---------------------------------------------------------------------------
 
-static std::expected<AnyIVSolver, ValidationError>
-build_chebyshev(const IVSolverFactoryConfig& config,
-                const ChebyshevBackend& backend) {
+static std::expected<AnyInterpIVSolver, ValidationError>
+build_bspline(const IVSolverFactoryConfig& config, const BSplineBackend& backend) {
+    if (config.discrete_dividends.has_value())
+        return build_bspline_segmented(config, *config.discrete_dividends);
+    return build_bspline_continuous(config, backend);
+}
+
+// ---------------------------------------------------------------------------
+// Factory: Chebyshev helpers
+// ---------------------------------------------------------------------------
+
+static std::expected<AnyInterpIVSolver, ValidationError>
+build_chebyshev_segmented(const IVSolverFactoryConfig& config,
+                          const DiscreteDividendConfig& divs) {
+    auto log_m = to_log_moneyness(config.grid.moneyness);
+    if (!log_m.has_value()) {
+        return std::unexpected(log_m.error());
+    }
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = config.spot,
+        .option_type = config.option_type,
+        .dividend_yield = config.dividend_yield,
+        .discrete_dividends = divs.discrete_dividends,
+        .maturity = divs.maturity,
+        .kref_config = divs.kref_config,
+    };
+
+    IVGrid log_grid{std::move(*log_m), config.grid.vol, config.grid.rate};
+
+    std::expected<ChebyshevMultiKRefSurface, PriceTableError> surface_result =
+        config.adaptive.has_value()
+            ? build_adaptive_chebyshev_segmented(
+                  *config.adaptive, seg_config, log_grid)
+                  .transform([](auto&& r) { return std::move(r.surface); })
+            : build_chebyshev_segmented_manual(seg_config, log_grid);
+
+    if (!surface_result.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+
+    auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
+        std::move(*surface_result), config.solver_config);
+    if (!solver.has_value()) {
+        return std::unexpected(solver.error());
+    }
+    return make_any_solver(std::move(*solver));
+}
+
+static std::expected<AnyInterpIVSolver, ValidationError>
+build_chebyshev_continuous(const IVSolverFactoryConfig& config,
+                           const ChebyshevBackend& backend) {
     auto b = extract_bounds(config.grid);
 
     ChebyshevTableConfig cheb_config{
@@ -402,7 +423,7 @@ build_chebyshev(const IVSolverFactoryConfig& config,
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    return std::visit([&](auto&& surface) -> std::expected<AnyIVSolver, ValidationError> {
+    return std::visit([&](auto&& surface) -> std::expected<AnyInterpIVSolver, ValidationError> {
         auto solver = InterpolatedIVSolver<std::decay_t<decltype(surface)>>::create(
             std::move(surface), config.solver_config);
         if (!solver.has_value()) {
@@ -413,58 +434,15 @@ build_chebyshev(const IVSolverFactoryConfig& config,
 }
 
 // ---------------------------------------------------------------------------
-// Factory: Chebyshev + discrete dividends
+// Factory: Chebyshev
 // ---------------------------------------------------------------------------
 
-static std::expected<AnyIVSolver, ValidationError>
-build_chebyshev_segmented(const IVSolverFactoryConfig& config,
-                          const ChebyshevBackend& /* backend */,
-                          const DiscreteDividendConfig& divs) {
-    auto log_m = to_log_moneyness(config.grid.moneyness);
-    if (!log_m.has_value()) {
-        return std::unexpected(log_m.error());
-    }
-
-    SegmentedAdaptiveConfig seg_config{
-        .spot = config.spot,
-        .option_type = config.option_type,
-        .dividend_yield = config.dividend_yield,
-        .discrete_dividends = divs.discrete_dividends,
-        .maturity = divs.maturity,
-        .kref_config = divs.kref_config,
-    };
-
-    IVGrid log_grid{std::move(*log_m), config.grid.vol, config.grid.rate};
-
-    if (config.adaptive.has_value()) {
-        auto result = build_adaptive_chebyshev_segmented(
-            *config.adaptive, seg_config, log_grid);
-        if (!result.has_value()) {
-            return std::unexpected(ValidationError{
-                ValidationErrorCode::InvalidGridSize, 0.0});
-        }
-
-        auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
-            std::move(result->surface), config.solver_config);
-        if (!solver.has_value()) {
-            return std::unexpected(solver.error());
-        }
-        return make_any_solver(std::move(*solver));
-    } else {
-        auto surface = build_chebyshev_segmented_manual(
-            seg_config, log_grid);
-        if (!surface.has_value()) {
-            return std::unexpected(ValidationError{
-                ValidationErrorCode::InvalidGridSize, 0.0});
-        }
-
-        auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
-            std::move(*surface), config.solver_config);
-        if (!solver.has_value()) {
-            return std::unexpected(solver.error());
-        }
-        return make_any_solver(std::move(*solver));
-    }
+static std::expected<AnyInterpIVSolver, ValidationError>
+build_chebyshev(const IVSolverFactoryConfig& config,
+                const ChebyshevBackend& backend) {
+    if (config.discrete_dividends.has_value())
+        return build_chebyshev_segmented(config, *config.discrete_dividends);
+    return build_chebyshev_continuous(config, backend);
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +510,7 @@ build_dimensionless_grid(const IVGrid& grid, double maturity) {
     return DimensionlessGridSpec{std::move(axes), d};
 }
 
-static std::expected<AnyIVSolver, ValidationError>
+static std::expected<AnyInterpIVSolver, ValidationError>
 build_dimensionless_bspline(const IVSolverFactoryConfig& config,
                             const DimensionlessBackend& backend) {
     auto grid_spec = build_dimensionless_grid(config.grid, backend.maturity);
@@ -597,7 +575,7 @@ build_dimensionless_bspline(const IVSolverFactoryConfig& config,
     return make_any_solver(std::move(*solver));
 }
 
-static std::expected<AnyIVSolver, ValidationError>
+static std::expected<AnyInterpIVSolver, ValidationError>
 build_dimensionless_chebyshev(const IVSolverFactoryConfig& config,
                               const DimensionlessBackend& backend) {
     auto log_m = to_log_moneyness(config.grid.moneyness);
@@ -654,7 +632,7 @@ build_dimensionless_chebyshev(const IVSolverFactoryConfig& config,
     return make_any_solver(std::move(*solver));
 }
 
-static std::expected<AnyIVSolver, ValidationError>
+static std::expected<AnyInterpIVSolver, ValidationError>
 build_dimensionless(const IVSolverFactoryConfig& config,
                     const DimensionlessBackend& backend) {
     // Dimensionless backend requires q=0, no discrete dividends, r > 0.
@@ -689,24 +667,15 @@ build_dimensionless(const IVSolverFactoryConfig& config,
 // Public factory
 // ---------------------------------------------------------------------------
 
-std::expected<AnyIVSolver, ValidationError> make_interpolated_iv_solver(const IVSolverFactoryConfig& config) {
-    const bool has_divs = config.discrete_dividends.has_value();
-
-    return std::visit([&](const auto& backend) -> std::expected<AnyIVSolver, ValidationError> {
+std::expected<AnyInterpIVSolver, ValidationError> make_interpolated_iv_solver(const IVSolverFactoryConfig& config) {
+    return std::visit([&](const auto& backend) -> std::expected<AnyInterpIVSolver, ValidationError> {
         using B = std::decay_t<decltype(backend)>;
-        if constexpr (std::is_same_v<B, BSplineBackend>) {
-            if (has_divs)
-                return build_bspline_segmented(config, *config.discrete_dividends);
-            else
-                return build_bspline(config, backend);
-        } else if constexpr (std::is_same_v<B, DimensionlessBackend>) {
+        if constexpr (std::is_same_v<B, BSplineBackend>)
+            return build_bspline(config, backend);
+        else if constexpr (std::is_same_v<B, ChebyshevBackend>)
+            return build_chebyshev(config, backend);
+        else
             return build_dimensionless(config, backend);
-        } else {
-            if (has_divs)
-                return build_chebyshev_segmented(config, backend, *config.discrete_dividends);
-            else
-                return build_chebyshev(config, backend);
-        }
     }, config.backend);
 }
 

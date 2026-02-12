@@ -5,7 +5,7 @@
  *
  * Provides:
  * - InterpolatedIVSolver<Surface>: Newton-Raphson IV solver on any PriceTable
- * - AnyIVSolver: type-erased wrapper for convenient use
+ * - AnyInterpIVSolver: type-erased wrapper for convenient use
  * - make_interpolated_iv_solver(): factory that builds the price surface and solver
  *
  * Two construction paths:
@@ -201,7 +201,7 @@ struct IVSolverFactoryConfig {
 /// Type-erased IV solver wrapping any PriceTable backend
 ///
 /// Impl is defined in the .cpp — only the factory can construct instances.
-class AnyIVSolver {
+class AnyInterpIVSolver {
 public:
     /// Solve for implied volatility (single query)
     std::expected<IVSuccess, IVError> solve(const IVQuery& query) const;
@@ -211,10 +211,10 @@ public:
 
     // Pimpl: move-only, defined in .cpp
     struct Impl;
-    explicit AnyIVSolver(std::unique_ptr<Impl> impl);
-    AnyIVSolver(AnyIVSolver&&) noexcept;
-    AnyIVSolver& operator=(AnyIVSolver&&) noexcept;
-    ~AnyIVSolver();
+    explicit AnyInterpIVSolver(std::unique_ptr<Impl> impl);
+    AnyInterpIVSolver(AnyInterpIVSolver&&) noexcept;
+    AnyInterpIVSolver& operator=(AnyInterpIVSolver&&) noexcept;
+    ~AnyInterpIVSolver();
 
 private:
     std::unique_ptr<Impl> impl_;
@@ -232,8 +232,8 @@ private:
 /// grid density until the target IV error is met.
 ///
 /// @param config Solver configuration
-/// @return Type-erased AnyIVSolver or ValidationError
-std::expected<AnyIVSolver, ValidationError> make_interpolated_iv_solver(const IVSolverFactoryConfig& config);
+/// @return Type-erased AnyInterpIVSolver or ValidationError
+std::expected<AnyInterpIVSolver, ValidationError> make_interpolated_iv_solver(const IVSolverFactoryConfig& config);
 
 // =====================================================================
 // Template implementation (must be in header for template instantiation)

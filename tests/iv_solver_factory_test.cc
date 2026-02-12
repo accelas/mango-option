@@ -32,7 +32,7 @@ IVSolverFactoryConfig make_base_config() {
     return config;
 }
 
-AnyIVSolver build_solver(const IVSolverFactoryConfig& config) {
+AnyInterpIVSolver build_solver(const IVSolverFactoryConfig& config) {
     auto result = make_interpolated_iv_solver(config);
     EXPECT_TRUE(result.has_value()) << "Solver build failed";
     return std::move(*result);

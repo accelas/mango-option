@@ -828,10 +828,10 @@ PYBIND11_MODULE(mango_option, m) {
                 else c.discrete_dividends = obj.cast<mango::DiscreteDividendConfig>();
             });
 
-    // AnyIVSolver (exposed as InterpolatedIVSolver for Python)
-    py::class_<mango::AnyIVSolver>(m, "InterpolatedIVSolver")
+    // AnyInterpIVSolver (exposed as InterpolatedIVSolver for Python)
+    py::class_<mango::AnyInterpIVSolver>(m, "InterpolatedIVSolver")
         .def("solve",
-            [](const mango::AnyIVSolver& solver, const mango::IVQuery& query) {
+            [](const mango::AnyInterpIVSolver& solver, const mango::IVQuery& query) {
                 auto result = solver.solve(query);
                 if (result.has_value()) {
                     return py::make_tuple(true, result.value(), mango::IVError{});
@@ -852,7 +852,7 @@ PYBIND11_MODULE(mango_option, m) {
                     Tuple of (success: bool, result: IVSuccess, error: IVError)
             )pbdoc")
         .def("solve_batch",
-            [](const mango::AnyIVSolver& solver, const std::vector<mango::IVQuery>& queries) {
+            [](const mango::AnyInterpIVSolver& solver, const std::vector<mango::IVQuery>& queries) {
                 auto batch_result = solver.solve_batch(queries);
                 py::list results;
                 for (const auto& r : batch_result.results) {

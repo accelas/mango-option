@@ -608,7 +608,7 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 ### Querying the Solver
 
-Both paths produce an `AnyIVSolver` with the same interface:
+Both paths produce an `AnyInterpIVSolver` with the same interface:
 
 ```cpp
 mango::IVQuery query(
