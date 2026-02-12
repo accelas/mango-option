@@ -17,7 +17,7 @@ namespace mango {
 /// Greek weights encode chain rule ∂/∂(physical) through dimensionless coords:
 ///   Delta: ∂x/∂S = 1/S
 ///   Vega:  ∂τ'/∂σ = στ,   ∂(ln κ)/∂σ = -2/σ
-///   Theta: ∂τ'/∂τ = σ²/2
+///   Theta: dτ'/dt = -σ²/2  (τ = T-t, so dτ/dt = -1)
 ///   Rho:   ∂(ln κ)/∂r = 1/r
 struct DimensionlessTransform3D {
     static constexpr size_t kDim = 3;
@@ -35,7 +35,7 @@ struct DimensionlessTransform3D {
         switch (greek) {
             case Greek::Delta: return {1.0 / spot, 0.0, 0.0};
             case Greek::Vega:  return {0.0, sigma * tau, -2.0 / sigma};
-            case Greek::Theta: return {0.0, sigma * sigma / 2.0, 0.0};
+            case Greek::Theta: return {0.0, -sigma * sigma / 2.0, 0.0};
             case Greek::Rho:   return {0.0, 0.0, 1.0 / rate};
         }
         __builtin_unreachable();

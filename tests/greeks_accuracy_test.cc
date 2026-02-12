@@ -626,14 +626,28 @@ TEST_F(Dimensionless3DGreeksTest, GammaMatchesFDM) {
         << " rel_err=" << std::abs(*surface_gamma - fdm_gamma) / std::abs(fdm_gamma);
 }
 
-TEST_F(Dimensionless3DGreeksTest, ThetaIsNegative) {
+TEST_F(Dimensionless3DGreeksTest, ThetaMatchesFD) {
     auto params = atm_put();
 
     auto surface_theta = table_->theta(params);
     ASSERT_TRUE(surface_theta.has_value()) << "3D theta failed";
 
+    // Theta should be negative (time decay)
     EXPECT_LT(*surface_theta, 0.0)
         << "Put theta should be negative (time decay)";
+
+    // Cross-check via finite difference on the surface
+    double rate = get_zero_rate(params.rate, params.maturity);
+    double dtau = 0.001;
+    double price_base = table_->price(
+        params.spot, params.strike, params.maturity, params.volatility, rate);
+    double price_up = table_->price(
+        params.spot, params.strike, params.maturity + dtau, params.volatility, rate);
+    double fd_theta = -(price_up - price_base) / dtau;
+
+    double tol = std::abs(fd_theta) * 0.10;
+    EXPECT_NEAR(*surface_theta, fd_theta, std::max(tol, 0.01))
+        << "3D theta=" << *surface_theta << " FD theta=" << fd_theta;
 }
 
 TEST_F(Dimensionless3DGreeksTest, AllGreeksAreFinite) {

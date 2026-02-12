@@ -99,7 +99,7 @@ TEST(SurfaceConceptsTest, DimensionlessTransform3DGreekWeights) {
 
     auto tw = xform.greek_weights(Greek::Theta, S, K, tau, sigma, rate);
     EXPECT_EQ(tw[0], 0.0);
-    EXPECT_NEAR(tw[1], sigma * sigma / 2.0, 1e-12);
+    EXPECT_NEAR(tw[1], -sigma * sigma / 2.0, 1e-12);
     EXPECT_EQ(tw[2], 0.0);
 
     auto rw = xform.greek_weights(Greek::Rho, S, K, tau, sigma, rate);
