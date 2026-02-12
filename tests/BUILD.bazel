@@ -1227,10 +1227,14 @@ cc_test(
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_refinement",
+        "//src/option/table:tau_segment_split",
         "//src/option/table/bspline:bspline_adaptive",
         "//src/option/table/bspline:bspline_pde_cache",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:american_option_batch",
         "//src/option:option_grid",
         "//src/pde/core:grid",
@@ -1604,7 +1608,7 @@ cc_test(
     deps = [
         "//src/option/table/dimensionless:dimensionless_builder",
         "//src/option/table/dimensionless:dimensionless_european",
-        "//src/option/table:dimensionless_3d_accessor",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
         "//src/option/table:analytical_eep",
         "//src/option:american_option",
         "//src/option:european_option",
@@ -1621,7 +1625,7 @@ cc_test(
     deps = [
         "//src/option/table/bspline:bspline_3d_surface",
         "//src/option/table/dimensionless:dimensionless_builder",
-        "//src/option/table:dimensionless_3d_accessor",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
         "//src/option/table:analytical_eep",
         "//src/math:bspline_nd_separable",
         "//src/option:american_option",

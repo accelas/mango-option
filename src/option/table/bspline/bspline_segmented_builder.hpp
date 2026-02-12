@@ -86,6 +86,24 @@ public:
     ///   4. Build earlier segments backward with chained IC.
     ///   5. Assemble into SegmentedSurface.
     static std::expected<BSplineSegmentedSurface, PriceTableError> build(const Config& config);
+
+private:
+    /// Build a single segment of the segmented price surface.
+    ///
+    /// For segment 0 (closest to expiry), uses payoff IC.
+    /// For later segments, chains from the previous segment's surface
+    /// with a dividend-adjusted initial condition.
+    ///
+    /// On success, updates @p prev_surface to the newly built segment's surface.
+    static std::expected<BSplineSegmentConfig, PriceTableError>
+    build_segment(
+        size_t seg_idx,
+        const std::vector<double>& boundaries,
+        const Config& config,
+        const std::vector<double>& expanded_log_m_grid,
+        double K_ref,
+        const std::vector<Dividend>& dividends,
+        std::shared_ptr<const PriceTableSurface>& prev_surface);
 };
 
 }  // namespace mango

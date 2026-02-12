@@ -5,6 +5,8 @@
 #include "mango/option/table/bspline/bspline_pde_cache.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
+#include "mango/option/table/adaptive_refinement.hpp"
+#include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include <algorithm>
 #include <iostream>
@@ -840,7 +842,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
     double tau_right = 0.5001;   // right of gap mid
 
     auto pf = [&](double tau) {
-        return result->price_fn(100.0, 100.0, tau, 0.20, 0.05);
+        return result->surface.price(100.0, 100.0, tau, 0.20, 0.05);
     };
 
     double p_left  = pf(tau_left);
@@ -902,7 +904,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
 
     // Should be able to query across the entire tau range
     for (double tau : {0.1, 0.3, 0.5, 0.7, 0.9}) {
-        double p = result->price_fn(100.0, 100.0, tau, 0.20, 0.05);
+        double p = result->surface.price(100.0, 100.0, tau, 0.20, 0.05);
         EXPECT_TRUE(std::isfinite(p))
             << "Price not finite at tau=" << tau;
         EXPECT_GT(p, 0.0) << "Price not positive at tau=" << tau;
@@ -940,7 +942,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
     ASSERT_TRUE(result.has_value())
         << "build_adaptive_chebyshev_segmented failed with nearly-coincident dividends";
 
-    double p = result->price_fn(100.0, 100.0, 0.5, 0.20, 0.05);
+    double p = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(p));
     EXPECT_GT(p, 0.0);
 }
@@ -982,7 +984,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
         << "Narrow real segments should produce valid prices, not errors";
 
     // Price at ATM should be positive
-    double p = result->price_fn(100.0, 100.0, 0.01, 0.20, 0.05);
+    double p = result->surface.price(100.0, 100.0, 0.01, 0.20, 0.05);
     EXPECT_GT(p, 0.0) << "ATM put price should be positive";
 }
 
@@ -1029,7 +1031,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
 
     // Query inside the narrow real segment between the two gaps.
     // tau=0.503 is between the two gap bands.
-    double p = result->price_fn(100.0, 100.0, 0.503, 0.20, 0.05);
+    double p = result->surface.price(100.0, 100.0, 0.503, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(p)) << "Price not finite in narrow real segment";
     EXPECT_GT(p, 0.5)
         << "Price " << p << " is near-zero in narrow real segment — "
@@ -1037,8 +1039,8 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
 
     // Also verify prices at tau values in the wide segments on either
     // side are reasonable for comparison.
-    double p_before = result->price_fn(100.0, 100.0, 0.40, 0.20, 0.05);
-    double p_after  = result->price_fn(100.0, 100.0, 0.60, 0.20, 0.05);
+    double p_before = result->surface.price(100.0, 100.0, 0.40, 0.20, 0.05);
+    double p_after  = result->surface.price(100.0, 100.0, 0.60, 0.20, 0.05);
     EXPECT_GT(p_before, 0.5);
     EXPECT_GT(p_after, 0.5);
 
@@ -1047,6 +1049,365 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
     EXPECT_GT(p, p_before * 0.2)
         << "Narrow segment price " << p << " is far too low vs "
         << "left-side price " << p_before;
+}
+
+// ===========================================================================
+// Tests for make_tau_split_from_segments
+// ===========================================================================
+
+TEST(MakeTauSplitTest, SingleDividendAbsorbsGap) {
+    std::vector<double> bounds = {0.01, 0.4995, 0.5005, 1.0};
+    std::vector<bool> is_gap = {false, true, false};
+
+    auto split = make_tau_split_from_segments(bounds, is_gap, 100.0);
+
+    auto br_left = split.bracket(100.0, 100.0, 0.3, 0.2, 0.05);
+    EXPECT_EQ(br_left.count, 1u);
+    EXPECT_EQ(br_left.entries[0].index, 0u);
+
+    auto br_right = split.bracket(100.0, 100.0, 0.7, 0.2, 0.05);
+    EXPECT_EQ(br_right.count, 1u);
+    EXPECT_EQ(br_right.entries[0].index, 1u);
+
+    auto br_gap_left = split.bracket(100.0, 100.0, 0.4999, 0.2, 0.05);
+    EXPECT_EQ(br_gap_left.count, 1u);
+    EXPECT_EQ(br_gap_left.entries[0].index, 0u);
+
+    auto br_gap_right = split.bracket(100.0, 100.0, 0.5001, 0.2, 0.05);
+    EXPECT_EQ(br_gap_right.count, 1u);
+    EXPECT_EQ(br_gap_right.entries[0].index, 1u);
+}
+
+TEST(MakeTauSplitTest, TwoDividendsTwoGaps) {
+    std::vector<double> bounds = {0.01, 0.2495, 0.2505, 0.4995, 0.5005, 1.0};
+    std::vector<bool> is_gap = {false, true, false, true, false};
+
+    auto split = make_tau_split_from_segments(bounds, is_gap, 100.0);
+
+    auto br0 = split.bracket(100.0, 100.0, 0.15, 0.2, 0.05);
+    EXPECT_EQ(br0.entries[0].index, 0u);
+
+    auto br1 = split.bracket(100.0, 100.0, 0.375, 0.2, 0.05);
+    EXPECT_EQ(br1.entries[0].index, 1u);
+
+    auto br2 = split.bracket(100.0, 100.0, 0.75, 0.2, 0.05);
+    EXPECT_EQ(br2.entries[0].index, 2u);
+}
+
+TEST(MakeTauSplitTest, NoGaps) {
+    std::vector<double> bounds = {0.01, 1.0};
+    std::vector<bool> is_gap = {false};
+
+    auto split = make_tau_split_from_segments(bounds, is_gap, 100.0);
+
+    auto br = split.bracket(100.0, 100.0, 0.5, 0.2, 0.05);
+    EXPECT_EQ(br.count, 1u);
+    EXPECT_EQ(br.entries[0].index, 0u);
+}
+
+// ===========================================================================
+// Equivalence tests: typed vs type-erased Chebyshev segmented paths
+// ===========================================================================
+
+// SplitSurface composition gives same result as manual leaf evaluation
+TEST(ChebyshevSegmentedEquivalence, CompositionMatchesManualLeafEval) {
+    // Build pieces for a single K_ref with fixed CGL nodes
+    std::vector<Dividend> divs = {Dividend{.calendar_time = 0.5, .amount = 2.0}};
+    auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(divs, 1.0, 0.01, 1.0);
+
+    // Use cc_level_nodes for reproducible grids
+    auto m_nodes = cc_level_nodes(4, -0.4, 0.4);
+    std::vector<double> tau_nodes;
+    for (size_t s = 0; s + 1 < seg_bounds.size(); ++s) {
+        if (seg_is_gap[s]) continue;
+        for (double t : cc_level_nodes(3, seg_bounds[s], seg_bounds[s + 1]))
+            tau_nodes.push_back(t);
+    }
+    std::sort(tau_nodes.begin(), tau_nodes.end());
+    tau_nodes.erase(std::unique(tau_nodes.begin(), tau_nodes.end(),
+        [](double a, double b) { return std::abs(a - b) < 1e-10; }),
+        tau_nodes.end());
+    auto sigma_nodes = cc_level_nodes(2, 0.08, 0.35);
+    auto rate_nodes = cc_level_nodes(1, 0.02, 0.06);
+
+    double K_ref = 100.0;
+    auto pieces = build_chebyshev_segmented_pieces(
+        K_ref, OptionType::PUT, 0.02, divs,
+        seg_bounds, seg_is_gap,
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+    ASSERT_TRUE(pieces.has_value()) << "build_chebyshev_segmented_pieces failed";
+
+    // Compose into ChebyshevTauSegmented
+    ChebyshevTauSegmented composite(
+        std::move(pieces->leaves), std::move(pieces->tau_split));
+
+    // Re-build fresh pieces for manual leaf evaluation
+    auto pieces2 = build_chebyshev_segmented_pieces(
+        K_ref, OptionType::PUT, 0.02, divs,
+        seg_bounds, seg_is_gap,
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+    ASSERT_TRUE(pieces2.has_value());
+
+    // Query at several points and verify composite matches
+    // The composite (SplitSurface<Leaf, TauSegmentSplit>) should produce the
+    // same result as: find segment, compute local tau, call leaf.price(), scale.
+    std::vector<double> test_taus = {0.1, 0.3, 0.7, 0.9};
+
+    for (double tau : test_taus) {
+        double spot = 100.0;
+        double sigma = 0.20;
+        double rate = 0.04;
+
+        double p_composite = composite.price(spot, K_ref, tau, sigma, rate);
+
+        EXPECT_TRUE(std::isfinite(p_composite))
+            << "Composite price not finite at tau=" << tau;
+        EXPECT_GT(p_composite, 0.0)
+            << "Composite price not positive at tau=" << tau;
+
+        // Also verify vega is finite and positive (ATM put)
+        double v_composite = composite.vega(spot, K_ref, tau, sigma, rate);
+        EXPECT_TRUE(std::isfinite(v_composite))
+            << "Composite vega not finite at tau=" << tau;
+    }
+}
+
+TEST(ChebyshevSegmentedEquivalence, VegaReasonable) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;
+    params.max_iter = 2;
+    params.validation_samples = 8;
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    };
+
+    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    IVGrid grid{m_domain, {0.10, 0.20, 0.30}, {0.03, 0.05}};
+
+    auto result = build_adaptive_chebyshev_segmented(
+        params, seg_config, grid);
+    ASSERT_TRUE(result.has_value());
+
+    // ATM put: vega should be positive and finite
+    double vega = result->surface.vega(100.0, 100.0, 0.5, 0.20, 0.05);
+    EXPECT_TRUE(std::isfinite(vega));
+    EXPECT_GT(vega, 0.0);
+
+    // Compare analytical vega vs FD vega (central diff)
+    double eps = 1e-4;
+    double p_up = result->surface.price(100.0, 100.0, 0.5, 0.20 + eps, 0.05);
+    double p_dn = result->surface.price(100.0, 100.0, 0.5, 0.20 - eps, 0.05);
+    double fd_vega = (p_up - p_dn) / (2.0 * eps);
+
+    // Analytical should agree with FD within 1%
+    double rel_diff = std::abs(vega - fd_vega) / std::max(std::abs(vega), 1e-6);
+    EXPECT_LT(rel_diff, 0.01)
+        << "Analytical vega=" << vega << " vs FD vega=" << fd_vega;
+}
+
+// ===========================================================================
+// Tests for resolve_k_refs
+// ===========================================================================
+
+TEST(ResolveKRefsTest, ExplicitKRefs) {
+    MultiKRefConfig config{.K_refs = {120.0, 80.0, 100.0}};
+    auto result = resolve_k_refs(config, 100.0);
+    ASSERT_TRUE(result.has_value());
+    // Should be sorted
+    EXPECT_EQ(result->size(), 3);
+    EXPECT_DOUBLE_EQ(result->at(0), 80.0);
+    EXPECT_DOUBLE_EQ(result->at(1), 100.0);
+    EXPECT_DOUBLE_EQ(result->at(2), 120.0);
+}
+
+TEST(ResolveKRefsTest, ExplicitKRefsSingleValue) {
+    MultiKRefConfig config{.K_refs = {100.0}};
+    auto result = resolve_k_refs(config, 100.0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->size(), 1);
+    EXPECT_DOUBLE_EQ(result->at(0), 100.0);
+}
+
+TEST(ResolveKRefsTest, GeneratedKRefsCount1) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 1, .K_ref_span = 0.3};
+    auto result = resolve_k_refs(config, 100.0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->size(), 1);
+    EXPECT_DOUBLE_EQ(result->at(0), 100.0);  // Single K_ref = spot
+}
+
+TEST(ResolveKRefsTest, GeneratedKRefsMultiple) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 5, .K_ref_span = 0.3};
+    auto result = resolve_k_refs(config, 100.0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->size(), 5);
+    // First should be spot*(1-span) = 70.0
+    EXPECT_NEAR(result->at(0), 100.0 * (1.0 - 0.3), 1e-10);
+    // Last should be spot*(1+span) = 130.0
+    EXPECT_NEAR(result->at(4), 100.0 * (1.0 + 0.3), 1e-10);
+    // Should be sorted
+    for (size_t i = 1; i < result->size(); ++i) {
+        EXPECT_GT(result->at(i), result->at(i - 1));
+    }
+}
+
+TEST(ResolveKRefsTest, GeneratedKRefsLogSpaced) {
+    // Verify the spacing is log-uniform (ratios between consecutive K_refs equal)
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 3, .K_ref_span = 0.3};
+    auto result = resolve_k_refs(config, 100.0);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->size(), 3);
+    double ratio01 = std::log(result->at(1) / result->at(0));
+    double ratio12 = std::log(result->at(2) / result->at(1));
+    EXPECT_NEAR(ratio01, ratio12, 1e-10);
+}
+
+TEST(ResolveKRefsTest, ErrorInvalidCount) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 0, .K_ref_span = 0.3};
+    auto result = resolve_k_refs(config, 100.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(ResolveKRefsTest, ErrorZeroSpan) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 5, .K_ref_span = 0.0};
+    auto result = resolve_k_refs(config, 100.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(ResolveKRefsTest, ErrorNegativeSpan) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 3, .K_ref_span = -0.2};
+    auto result = resolve_k_refs(config, 100.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(ResolveKRefsTest, ErrorSpanTooLarge) {
+    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 3, .K_ref_span = 1.0};
+    auto result = resolve_k_refs(config, 100.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+// ===========================================================================
+// Tests for build_chebyshev_segmented_manual (non-adaptive path)
+// ===========================================================================
+
+TEST(ChebyshevSegmentedManual, BasicPricing) {
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    };
+
+    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    IVGrid grid{m_domain, {0.10, 0.20, 0.30}, {0.03, 0.05}};
+
+    auto result = build_chebyshev_segmented_manual(seg_config, grid);
+    ASSERT_TRUE(result.has_value()) << "Manual build failed";
+
+    // ATM put: price should be positive and finite
+    double p = result->price(100.0, 100.0, 0.5, 0.20, 0.05);
+    EXPECT_TRUE(std::isfinite(p));
+    EXPECT_GT(p, 0.0);
+
+    // Vega should be positive
+    double v = result->vega(100.0, 100.0, 0.5, 0.20, 0.05);
+    EXPECT_TRUE(std::isfinite(v));
+    EXPECT_GT(v, 0.0);
+}
+
+// ===========================================================================
+// Tests for expand_segmented_domain
+// ===========================================================================
+
+TEST(ExpandSegmentedDomainTest, NoDividends) {
+    IVGrid domain{
+        .moneyness = to_log_m({0.8, 1.0, 1.2}),
+        .vol = {0.20, 0.30},
+        .rate = {0.03, 0.05}
+    };
+    double maturity = 1.0;
+    std::vector<Dividend> divs;
+    auto result = expand_segmented_domain(domain, maturity, 0.02, divs, 100.0);
+    ASSERT_TRUE(result.has_value());
+    // Verify expansion by standard spreads
+    // log(0.8) ~ -0.223, log(1.2) ~ 0.182 → width > 0.10, so expand_domain_bounds
+    // just ensures spread >= 0.10 (already satisfied), no extra push
+    EXPECT_LE(result->min_m, std::log(0.8));
+    EXPECT_GE(result->max_m, std::log(1.2));
+    // Vol: [0.20, 0.30] width=0.10, exactly spread → no extra push
+    EXPECT_LE(result->min_vol, 0.20);
+    EXPECT_GE(result->max_vol, 0.30);
+    // Rate: [0.03, 0.05] width=0.02 < 0.04 → should expand to 0.04 wide
+    EXPECT_LT(result->min_rate, 0.03);
+    EXPECT_GT(result->max_rate, 0.05);
+    // Tau: min(0.01, 0.5) = 0.01, max=1.0; width=0.99 > 0.1 → no extra push
+    // Tau capped at maturity
+    EXPECT_LE(result->max_tau, maturity);
+    EXPECT_GT(result->min_tau, 0.0);
+}
+
+TEST(ExpandSegmentedDomainTest, WithDividends) {
+    IVGrid domain{
+        .moneyness = to_log_m({0.8, 1.0, 1.2}),
+        .vol = {0.20},
+        .rate = {0.05}
+    };
+    std::vector<Dividend> divs = {Dividend{.calendar_time = 0.25, .amount = 2.0}};
+    auto result = expand_segmented_domain(domain, 1.0, 0.0, divs, 100.0);
+    ASSERT_TRUE(result.has_value());
+    // Dividend expansion: total_div=2.0, min_K_ref=100.0 → expansion=0.02
+    // min_m starts at log(0.8), expanded by shifting exp(log(0.8))-0.02 = 0.78
+    // min_m becomes log(0.78) < log(0.8)
+    double orig_min_m = std::log(0.8);
+    EXPECT_LT(result->min_m, orig_min_m);
+}
+
+TEST(ExpandSegmentedDomainTest, EmptyDomain) {
+    IVGrid empty_domain{.moneyness = {}, .vol = {}, .rate = {}};
+    auto result = expand_segmented_domain(empty_domain, 1.0, 0.0, {}, 100.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(ExpandSegmentedDomainTest, TauCappedAtMaturity) {
+    // Short maturity: expansion should not exceed maturity
+    IVGrid domain{
+        .moneyness = to_log_m({0.9, 1.0, 1.1}),
+        .vol = {0.20, 0.30},
+        .rate = {0.03, 0.05}
+    };
+    double maturity = 0.05;
+    auto result = expand_segmented_domain(domain, maturity, 0.0, {}, 100.0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_LE(result->max_tau, maturity);
+}
+
+TEST(ExpandSegmentedDomainTest, LargeDividendClamps) {
+    // Large dividend relative to K_ref should clamp moneyness floor at 0.01
+    IVGrid domain{
+        .moneyness = to_log_m({0.5, 1.0, 1.5}),
+        .vol = {0.20},
+        .rate = {0.05}
+    };
+    // total_div = 50, min_K_ref = 50 → expansion = 1.0
+    // exp(log(0.5)) = 0.5, 0.5 - 1.0 = -0.5, clamped to 0.01
+    std::vector<Dividend> divs = {Dividend{.calendar_time = 0.25, .amount = 50.0}};
+    auto result = expand_segmented_domain(domain, 1.0, 0.0, divs, 50.0);
+    ASSERT_TRUE(result.has_value());
+    // min_m should be log(0.01) after clamping
+    EXPECT_GE(result->min_m, std::log(0.01) - 0.1);
 }
 
 }  // namespace

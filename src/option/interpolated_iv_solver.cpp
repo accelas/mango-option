@@ -21,7 +21,7 @@
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_3d_surface.hpp"
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
-#include "mango/option/table/eep/dimensionless_3d_accessor.hpp"
+#include "mango/option/table/dimensionless/dimensionless_3d_accessor.hpp"
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
@@ -40,42 +40,13 @@ template class InterpolatedIVSolver<BSplinePriceTable>;
 template class InterpolatedIVSolver<BSplineMultiKRefSurface>;
 template class InterpolatedIVSolver<ChebyshevSurface>;
 template class InterpolatedIVSolver<ChebyshevRawSurface>;
+template class InterpolatedIVSolver<ChebyshevMultiKRefSurface>;
 template class InterpolatedIVSolver<BSpline3DPriceTable>;
 template class InterpolatedIVSolver<Chebyshev3DPriceTable>;
 
 // =====================================================================
 // Factory internals
 // =====================================================================
-
-/// Surface leaf that wraps a type-erased price_fn and computes vega via FD.
-/// Used for segmented Chebyshev which produces multi-K_ref blended price_fn.
-class FDVegaLeaf {
-public:
-    using PriceFn = std::function<double(double, double, double, double, double)>;
-
-    explicit FDVegaLeaf(PriceFn fn) : fn_(std::move(fn)) {}
-
-    double price(double spot, double strike,
-                 double tau, double sigma, double rate) const {
-        return fn_(spot, strike, tau, sigma, rate);
-    }
-
-    double vega(double spot, double strike,
-                double tau, double sigma, double rate) const {
-        double eps = std::max(1e-4, 0.01 * sigma);
-        double sigma_up = sigma + eps;
-        double sigma_dn = std::max(1e-4, sigma - eps);
-        double eff_eps = (sigma_up - sigma_dn) / 2.0;
-        return (fn_(spot, strike, tau, sigma_up, rate) -
-                fn_(spot, strike, tau, sigma_dn, rate)) / (2.0 * eff_eps);
-    }
-
-private:
-    PriceFn fn_;
-};
-
-using ChebyshevSegmentedSurface = PriceTable<FDVegaLeaf>;
-template class InterpolatedIVSolver<ChebyshevSegmentedSurface>;
 
 namespace {
 
@@ -187,7 +158,7 @@ struct AnyIVSolver::Impl {
         InterpolatedIVSolver<BSplineMultiKRefSurface>,
         InterpolatedIVSolver<ChebyshevSurface>,
         InterpolatedIVSolver<ChebyshevRawSurface>,
-        InterpolatedIVSolver<ChebyshevSegmentedSurface>,
+        InterpolatedIVSolver<ChebyshevMultiKRefSurface>,
         InterpolatedIVSolver<BSpline3DPriceTable>,
         InterpolatedIVSolver<Chebyshev3DPriceTable>
     >;
@@ -449,12 +420,6 @@ static std::expected<AnyIVSolver, ValidationError>
 build_chebyshev_segmented(const IVSolverFactoryConfig& config,
                           const ChebyshevBackend& /* backend */,
                           const DiscreteDividendConfig& divs) {
-    // Segmented Chebyshev requires adaptive grid builder
-    if (!config.adaptive.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-
     auto log_m = to_log_moneyness(config.grid.moneyness);
     if (!log_m.has_value()) {
         return std::unexpected(log_m.error());
@@ -470,32 +435,36 @@ build_chebyshev_segmented(const IVSolverFactoryConfig& config,
     };
 
     IVGrid log_grid{std::move(*log_m), config.grid.vol, config.grid.rate};
-    auto result = build_adaptive_chebyshev_segmented(
-        *config.adaptive, seg_config, log_grid);
-    if (!result.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
+
+    if (config.adaptive.has_value()) {
+        auto result = build_adaptive_chebyshev_segmented(
+            *config.adaptive, seg_config, log_grid);
+        if (!result.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+
+        auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
+            std::move(result->surface), config.solver_config);
+        if (!solver.has_value()) {
+            return std::unexpected(solver.error());
+        }
+        return make_any_solver(std::move(*solver));
+    } else {
+        auto surface = build_chebyshev_segmented_manual(
+            seg_config, log_grid);
+        if (!surface.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+
+        auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
+            std::move(*surface), config.solver_config);
+        if (!solver.has_value()) {
+            return std::unexpected(solver.error());
+        }
+        return make_any_solver(std::move(*solver));
     }
-
-    // Wrap the type-erased price_fn in FDVegaLeaf for Newton-based IV solving
-    auto b = extract_bounds(config.grid);
-    SurfaceBounds bounds{
-        .m_min = b.m_min, .m_max = b.m_max,
-        .tau_min = std::min(0.01, divs.maturity * 0.5), .tau_max = divs.maturity,
-        .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
-        .rate_min = b.rate_min, .rate_max = b.rate_max,
-    };
-
-    FDVegaLeaf leaf(std::move(result->price_fn));
-    ChebyshevSegmentedSurface surface(
-        std::move(leaf), bounds, config.option_type, config.dividend_yield);
-
-    auto solver = InterpolatedIVSolver<ChebyshevSegmentedSurface>::create(
-        std::move(surface), config.solver_config);
-    if (!solver.has_value()) {
-        return std::unexpected(solver.error());
-    }
-    return make_any_solver(std::move(*solver));
 }
 
 // ---------------------------------------------------------------------------
@@ -533,14 +502,19 @@ static SurfaceBounds dimless_bounds(const DimlessDomain& d, double maturity) {
     };
 }
 
-static std::expected<AnyIVSolver, ValidationError>
-build_dimensionless_bspline(const IVSolverFactoryConfig& config,
-                            const DimensionlessBackend& backend) {
-    auto log_m = to_log_moneyness(config.grid.moneyness);
+/// Result of grid construction for dimensionless builders.
+struct DimensionlessGridSpec {
+    DimensionlessAxes axes;
+    DimlessDomain domain;
+};
+
+static std::expected<DimensionlessGridSpec, ValidationError>
+build_dimensionless_grid(const IVGrid& grid, double maturity) {
+    auto log_m = to_log_moneyness(grid.moneyness);
     if (!log_m.has_value()) return std::unexpected(log_m.error());
 
-    auto b = extract_bounds(config.grid);
-    auto d = compute_dimless_domain(b, backend.maturity);
+    auto b = extract_bounds(grid);
+    auto d = compute_dimless_domain(b, maturity);
 
     auto linspace = [](double lo, double hi, size_t n) {
         std::vector<double> v(n);
@@ -554,6 +528,18 @@ build_dimensionless_bspline(const IVSolverFactoryConfig& config,
         .tau_prime = linspace(d.tp_min, d.tp_max, 10),
         .ln_kappa = linspace(d.lk_min, d.lk_max, 10),
     };
+
+    return DimensionlessGridSpec{std::move(axes), d};
+}
+
+static std::expected<AnyIVSolver, ValidationError>
+build_dimensionless_bspline(const IVSolverFactoryConfig& config,
+                            const DimensionlessBackend& backend) {
+    auto grid_spec = build_dimensionless_grid(config.grid, backend.maturity);
+    if (!grid_spec.has_value()) return std::unexpected(grid_spec.error());
+
+    auto& axes = grid_spec->axes;
+    auto& d = grid_spec->domain;
 
     // 1. PDE solve -> raw V/K
     auto pde = solve_dimensionless_pde(axes, config.spot, config.option_type);

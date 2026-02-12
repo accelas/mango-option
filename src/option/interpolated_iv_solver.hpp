@@ -117,9 +117,6 @@ private:
     /// Evaluate option price using surface interpolation with strike scaling
     double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const;
 
-    /// Compute vega using partial derivative w.r.t. volatility
-    double compute_vega(double moneyness, double maturity, double vol, double rate, double strike) const;
-
     /// Check if query parameters are within surface bounds
     bool is_in_bounds(const IVQuery& query, double vol) const {
         const double x = std::log(query.spot / query.strike);
@@ -284,13 +281,7 @@ double InterpolatedIVSolver<Surface>::eval_price(
     return surface_.price(spot, strike, maturity, vol, rate);
 }
 
-template <typename Surface>
-double InterpolatedIVSolver<Surface>::compute_vega(
-    double moneyness, double maturity, double vol, double rate, double strike) const
-{
-    double spot = moneyness * strike;
-    return surface_.vega(spot, strike, maturity, vol, rate);
-}
+
 
 template <typename Surface>
 std::optional<ValidationError>
@@ -386,19 +377,13 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
         return eval_price(moneyness, query.maturity, sigma, rate_value, query.strike) - query.market_price;
     };
 
-    // Define derivative (vega): df/ds = dPrice/ds
-    auto derivative = [&](double sigma) -> double {
-        return compute_vega(moneyness, query.maturity, sigma, rate_value, query.strike);
-    };
-
-    // Use generic bounded Newton-Raphson
-    RootFindingConfig newton_config{
+    // Brent's method — no vega needed
+    RootFindingConfig brent_config{
         .max_iter = config_.max_iter,
-        .tolerance = config_.tolerance
+        .brent_tol_abs = config_.tolerance
     };
 
-    const double sigma0 = (sigma_min + sigma_max) / 2.0;  // Initial guess
-    auto result = newton_find_root(objective, derivative, sigma0, sigma_min, sigma_max, newton_config);
+    auto result = find_root(objective, sigma_min, sigma_max, brent_config);
 
     // Check convergence - transform RootFindingError to IVError
     if (!result.has_value()) {
@@ -430,15 +415,11 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
         });
     }
 
-    // Compute final vega for the result
-    double final_vega = derivative(result->root);
-
-    // Return success
     return IVSuccess{
         .implied_vol = result->root,
         .iterations = result->iterations,
         .final_error = result->final_error,
-        .vega = final_vega,
+        .vega = std::nullopt,
         .used_rate_approximation = rate_is_curve
     };
 }

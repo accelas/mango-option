@@ -97,10 +97,10 @@ jobs:
             ~/.cache/bazel
           # Unique key per run so each CI job can save updated artifacts.
           # restore-keys ensures partial cache hits from prior runs.
-          key: bazel-v5-${{ hashFiles('.bazelversion', 'MODULE.bazel') }}-${{ github.sha }}
+          key: bazel-v6-${{ hashFiles('.bazelversion', 'MODULE.bazel', '.bazelrc') }}-${{ github.sha }}
           restore-keys: |
-            bazel-v5-${{ hashFiles('.bazelversion', 'MODULE.bazel') }}-
-            bazel-v5-
+            bazel-v6-${{ hashFiles('.bazelversion', 'MODULE.bazel', '.bazelrc') }}-
+            bazel-v6-
 
       - name: Build all targets
         run: bazel build //... --build_tag_filters=-benchmark

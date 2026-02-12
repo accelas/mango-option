@@ -780,7 +780,7 @@ run_chebyshev_dividends(const PriceGrid& prices) {
     for (double sigma : {0.15, 0.30}) {
         std::printf("  σ=%.2f:\n", sigma);
         for (double K : {80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0}) {
-            double surf = result->price_fn(kSpot, K, 1.0, sigma, kRate);
+            double surf = result->surface.price(kSpot, K, 1.0, sigma, kRate);
             PricingParams pp;
             pp.spot = kSpot; pp.strike = K; pp.maturity = 1.0;
             pp.rate = kRate; pp.dividend_yield = kDivYield;
@@ -841,7 +841,7 @@ run_chebyshev_dividends(const PriceGrid& prices) {
                 // Surface IV via Brent inversion
                 double cheb_iv = brent_solve_iv(
                     [&](double vol) {
-                        return result->price_fn(
+                        return result->surface.price(
                             kSpot, kStrikes[si], tau, vol, kRate);
                     },
                     price);

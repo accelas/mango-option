@@ -112,7 +112,7 @@ public:
 
     /// Evaluate the interpolant at a query point.
     /// Coordinates are clamped to the domain.
-    MANGO_TARGET_CLONES("default", "avx2", "avx512f")
+    MANGO_TARGET_CLONES("default", "avx2")
     [[nodiscard]] double eval(std::array<double, N> query) const {
         // Clamp to domain
         for (size_t d = 0; d < N; ++d) {

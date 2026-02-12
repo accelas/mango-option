@@ -14,6 +14,15 @@ namespace mango {
 
 namespace {
 constexpr double kMinPositive = 1e-6;
+
+struct ValidationResult {
+    double max_error;
+    double avg_error;
+    size_t valid_samples;
+    size_t pde_solves_validation;
+    ErrorBins error_bins;
+};
+
 }  // namespace
 
 void expand_domain_bounds(double& lo, double& hi, double min_spread,
@@ -109,6 +118,45 @@ SegmentBoundaries compute_segment_boundaries(
     bounds.push_back(tau_max);
 
     return {std::move(bounds), std::move(is_gap)};
+}
+
+TauSegmentSplit make_tau_split_from_segments(
+    const std::vector<double>& bounds,
+    const std::vector<bool>& is_gap,
+    double K_ref)
+{
+    const size_t n_seg = is_gap.size();
+    std::vector<double> tau_start, tau_end, tau_min, tau_max;
+
+    for (size_t s = 0; s < n_seg; ++s) {
+        if (is_gap[s]) continue;
+
+        double start = bounds[s];
+        double end = bounds[s + 1];
+
+        // Absorb gap to the left
+        if (s > 0 && is_gap[s - 1]) {
+            double gap_lo = bounds[s - 1];
+            double gap_hi = bounds[s];
+            start = (gap_lo + gap_hi) * 0.5;
+        }
+
+        // Absorb gap to the right
+        if (s + 1 < n_seg && is_gap[s + 1]) {
+            double gap_lo = bounds[s + 1];
+            double gap_hi = bounds[s + 2];
+            end = (gap_lo + gap_hi) * 0.5;
+        }
+
+        tau_start.push_back(start);
+        tau_end.push_back(end);
+        tau_min.push_back(0.0);
+        tau_max.push_back(bounds[s + 1] - bounds[s]);
+    }
+
+    return TauSegmentSplit(
+        std::move(tau_start), std::move(tau_end),
+        std::move(tau_min), std::move(tau_max), K_ref);
 }
 
 double compute_iv_error(double price_error, double vega,
@@ -243,6 +291,152 @@ std::vector<double> seed_grid(const std::vector<double>& user_knots,
     return grid;
 }
 
+static std::vector<std::array<double, 4>> generate_validation_samples(
+    const AdaptiveGridParams& params,
+    size_t iteration,
+    const std::array<std::pair<double, double>, 4>& bounds,
+    const std::array<std::vector<size_t>, 4>& focus_bins,
+    bool focus_active) {
+    const size_t total_samples = params.validation_samples;
+    bool has_focus_bins = focus_active;
+    if (focus_active) {
+        has_focus_bins = std::any_of(focus_bins.begin(), focus_bins.end(),
+                                     [](const std::vector<size_t>& bins) { return !bins.empty(); });
+    }
+
+    size_t base_samples = (has_focus_bins && total_samples > 1)
+        ? std::max<size_t>(total_samples / 2, 1)
+        : total_samples;
+    size_t targeted_samples = has_focus_bins ? total_samples - base_samples : 0;
+
+    auto base_unit_samples = latin_hypercube_4d(base_samples,
+                                                params.lhs_seed + iteration);
+
+    std::vector<std::array<double, 4>> samples = scale_lhs_samples(base_unit_samples, bounds);
+
+    if (targeted_samples > 0 && has_focus_bins) {
+        std::mt19937_64 targeted_rng(params.lhs_seed ^ (iteration * 1315423911ULL + 0x9e3779b97f4a7c15ULL));
+        std::uniform_real_distribution<double> uniform(0.0, 1.0);
+
+        std::vector<std::array<double, 4>> targeted_unit;
+        targeted_unit.reserve(targeted_samples);
+
+        for (size_t i = 0; i < targeted_samples; ++i) {
+            std::array<double, 4> point{};
+            for (size_t d = 0; d < 4; ++d) {
+                double u = uniform(targeted_rng);
+                if (!focus_bins[d].empty()) {
+                    const auto& dim_bins = focus_bins[d];
+                    size_t bin = dim_bins[i % dim_bins.size()];
+                    double bin_lo = static_cast<double>(bin) / ErrorBins::N_BINS;
+                    double bin_hi = static_cast<double>(bin + 1) / ErrorBins::N_BINS;
+                    double span = bin_hi - bin_lo;
+                    point[d] = bin_lo + u * span;
+                } else {
+                    point[d] = u;
+                }
+            }
+            targeted_unit.push_back(point);
+        }
+
+        auto targeted_scaled = scale_lhs_samples(targeted_unit, bounds);
+        samples.insert(samples.end(), targeted_scaled.begin(), targeted_scaled.end());
+    }
+
+    return samples;
+}
+
+static void save_refinement_result(
+    RefinementResult& result,
+    IterationStats& stats,
+    const std::vector<double>& moneyness_grid,
+    const std::vector<double>& maturity_grid,
+    const std::vector<double>& vol_grid,
+    const std::vector<double>& rate_grid,
+    double max_error,
+    double avg_error,
+    bool target_met) {
+    stats.refined_dim = -1;
+    result.iterations.push_back(stats);
+    result.moneyness = moneyness_grid;
+    result.tau = maturity_grid;
+    result.vol = vol_grid;
+    result.rate = rate_grid;
+    result.tau_points = static_cast<int>(maturity_grid.size());
+    result.achieved_max_error = max_error;
+    result.achieved_avg_error = avg_error;
+    result.target_met = target_met;
+}
+
+static std::expected<ValidationResult, PriceTableError>
+evaluate_samples(
+    const std::vector<std::array<double, 4>>& samples,
+    const SurfaceHandle& handle,
+    const ValidateFn& validate_fn,
+    const ComputeErrorFn& compute_error,
+    const RefinementContext& ctx,
+    double target_iv_error) {
+    double max_error = 0.0;
+    double sum_error = 0.0;
+    size_t valid_samples = 0;
+    size_t pde_solves_validation = 0;
+    ErrorBins error_bins;
+
+    for (const auto& sample : samples) {
+        double m = sample[0];
+        double tau = sample[1];
+        double sigma = sample[2];
+        double rate = sample[3];
+
+        // Interpolated price from surface via callback
+        double strike = ctx.spot * std::exp(-m);
+        double interp_price = handle.price(ctx.spot, strike, tau, sigma, rate);
+
+        // Fresh FD solve for reference via callback
+        auto fd_result = validate_fn(ctx.spot, strike, tau, sigma, rate);
+
+        if (!fd_result.has_value()) {
+            continue;  // Skip failed solves
+        }
+
+        pde_solves_validation++;
+
+        double ref_price = fd_result.value();
+        double iv_error = compute_error(
+            interp_price, ref_price,
+            ctx.spot, strike, tau, sigma, rate,
+            ctx.dividend_yield);
+        max_error = std::max(max_error, iv_error);
+        sum_error += iv_error;
+        valid_samples++;
+
+        // Normalize position for error bins
+        std::array<double, 4> norm_pos = {{
+            (m - ctx.min_moneyness) / (ctx.max_moneyness - ctx.min_moneyness),
+            (tau - ctx.min_tau) / (ctx.max_tau - ctx.min_tau),
+            (sigma - ctx.min_vol) / (ctx.max_vol - ctx.min_vol),
+            (rate - ctx.min_rate) / (ctx.max_rate - ctx.min_rate)
+        }};
+        error_bins.record_error(norm_pos, iv_error, target_iv_error);
+    }
+
+    if (valid_samples == 0) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::ExtractionFailed, /*axis=*/0, /*detail=*/0
+        });
+    }
+
+    double avg_error = sum_error / valid_samples;
+
+    return ValidationResult{
+        .max_error = max_error,
+        .avg_error = avg_error,
+        .valid_samples = valid_samples,
+        .pde_solves_validation = pde_solves_validation,
+        .error_bins = std::move(error_bins),
+    };
+}
+
 std::expected<RefinementResult, PriceTableError> run_refinement(
     const AdaptiveGridParams& params,
     BuildFn build_fn,
@@ -336,109 +530,27 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         stats.pde_solves_table = handle.pde_solves;
 
         // b. GENERATE VALIDATION SAMPLE
-        const size_t total_samples = params.validation_samples;
-        bool has_focus_bins = focus_active;
-        if (focus_active) {
-            has_focus_bins = std::any_of(focus_bins.begin(), focus_bins.end(),
-                                         [](const std::vector<size_t>& bins) { return !bins.empty(); });
-        }
-
-        size_t base_samples = (has_focus_bins && total_samples > 1)
-            ? std::max<size_t>(total_samples / 2, 1)
-            : total_samples;
-        size_t targeted_samples = has_focus_bins ? total_samples - base_samples : 0;
-
-        auto base_unit_samples = latin_hypercube_4d(base_samples,
-                                                    params.lhs_seed + iteration);
-
         std::array<std::pair<double, double>, 4> bounds = {{
             {min_moneyness, max_moneyness},
             {min_tau, max_tau},
             {min_vol, max_vol},
             {min_rate, max_rate}
         }};
-        std::vector<std::array<double, 4>> samples = scale_lhs_samples(base_unit_samples, bounds);
-
-        if (targeted_samples > 0 && has_focus_bins) {
-            std::mt19937_64 targeted_rng(params.lhs_seed ^ (iteration * 1315423911ULL + 0x9e3779b97f4a7c15ULL));
-            std::uniform_real_distribution<double> uniform(0.0, 1.0);
-
-            std::vector<std::array<double, 4>> targeted_unit;
-            targeted_unit.reserve(targeted_samples);
-
-            for (size_t i = 0; i < targeted_samples; ++i) {
-                std::array<double, 4> point{};
-                for (size_t d = 0; d < 4; ++d) {
-                    double u = uniform(targeted_rng);
-                    if (!focus_bins[d].empty()) {
-                        const auto& dim_bins = focus_bins[d];
-                        size_t bin = dim_bins[i % dim_bins.size()];
-                        double bin_lo = static_cast<double>(bin) / ErrorBins::N_BINS;
-                        double bin_hi = static_cast<double>(bin + 1) / ErrorBins::N_BINS;
-                        double span = bin_hi - bin_lo;
-                        point[d] = bin_lo + u * span;
-                    } else {
-                        point[d] = u;
-                    }
-                }
-                targeted_unit.push_back(point);
-            }
-
-            auto targeted_scaled = scale_lhs_samples(targeted_unit, bounds);
-            samples.insert(samples.end(), targeted_scaled.begin(), targeted_scaled.end());
-        }
+        auto samples = generate_validation_samples(
+            params, iteration, bounds, focus_bins, focus_active);
 
         // c. VALIDATE AGAINST FRESH FD SOLVES
-        double max_error = 0.0;
-        double sum_error = 0.0;
-        size_t valid_samples = 0;
-        ErrorBins error_bins;
-
-        for (const auto& sample : samples) {
-            double m = sample[0];
-            double tau = sample[1];
-            double sigma = sample[2];
-            double rate = sample[3];
-
-            // Interpolated price from surface via callback
-            double strike = ctx.spot * std::exp(-m);
-            double interp_price = handle.price(ctx.spot, strike, tau, sigma, rate);
-
-            // Fresh FD solve for reference via callback
-            auto fd_result = validate_fn(ctx.spot, strike, tau, sigma, rate);
-
-            if (!fd_result.has_value()) {
-                continue;  // Skip failed solves
-            }
-
-            stats.pde_solves_validation++;
-
-            double ref_price = fd_result.value();
-            double iv_error = compute_error(
-                interp_price, ref_price,
-                ctx.spot, strike, tau, sigma, rate,
-                ctx.dividend_yield);
-            max_error = std::max(max_error, iv_error);
-            sum_error += iv_error;
-            valid_samples++;
-
-            // Normalize position for error bins
-            std::array<double, 4> norm_pos = {{
-                (m - min_moneyness) / (max_moneyness - min_moneyness),
-                (tau - min_tau) / (max_tau - min_tau),
-                (sigma - min_vol) / (max_vol - min_vol),
-                (rate - min_rate) / (max_rate - min_rate)
-            }};
-            error_bins.record_error(norm_pos, iv_error, params.target_iv_error);
+        auto eval_result = evaluate_samples(
+            samples, handle, validate_fn, compute_error,
+            ctx, params.target_iv_error);
+        if (!eval_result.has_value()) {
+            return std::unexpected(eval_result.error());
         }
-
-        if (valid_samples == 0) {
-            return std::unexpected(PriceTableError{
-                PriceTableErrorCode::ExtractionFailed, /*axis=*/0, /*detail=*/0
-            });
-        }
-
-        double avg_error = sum_error / valid_samples;
+        auto& vr = eval_result.value();
+        double max_error = vr.max_error;
+        double avg_error = vr.avg_error;
+        auto& error_bins = vr.error_bins;
+        stats.pde_solves_validation = vr.pde_solves_validation;
 
         stats.max_error = max_error;
         stats.avg_error = avg_error;
@@ -451,16 +563,10 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 
         if (converged || iteration == params.max_iter - 1) {
             // Final iteration - save results
-            stats.refined_dim = -1;  // No refinement on final iteration
-            result.iterations.push_back(stats);
-            result.moneyness = moneyness_grid;
-            result.tau = maturity_grid;
-            result.vol = vol_grid;
-            result.rate = rate_grid;
-            result.tau_points = static_cast<int>(maturity_grid.size());
-            result.achieved_max_error = max_error;
-            result.achieved_avg_error = avg_error;
-            result.target_met = converged;
+            save_refinement_result(result, stats,
+                                   moneyness_grid, maturity_grid,
+                                   vol_grid, rate_grid,
+                                   max_error, avg_error, converged);
             break;
         }
 
@@ -472,16 +578,10 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
                                  vol_grid, rate_grid);
         if (!refined) {
             // Maxed out — treat as final iteration
-            stats.refined_dim = -1;
-            result.iterations.push_back(stats);
-            result.moneyness = moneyness_grid;
-            result.tau = maturity_grid;
-            result.vol = vol_grid;
-            result.rate = rate_grid;
-            result.tau_points = static_cast<int>(maturity_grid.size());
-            result.achieved_max_error = max_error;
-            result.achieved_avg_error = avg_error;
-            result.target_met = false;
+            save_refinement_result(result, stats,
+                                   moneyness_grid, maturity_grid,
+                                   vol_grid, rate_grid,
+                                   max_error, avg_error, false);
             break;
         }
 
@@ -498,6 +598,88 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     }
 
     return result;
+}
+
+std::expected<std::vector<double>, PriceTableError>
+resolve_k_refs(const MultiKRefConfig& config, double spot) {
+    // If K_refs explicitly provided, sort and return
+    if (!config.K_refs.empty()) {
+        std::vector<double> sorted = config.K_refs;
+        std::sort(sorted.begin(), sorted.end());
+        return sorted;
+    }
+
+    // Generate from count/span
+    if (config.K_ref_count < 1 || config.K_ref_span <= 0.0
+        || config.K_ref_span >= 1.0) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    const int count = config.K_ref_count;
+    const double span = config.K_ref_span;
+    std::vector<double> K_refs;
+    K_refs.reserve(static_cast<size_t>(count));
+
+    if (count == 1) {
+        K_refs.push_back(spot);
+    } else {
+        const double log_lo = std::log(1.0 - span);
+        const double log_hi = std::log(1.0 + span);
+        for (int i = 0; i < count; ++i) {
+            double t = static_cast<double>(i)
+                     / static_cast<double>(count - 1);
+            K_refs.push_back(spot * std::exp(log_lo + t * (log_hi - log_lo)));
+        }
+    }
+
+    std::sort(K_refs.begin(), K_refs.end());
+    return K_refs;
+}
+
+std::expected<DomainBounds, PriceTableError>
+expand_segmented_domain(const IVGrid& domain,
+                        double maturity,
+                        double /*dividend_yield*/,
+                        const std::vector<Dividend>& discrete_dividends,
+                        double min_K_ref) {
+    if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    // domain.moneyness is already log(S/K) — take min/max directly
+    double min_m = domain.moneyness.front();
+    double max_m = domain.moneyness.back();
+
+    // Expand lower bound for cumulative discrete-dividend spot shifts
+    double total_div = total_discrete_dividends(discrete_dividends, maturity);
+    double expansion = (min_K_ref > 0.0) ? total_div / min_K_ref : 0.0;
+    if (expansion > 0.0) {
+        double m_min_money = std::exp(min_m);
+        double expanded = std::max(m_min_money - expansion, 0.01);
+        min_m = std::log(expanded);
+    }
+
+    double min_vol = domain.vol.front();
+    double max_vol = domain.vol.back();
+    double min_rate = domain.rate.front();
+    double max_rate = domain.rate.back();
+
+    // Apply standard minimum spreads
+    expand_domain_bounds(min_m, max_m, 0.10);
+    expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
+    expand_domain_bounds(min_rate, max_rate, 0.04);
+
+    double min_tau = std::min(0.01, maturity * 0.5);
+    double max_tau = maturity;
+    expand_domain_bounds(min_tau, max_tau, 0.1, kMinPositive);
+    max_tau = std::min(max_tau, maturity);
+
+    return DomainBounds{
+        .min_m = min_m, .max_m = max_m,
+        .min_tau = min_tau, .max_tau = max_tau,
+        .min_vol = min_vol, .max_vol = max_vol,
+        .min_rate = min_rate, .max_rate = max_rate,
+    };
 }
 
 std::expected<RefinementContext, PriceTableError>

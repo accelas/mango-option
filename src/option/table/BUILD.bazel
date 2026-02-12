@@ -41,6 +41,7 @@ cc_library(
     ],
     deps = [
         ":adaptive_grid_types",
+        ":tau_segment_split",
         "//src/option:american_option",
         "//src/option:dividend_utils",
         "//src/option:option_grid",
@@ -123,18 +124,6 @@ cc_library(
     name = "eep_layer",
     hdrs = ["eep/eep_layer.hpp"],
     deps = [":surface_concepts"],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "dimensionless_3d_accessor",
-    hdrs = ["eep/dimensionless_3d_accessor.hpp"],
-    deps = [
-        "//src/option/table/dimensionless:dimensionless_builder",
-        ":eep_decomposer",
-    ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
