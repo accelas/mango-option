@@ -2,6 +2,8 @@
 #pragma once
 
 #include "mango/option/option_spec.hpp"
+#include "mango/option/table/greek_types.hpp"
+#include <expected>
 
 namespace mango {
 
@@ -35,6 +37,18 @@ public:
                                double tau, double sigma, double rate) const {
         return inner_.vega(spot, strike, tau, sigma, rate);
     }
+
+    [[nodiscard]] std::expected<double, GreekError>
+    delta(const PricingParams& params) const { return inner_.greek(Greek::Delta, params); }
+
+    [[nodiscard]] std::expected<double, GreekError>
+    gamma(const PricingParams& params) const { return inner_.gamma(params); }
+
+    [[nodiscard]] std::expected<double, GreekError>
+    theta(const PricingParams& params) const { return inner_.greek(Greek::Theta, params); }
+
+    [[nodiscard]] std::expected<double, GreekError>
+    rho(const PricingParams& params) const { return inner_.greek(Greek::Rho, params); }
 
     [[nodiscard]] double m_min() const noexcept { return bounds_.m_min; }
     [[nodiscard]] double m_max() const noexcept { return bounds_.m_max; }
