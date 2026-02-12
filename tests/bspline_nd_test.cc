@@ -7,11 +7,17 @@
 #include "mango/math/bspline_nd.hpp"
 #include "mango/math/bspline_basis.hpp"
 #include "mango/math/bspline_nd_separable.hpp"
+#include "mango/option/table/surface_concepts.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <array>
 #include <cmath>
 #include <numbers>
+
+// Verify BSplineND satisfies SurfaceInterpolant
+static_assert(mango::SurfaceInterpolant<mango::BSplineND<double, 4>, 4>);
+static_assert(mango::SurfaceInterpolant<mango::BSplineND<double, 3>, 3>);
+static_assert(mango::SurfaceInterpolant<mango::BSplineND<double, 2>, 2>);
 
 using namespace mango;
 

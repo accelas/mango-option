@@ -206,6 +206,11 @@ public:
         return eval_tensor_product<0>(spans, basis_weights, std::array<int, N>{});
     }
 
+    /// Alias for eval_partial — satisfies SurfaceInterpolant concept.
+    T partial(size_t axis, const QueryPoint& query) const {
+        return eval_partial(axis, query);
+    }
+
     /// Second partial derivative along a single axis
     ///
     /// Uses analytical B-spline second derivatives (O(h²) accuracy).

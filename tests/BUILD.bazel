@@ -908,6 +908,7 @@ cc_test(
         "//src/math:bspline_nd",
         "//src/math:bspline_basis",
         "//src/math:bspline_nd_separable",
+        "//src/option/table:surface_concepts",
         "@googletest//:gtest_main",
     ],
     copts = [
