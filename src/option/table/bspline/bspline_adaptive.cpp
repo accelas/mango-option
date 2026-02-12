@@ -159,141 +159,6 @@ build_segmented_surfaces(
     return surfaces;
 }
 
-/// Result of the shared segmented probe-and-build pipeline.
-struct SegmentedBuildResult {
-    std::vector<BSplineSegmentedSurface> surfaces;
-    SegmentedPriceTableBuilder::Config seg_template;
-    MaxGridSizes gsz;
-    // Domain bounds (needed for validation/retry)
-    double min_m, max_m;
-    double min_vol, max_vol;
-    double min_rate, max_rate;
-    double min_tau, max_tau;
-};
-
-/// Shared probe-and-build pipeline for build_segmented.
-/// Selects representative probes, runs adaptive refinement per probe, aggregates
-/// grid sizes, then builds one SegmentedSurface per ref_value.
-static std::expected<SegmentedBuildResult, PriceTableError>
-probe_and_build(
-    const AdaptiveGridParams& params,
-    const SegmentedAdaptiveConfig& config,
-    const std::vector<double>& ref_values,
-    const IVGrid& domain)
-{
-    // 1. Select probe values (up to 3: front, back, nearest ATM)
-    auto probes = select_probes(ref_values, config.spot);
-
-    // 2. Expand domain bounds
-    auto dom = expand_segmented_domain(
-        domain, config.maturity, config.dividend_yield,
-        config.discrete_dividends, ref_values.front());
-    if (!dom.has_value()) {
-        return std::unexpected(dom.error());
-    }
-    auto [min_m, max_m, min_tau, max_tau, min_vol, max_vol, min_rate, max_rate] = *dom;
-
-    // B-spline support headroom on moneyness
-    double h = spline_support_headroom(max_m - min_m, domain.moneyness.size());
-    min_m -= h;
-    max_m += h;
-
-    // 3. Run adaptive refinement per probe
-    std::vector<RefinementResult> probe_results;
-    for (double probe_ref : probes) {
-        BuildFn build_fn = [&config, probe_ref](
-            std::span<const double> m_grid,
-            std::span<const double> tau_grid,
-            std::span<const double> v_grid,
-            std::span<const double> r_grid)
-            -> std::expected<SurfaceHandle, PriceTableError>
-        {
-            int tau_pts = static_cast<int>(tau_grid.size());
-            std::vector<double> m_vec(m_grid.begin(), m_grid.end());
-            std::vector<double> v_vec(v_grid.begin(), v_grid.end());
-            std::vector<double> r_vec(r_grid.begin(), r_grid.end());
-            auto seg_cfg = make_seg_config(config, m_vec, v_vec, r_vec, tau_pts);
-            seg_cfg.K_ref = probe_ref;
-            auto surface = SegmentedPriceTableBuilder::build(seg_cfg);
-            if (!surface.has_value()) {
-                return std::unexpected(surface.error());
-            }
-            auto shared = std::make_shared<BSplineSegmentedSurface>(std::move(*surface));
-            return SurfaceHandle{
-                .price = [shared](double spot, double strike,
-                                  double tau, double sigma, double rate) -> double {
-                    return shared->price(spot, strike, tau, sigma, rate);
-                },
-                .pde_solves = 0
-            };
-        };
-
-        auto validate_fn = make_validate_fn(
-            config.dividend_yield, config.option_type,
-            config.discrete_dividends);
-
-        auto compute_error_fn = make_fd_vega_error_fn(
-            params, validate_fn, config.option_type);
-
-        RefinementContext ctx{
-            .spot = config.spot,
-            .dividend_yield = config.dividend_yield,
-            .option_type = config.option_type,
-            .min_moneyness = min_m,
-            .max_moneyness = max_m,
-            .min_tau = min_tau,
-            .max_tau = max_tau,
-            .min_vol = min_vol,
-            .max_vol = max_vol,
-            .min_rate = min_rate,
-            .max_rate = max_rate,
-        };
-
-        InitialGrids initial_grids;
-        initial_grids.moneyness = domain.moneyness;
-        initial_grids.vol = domain.vol;
-        initial_grids.rate = domain.rate;
-
-        auto refine_fn = make_bspline_refine_fn(params);
-        auto sizes = run_refinement(params, build_fn, validate_fn,
-                                    refine_fn, ctx,
-                                    compute_error_fn, initial_grids);
-        if (!sizes.has_value()) {
-            return std::unexpected(sizes.error());
-        }
-        probe_results.push_back(std::move(*sizes));
-    }
-
-    // 4. Aggregate max grid sizes across probes
-    auto gsz = aggregate_max_sizes(probe_results);
-
-    // 5. Build final uniform grids and all surfaces
-    auto final_m = linspace(min_m, max_m, gsz.moneyness);
-    auto final_v = linspace(min_vol, max_vol, gsz.vol);
-    auto final_r = linspace(min_rate, max_rate, gsz.rate);
-    int max_tau_pts = gsz.tau_points;
-
-    auto seg_template = make_seg_config(config, final_m, final_v, final_r, max_tau_pts);
-
-    auto seg_surfaces = build_segmented_surfaces(seg_template, ref_values);
-    if (!seg_surfaces.has_value()) {
-        return std::unexpected(seg_surfaces.error());
-    }
-
-    return SegmentedBuildResult{
-        .surfaces = std::move(*seg_surfaces),
-        .seg_template = std::move(seg_template),
-        .gsz = gsz,
-        .min_m = min_m,
-        .max_m = max_m,
-        .min_vol = min_vol,
-        .max_vol = max_vol,
-        .min_rate = min_rate,
-        .max_rate = max_rate,
-        .min_tau = min_tau,
-        .max_tau = max_tau,
-    };
-}
 
 /// Solve missing PDE slices, dispatching on PDEGridSpec variant.
 BatchAmericanOptionResult solve_missing_slices(
@@ -637,50 +502,152 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
     return result;
 }
 
-std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
-build_adaptive_bspline_segmented(const AdaptiveGridParams& params,
-                                 const SegmentedAdaptiveConfig& config,
+// ============================================================================
+// BSplineSegmentedBuilder
+// ============================================================================
+
+std::expected<BSplineSegmentedBuilder, PriceTableError>
+BSplineSegmentedBuilder::create(const SegmentedAdaptiveConfig& config,
                                  const IVGrid& domain)
 {
-    // 1. Determine full K_ref list
-    auto k_refs_result = resolve_k_refs(config.kref_config, config.spot);
-    if (!k_refs_result.has_value()) {
-        return std::unexpected(k_refs_result.error());
-    }
-    auto K_refs = std::move(*k_refs_result);
+    auto K_refs = resolve_k_refs(config.kref_config, config.spot);
+    if (!K_refs) return std::unexpected(K_refs.error());
 
-    // 2. Probe, refine, and build all surfaces
-    auto result = probe_and_build(params, config, K_refs, domain);
-    if (!result.has_value()) {
-        return std::unexpected(result.error());
-    }
-    auto& build = *result;
+    auto dom = expand_segmented_domain(
+        domain, config.maturity, config.dividend_yield,
+        config.discrete_dividends, K_refs->front());
+    if (!dom) return std::unexpected(dom.error());
 
-    // 3. Assemble MultiKRefSurface
+    // B-spline support headroom on moneyness
+    double h = spline_support_headroom(dom->max_m - dom->min_m, domain.moneyness.size());
+    dom->min_m -= h;
+    dom->max_m += h;
+
+    return BSplineSegmentedBuilder(config, std::move(*K_refs), *dom, domain);
+}
+
+BSplineSegmentedBuilder::BSplineSegmentedBuilder(
+    SegmentedAdaptiveConfig config,
+    std::vector<double> K_refs,
+    DomainBounds domain,
+    IVGrid initial_grid)
+    : config_(std::move(config))
+    , K_refs_(std::move(K_refs))
+    , domain_(domain)
+    , initial_grid_(std::move(initial_grid))
+{}
+
+std::expected<BSplineMultiKRefInner, PriceTableError>
+BSplineSegmentedBuilder::assemble(std::vector<BSplineSegmentedSurface> surfaces) const
+{
     std::vector<BSplineMultiKRefEntry> entries;
-    for (size_t i = 0; i < K_refs.size(); ++i) {
-        entries.push_back({.K_ref = K_refs[i], .surface = std::move(build.surfaces[i])});
+    entries.reserve(K_refs_.size());
+    for (size_t i = 0; i < K_refs_.size(); ++i) {
+        entries.push_back({.K_ref = K_refs_[i], .surface = std::move(surfaces[i])});
     }
-    auto surface = build_multi_kref_surface(std::move(entries));
-    if (!surface.has_value()) {
-        return std::unexpected(surface.error());
+    return build_multi_kref_surface(std::move(entries));
+}
+
+std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
+BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
+{
+    // 1. Select probe values (up to 3: front, back, nearest ATM)
+    auto probes = select_probes(K_refs_, config_.spot);
+
+    // 2. Run adaptive refinement per probe
+    std::vector<RefinementResult> probe_results;
+    for (double probe_ref : probes) {
+        BuildFn build_fn = [this, probe_ref](
+            std::span<const double> m_grid,
+            std::span<const double> tau_grid,
+            std::span<const double> v_grid,
+            std::span<const double> r_grid)
+            -> std::expected<SurfaceHandle, PriceTableError>
+        {
+            int tau_pts = static_cast<int>(tau_grid.size());
+            std::vector<double> m_vec(m_grid.begin(), m_grid.end());
+            std::vector<double> v_vec(v_grid.begin(), v_grid.end());
+            std::vector<double> r_vec(r_grid.begin(), r_grid.end());
+            auto seg_cfg = make_seg_config(config_, m_vec, v_vec, r_vec, tau_pts);
+            seg_cfg.K_ref = probe_ref;
+            auto surface = SegmentedPriceTableBuilder::build(seg_cfg);
+            if (!surface) return std::unexpected(surface.error());
+            auto shared = std::make_shared<BSplineSegmentedSurface>(std::move(*surface));
+            return SurfaceHandle{
+                .price = [shared](double spot, double strike,
+                                  double tau, double sigma, double rate) -> double {
+                    return shared->price(spot, strike, tau, sigma, rate);
+                },
+                .pde_solves = 0
+            };
+        };
+
+        auto validate_fn = make_validate_fn(
+            config_.dividend_yield, config_.option_type,
+            config_.discrete_dividends);
+
+        auto compute_error_fn = make_fd_vega_error_fn(
+            params, validate_fn, config_.option_type);
+
+        RefinementContext ctx{
+            .spot = config_.spot,
+            .dividend_yield = config_.dividend_yield,
+            .option_type = config_.option_type,
+            .min_moneyness = domain_.min_m,
+            .max_moneyness = domain_.max_m,
+            .min_tau = domain_.min_tau,
+            .max_tau = domain_.max_tau,
+            .min_vol = domain_.min_vol,
+            .max_vol = domain_.max_vol,
+            .min_rate = domain_.min_rate,
+            .max_rate = domain_.max_rate,
+        };
+
+        InitialGrids initial_grids;
+        initial_grids.moneyness = initial_grid_.moneyness;
+        initial_grids.vol = initial_grid_.vol;
+        initial_grids.rate = initial_grid_.rate;
+
+        auto refine_fn = make_bspline_refine_fn(params);
+        auto sizes = run_refinement(params, build_fn, validate_fn,
+                                    refine_fn, ctx,
+                                    compute_error_fn, initial_grids);
+        if (!sizes) return std::unexpected(sizes.error());
+        probe_results.push_back(std::move(*sizes));
     }
 
-    // 4. Final multi-K_ref validation at arbitrary strikes
+    // 3. Aggregate max grid sizes across probes
+    auto gsz = aggregate_max_sizes(probe_results);
+
+    // 4. Build final uniform grids and all surfaces
+    auto final_m = linspace(domain_.min_m, domain_.max_m, gsz.moneyness);
+    auto final_v = linspace(domain_.min_vol, domain_.max_vol, gsz.vol);
+    auto final_r = linspace(domain_.min_rate, domain_.max_rate, gsz.rate);
+    int max_tau_pts = gsz.tau_points;
+
+    auto seg_template = make_seg_config(config_, final_m, final_v, final_r, max_tau_pts);
+    auto seg_surfaces = build_segmented_surfaces(seg_template, K_refs_);
+    if (!seg_surfaces) return std::unexpected(seg_surfaces.error());
+
+    // 5. Assemble multi-K_ref surface
+    auto surface = assemble(std::move(*seg_surfaces));
+    if (!surface) return std::unexpected(surface.error());
+
+    // 6. Final multi-K_ref validation at arbitrary strikes
     auto final_validate_fn = make_validate_fn(
-        config.dividend_yield, config.option_type,
-        config.discrete_dividends);
+        config_.dividend_yield, config_.option_type,
+        config_.discrete_dividends);
     auto final_error_fn = make_fd_vega_error_fn(
-        params, final_validate_fn, config.option_type);
+        params, final_validate_fn, config_.option_type);
 
     auto final_samples = latin_hypercube_4d(
         params.validation_samples, params.lhs_seed + 999);
 
     std::array<std::pair<double, double>, 4> final_bounds = {{
-        {build.min_m, build.max_m},
-        {build.min_tau, build.max_tau},
-        {build.min_vol, build.max_vol},
-        {build.min_rate, build.max_rate},
+        {domain_.min_m, domain_.max_m},
+        {domain_.min_tau, domain_.max_tau},
+        {domain_.min_vol, domain_.max_vol},
+        {domain_.min_rate, domain_.max_rate},
     }};
     auto scaled = scale_lhs_samples(final_samples, final_bounds);
 
@@ -689,45 +656,40 @@ build_adaptive_bspline_segmented(const AdaptiveGridParams& params,
 
     for (const auto& sample : scaled) {
         double m = sample[0], tau = sample[1], sigma = sample[2], rate = sample[3];
-        double strike = config.spot * std::exp(-m);
+        double strike = config_.spot * std::exp(-m);
 
-        double interp = surface->price(config.spot, strike, tau, sigma, rate);
+        double interp = surface->price(config_.spot, strike, tau, sigma, rate);
 
-        auto fd = final_validate_fn(config.spot, strike, tau, sigma, rate);
+        auto fd = final_validate_fn(config_.spot, strike, tau, sigma, rate);
         if (!fd.has_value()) continue;
 
         double ref_price = fd.value();
         double err = final_error_fn(
             interp, ref_price,
-            config.spot, strike, tau, sigma, rate,
-            config.dividend_yield);
+            config_.spot, strike, tau, sigma, rate,
+            config_.dividend_yield);
 
         final_max_error = std::max(final_max_error, err);
         if (err > 0.0) valid++;
     }
 
+    // 7. Optional retry with bumped grids
     if (valid > 0 && final_max_error > params.target_iv_error) {
-        // Bump grids by one refinement step and rebuild (one retry)
-        size_t bumped_m = std::min(build.gsz.moneyness + 2, params.max_points_per_dim);
-        size_t bumped_v = std::min(build.gsz.vol + 1, params.max_points_per_dim);
-        size_t bumped_r = std::min(build.gsz.rate + 1, params.max_points_per_dim);
-        int bumped_tau = std::min(build.gsz.tau_points + 2,
+        size_t bumped_m = std::min(gsz.moneyness + 2, params.max_points_per_dim);
+        size_t bumped_v = std::min(gsz.vol + 1, params.max_points_per_dim);
+        size_t bumped_r = std::min(gsz.rate + 1, params.max_points_per_dim);
+        int bumped_tau = std::min(gsz.tau_points + 2,
             static_cast<int>(params.max_points_per_dim));
 
-        auto retry_m = linspace(build.min_m, build.max_m, bumped_m);
-        auto retry_v = linspace(build.min_vol, build.max_vol, bumped_v);
-        auto retry_r = linspace(build.min_rate, build.max_rate, bumped_r);
+        auto retry_m = linspace(domain_.min_m, domain_.max_m, bumped_m);
+        auto retry_v = linspace(domain_.min_vol, domain_.max_vol, bumped_v);
+        auto retry_r = linspace(domain_.min_rate, domain_.max_rate, bumped_r);
 
-        build.seg_template.grid = {.moneyness = retry_m, .vol = retry_v, .rate = retry_r};
-        build.seg_template.tau_points_per_segment = bumped_tau;
-        auto retry_segs = build_segmented_surfaces(build.seg_template, K_refs);
-        if (retry_segs.has_value()) {
-            std::vector<BSplineMultiKRefEntry> retry_entries;
-            for (size_t i = 0; i < K_refs.size(); ++i) {
-                retry_entries.push_back({.K_ref = K_refs[i], .surface = std::move((*retry_segs)[i])});
-            }
-            auto retry_surface = build_multi_kref_surface(std::move(retry_entries));
-            if (retry_surface.has_value()) {
+        auto retry_template = make_seg_config(config_, retry_m, retry_v, retry_r, bumped_tau);
+        auto retry_segs = build_segmented_surfaces(retry_template, K_refs_);
+        if (retry_segs) {
+            auto retry_surface = assemble(std::move(*retry_segs));
+            if (retry_surface) {
                 return BSplineSegmentedAdaptiveResult{
                     .surface = std::move(*retry_surface),
                     .grid = {.moneyness = retry_m, .vol = retry_v, .rate = retry_r},
@@ -739,9 +701,19 @@ build_adaptive_bspline_segmented(const AdaptiveGridParams& params,
 
     return BSplineSegmentedAdaptiveResult{
         .surface = std::move(*surface),
-        .grid = build.seg_template.grid,
-        .tau_points_per_segment = build.seg_template.tau_points_per_segment,
+        .grid = seg_template.grid,
+        .tau_points_per_segment = max_tau_pts,
     };
+}
+
+std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
+build_adaptive_bspline_segmented(const AdaptiveGridParams& params,
+                                 const SegmentedAdaptiveConfig& config,
+                                 const IVGrid& domain)
+{
+    auto builder = BSplineSegmentedBuilder::create(config, domain);
+    if (!builder) return std::unexpected(builder.error());
+    return builder->build_adaptive(params);
 }
 
 }  // namespace mango

@@ -40,10 +40,39 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
                        PDEGridSpec pde_grid,
                        OptionType type = OptionType::PUT);
 
-/// Build segmented multi-K_ref B-spline surface with adaptive grid refinement.
+/// Builder for segmented B-spline surfaces (discrete dividends, multi-K_ref).
 ///
-/// Probes representative K_refs, runs adaptive refinement per probe,
-/// aggregates grid sizes, then builds all segments.
+/// Performs shared setup (K_ref resolution, domain expansion, headroom)
+/// once in create(), then builds via adaptive refinement.
+class BSplineSegmentedBuilder {
+public:
+    /// Create builder, performing shared setup.
+    [[nodiscard]] static std::expected<BSplineSegmentedBuilder, PriceTableError>
+    create(const SegmentedAdaptiveConfig& config, const IVGrid& domain);
+
+    /// Build with adaptive grid refinement.
+    [[nodiscard]] std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
+    build_adaptive(const AdaptiveGridParams& params) const;
+
+private:
+    BSplineSegmentedBuilder(
+        SegmentedAdaptiveConfig config,
+        std::vector<double> K_refs,
+        DomainBounds domain,
+        IVGrid initial_grid);
+
+    /// Assemble multi-K_ref surface from per-K_ref segmented surfaces.
+    [[nodiscard]] std::expected<BSplineMultiKRefInner, PriceTableError>
+    assemble(std::vector<BSplineSegmentedSurface> surfaces) const;
+
+    SegmentedAdaptiveConfig config_;
+    std::vector<double> K_refs_;
+    DomainBounds domain_;
+    IVGrid initial_grid_;
+};
+
+/// Build segmented multi-K_ref B-spline surface with adaptive grid refinement.
+/// Convenience wrapper around BSplineSegmentedBuilder.
 [[nodiscard]] std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
 build_adaptive_bspline_segmented(const AdaptiveGridParams& params,
                                  const SegmentedAdaptiveConfig& config,
