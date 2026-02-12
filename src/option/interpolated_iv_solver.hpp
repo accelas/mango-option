@@ -42,11 +42,12 @@ struct InterpolatedIVSolverConfig {
     double sigma_min = 0.01;       ///< Minimum volatility (1%)
     double sigma_max = 3.0;        ///< Maximum volatility (300%)
 
-    /// Minimum vega to attempt IV solve.  When the surface vega at the
-    /// midpoint of the search bracket is below this threshold, the option
-    /// has near-zero sensitivity to volatility and IV is effectively
-    /// undefined.  Returns VegaTooSmall immediately (~200 ns) instead of
-    /// running a doomed Brent search.  Set to 0 to disable.
+    /// Minimum vega to attempt IV solve.  Evaluates surface vega at
+    /// three representative vols (10%, 25%, 50%) and takes the max.
+    /// If below threshold, the option has near-zero sensitivity to
+    /// volatility and IV is effectively undefined.  Returns VegaTooSmall
+    /// immediately (~600 ns) instead of running a doomed Brent search.
+    /// Set to 0 to disable.
     double vega_threshold = 1e-4;
 };
 
@@ -380,18 +381,24 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
     double rate_value = get_zero_rate(query.rate, query.maturity);
 
     // Vega pre-check: reject queries where the option has near-zero
-    // sensitivity to volatility.  Evaluates surface vega at the bracket
-    // midpoint (~200 ns) to avoid a doomed Brent search.
+    // sensitivity to volatility.  Evaluates surface vega at three
+    // representative vols (~600 ns) to avoid a doomed Brent search.
+    // Using 10%, 25%, 50% covers the typical market vol range where
+    // vega differences between ATM and deep OTM/ITM are visible.
     if (config_.vega_threshold > 0.0) {
-        double sigma_mid = 0.5 * (sigma_min + sigma_max);
-        double v = surface_.vega(query.spot, query.strike,
-                                 query.maturity, sigma_mid, rate_value);
-        if (std::abs(v) < config_.vega_threshold) {
+        static constexpr double kProbeVols[] = {0.10, 0.25, 0.50};
+        double max_vega = 0.0;
+        for (double sv : kProbeVols) {
+            double v = std::abs(surface_.vega(query.spot, query.strike,
+                                              query.maturity, sv, rate_value));
+            if (v > max_vega) max_vega = v;
+        }
+        if (max_vega < config_.vega_threshold) {
             return std::unexpected(IVError{
                 .code = IVErrorCode::VegaTooSmall,
                 .iterations = 0,
-                .final_error = std::abs(v),
-                .last_vol = sigma_mid
+                .final_error = max_vega,
+                .last_vol = std::nullopt
             });
         }
     }

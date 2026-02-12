@@ -594,6 +594,8 @@ static ErrorTable compute_errors_chebyshev(
     auto fdm_results = fdm_solver.solve_batch(queries);
 
     // Chebyshev IV via Brent (with vega pre-check)
+    static constexpr double kProbeVols[] = {0.10, 0.25, 0.50};
+
     for (size_t i = 0; i < queries.size(); ++i) {
         auto [ti, si] = query_map[i];
 
@@ -606,10 +608,13 @@ static ErrorTable compute_errors_chebyshev(
         double strike = kStrikes[si];
         double maturity = kMaturities[ti];
 
-        // Vega pre-check: skip when surface vega is too small
-        double sigma_mid = 0.5 * (0.01 + 3.0);
-        double v = surface.vega(kSpot, strike, maturity, sigma_mid, kRate);
-        if (std::abs(v) < kVegaThreshold) {
+        // Vega pre-check: skip when max surface vega across probe vols is too small
+        double max_vega = 0.0;
+        for (double sv : kProbeVols) {
+            double v = std::abs(surface.vega(kSpot, strike, maturity, sv, kRate));
+            if (v > max_vega) max_vega = v;
+        }
+        if (max_vega < kVegaThreshold) {
             errors[ti][si] = std::nan("");
             n_vega_skip++;
             continue;
@@ -716,9 +721,12 @@ static ErrorTable compute_errors_from_price_fn(
 
         // Vega pre-check when vega function is available
         if (vega_fn) {
-            double sigma_mid = 0.5 * (0.01 + 3.0);
-            double v = vega_fn(kSpot, strike, maturity, sigma_mid, kRate);
-            if (std::abs(v) < kVegaThreshold) {
+            double max_vega = 0.0;
+            for (double sv : {0.10, 0.25, 0.50}) {
+                double v = std::abs(vega_fn(kSpot, strike, maturity, sv, kRate));
+                if (v > max_vega) max_vega = v;
+            }
+            if (max_vega < kVegaThreshold) {
                 errors[ti][si] = std::nan("");
                 n_vega_skip++;
                 continue;
@@ -928,11 +936,14 @@ run_chebyshev_dividends(const PriceGrid& prices) {
                 double price = prices[vi][ti][si];
                 if (std::isnan(price) || price <= 0) continue;
 
-                // Vega pre-check
-                double sigma_mid = 0.5 * (0.01 + 3.0);
-                double v = result->surface.vega(
-                    kSpot, kStrikes[si], tau, sigma_mid, kRate);
-                if (std::abs(v) < kVegaThreshold) {
+                // Vega pre-check: max vega across probe vols
+                double max_vega = 0.0;
+                for (double sv : {0.10, 0.25, 0.50}) {
+                    double v = std::abs(result->surface.vega(
+                        kSpot, kStrikes[si], tau, sv, kRate));
+                    if (v > max_vega) max_vega = v;
+                }
+                if (max_vega < kVegaThreshold) {
                     vega_skip++;
                     continue;
                 }
