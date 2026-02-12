@@ -161,7 +161,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
 
     // 1. Build adaptive base (only for scale=1, reuse axes for larger scales)
     static BSplineAdaptiveResult* base_result = nullptr;
-    static PriceTableAxes base_axes;
+    static PriceTableAxesND<4> base_axes;
     static double base_K_ref = 0.0;
 
     if (!base_result) {
@@ -189,17 +189,18 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
         }
         static BSplineAdaptiveResult stored = std::move(*result);
         base_result = &stored;
-        base_axes = stored.surface->axes();
-        base_K_ref = stored.surface->K_ref();
+        base_axes = stored.axes;
+        base_K_ref = stored.K_ref;
     }
 
     // 2. For scale=1, use adaptive result directly
-    std::shared_ptr<const PriceTableSurface> surface;
+    std::shared_ptr<const BSplineND<double, 4>> spline;
+    double surface_K_ref = base_K_ref;
     size_t total_pde = base_result->total_pde_solves;
     std::array<size_t, 4> grid_sizes = {};
 
     if (scale == 1) {
-        surface = base_result->surface;
+        spline = base_result->spline;
         for (int d = 0; d < 4; ++d) {
             grid_sizes[d] = base_axes.grids[d].size();
         }
@@ -235,12 +236,13 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
             std::fprintf(stderr, "PriceTableBuilderND::build failed (scale=%d)\n", scale);
             std::abort();
         }
-        surface = result->surface;
+        spline = result->spline;
+        surface_K_ref = result->K_ref;
         total_pde = result->n_pde_solves;
     }
 
     // 4. Create InterpolatedIVSolver
-    auto wrapper = make_bspline_surface(surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(spline, surface_K_ref, kDivYield, OptionType::PUT);
     if (!wrapper) {
         std::fprintf(stderr, "make_bspline_surface failed (scale=%d)\n", scale);
         std::abort();

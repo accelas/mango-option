@@ -53,7 +53,8 @@ double analytic_bs_price(double S, double K, double tau, double sigma, double r,
 
 struct AnalyticSurfaceFixture {
     double K_ref;
-    std::shared_ptr<const PriceTableSurface> surface;
+    double dividend_yield;
+    std::shared_ptr<const BSplineND<double, 4>> spline;
 };
 
 const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
@@ -81,7 +82,8 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         if (!table) {
             throw std::runtime_error("Failed to build price table");
         }
-        fixture_ptr->surface = table->surface;
+        fixture_ptr->spline = table->spline;
+        fixture_ptr->dividend_yield = 0.0;
 
         return fixture_ptr.release();
     }();
@@ -285,7 +287,7 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
     // Create BSplinePriceTable and IV solver
-    auto wrapper = make_bspline_surface(surf.surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(surf.spline, surf.K_ref, surf.dividend_yield, OptionType::PUT);
     if (!wrapper) {
         throw std::runtime_error("Failed to create BSplinePriceTable");
     }

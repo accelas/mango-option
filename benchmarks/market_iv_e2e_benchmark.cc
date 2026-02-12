@@ -36,8 +36,8 @@
  *         eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, dividend));
  *     });
  *
- * // Step 3: Create IV solver from surface
- * auto wrapper = make_bspline_surface(result.value().surface, OptionType::PUT);
+ * // Step 3: Create IV solver from spline
+ * auto wrapper = make_bspline_surface(result.value().spline, K_ref, dividend, OptionType::PUT);
  * auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(std::move(*wrapper));
  * const auto& iv_solver = solver_result.value();
  *
@@ -268,7 +268,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     }
 
     const auto& price_table = price_table_result.value();
-    const auto& surface = price_table.surface;
+    const auto& spline = price_table.spline;
 
     // Generate market observations
     auto observations = generate_market_observations(grid, 100);
@@ -276,7 +276,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     // Fill in "market prices" using our price table (simulates real market data)
     for (auto& obs : observations) {
         double m = obs.spot / obs.strike;
-        obs.market_price = surface->value({m, obs.maturity, obs.true_vol, obs.rate});
+        obs.market_price = spline->eval({m, obs.maturity, obs.true_vol, obs.rate});
     }
 
     // API STEP 3: Create IV solver
@@ -284,7 +284,8 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
-    auto wrapper = make_bspline_surface(surface, OptionType::PUT);
+    auto wrapper = make_bspline_surface(spline, price_table.K_ref,
+        price_table.dividends.dividend_yield, OptionType::PUT);
     if (!wrapper) {
         state.SkipWithError("make_bspline_surface failed");
         return;
@@ -386,16 +387,17 @@ static void BM_API_EndToEnd(benchmark::State& state) {
             return;
         }
         auto price_table = std::move(price_table_result.value());
-        const auto& surface = price_table.surface;
+        const auto& spline = price_table.spline;
 
         // Fill market prices
         for (auto& obs : observations) {
             double m = obs.spot / obs.strike;
-            obs.market_price = surface->value({m, obs.maturity, obs.true_vol, obs.rate});
+            obs.market_price = spline->eval({m, obs.maturity, obs.true_vol, obs.rate});
         }
 
         // Step 3-4: Compute IVs
-        auto wrapper = make_bspline_surface(surface, OptionType::PUT);
+        auto wrapper = make_bspline_surface(spline, price_table.K_ref,
+            price_table.dividends.dividend_yield, OptionType::PUT);
         if (!wrapper) {
             state.SkipWithError("make_bspline_surface failed");
             return;
