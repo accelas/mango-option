@@ -41,6 +41,13 @@ struct InterpolatedIVSolverConfig {
     double tolerance = 1e-6;       ///< Price convergence tolerance
     double sigma_min = 0.01;       ///< Minimum volatility (1%)
     double sigma_max = 3.0;        ///< Maximum volatility (300%)
+
+    /// Minimum vega to attempt IV solve.  When the surface vega at the
+    /// midpoint of the search bracket is below this threshold, the option
+    /// has near-zero sensitivity to volatility and IV is effectively
+    /// undefined.  Returns VegaTooSmall immediately (~200 ns) instead of
+    /// running a doomed Brent search.  Set to 0 to disable.
+    double vega_threshold = 1e-4;
 };
 
 /// Interpolation-based IV Solver
@@ -372,12 +379,29 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
     const bool rate_is_curve = is_yield_curve(query.rate);
     double rate_value = get_zero_rate(query.rate, query.maturity);
 
+    // Vega pre-check: reject queries where the option has near-zero
+    // sensitivity to volatility.  Evaluates surface vega at the bracket
+    // midpoint (~200 ns) to avoid a doomed Brent search.
+    if (config_.vega_threshold > 0.0) {
+        double sigma_mid = 0.5 * (sigma_min + sigma_max);
+        double v = surface_.vega(query.spot, query.strike,
+                                 query.maturity, sigma_mid, rate_value);
+        if (std::abs(v) < config_.vega_threshold) {
+            return std::unexpected(IVError{
+                .code = IVErrorCode::VegaTooSmall,
+                .iterations = 0,
+                .final_error = std::abs(v),
+                .last_vol = sigma_mid
+            });
+        }
+    }
+
     // Define objective function: f(s) = Price(s) - Market_Price
     auto objective = [&](double sigma) -> double {
         return eval_price(moneyness, query.maturity, sigma, rate_value, query.strike) - query.market_price;
     };
 
-    // Brent's method — no vega needed
+    // Brent's method
     RootFindingConfig brent_config{
         .max_iter = config_.max_iter,
         .brent_tol_abs = config_.tolerance

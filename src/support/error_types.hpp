@@ -128,6 +128,7 @@ enum class IVErrorCode {
     MaxIterationsExceeded,
     BracketingFailed,
     NumericalInstability,
+    VegaTooSmall,           ///< Vega below threshold — IV undefined
 
     // Solver errors
     PDESolveFailed
