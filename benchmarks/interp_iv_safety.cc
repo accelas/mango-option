@@ -123,7 +123,7 @@ static PriceGrid generate_prices(bool with_dividends, double div_yield = kDivYie
 // ============================================================================
 
 // Vanilla: one solver covering all maturities via BSpline + adaptive grid
-static AnyIVSolver build_vanilla_solver() {
+static AnyInterpIVSolver build_vanilla_solver() {
     // Maturity grid for price table — deliberately offset from test maturities
     // so most test points require real interpolation
     IVSolverFactoryConfig config{
@@ -151,8 +151,8 @@ static AnyIVSolver build_vanilla_solver() {
 }
 
 // Dividends: one solver per maturity via BSpline + discrete dividends + adaptive grid
-static std::vector<std::pair<size_t, AnyIVSolver>> build_div_solvers() {
-    std::vector<std::pair<size_t, AnyIVSolver>> solvers;
+static std::vector<std::pair<size_t, AnyInterpIVSolver>> build_div_solvers() {
+    std::vector<std::pair<size_t, AnyInterpIVSolver>> solvers;
 
     for (size_t ti = 0; ti < kNT; ++ti) {
         double mat = kMaturities[ti];
@@ -222,7 +222,7 @@ static double solve_fdm_iv_div(double strike, double maturity,
 using ErrorTable = std::array<std::array<double, kNS>, kNT>;
 
 static ErrorTable compute_errors_vanilla(const PriceGrid& prices,
-                                          const AnyIVSolver& interp_solver,
+                                          const AnyInterpIVSolver& interp_solver,
                                           size_t vol_idx,
                                           double div_yield = kDivYield) {
     ErrorTable errors{};
@@ -281,7 +281,7 @@ static ErrorTable compute_errors_vanilla(const PriceGrid& prices,
 
 static ErrorTable compute_errors_div(
     const PriceGrid& prices,
-    const std::vector<std::pair<size_t, AnyIVSolver>>& div_solvers,
+    const std::vector<std::pair<size_t, AnyInterpIVSolver>>& div_solvers,
     size_t vol_idx) {
     ErrorTable errors{};
 
@@ -864,7 +864,7 @@ run_chebyshev_dividends(const PriceGrid& prices) {
 // q=0 comparison: 4D B-spline vs 3D dimensionless (B-spline & Chebyshev)
 // ============================================================================
 
-static AnyIVSolver build_bspline_q0() {
+static AnyInterpIVSolver build_bspline_q0() {
     IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,
         .spot = kSpot,
@@ -888,7 +888,7 @@ static AnyIVSolver build_bspline_q0() {
     return std::move(*solver);
 }
 
-static std::expected<AnyIVSolver, ValidationError>
+static std::expected<AnyInterpIVSolver, ValidationError>
 build_dimless_3d(DimensionlessBackend::Interpolant interp) {
     IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,

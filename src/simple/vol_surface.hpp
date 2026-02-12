@@ -98,7 +98,7 @@ enum class PriceSource {
 std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
     const OptionChain& chain,
     const MarketContext& ctx,
-    const mango::AnyIVSolver* solver = nullptr,
+    const mango::AnyInterpIVSolver* solver = nullptr,
     const IVComputeConfig& config = {},
     PriceSource price_source = PriceSource::Mid);
 

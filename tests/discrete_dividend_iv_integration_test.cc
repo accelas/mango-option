@@ -34,10 +34,10 @@ protected:
         };
         auto result = make_interpolated_iv_solver(config);
         ASSERT_TRUE(result.has_value()) << "Failed to build solver";
-        solver_ = std::make_unique<AnyIVSolver>(std::move(*result));
+        solver_ = std::make_unique<AnyInterpIVSolver>(std::move(*result));
     }
 
-    std::unique_ptr<AnyIVSolver> solver_;
+    std::unique_ptr<AnyInterpIVSolver> solver_;
 };
 
 TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {

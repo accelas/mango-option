@@ -437,7 +437,7 @@ BENCHMARK(BM_Chebyshev_IV)
 // ============================================================================
 
 struct Dimensionless3DSolverEntry {
-    std::unique_ptr<AnyIVSolver> solver;
+    std::unique_ptr<AnyInterpIVSolver> solver;
     double build_time_ms = 0.0;
     size_t n_pde_solves = 0;
 };
@@ -468,7 +468,7 @@ static const Dimensionless3DSolverEntry& get_dimensionless_solver() {
         double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         Dimensionless3DSolverEntry e;
-        e.solver = std::make_unique<AnyIVSolver>(std::move(*solver));
+        e.solver = std::make_unique<AnyInterpIVSolver>(std::move(*solver));
         e.build_time_ms = ms;
         return e;
     }();
