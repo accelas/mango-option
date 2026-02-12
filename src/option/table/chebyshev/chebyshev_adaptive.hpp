@@ -4,7 +4,9 @@
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
+#include "mango/option/table/split_surface.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
+#include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/support/error_types.hpp"
 #include <expected>
@@ -13,6 +15,15 @@
 #include <vector>
 
 namespace mango {
+
+/// Tau-segmented Chebyshev surface (one leaf per inter-dividend interval)
+using ChebyshevTauSegmented = SplitSurface<ChebyshevSegmentedLeaf, TauSegmentSplit>;
+
+/// Multi-K_ref blended segmented Chebyshev surface
+using ChebyshevMultiKRefInner = SplitSurface<ChebyshevTauSegmented, MultiKRefSplit>;
+
+/// Multi-K_ref segmented Chebyshev price table (final queryable surface)
+using ChebyshevMultiKRefSurface = PriceTable<ChebyshevMultiKRefInner>;
 
 /// Result of adaptive Chebyshev surface construction (standard path)
 struct ChebyshevAdaptiveResult {
