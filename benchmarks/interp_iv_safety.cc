@@ -425,49 +425,102 @@ struct AlgoErrors {
     const ErrorTable* errors;
 };
 
+/// Compute masked RMS error for a given mask and set of algorithms.
+static void print_masked_rms(const TVKMask& mask, size_t mask_count,
+                              const char* label,
+                              std::span<const AlgoErrors> algos) {
+    std::printf("  %-12s [%2zu/%zu]", label, mask_count, kNT * kNS);
+    for (const auto& a : algos) {
+        double sum_sq = 0;
+        size_t n = 0;
+        for (size_t ti = 0; ti < kNT; ++ti) {
+            for (size_t si = 0; si < kNS; ++si) {
+                if (!mask[ti][si]) continue;
+                double e = (*a.errors)[ti][si];
+                if (std::isnan(e)) continue;
+                sum_sq += e * e;
+                n++;
+            }
+        }
+        double rms = n > 0 ? std::sqrt(sum_sq / n) : 0;
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.1f (%zu)", rms, n);
+        std::printf("  %14s", buf);
+    }
+    std::printf("\n");
+}
+
+/// BS European vega: S * sqrt(T) * N'(d1) * exp(-q*T)
+/// Used as a surface-independent vega proxy for mask comparison.
+static double bs_vega(double S, double K, double T, double sigma,
+                       double r, double q) {
+    if (T <= 0 || sigma <= 0) return 0.0;
+    double sqrtT = std::sqrt(T);
+    double d1 = (std::log(S / K) + (r - q + 0.5 * sigma * sigma) * T)
+                / (sigma * sqrtT);
+    double nd1 = std::exp(-0.5 * d1 * d1) / std::sqrt(2.0 * M_PI);
+    return S * sqrtT * nd1 * std::exp(-q * T);
+}
+
+/// Vega mask: which (maturity, strike) points survive a given BS vega threshold.
+/// Uses known test vol for each point (benchmark knows true vol).
+static TVKMask compute_vega_mask(size_t vol_idx, double threshold) {
+    TVKMask mask{};
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        for (size_t si = 0; si < kNS; ++si) {
+            double v = bs_vega(kSpot, kStrikes[si], kMaturities[ti],
+                               kVols[vol_idx], kRate, kDivYield);
+            mask[ti][si] = v >= threshold;
+        }
+    }
+    return mask;
+}
+
 static void print_tvk_comparison(const PriceGrid& prices, size_t vol_idx,
                                   std::span<const AlgoErrors> algos) {
-    static constexpr double kThresholds[] = {0.0, 1e-4, 1e-3, 5e-3};
-    static constexpr const char* kThreshLabels[] = {
+    static constexpr double kTVKThresholds[] = {0.0, 1e-4, 1e-3, 5e-3};
+    static constexpr const char* kTVKLabels[] = {
         "none", "1e-4", "1e-3", "5e-3"};
 
+    // BS vega thresholds for comparison: at the actual test vol, what
+    // vega thresholds give similar filtering to TV/K thresholds?
+    static constexpr double kVegaThresholds[] = {0.0, 0.01, 0.1, 0.5};
+    static constexpr const char* kVegaLabels[] = {
+        "none", "0.01", "0.1", "0.5"};
+
+    // TV/K filtered
     std::printf("\n  TV/K filtered RMS (σ=%.0f%%):\n", kVols[vol_idx] * 100);
 
-    // Header
     std::printf("  %-20s", "TV/K >=");
     for (const auto& a : algos)
         std::printf("  %14s", a.label);
     std::printf("\n");
 
     for (size_t fi = 0; fi < 4; ++fi) {
-        auto mask = compute_tvk_mask(prices, vol_idx, kThresholds[fi]);
-
-        // Count cells passing the TV/K filter
+        auto mask = compute_tvk_mask(prices, vol_idx, kTVKThresholds[fi]);
         size_t mask_count = 0;
         for (size_t ti = 0; ti < kNT; ++ti)
             for (size_t si = 0; si < kNS; ++si)
                 if (mask[ti][si]) mask_count++;
+        print_masked_rms(mask, mask_count, kTVKLabels[fi], algos);
+    }
 
-        std::printf("  %-12s [%2zu/%zu]", kThreshLabels[fi],
-                    mask_count, kNT * kNS);
-        for (const auto& a : algos) {
-            double sum_sq = 0;
-            size_t n = 0;
-            for (size_t ti = 0; ti < kNT; ++ti) {
-                for (size_t si = 0; si < kNS; ++si) {
-                    if (!mask[ti][si]) continue;
-                    double e = (*a.errors)[ti][si];
-                    if (std::isnan(e)) continue;
-                    sum_sq += e * e;
-                    n++;
-                }
-            }
-            double rms = n > 0 ? std::sqrt(sum_sq / n) : 0;
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), "%.1f (%zu)", rms, n);
-            std::printf("  %14s", buf);
-        }
-        std::printf("\n");
+    // Vega filtered (BS vega at known test vol)
+    std::printf("\n  Vega filtered RMS (σ=%.0f%%, BS vega at true vol):\n",
+                kVols[vol_idx] * 100);
+
+    std::printf("  %-20s", "vega >=");
+    for (const auto& a : algos)
+        std::printf("  %14s", a.label);
+    std::printf("\n");
+
+    for (size_t fi = 0; fi < 4; ++fi) {
+        auto mask = compute_vega_mask(vol_idx, kVegaThresholds[fi]);
+        size_t mask_count = 0;
+        for (size_t ti = 0; ti < kNT; ++ti)
+            for (size_t si = 0; si < kNS; ++si)
+                if (mask[ti][si]) mask_count++;
+        print_masked_rms(mask, mask_count, kVegaLabels[fi], algos);
     }
 }
 
@@ -500,13 +553,17 @@ static ChebyshevTableResult build_chebyshev_surface() {
     return std::move(*result);
 }
 
+static constexpr double kVegaThreshold = 1e-4;
+
 static ErrorTable compute_errors_chebyshev(
     const PriceGrid& prices,
     const ChebyshevTableResult& surface,
-    size_t vol_idx) {
+    size_t vol_idx,
+    size_t* vega_skipped = nullptr) {
     ErrorTable errors{};
     IVSolverConfig fdm_config;
     IVSolver fdm_solver(fdm_config);
+    size_t n_vega_skip = 0;
 
     // Batch FDM IV
     std::vector<IVQuery> queries;
@@ -536,7 +593,7 @@ static ErrorTable compute_errors_chebyshev(
 
     auto fdm_results = fdm_solver.solve_batch(queries);
 
-    // Chebyshev IV via Brent
+    // Chebyshev IV via Brent (with vega pre-check)
     for (size_t i = 0; i < queries.size(); ++i) {
         auto [ti, si] = query_map[i];
 
@@ -548,6 +605,15 @@ static ErrorTable compute_errors_chebyshev(
         double fdm_iv = fdm_results.results[i]->implied_vol;
         double strike = kStrikes[si];
         double maturity = kMaturities[ti];
+
+        // Vega pre-check: skip when surface vega is too small
+        double sigma_mid = 0.5 * (0.01 + 3.0);
+        double v = surface.vega(kSpot, strike, maturity, sigma_mid, kRate);
+        if (std::abs(v) < kVegaThreshold) {
+            errors[ti][si] = std::nan("");
+            n_vega_skip++;
+            continue;
+        }
 
         double cheb_iv = brent_solve_iv(
             [&](double vol) {
@@ -563,6 +629,7 @@ static ErrorTable compute_errors_chebyshev(
         errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
     }
 
+    if (vega_skipped) *vega_skipped = n_vega_skip;
     return errors;
 }
 
@@ -582,8 +649,11 @@ run_chebyshev_4d(const PriceGrid& prices) {
         std::snprintf(title, sizeof(title),
                       "Chebyshev 4D IV Error (bps) — σ=%.0f%%",
                       kVols[vi] * 100);
-        all_errors[vi] = compute_errors_chebyshev(prices, surface, vi);
+        size_t vega_skip = 0;
+        all_errors[vi] = compute_errors_chebyshev(prices, surface, vi, &vega_skip);
         print_heatmap(title, all_errors[vi]);
+        if (vega_skip > 0)
+            std::printf("  Vega pre-check skipped: %zu queries\n", vega_skip);
     }
     return all_errors;
 }
@@ -592,13 +662,18 @@ run_chebyshev_4d(const PriceGrid& prices) {
 // Chebyshev Adaptive — CC-level refinement via AdaptiveGridBuilder
 // ============================================================================
 
+using PriceFn5 = std::function<double(double, double, double, double, double)>;
+
 static ErrorTable compute_errors_from_price_fn(
     const PriceGrid& prices,
-    const std::function<double(double, double, double, double, double)>& price_fn,
-    size_t vol_idx) {
+    const PriceFn5& price_fn,
+    size_t vol_idx,
+    const PriceFn5& vega_fn = nullptr,
+    size_t* vega_skipped = nullptr) {
     ErrorTable errors{};
     IVSolverConfig fdm_config;
     IVSolver fdm_solver(fdm_config);
+    size_t n_vega_skip = 0;
 
     std::vector<IVQuery> queries;
     std::vector<std::pair<size_t, size_t>> query_map;
@@ -639,6 +714,17 @@ static ErrorTable compute_errors_from_price_fn(
         double strike = kStrikes[si];
         double maturity = kMaturities[ti];
 
+        // Vega pre-check when vega function is available
+        if (vega_fn) {
+            double sigma_mid = 0.5 * (0.01 + 3.0);
+            double v = vega_fn(kSpot, strike, maturity, sigma_mid, kRate);
+            if (std::abs(v) < kVegaThreshold) {
+                errors[ti][si] = std::nan("");
+                n_vega_skip++;
+                continue;
+            }
+        }
+
         double cheb_iv = brent_solve_iv(
             [&](double vol) {
                 return price_fn(kSpot, strike, maturity, vol, kRate);
@@ -653,6 +739,7 @@ static ErrorTable compute_errors_from_price_fn(
         errors[ti][si] = std::abs(cheb_iv - fdm_iv) * 10000.0;
     }
 
+    if (vega_skipped) *vega_skipped = n_vega_skip;
     return errors;
 }
 
@@ -707,13 +794,20 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
         std::snprintf(title, sizeof(title),
                       "Chebyshev Adaptive IV Error (bps) — σ=%.0f%%",
                       kVols[vi] * 100);
+        size_t vega_skip = 0;
         all_errors[vi] = compute_errors_from_price_fn(
             prices,
             [&](double spot, double strike, double tau, double sigma, double rate) {
                 return result->surface->price(spot, strike, tau, sigma, rate);
             },
-            vi);
+            vi,
+            [&](double spot, double strike, double tau, double sigma, double rate) {
+                return result->surface->vega(spot, strike, tau, sigma, rate);
+            },
+            &vega_skip);
         print_heatmap(title, all_errors[vi]);
+        if (vega_skip > 0)
+            std::printf("  Vega pre-check skipped: %zu queries\n", vega_skip);
     }
     return all_errors;
 }
@@ -811,6 +905,7 @@ run_chebyshev_dividends(const PriceGrid& prices) {
         for (auto& row : errors)
             for (auto& v : row)
                 v = std::nan("");
+        size_t vega_skip = 0;
 
         for (size_t ti = 0; ti < kNT; ++ti) {
             double tau = kMaturities[ti];
@@ -832,6 +927,15 @@ run_chebyshev_dividends(const PriceGrid& prices) {
             for (size_t si = 0; si < kNS; ++si) {
                 double price = prices[vi][ti][si];
                 if (std::isnan(price) || price <= 0) continue;
+
+                // Vega pre-check
+                double sigma_mid = 0.5 * (0.01 + 3.0);
+                double v = result->surface.vega(
+                    kSpot, kStrikes[si], tau, sigma_mid, kRate);
+                if (std::abs(v) < kVegaThreshold) {
+                    vega_skip++;
+                    continue;
+                }
 
                 // FDM reference with the same dividends
                 double fdm_iv = solve_fdm_iv_div(
@@ -856,6 +960,8 @@ run_chebyshev_dividends(const PriceGrid& prices) {
                       "Cheb Dividend IV Error (bps) — σ=%.0f%%",
                       kVols[vi] * 100);
         print_heatmap(title, all_errors[vi]);
+        if (vega_skip > 0)
+            std::printf("  Vega pre-check skipped: %zu queries\n", vega_skip);
     }
     return all_errors;
 }
