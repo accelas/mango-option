@@ -9,6 +9,7 @@
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/support/error_types.hpp"
+#include <array>
 #include <expected>
 #include <memory>
 #include <span>
@@ -76,15 +77,62 @@ struct ChebyshevSegmentedAdaptiveResult {
     size_t total_pde_solves = 0;
 };
 
+/// Builder for segmented Chebyshev surfaces (discrete dividends, multi-K_ref).
+///
+/// Performs shared setup (K_ref resolution, domain expansion, segment boundaries)
+/// once in create(), then builds via fixed CC levels or adaptive refinement.
+class ChebyshevSegmentedBuilder {
+public:
+    /// Create builder, performing shared setup.
+    [[nodiscard]] static std::expected<ChebyshevSegmentedBuilder, PriceTableError>
+    create(const SegmentedAdaptiveConfig& config, const IVGrid& domain);
+
+    /// Build with fixed CC levels (no adaptive refinement).
+    [[nodiscard]] std::expected<ChebyshevMultiKRefSurface, PriceTableError>
+    build(std::array<size_t, 4> cc_levels = {5, 3, 2, 1}) const;
+
+    /// Build with adaptive grid refinement.
+    [[nodiscard]] std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
+    build_adaptive(const AdaptiveGridParams& params) const;
+
+private:
+    ChebyshevSegmentedBuilder(
+        SegmentedAdaptiveConfig config,
+        std::vector<double> K_refs,
+        DomainBounds domain,
+        std::vector<double> seg_bounds,
+        std::vector<bool> seg_is_gap);
+
+    [[nodiscard]] std::expected<ChebyshevMultiKRefSurface, PriceTableError>
+    assemble(std::span<const double> m_nodes,
+             std::span<const double> tau_nodes,
+             std::span<const double> sigma_nodes,
+             std::span<const double> rate_nodes) const;
+
+    [[nodiscard]] std::vector<double> generate_tau_nodes(size_t tau_level) const;
+
+    struct ExtendedBounds {
+        double m_lo, m_hi, sigma_lo, sigma_hi, rate_lo, rate_hi;
+    };
+    [[nodiscard]] ExtendedBounds compute_headroom(
+        std::array<size_t, 4> cc_levels) const;
+
+    SegmentedAdaptiveConfig config_;
+    std::vector<double> K_refs_;
+    DomainBounds domain_;
+    std::vector<double> seg_bounds_;
+    std::vector<bool> seg_is_gap_;
+};
+
 /// Build segmented Chebyshev surface with discrete dividend support.
-/// Returns a ChebyshevMultiKRefSurface with multi-K_ref blending.
+/// Convenience wrapper around ChebyshevSegmentedBuilder.
 [[nodiscard]] std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
 build_adaptive_chebyshev_segmented(const AdaptiveGridParams& params,
                                    const SegmentedAdaptiveConfig& config,
                                    const IVGrid& domain);
 
-/// Build typed segmented Chebyshev surface from explicit CC levels (no adaptive refinement).
-/// Used for benchmarking with fixed grid sizes.
+/// Build typed segmented Chebyshev surface from explicit CC levels.
+/// Convenience wrapper around ChebyshevSegmentedBuilder.
 [[nodiscard]] std::expected<ChebyshevMultiKRefSurface, PriceTableError>
 build_chebyshev_segmented_manual(
     const SegmentedAdaptiveConfig& config,
