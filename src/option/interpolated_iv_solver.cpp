@@ -502,14 +502,19 @@ static SurfaceBounds dimless_bounds(const DimlessDomain& d, double maturity) {
     };
 }
 
-static std::expected<AnyIVSolver, ValidationError>
-build_dimensionless_bspline(const IVSolverFactoryConfig& config,
-                            const DimensionlessBackend& backend) {
-    auto log_m = to_log_moneyness(config.grid.moneyness);
+/// Result of grid construction for dimensionless builders.
+struct DimensionlessGridSpec {
+    DimensionlessAxes axes;
+    DimlessDomain domain;
+};
+
+static std::expected<DimensionlessGridSpec, ValidationError>
+build_dimensionless_grid(const IVGrid& grid, double maturity) {
+    auto log_m = to_log_moneyness(grid.moneyness);
     if (!log_m.has_value()) return std::unexpected(log_m.error());
 
-    auto b = extract_bounds(config.grid);
-    auto d = compute_dimless_domain(b, backend.maturity);
+    auto b = extract_bounds(grid);
+    auto d = compute_dimless_domain(b, maturity);
 
     auto linspace = [](double lo, double hi, size_t n) {
         std::vector<double> v(n);
@@ -523,6 +528,18 @@ build_dimensionless_bspline(const IVSolverFactoryConfig& config,
         .tau_prime = linspace(d.tp_min, d.tp_max, 10),
         .ln_kappa = linspace(d.lk_min, d.lk_max, 10),
     };
+
+    return DimensionlessGridSpec{std::move(axes), d};
+}
+
+static std::expected<AnyIVSolver, ValidationError>
+build_dimensionless_bspline(const IVSolverFactoryConfig& config,
+                            const DimensionlessBackend& backend) {
+    auto grid_spec = build_dimensionless_grid(config.grid, backend.maturity);
+    if (!grid_spec.has_value()) return std::unexpected(grid_spec.error());
+
+    auto& axes = grid_spec->axes;
+    auto& d = grid_spec->domain;
 
     // 1. PDE solve -> raw V/K
     auto pde = solve_dimensionless_pde(axes, config.spot, config.option_type);

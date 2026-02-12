@@ -100,6 +100,81 @@ void append_upper_tail_log_moneyness(std::vector<double>& log_grid,
     }
 }
 
+/// Expand a log-moneyness grid to cover dividend-induced downward shifts and
+/// add upper-tail headroom for B-spline support and diffusion.
+///
+/// Returns the expanded, sorted, deduplicated log-moneyness grid, or an error
+/// if the resulting grid is too small or contains non-finite values.
+static std::expected<std::vector<double>, PriceTableError>
+expand_log_moneyness_grid(
+    const std::vector<double>& input_grid,
+    const std::vector<Dividend>& dividends,
+    double K_ref,
+    double sigma_max,
+    double max_segment_width) {
+
+    std::vector<double> expanded_log_m_grid = input_grid;
+    std::sort(expanded_log_m_grid.begin(), expanded_log_m_grid.end());
+    expanded_log_m_grid.erase(
+        std::unique(expanded_log_m_grid.begin(), expanded_log_m_grid.end()),
+        expanded_log_m_grid.end());
+
+    if (expanded_log_m_grid.size() < 2) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InsufficientGridPoints, 0});
+    }
+    if (!std::isfinite(expanded_log_m_grid.front()) ||
+        !std::isfinite(expanded_log_m_grid.back())) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    double total_div = 0.0;
+    for (const auto& div : dividends) {
+        total_div += div.amount;
+    }
+
+    // Expand lower side in moneyness-space, then map back to log-moneyness.
+    const double x_min = expanded_log_m_grid.front();
+    const double m_min = std::exp(x_min);
+    double m_min_expanded = std::max(m_min - total_div / K_ref, 0.01);
+    double x_min_expanded = std::log(m_min_expanded);
+
+    if (x_min_expanded < expanded_log_m_grid.front()) {
+        double step = (expanded_log_m_grid.front() - x_min_expanded) / 3.0;
+        for (int i = 2; i >= 0; --i) {
+            double x = x_min_expanded + step * static_cast<double>(i);
+            if (x < expanded_log_m_grid.front()) {
+                expanded_log_m_grid.insert(expanded_log_m_grid.begin(), x);
+            }
+        }
+    }
+
+    // Add right-tail headroom. Scale by one diffusion length in log-space
+    // (sigma_max * sqrt(max segment width)) and at least one cubic-support
+    // band so the original upper domain stays away from endpoint effects.
+    append_upper_tail_log_moneyness(
+        expanded_log_m_grid, sigma_max, max_segment_width);
+
+    std::sort(expanded_log_m_grid.begin(), expanded_log_m_grid.end());
+    expanded_log_m_grid.erase(
+        std::unique(expanded_log_m_grid.begin(), expanded_log_m_grid.end()),
+        expanded_log_m_grid.end());
+
+    // Ensure at least 4 log-moneyness points
+    if (expanded_log_m_grid.size() < 4) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0});
+    }
+
+    for (double x : expanded_log_m_grid) {
+        if (!std::isfinite(x)) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
+    }
+
+    return expanded_log_m_grid;
+}
+
 }  // namespace
 
 std::expected<BSplineSegmentedSurface, PriceTableError>
@@ -152,45 +227,6 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Step 3: Expand log-moneyness grid downward
     // =====================================================================
-    std::vector<double> expanded_log_m_grid = config.grid.moneyness;
-    std::sort(expanded_log_m_grid.begin(), expanded_log_m_grid.end());
-    expanded_log_m_grid.erase(
-        std::unique(expanded_log_m_grid.begin(), expanded_log_m_grid.end()),
-        expanded_log_m_grid.end());
-
-    if (expanded_log_m_grid.size() < 2) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::InsufficientGridPoints, 0});
-    }
-    if (!std::isfinite(expanded_log_m_grid.front()) ||
-        !std::isfinite(expanded_log_m_grid.back())) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-    }
-
-    double total_div = 0.0;
-    for (const auto& div : dividends) {
-        total_div += div.amount;
-    }
-
-    // Expand lower side in moneyness-space, then map back to log-moneyness.
-    const double x_min = expanded_log_m_grid.front();
-    const double m_min = std::exp(x_min);
-    double m_min_expanded = std::max(m_min - total_div / K_ref, 0.01);
-    double x_min_expanded = std::log(m_min_expanded);
-
-    if (x_min_expanded < expanded_log_m_grid.front()) {
-        double step = (expanded_log_m_grid.front() - x_min_expanded) / 3.0;
-        for (int i = 2; i >= 0; --i) {
-            double x = x_min_expanded + step * static_cast<double>(i);
-            if (x < expanded_log_m_grid.front()) {
-                expanded_log_m_grid.insert(expanded_log_m_grid.begin(), x);
-            }
-        }
-    }
-
-    // Add right-tail headroom. Scale by one diffusion length in log-space
-    // (sigma_max * sqrt(max segment width)) and at least one cubic-support
-    // band so the original upper domain stays away from endpoint effects.
     double sigma_max = *std::max_element(
         config.grid.vol.begin(), config.grid.vol.end());
     double max_segment_width = 0.0;
@@ -198,25 +234,14 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         max_segment_width =
             std::max(max_segment_width, boundaries[i + 1] - boundaries[i]);
     }
-    append_upper_tail_log_moneyness(
-        expanded_log_m_grid, sigma_max, max_segment_width);
 
-    std::sort(expanded_log_m_grid.begin(), expanded_log_m_grid.end());
-    expanded_log_m_grid.erase(
-        std::unique(expanded_log_m_grid.begin(), expanded_log_m_grid.end()),
-        expanded_log_m_grid.end());
-
-    // Ensure at least 4 log-moneyness points
-    if (expanded_log_m_grid.size() < 4) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0});
+    auto grid_result = expand_log_moneyness_grid(
+        config.grid.moneyness, dividends, K_ref,
+        sigma_max, max_segment_width);
+    if (!grid_result.has_value()) {
+        return std::unexpected(grid_result.error());
     }
-
-    for (double x : expanded_log_m_grid) {
-        if (!std::isfinite(x)) {
-            return std::unexpected(PriceTableError{
-                PriceTableErrorCode::InvalidConfig});
-        }
-    }
+    auto expanded_log_m_grid = std::move(*grid_result);
 
     // =====================================================================
     // Step 4: Build segments (last first, then backward)
@@ -230,140 +255,13 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     std::shared_ptr<const PriceTableSurface> prev_surface;
 
     for (size_t seg_idx = 0; seg_idx < n_segments; ++seg_idx) {
-        double tau_start = boundaries[seg_idx];
-        double tau_end = boundaries[seg_idx + 1];
-        double seg_width = tau_end - tau_start;
-
-        // Local τ grid for this segment
-        auto local_tau = make_segment_tau_grid(
-            0.0, seg_width, config.tau_points_per_segment,
-            config.tau_target_dt, config.tau_points_min, config.tau_points_max);
-
-        // Build PriceTableBuilderND for this segment
-        auto setup = PriceTableBuilder::from_vectors(
-            expanded_log_m_grid, local_tau, config.grid.vol, config.grid.rate,
-            K_ref, config.pde_accuracy, config.option_type,
-            config.dividends.dividend_yield);
-
-        if (!setup.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        auto seg_result = build_segment(
+            seg_idx, boundaries, config, expanded_log_m_grid,
+            K_ref, dividends, prev_surface);
+        if (!seg_result.has_value()) {
+            return std::unexpected(seg_result.error());
         }
-
-        auto& [builder, axes] = *setup;
-        builder.set_allow_tau_zero(true);
-
-        // ------ Manual build path (used for all segments) ------
-
-        // 1. Create batch params
-        auto batch_params = builder.make_batch(axes);
-
-        // 2. Estimate PDE grid (same as builder.build() would)
-        auto [est_grid, est_td] = builder.estimate_pde_grid(batch_params, axes);
-        PDEGridSpec custom_grid = PDEGridConfig{est_grid, est_td.n_steps(), {}};
-
-        // 3. Create batch solver with snapshot times
-        BatchAmericanOptionSolver batch_solver;
-        batch_solver.set_snapshot_times(axes.grids[1]);
-
-        // 4. Build setup callback (chained segments only)
-        BatchAmericanOptionSolver::SetupCallback setup_callback = nullptr;
-
-        if (seg_idx > 0) {
-
-            const auto& vol_grid = config.grid.vol;
-            const auto& rate_grid = config.grid.rate;
-            const size_t Nr = rate_grid.size();
-
-            // τ at the boundary of the previous segment (in its local coords)
-            double prev_seg_tau_local_end = boundaries[seg_idx] - boundaries[seg_idx - 1];
-
-            // Dividend amount at this boundary.
-            double boundary_div = dividends[dividends.size() - seg_idx].amount;
-
-            ChainedICContext ic_ctx{
-                .prev_surface = prev_surface,
-                .K_ref = K_ref,
-                .prev_tau_end = prev_seg_tau_local_end,
-                .boundary_div = boundary_div,
-            };
-
-            setup_callback = [ic_ctx, &vol_grid, &rate_grid, Nr](
-                size_t index, AmericanOptionSolver& solver)
-            {
-                double sigma = vol_grid[index / Nr];
-                double rate = rate_grid[index % Nr];
-
-                // IC maps log-moneyness x → normalized price u = V/K_ref.
-                // Jump condition at dividend date: V(t⁻, S) = V(t⁺, S - D).
-                solver.set_initial_condition(
-                    [ic_ctx, sigma, rate](
-                        std::span<const double> x, std::span<double> u)
-                    {
-                        for (size_t i = 0; i < x.size(); ++i) {
-                            double spot = ic_ctx.K_ref * std::exp(x[i]);
-                            double spot_adj = std::max(spot - ic_ctx.boundary_div, 1e-8);
-                            double x_adj = std::log(spot_adj / ic_ctx.K_ref);
-                            double raw = ic_ctx.prev_surface->value(
-                                {x_adj, ic_ctx.prev_tau_end, sigma, rate});
-                            u[i] = raw;
-                        }
-                    });
-            };
-        }
-
-        // 5. Solve batch with estimated grid
-        auto batch_result = batch_solver.solve_batch(
-            batch_params, true, setup_callback, custom_grid);
-
-        // 6. Failure rate check
-        // Segment 0: strict (0.0), matching builder.build() default.
-        // Chained segments: lenient (0.5), matching old behavior (no check).
-        if (!batch_result.results.empty()) {
-            const double max_rate = (seg_idx == 0) ? 0.0 : 0.5;
-            const double failure_rate = static_cast<double>(batch_result.failed_count) /
-                                        static_cast<double>(batch_result.results.size());
-            if (failure_rate > max_rate) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
-            }
-        }
-
-        // 7. Extract tensor
-        auto extraction = builder.extract_tensor(batch_result, axes);
-        if (!extraction.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
-        }
-
-        // 8. Repair failures
-        auto repair = builder.repair_failed_slices(
-            extraction->tensor, extraction->failed_pde,
-            extraction->failed_spline, axes);
-        if (!repair.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::RepairFailed});
-        }
-
-        // 9. Fit B-spline coefficients
-        auto fit_result = builder.fit_coeffs(extraction->tensor, axes);
-        if (!fit_result.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
-        }
-        auto coeffs = std::move(fit_result->coefficients);
-
-        // 10. Build PriceTableSurfaceND
-        auto surface = PriceTableSurface::build(
-            axes, std::move(coeffs), K_ref,
-            DividendSpec{.dividend_yield = config.dividends.dividend_yield, .discrete_dividends = {}});
-        if (!surface.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-        }
-
-        auto surface_ptr = *surface;
-
-        segment_configs.push_back(BSplineSegmentConfig{
-            .surface = surface_ptr,
-            .tau_start = tau_start,
-            .tau_end = tau_end,
-        });
-        prev_surface = surface_ptr;
+        segment_configs.push_back(std::move(*seg_result));
     }
 
     // =====================================================================
@@ -375,6 +273,132 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     };
 
     return build_segmented_surface(std::move(seg_config));
+}
+
+std::expected<BSplineSegmentConfig, PriceTableError>
+SegmentedPriceTableBuilder::build_segment(
+    size_t seg_idx,
+    const std::vector<double>& boundaries,
+    const Config& config,
+    const std::vector<double>& expanded_log_m_grid,
+    double K_ref,
+    const std::vector<Dividend>& dividends,
+    std::shared_ptr<const PriceTableSurface>& prev_surface)
+{
+    double tau_start = boundaries[seg_idx];
+    double tau_end = boundaries[seg_idx + 1];
+    double seg_width = tau_end - tau_start;
+
+    // Local τ grid for this segment
+    auto local_tau = make_segment_tau_grid(
+        0.0, seg_width, config.tau_points_per_segment,
+        config.tau_target_dt, config.tau_points_min, config.tau_points_max);
+
+    // Build PriceTableBuilderND for this segment
+    auto setup = PriceTableBuilder::from_vectors(
+        expanded_log_m_grid, local_tau, config.grid.vol, config.grid.rate,
+        K_ref, config.pde_accuracy, config.option_type,
+        config.dividends.dividend_yield);
+
+    if (!setup.has_value()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    auto& [builder, axes] = *setup;
+    builder.set_allow_tau_zero(true);
+
+    // ------ Manual build path (used for all segments) ------
+
+    // 1. Create batch params
+    auto batch_params = builder.make_batch(axes);
+
+    // 2. Estimate PDE grid (same as builder.build() would)
+    auto [est_grid, est_td] = builder.estimate_pde_grid(batch_params, axes);
+    PDEGridSpec custom_grid = PDEGridConfig{est_grid, est_td.n_steps(), {}};
+
+    // 3. Create batch solver with snapshot times
+    BatchAmericanOptionSolver batch_solver;
+    batch_solver.set_snapshot_times(axes.grids[1]);
+
+    // 4. Build setup callback (chained segments only)
+    BatchAmericanOptionSolver::SetupCallback setup_callback = nullptr;
+
+    if (seg_idx > 0) {
+
+        const auto& vol_grid = config.grid.vol;
+        const auto& rate_grid = config.grid.rate;
+        const size_t Nr = rate_grid.size();
+
+        // τ at the boundary of the previous segment (in its local coords)
+        double prev_seg_tau_local_end = boundaries[seg_idx] - boundaries[seg_idx - 1];
+
+        // Dividend amount at this boundary.
+        double boundary_div = dividends[dividends.size() - seg_idx].amount;
+
+        ChainedICContext ic_ctx{
+            .prev_surface = prev_surface,
+            .K_ref = K_ref,
+            .prev_tau_end = prev_seg_tau_local_end,
+            .boundary_div = boundary_div,
+        };
+
+        setup_callback = [ic_ctx, &vol_grid, &rate_grid, Nr](
+            size_t index, AmericanOptionSolver& solver)
+        {
+            double sigma = vol_grid[index / Nr];
+            double rate = rate_grid[index % Nr];
+
+            // IC maps log-moneyness x → normalized price u = V/K_ref.
+            // Jump condition at dividend date: V(t⁻, S) = V(t⁺, S - D).
+            solver.set_initial_condition(
+                [ic_ctx, sigma, rate](
+                    std::span<const double> x, std::span<double> u)
+                {
+                    for (size_t i = 0; i < x.size(); ++i) {
+                        double spot = ic_ctx.K_ref * std::exp(x[i]);
+                        double spot_adj = std::max(spot - ic_ctx.boundary_div, 1e-8);
+                        double x_adj = std::log(spot_adj / ic_ctx.K_ref);
+                        double raw = ic_ctx.prev_surface->value(
+                            {x_adj, ic_ctx.prev_tau_end, sigma, rate});
+                        u[i] = raw;
+                    }
+                });
+        };
+    }
+
+    // 5. Solve batch with estimated grid
+    auto batch_result = batch_solver.solve_batch(
+        batch_params, true, setup_callback, custom_grid);
+
+    // 6. Failure rate check
+    // Segment 0: strict (0.0), matching builder.build() default.
+    // Chained segments: lenient (0.5), matching old behavior (no check).
+    if (!batch_result.results.empty()) {
+        const double max_rate = (seg_idx == 0) ? 0.0 : 0.5;
+        const double failure_rate = static_cast<double>(batch_result.failed_count) /
+                                    static_cast<double>(batch_result.results.size());
+        if (failure_rate > max_rate) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+        }
+    }
+
+    // 7-10. Extract tensor, repair, fit, build surface
+    DividendSpec seg_divs{.dividend_yield = config.dividends.dividend_yield,
+                          .discrete_dividends = {}};
+    auto assembly = builder.assemble_surface(
+        batch_result, axes, K_ref, seg_divs);
+    if (!assembly.has_value()) {
+        return std::unexpected(assembly.error());
+    }
+
+    auto surface_ptr = assembly->surface;
+    prev_surface = surface_ptr;
+
+    return BSplineSegmentConfig{
+        .surface = surface_ptr,
+        .tau_start = tau_start,
+        .tau_end = tau_end,
+    };
 }
 
 // ===========================================================================

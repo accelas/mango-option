@@ -17,6 +17,7 @@
 #include <expected>
 #include <experimental/mdspan>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -558,6 +559,37 @@ public:
         BSplineFittingStats<double, N> stats;
     };
 
+    /// Result from assemble_surface() — surface + extraction diagnostics
+    struct AssembleSurfaceResult {
+        std::shared_ptr<const PriceTableSurfaceND<N>> surface;
+        BSplineFittingStats<double, N> fitting_stats;
+        size_t failed_pde_slices = 0;
+        size_t failed_spline_points = 0;
+        size_t repaired_full_slices = 0;
+        size_t repaired_partial_points = 0;
+        size_t total_slices = 0;
+    };
+
+    /// Assemble a B-spline surface from batch PDE results.
+    ///
+    /// Runs the common pipeline: extract tensor, repair failures,
+    /// apply optional transform (e.g. EEP decomposition), fit B-spline
+    /// coefficients, and build the immutable surface.
+    ///
+    /// @param batch      Batch PDE solve results
+    /// @param axes       Grid axes for the tensor
+    /// @param K_ref      Reference strike for the surface
+    /// @param dividends  Dividend specification for the surface
+    /// @param transform  Optional tensor transform (e.g. EEP decomposition)
+    /// @return AssembleSurfaceResult on success, or error
+    [[nodiscard]] std::expected<AssembleSurfaceResult, PriceTableError>
+    assemble_surface(
+        const BatchAmericanOptionResult& batch,
+        const PriceTableAxesND<N>& axes,
+        double K_ref,
+        const DividendSpec& dividends,
+        TensorTransformFn transform = nullptr) const;
+
     /// Generate batch of PricingParams from axes
     [[nodiscard]] std::vector<PricingParams> make_batch(
         const PriceTableAxesND<N>& axes) const;
@@ -588,6 +620,20 @@ private:
     /// Solve batch of options with snapshot registration
     [[nodiscard]] BatchAmericanOptionResult solve_batch(
         const std::vector<PricingParams>& batch,
+        const PriceTableAxesND<N>& axes) const;
+
+    /// Repair partial spline failures via τ-interpolation
+    [[nodiscard]] RepairStats repair_spline_failures(
+        PriceTensorND<N>& tensor,
+        const std::map<std::pair<size_t, size_t>, std::vector<size_t>>& spline_failures_by_slice,
+        size_t Nt,
+        const PriceTableAxesND<N>& axes) const;
+
+    /// Repair full-slice failures (PDE + all-maturity spline) via neighbor copy
+    [[nodiscard]] std::expected<RepairStats, PriceTableError> repair_pde_failures(
+        PriceTensorND<N>& tensor,
+        const std::vector<size_t>& full_slice_failures,
+        std::vector<bool>& slice_valid,
         const PriceTableAxesND<N>& axes) const;
 
     /// Find nearest valid neighbor in (σ,r) grid using Manhattan distance

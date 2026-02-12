@@ -24,8 +24,6 @@ namespace mango {
 
 namespace {
 
-constexpr double kMinPositive = 1e-6;
-
 // ============================================================================
 // Chebyshev refinement and build strategies
 // ============================================================================
@@ -62,6 +60,185 @@ struct SegmentedChebyshevBuildConfig {
     std::vector<double> seg_boundaries;
     std::vector<bool> seg_is_gap;  ///< true for synthetic dividend gap segments
 };
+
+/// Generate per-segment CC-level tau nodes, sorted and deduplicated.
+/// Gap segments are skipped.
+static std::vector<double> generate_segmented_tau_nodes(
+    size_t tau_level,
+    const std::vector<double>& seg_bounds,
+    const std::vector<bool>& seg_is_gap)
+{
+    std::vector<double> tau_nodes;
+    for (size_t s = 0; s + 1 < seg_bounds.size(); ++s) {
+        if (seg_is_gap[s]) continue;
+        for (double t : cc_level_nodes(tau_level, seg_bounds[s], seg_bounds[s + 1]))
+            tau_nodes.push_back(t);
+    }
+    std::sort(tau_nodes.begin(), tau_nodes.end());
+    tau_nodes.erase(std::unique(tau_nodes.begin(), tau_nodes.end(),
+        [](double a, double b) { return std::abs(a - b) < 1e-10; }),
+        tau_nodes.end());
+    return tau_nodes;
+}
+
+/// Batch-solve PDE for missing (sigma, rate) pairs, storing results in cache.
+/// Returns the number of successful new PDE solves.
+static size_t solve_missing_pde_pairs(
+    ChebyshevPDECache& cache,
+    double K_ref,
+    OptionType option_type,
+    double dividend_yield,
+    const std::vector<Dividend>& discrete_dividends,
+    std::span<const double> tau_nodes,
+    std::span<const double> sigma_nodes,
+    std::span<const double> rate_nodes)
+{
+    auto missing = cache.missing_pairs(sigma_nodes, rate_nodes);
+    if (missing.empty()) return 0;
+
+    std::vector<PricingParams> batch;
+    batch.reserve(missing.size());
+    for (auto [si, ri] : missing) {
+        PricingParams p(
+            OptionSpec{.spot = K_ref, .strike = K_ref,
+                       .maturity = tau_nodes.back() * 1.01,
+                       .rate = rate_nodes[ri],
+                       .dividend_yield = dividend_yield,
+                       .option_type = option_type},
+            sigma_nodes[si]);
+        p.discrete_dividends = discrete_dividends;
+        batch.push_back(std::move(p));
+    }
+
+    BatchAmericanOptionSolver solver;
+    solver.set_grid_accuracy(make_grid_accuracy(GridAccuracyProfile::Ultra));
+    std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
+    solver.set_snapshot_times(std::span<const double>(tau_vec));
+    auto batch_result = solver.solve_batch(
+        std::span<const PricingParams>(batch), /*use_shared_grid=*/true);
+
+    for (size_t bi = 0; bi < missing.size(); ++bi) {
+        auto [si, ri] = missing[bi];
+        if (!batch_result.results[bi].has_value()) continue;
+        const auto& result = batch_result.results[bi].value();
+        auto grid = result.grid();
+        auto x_grid = grid->x();
+        for (size_t j = 0; j < tau_nodes.size(); ++j) {
+            auto spatial = result.at_time(j);
+            cache.store_slice(sigma_nodes[si], rate_nodes[ri],
+                              j, x_grid, spatial);
+        }
+    }
+
+    return batch.size() - batch_result.failed_count;
+}
+
+/// Build per-segment Chebyshev leaves from cached PDE slices.
+/// @param include_gaps If true, gap segments get minimal placeholder leaves
+///                     (needed for direct-index routing in SurfaceHandle).
+///                     If false, gap segments are skipped entirely.
+static std::vector<ChebyshevSegmentedLeaf>
+build_segment_leaves(
+    ChebyshevPDECache& cache,
+    double K_ref,
+    const std::vector<double>& seg_bounds,
+    const std::vector<bool>& seg_is_gap,
+    bool include_gaps,
+    std::span<const double> m_nodes,
+    std::span<const double> tau_nodes,
+    std::span<const double> sigma_nodes,
+    std::span<const double> rate_nodes)
+{
+    // Map tau nodes to segments (skip gaps in mapping)
+    const size_t n_seg = seg_bounds.size() - 1;
+    std::vector<std::vector<size_t>> seg_tau_indices(n_seg);
+    for (size_t ti = 0; ti < tau_nodes.size(); ++ti) {
+        double t = tau_nodes[ti];
+        size_t s = 0;
+        for (size_t k = 0; k < n_seg; ++k) {
+            if (seg_is_gap[k]) continue;
+            if (t >= seg_bounds[k] && t <= seg_bounds[k + 1]) {
+                s = k;
+                break;
+            }
+        }
+        seg_tau_indices[s].push_back(ti);
+    }
+
+    // Build per-segment Chebyshev tensors (V/K_ref, no EEP)
+    const size_t Nm = m_nodes.size();
+    const size_t Ns = sigma_nodes.size();
+    const size_t Nr = rate_nodes.size();
+
+    std::vector<ChebyshevSegmentedLeaf> leaves;
+    leaves.reserve(n_seg);
+
+    for (size_t s = 0; s < n_seg; ++s) {
+        if (!include_gaps && seg_is_gap[s]) continue;
+
+        const auto& tau_idx = seg_tau_indices[s];
+        const size_t Nt_seg = tau_idx.size();
+
+        if (Nt_seg == 0) {
+            // No tau nodes — minimal placeholder leaf
+            Domain<4> domain{
+                .lo = {m_nodes.front(), 0.0,
+                       sigma_nodes.front(), rate_nodes.front()},
+                .hi = {m_nodes.back(), seg_bounds[s + 1] - seg_bounds[s],
+                       sigma_nodes.back(), rate_nodes.back()},
+            };
+            std::array<size_t, 4> num_pts = {2, 2, 2, 2};
+            std::vector<double> zeros(16, 0.0);
+            auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
+                build_from_values(std::span<const double>(zeros),
+                                  domain, num_pts);
+            leaves.emplace_back(std::move(interp), StandardTransform4D{},
+                                K_ref);
+            continue;
+        }
+
+        std::vector<double> local_tau(Nt_seg);
+        for (size_t j = 0; j < Nt_seg; ++j) {
+            local_tau[j] = tau_nodes[tau_idx[j]] - seg_bounds[s];
+        }
+
+        std::vector<double> values(Nm * Nt_seg * Ns * Nr, 0.0);
+        for (size_t si = 0; si < Ns; ++si) {
+            double sigma = sigma_nodes[si];
+            for (size_t ri = 0; ri < Nr; ++ri) {
+                double rate = rate_nodes[ri];
+                for (size_t jt = 0; jt < Nt_seg; ++jt) {
+                    auto* spline = cache.get_slice(
+                        sigma, rate, tau_idx[jt]);
+                    if (!spline) continue;
+                    for (size_t mi = 0; mi < Nm; ++mi) {
+                        double v_over_k = spline->eval(m_nodes[mi]);
+                        size_t flat =
+                            mi * (Nt_seg * Ns * Nr)
+                            + jt * (Ns * Nr)
+                            + si * Nr + ri;
+                        values[flat] = v_over_k;
+                    }
+                }
+            }
+        }
+
+        Domain<4> domain{
+            .lo = {m_nodes.front(), local_tau.front(),
+                   sigma_nodes.front(), rate_nodes.front()},
+            .hi = {m_nodes.back(), local_tau.back(),
+                   sigma_nodes.back(), rate_nodes.back()},
+        };
+        std::array<size_t, 4> num_pts = {Nm, Nt_seg, Ns, Nr};
+        auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
+            build_from_values(std::span<const double>(values),
+                              domain, num_pts);
+        leaves.emplace_back(std::move(interp), StandardTransform4D{},
+                            K_ref);
+    }
+
+    return leaves;
+}
 
 /// Create a BuildFn for the adaptive refinement loop that builds Chebyshev surfaces.
 /// Reuses PDE solutions across refinement iterations via ChebyshevPDECache.
@@ -224,144 +401,25 @@ static BuildFn make_segmented_chebyshev_build_fn(
             *last_tau_size = tau_nodes.size();
         }
 
-        // 1. Batch-solve missing (sigma, rate) pairs
-        auto missing = cache.missing_pairs(sigma_nodes, rate_nodes);
-        size_t new_solves = 0;
-        if (!missing.empty()) {
-            std::vector<PricingParams> batch;
-            batch.reserve(missing.size());
-            for (auto [si, ri] : missing) {
-                PricingParams p(
-                    OptionSpec{.spot = config.K_ref, .strike = config.K_ref,
-                               .maturity = tau_nodes.back() * 1.01,
-                               .rate = rate_nodes[ri],
-                               .dividend_yield = config.dividend_yield,
-                               .option_type = config.option_type},
-                    sigma_nodes[si]);
-                p.discrete_dividends = config.discrete_dividends;
-                batch.push_back(std::move(p));
-            }
+        size_t new_solves = solve_missing_pde_pairs(
+            cache, config.K_ref, config.option_type, config.dividend_yield,
+            config.discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
+        cache.record_pde_solves(new_solves);
 
-            BatchAmericanOptionSolver solver;
-            solver.set_grid_accuracy(
-                make_grid_accuracy(GridAccuracyProfile::Ultra));
-            std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
-            solver.set_snapshot_times(std::span<const double>(tau_vec));
-            auto batch_result = solver.solve_batch(
-                std::span<const PricingParams>(batch), true);
-            new_solves = batch.size() - batch_result.failed_count;
+        auto leaves = build_segment_leaves(
+            cache, config.K_ref, config.seg_boundaries, config.seg_is_gap,
+            /*include_gaps=*/true,
+            m_nodes, tau_nodes, sigma_nodes, rate_nodes);
 
-            for (size_t bi = 0; bi < missing.size(); ++bi) {
-                auto [si, ri] = missing[bi];
-                if (!batch_result.results[bi].has_value()) continue;
-                const auto& result = batch_result.results[bi].value();
-                auto grid = result.grid();
-                auto x_grid = grid->x();
-                for (size_t j = 0; j < tau_nodes.size(); ++j) {
-                    auto spatial = result.at_time(j);
-                    cache.store_slice(sigma_nodes[si], rate_nodes[ri],
-                                      j, x_grid, spatial);
-                }
-            }
-            cache.record_pde_solves(new_solves);
-        }
-
-        // 2. Map tau nodes to segments
-        const auto& seg = config.seg_boundaries;
-        const size_t n_seg = seg.size() - 1;
-        std::vector<std::vector<size_t>> seg_tau_indices(n_seg);
-        for (size_t ti = 0; ti < tau_nodes.size(); ++ti) {
-            double t = tau_nodes[ti];
-            size_t s = 0;
-            for (size_t k = 0; k < n_seg; ++k) {
-                // Skip gap segments -- CGL nodes at boundaries belong
-                // to the adjacent real segment, not the narrow gap.
-                if (config.seg_is_gap[k]) continue;
-                if (t >= seg[k] && t <= seg[k + 1]) {
-                    s = k;
-                    break;
-                }
-            }
-            seg_tau_indices[s].push_back(ti);
-        }
-
-        // 3. Build per-segment Chebyshev tensors (V/K_ref, no EEP)
-        const size_t Nm = m_nodes.size();
-        const size_t Ns = sigma_nodes.size();
-        const size_t Nr = rate_nodes.size();
-
-        std::vector<ChebyshevSegmentedLeaf> leaves;
-        leaves.reserve(n_seg);
-
-        for (size_t s = 0; s < n_seg; ++s) {
-            const auto& tau_idx = seg_tau_indices[s];
-            const size_t Nt_seg = tau_idx.size();
-
-            if (Nt_seg == 0) {
-                Domain<4> domain{
-                    .lo = {m_nodes.front(), seg[s],
-                           sigma_nodes.front(), rate_nodes.front()},
-                    .hi = {m_nodes.back(), seg[s + 1],
-                           sigma_nodes.back(), rate_nodes.back()},
-                };
-                std::array<size_t, 4> num_pts = {2, 2, 2, 2};
-                std::vector<double> zeros(16, 0.0);
-                auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
-                    build_from_values(std::span<const double>(zeros),
-                                      domain, num_pts);
-                leaves.emplace_back(std::move(interp), StandardTransform4D{},
-                                    config.K_ref);
-                continue;
-            }
-
-            std::vector<double> local_tau(Nt_seg);
-            for (size_t j = 0; j < Nt_seg; ++j) {
-                local_tau[j] = tau_nodes[tau_idx[j]] - seg[s];
-            }
-
-            std::vector<double> values(Nm * Nt_seg * Ns * Nr, 0.0);
-            for (size_t si = 0; si < Ns; ++si) {
-                double sigma = sigma_nodes[si];
-                for (size_t ri = 0; ri < Nr; ++ri) {
-                    double rate = rate_nodes[ri];
-                    for (size_t jt = 0; jt < Nt_seg; ++jt) {
-                        auto* spline = cache.get_slice(
-                            sigma, rate, tau_idx[jt]);
-                        if (!spline) continue;
-                        for (size_t mi = 0; mi < Nm; ++mi) {
-                            double v_over_k = spline->eval(m_nodes[mi]);
-                            size_t flat =
-                                mi * (Nt_seg * Ns * Nr)
-                                + jt * (Ns * Nr)
-                                + si * Nr + ri;
-                            values[flat] = v_over_k;
-                        }
-                    }
-                }
-            }
-
-            Domain<4> domain{
-                .lo = {m_nodes.front(), local_tau.front(),
-                       sigma_nodes.front(), rate_nodes.front()},
-                .hi = {m_nodes.back(), local_tau.back(),
-                       sigma_nodes.back(), rate_nodes.back()},
-            };
-            std::array<size_t, 4> num_pts = {Nm, Nt_seg, Ns, Nr};
-            auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
-                build_from_values(std::span<const double>(values),
-                                  domain, num_pts);
-            leaves.emplace_back(std::move(interp), StandardTransform4D{},
-                                config.K_ref);
-        }
-
-        // 4. Direct evaluation lambda.
+        // Direct evaluation lambda with gap routing.
         // TransformLeaf: leaf.price() = interp(log(S/K), tau, sigma, r) * K/K_ref
         // Multiply by K_ref to get V * K/K_ref (homogeneity scaling).
+        const size_t n_seg = config.seg_boundaries.size() - 1;
         auto leaves_shared =
             std::make_shared<std::vector<ChebyshevSegmentedLeaf>>(
                 std::move(leaves));
         auto seg_copy = std::make_shared<std::vector<double>>(
-            seg.begin(), seg.end());
+            config.seg_boundaries.begin(), config.seg_boundaries.end());
         auto gap_copy = std::make_shared<std::vector<bool>>(
             config.seg_is_gap.begin(), config.seg_is_gap.end());
         double K_ref = config.K_ref;
@@ -522,22 +580,10 @@ static RefineFn make_segmented_chebyshev_refine_fn(
         case 0:
             moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
             break;
-        case 1: {
-            // Per-segment CC-level tau nodes
-            tau.clear();
-            for (size_t s = 0; s + 1 < state.seg_boundaries.size(); ++s) {
-                if (state.seg_is_gap[s]) continue;
-                double seg_lo = state.seg_boundaries[s];
-                double seg_hi = state.seg_boundaries[s + 1];
-                for (double t : cc_level_nodes(state.tau_level, seg_lo, seg_hi))
-                    tau.push_back(t);
-            }
-            std::sort(tau.begin(), tau.end());
-            tau.erase(std::unique(tau.begin(), tau.end(),
-                [](double a, double b) { return std::abs(a - b) < 1e-10; }),
-                tau.end());
+        case 1:
+            tau = generate_segmented_tau_nodes(
+                state.tau_level, state.seg_boundaries, state.seg_is_gap);
             break;
-        }
         case 2:
             vol = cc_level_nodes(state.sigma_level, state.sigma_lo, state.sigma_hi);
             break;
@@ -568,141 +614,23 @@ build_chebyshev_segmented_pieces(
     std::span<const double> sigma_nodes,
     std::span<const double> rate_nodes)
 {
-    // 1. Create PDE cache, find missing (sigma, rate) pairs, batch-solve
     ChebyshevPDECache cache;
+    size_t pde_solves = solve_missing_pde_pairs(
+        cache, K_ref, option_type, dividend_yield,
+        discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
 
-    auto missing = cache.missing_pairs(sigma_nodes, rate_nodes);
-    if (!missing.empty()) {
-        std::vector<PricingParams> batch;
-        batch.reserve(missing.size());
-        for (auto [si, ri] : missing) {
-            PricingParams p(
-                OptionSpec{.spot = K_ref, .strike = K_ref,
-                           .maturity = tau_nodes.back() * 1.01,
-                           .rate = rate_nodes[ri],
-                           .dividend_yield = dividend_yield,
-                           .option_type = option_type},
-                sigma_nodes[si]);
-            p.discrete_dividends = discrete_dividends;
-            batch.push_back(std::move(p));
-        }
+    auto leaves = build_segment_leaves(
+        cache, K_ref, seg_bounds, seg_is_gap,
+        /*include_gaps=*/false,
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
 
-        BatchAmericanOptionSolver solver;
-        solver.set_grid_accuracy(
-            make_grid_accuracy(GridAccuracyProfile::Ultra));
-        std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
-        solver.set_snapshot_times(std::span<const double>(tau_vec));
-        auto batch_result = solver.solve_batch(
-            std::span<const PricingParams>(batch), true);
-
-        for (size_t bi = 0; bi < missing.size(); ++bi) {
-            auto [si, ri] = missing[bi];
-            if (!batch_result.results[bi].has_value()) continue;
-            const auto& result = batch_result.results[bi].value();
-            auto grid = result.grid();
-            auto x_grid = grid->x();
-            for (size_t j = 0; j < tau_nodes.size(); ++j) {
-                auto spatial = result.at_time(j);
-                cache.store_slice(sigma_nodes[si], rate_nodes[ri],
-                                  j, x_grid, spatial);
-            }
-        }
-    }
-
-    // 2. Map tau nodes to segments (skip gap segments)
-    const size_t n_seg = seg_bounds.size() - 1;
-    std::vector<std::vector<size_t>> seg_tau_indices(n_seg);
-    for (size_t ti = 0; ti < tau_nodes.size(); ++ti) {
-        double t = tau_nodes[ti];
-        size_t s = 0;
-        for (size_t k = 0; k < n_seg; ++k) {
-            if (seg_is_gap[k]) continue;
-            if (t >= seg_bounds[k] && t <= seg_bounds[k + 1]) {
-                s = k;
-                break;
-            }
-        }
-        seg_tau_indices[s].push_back(ti);
-    }
-
-    // 3. Build per-segment Chebyshev tensors (V/K_ref, no EEP) — real segments only
-    const size_t Nm = m_nodes.size();
-    const size_t Ns = sigma_nodes.size();
-    const size_t Nr = rate_nodes.size();
-
-    std::vector<ChebyshevSegmentedLeaf> leaves;
-    leaves.reserve(n_seg);  // upper bound; only real segments get leaves
-
-    for (size_t s = 0; s < n_seg; ++s) {
-        if (seg_is_gap[s]) continue;  // skip gap segments entirely
-
-        const auto& tau_idx = seg_tau_indices[s];
-        const size_t Nt_seg = tau_idx.size();
-
-        if (Nt_seg == 0) {
-            // Degenerate real segment with no tau nodes — minimal placeholder
-            Domain<4> domain{
-                .lo = {m_nodes.front(), 0.0,
-                       sigma_nodes.front(), rate_nodes.front()},
-                .hi = {m_nodes.back(), seg_bounds[s + 1] - seg_bounds[s],
-                       sigma_nodes.back(), rate_nodes.back()},
-            };
-            std::array<size_t, 4> num_pts = {2, 2, 2, 2};
-            std::vector<double> zeros(16, 0.0);
-            auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
-                build_from_values(std::span<const double>(zeros),
-                                  domain, num_pts);
-            leaves.emplace_back(std::move(interp), StandardTransform4D{},
-                                K_ref);
-            continue;
-        }
-
-        std::vector<double> local_tau(Nt_seg);
-        for (size_t j = 0; j < Nt_seg; ++j) {
-            local_tau[j] = tau_nodes[tau_idx[j]] - seg_bounds[s];
-        }
-
-        std::vector<double> values(Nm * Nt_seg * Ns * Nr, 0.0);
-        for (size_t si = 0; si < Ns; ++si) {
-            double sigma = sigma_nodes[si];
-            for (size_t ri = 0; ri < Nr; ++ri) {
-                double rate = rate_nodes[ri];
-                for (size_t jt = 0; jt < Nt_seg; ++jt) {
-                    auto* spline = cache.get_slice(
-                        sigma, rate, tau_idx[jt]);
-                    if (!spline) continue;
-                    for (size_t mi = 0; mi < Nm; ++mi) {
-                        double v_over_k = spline->eval(m_nodes[mi]);
-                        size_t flat =
-                            mi * (Nt_seg * Ns * Nr)
-                            + jt * (Ns * Nr)
-                            + si * Nr + ri;
-                        values[flat] = v_over_k;
-                    }
-                }
-            }
-        }
-
-        Domain<4> domain{
-            .lo = {m_nodes.front(), local_tau.front(),
-                   sigma_nodes.front(), rate_nodes.front()},
-            .hi = {m_nodes.back(), local_tau.back(),
-                   sigma_nodes.back(), rate_nodes.back()},
-        };
-        std::array<size_t, 4> num_pts = {Nm, Nt_seg, Ns, Nr};
-        auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
-            build_from_values(std::span<const double>(values),
-                              domain, num_pts);
-        leaves.emplace_back(std::move(interp), StandardTransform4D{},
-                            K_ref);
-    }
-
-    // 4. Build TauSegmentSplit from segment boundaries (absorbs gaps)
+    // Build TauSegmentSplit from segment boundaries (absorbs gaps)
     auto tau_split = make_tau_split_from_segments(seg_bounds, seg_is_gap, K_ref);
 
     return ChebyshevSegmentedPieces{
         .leaves = std::move(leaves),
         .tau_split = std::move(tau_split),
+        .pde_solves = pde_solves,
     };
 }
 
@@ -812,199 +740,229 @@ build_adaptive_chebyshev(
     return result;
 }
 
+// ============================================================================
+// ChebyshevSegmentedBuilder
+// ============================================================================
+
+ChebyshevSegmentedBuilder::ChebyshevSegmentedBuilder(
+    SegmentedAdaptiveConfig config,
+    std::vector<double> K_refs,
+    DomainBounds domain,
+    std::vector<double> seg_bounds,
+    std::vector<bool> seg_is_gap)
+    : config_(std::move(config)),
+      K_refs_(std::move(K_refs)),
+      domain_(domain),
+      seg_bounds_(std::move(seg_bounds)),
+      seg_is_gap_(std::move(seg_is_gap)) {}
+
+std::expected<ChebyshevSegmentedBuilder, PriceTableError>
+ChebyshevSegmentedBuilder::create(
+    const SegmentedAdaptiveConfig& config, const IVGrid& domain)
+{
+    auto K_refs = resolve_k_refs(config.kref_config, config.spot);
+    if (!K_refs) return std::unexpected(K_refs.error());
+
+    auto dom = expand_segmented_domain(
+        domain, config.maturity, config.dividend_yield,
+        config.discrete_dividends, K_refs->front());
+    if (!dom) return std::unexpected(dom.error());
+
+    auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(
+        config.discrete_dividends, config.maturity,
+        dom->min_tau, dom->max_tau);
+
+    return ChebyshevSegmentedBuilder(
+        config, std::move(*K_refs), *dom,
+        std::move(seg_bounds), std::move(seg_is_gap));
+}
+
+std::vector<double>
+ChebyshevSegmentedBuilder::generate_tau_nodes(size_t tau_level) const {
+    return generate_segmented_tau_nodes(tau_level, seg_bounds_, seg_is_gap_);
+}
+
+ChebyshevSegmentedBuilder::ExtendedBounds
+ChebyshevSegmentedBuilder::compute_headroom(
+    std::array<size_t, 4> cc_levels) const
+{
+    auto hfn = [](double lo, double hi, size_t n) {
+        return 3.0 * (hi - lo)
+             / static_cast<double>(std::max(n, size_t{4}) - 1);
+    };
+    double hm = hfn(domain_.min_m, domain_.max_m, (1u << cc_levels[0]) + 1);
+    double hs = hfn(domain_.min_vol, domain_.max_vol, (1u << cc_levels[2]) + 1);
+    double hr = hfn(domain_.min_rate, domain_.max_rate, (1u << cc_levels[3]) + 1);
+
+    return {
+        .m_lo = domain_.min_m - hm,
+        .m_hi = domain_.max_m + hm,
+        .sigma_lo = std::max(domain_.min_vol - hs, 0.01),
+        .sigma_hi = domain_.max_vol + hs,
+        .rate_lo = std::max(domain_.min_rate - hr, -0.05),
+        .rate_hi = domain_.max_rate + hr,
+    };
+}
+
+std::expected<ChebyshevSegmentedBuilder::AssembleResult, PriceTableError>
+ChebyshevSegmentedBuilder::build_all_krefs(
+    std::span<const double> m_nodes,
+    std::span<const double> tau_nodes,
+    std::span<const double> sigma_nodes,
+    std::span<const double> rate_nodes) const
+{
+    std::vector<ChebyshevTauSegmented> kref_surfaces;
+    size_t total_pde_solves = 0;
+    for (double k_ref : K_refs_) {
+        auto pieces = build_chebyshev_segmented_pieces(
+            k_ref, config_.option_type, config_.dividend_yield,
+            config_.discrete_dividends, seg_bounds_, seg_is_gap_,
+            m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+        if (!pieces) return std::unexpected(pieces.error());
+        total_pde_solves += pieces->pde_solves;
+        kref_surfaces.emplace_back(
+            std::move(pieces->leaves), std::move(pieces->tau_split));
+    }
+
+    ChebyshevMultiKRefInner inner(
+        std::move(kref_surfaces), MultiKRefSplit(K_refs_));
+
+    SurfaceBounds bounds{
+        .m_min = domain_.min_m, .m_max = domain_.max_m,
+        .tau_min = domain_.min_tau, .tau_max = domain_.max_tau,
+        .sigma_min = domain_.min_vol, .sigma_max = domain_.max_vol,
+        .rate_min = domain_.min_rate, .rate_max = domain_.max_rate,
+    };
+
+    return AssembleResult{
+        .surface = ChebyshevMultiKRefSurface(
+            std::move(inner), bounds,
+            config_.option_type, config_.dividend_yield),
+        .pde_solves = total_pde_solves,
+    };
+}
+
+std::expected<ChebyshevMultiKRefSurface, PriceTableError>
+ChebyshevSegmentedBuilder::build(std::array<size_t, 4> cc_levels) const
+{
+    auto ext = compute_headroom(cc_levels);
+
+    auto m_nodes = cc_level_nodes(cc_levels[0], ext.m_lo, ext.m_hi);
+    auto sigma_nodes = cc_level_nodes(cc_levels[2], ext.sigma_lo, ext.sigma_hi);
+    auto rate_nodes = cc_level_nodes(cc_levels[3], ext.rate_lo, ext.rate_hi);
+    auto tau_nodes = generate_tau_nodes(cc_levels[1]);
+    if (tau_nodes.empty()) {
+        return std::unexpected(
+            PriceTableError(PriceTableErrorCode::InvalidConfig));
+    }
+
+    auto assembled = build_all_krefs(
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+    if (!assembled) return std::unexpected(assembled.error());
+    return std::move(assembled->surface);
+}
+
+std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
+ChebyshevSegmentedBuilder::build_adaptive(
+    const AdaptiveGridParams& params) const
+{
+    constexpr std::array<size_t, 4> kInitLevels = {5, 3, 2, 1};
+    auto ext = compute_headroom(kInitLevels);
+
+    // Tau headroom for refinement state
+    auto hfn = [](double lo, double hi, size_t n) {
+        return 3.0 * (hi - lo)
+             / static_cast<double>(std::max(n, size_t{4}) - 1);
+    };
+    double ht = hfn(domain_.min_tau, domain_.max_tau,
+                     (1u << kInitLevels[1]) + 1);
+
+    ChebyshevRefinementState state{
+        .m_level = kInitLevels[0], .tau_level = kInitLevels[1],
+        .sigma_level = kInitLevels[2], .rate_level = kInitLevels[3],
+        .max_level = 7,
+        .m_lo = ext.m_lo, .m_hi = ext.m_hi,
+        .tau_lo = std::max(domain_.min_tau - ht, 1e-4),
+        .tau_hi = domain_.max_tau + ht,
+        .sigma_lo = ext.sigma_lo, .sigma_hi = ext.sigma_hi,
+        .rate_lo = ext.rate_lo, .rate_hi = ext.rate_hi,
+        .seg_boundaries = seg_bounds_,
+        .seg_is_gap = seg_is_gap_,
+    };
+
+    ChebyshevPDECache pde_cache;
+    SegmentedChebyshevBuildConfig build_cfg{
+        .K_ref = config_.spot,
+        .option_type = config_.option_type,
+        .dividend_yield = config_.dividend_yield,
+        .discrete_dividends = config_.discrete_dividends,
+        .seg_boundaries = seg_bounds_,
+        .seg_is_gap = seg_is_gap_,
+    };
+
+    auto build_fn = make_segmented_chebyshev_build_fn(pde_cache, build_cfg, state);
+    auto refine_fn = make_segmented_chebyshev_refine_fn(state);
+    auto validate_fn = make_validate_fn(
+        config_.dividend_yield, config_.option_type, config_.discrete_dividends);
+    auto compute_error_fn = make_fd_vega_error_fn(
+        params, validate_fn, config_.option_type);
+
+    InitialGrids initial;
+    initial.moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
+    initial.tau = generate_tau_nodes(state.tau_level);
+    if (initial.tau.empty()) {
+        return std::unexpected(
+            PriceTableError(PriceTableErrorCode::InvalidConfig));
+    }
+    initial.vol = cc_level_nodes(state.sigma_level, state.sigma_lo, state.sigma_hi);
+    initial.rate = cc_level_nodes(state.rate_level, state.rate_lo, state.rate_hi);
+    initial.exact = true;
+
+    RefinementContext ctx{
+        .spot = config_.spot,
+        .dividend_yield = config_.dividend_yield,
+        .option_type = config_.option_type,
+        .min_moneyness = domain_.min_m, .max_moneyness = domain_.max_m,
+        .min_tau = domain_.min_tau, .max_tau = domain_.max_tau,
+        .min_vol = domain_.min_vol, .max_vol = domain_.max_vol,
+        .min_rate = domain_.min_rate, .max_rate = domain_.max_rate,
+    };
+
+    auto grid_result = run_refinement(
+        params, build_fn, validate_fn, refine_fn, ctx,
+        compute_error_fn, initial);
+    if (!grid_result) return std::unexpected(grid_result.error());
+    auto& grids = *grid_result;
+
+    // Assemble final surface from converged grids
+    auto surface = build_all_krefs(
+        grids.moneyness, grids.tau, grids.vol, grids.rate);
+    if (!surface) return std::unexpected(surface.error());
+
+    return ChebyshevSegmentedAdaptiveResult{
+        .surface = std::move(surface->surface),
+        .iterations = std::move(grids.iterations),
+        .achieved_max_error = grids.achieved_max_error,
+        .achieved_avg_error = grids.achieved_avg_error,
+        .target_met = grids.target_met,
+        .total_pde_solves =
+            pde_cache.total_pde_solves() + surface->pde_solves,
+    };
+}
+
+// ============================================================================
+// Free function wrappers
+// ============================================================================
+
 std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
 build_adaptive_chebyshev_segmented(
     const AdaptiveGridParams& params,
     const SegmentedAdaptiveConfig& config,
     const IVGrid& domain)
 {
-    // 1. Determine K_refs
-    std::vector<double> K_refs = config.kref_config.K_refs;
-    if (K_refs.empty()) {
-        const int count = config.kref_config.K_ref_count;
-        const double span = config.kref_config.K_ref_span;
-        if (count < 1 || span <= 0.0) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-        }
-        const double log_lo = std::log(1.0 - span);
-        const double log_hi = std::log(1.0 + span);
-        K_refs.reserve(static_cast<size_t>(count));
-        if (count == 1) {
-            K_refs.push_back(config.spot);
-        } else {
-            for (int i = 0; i < count; ++i) {
-                double t = static_cast<double>(i) / static_cast<double>(count - 1);
-                K_refs.push_back(config.spot * std::exp(log_lo + t * (log_hi - log_lo)));
-            }
-        }
-    }
-    std::sort(K_refs.begin(), K_refs.end());
-
-    // 2. Domain setup
-    if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-    }
-
-    double min_m = domain.moneyness.front();
-    double max_m = domain.moneyness.back();
-
-    double total_div = total_discrete_dividends(config.discrete_dividends, config.maturity);
-    double ref_min = K_refs.front();
-    double expansion = (ref_min > 0.0) ? total_div / ref_min : 0.0;
-    if (expansion > 0.0) {
-        double m_min_money = std::exp(min_m);
-        double expanded = std::max(m_min_money - expansion, 0.01);
-        min_m = std::log(expanded);
-    }
-
-    double min_vol = domain.vol.front();
-    double max_vol = domain.vol.back();
-    double min_rate = domain.rate.front();
-    double max_rate = domain.rate.back();
-
-    expand_domain_bounds(min_m, max_m, 0.10);
-    expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
-    expand_domain_bounds(min_rate, max_rate, 0.04);
-
-    double min_tau = std::min(0.01, config.maturity * 0.5);
-    double max_tau = config.maturity;
-    expand_domain_bounds(min_tau, max_tau, 0.1, kMinPositive);
-    max_tau = std::min(max_tau, config.maturity);
-
-    // Initial CC levels for segmented path
-    constexpr size_t kInitMLevel = 5;      // 33 nodes
-    constexpr size_t kInitTauLevel = 3;    // 9 nodes per segment
-    constexpr size_t kInitSigmaLevel = 2;  // 5 nodes
-    constexpr size_t kInitRateLevel = 1;   // 3 nodes
-
-    // Chebyshev headroom from initial CC node counts
-    auto hfn = [](double lo, double hi, size_t n) {
-        return 3.0 * (hi - lo)
-             / static_cast<double>(std::max(n, size_t{4}) - 1);
-    };
-    double hm = hfn(min_m, max_m, (1u << kInitMLevel) + 1);
-    double ht = hfn(min_tau, max_tau, (1u << kInitTauLevel) + 1);
-    double hs = hfn(min_vol, max_vol, (1u << kInitSigmaLevel) + 1);
-    double hr = hfn(min_rate, max_rate, (1u << kInitRateLevel) + 1);
-
-    // 3. Compute segment boundaries
-    auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(
-        config.discrete_dividends, config.maturity, min_tau, max_tau);
-
-    // 4. Adaptive refinement at probe K_ref = spot
-    ChebyshevRefinementState state{
-        .m_level = kInitMLevel, .tau_level = kInitTauLevel,
-        .sigma_level = kInitSigmaLevel, .rate_level = kInitRateLevel,
-        .max_level = 7,
-        .m_lo = min_m - hm,
-        .m_hi = max_m + hm,
-        .tau_lo = std::max(min_tau - ht, 1e-4),
-        .tau_hi = max_tau + ht,
-        .sigma_lo = std::max(min_vol - hs, 0.01),
-        .sigma_hi = max_vol + hs,
-        .rate_lo = std::max(min_rate - hr, -0.05),
-        .rate_hi = max_rate + hr,
-        .seg_boundaries = seg_bounds,
-        .seg_is_gap = seg_is_gap,
-    };
-
-    ChebyshevPDECache pde_cache;
-    SegmentedChebyshevBuildConfig build_cfg{
-        .K_ref = config.spot,
-        .option_type = config.option_type,
-        .dividend_yield = config.dividend_yield,
-        .discrete_dividends = config.discrete_dividends,
-        .seg_boundaries = seg_bounds,
-        .seg_is_gap = seg_is_gap,
-    };
-
-    auto build_fn = make_segmented_chebyshev_build_fn(pde_cache, build_cfg, state);
-    auto refine_fn = make_segmented_chebyshev_refine_fn(state);
-    auto validate_fn = make_validate_fn(
-        config.dividend_yield, config.option_type, config.discrete_dividends);
-    auto compute_error_fn = make_fd_vega_error_fn(
-        params, validate_fn, config.option_type);
-
-    // Seed initial tau: union of per-segment CC-level nodes (skip gap segments)
-    InitialGrids initial;
-    initial.moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
-    initial.tau.clear();
-    for (size_t s = 0; s + 1 < seg_bounds.size(); ++s) {
-        if (seg_is_gap[s]) continue;
-        double seg_lo = seg_bounds[s];
-        double seg_hi = seg_bounds[s + 1];
-        for (double t : cc_level_nodes(state.tau_level, seg_lo, seg_hi))
-            initial.tau.push_back(t);
-    }
-    if (initial.tau.empty()) {
-        return std::unexpected(
-            PriceTableError(PriceTableErrorCode::InvalidConfig));
-    }
-    std::sort(initial.tau.begin(), initial.tau.end());
-    initial.tau.erase(std::unique(initial.tau.begin(), initial.tau.end(),
-        [](double a, double b) { return std::abs(a - b) < 1e-10; }),
-        initial.tau.end());
-    initial.vol = cc_level_nodes(state.sigma_level, state.sigma_lo, state.sigma_hi);
-    initial.rate = cc_level_nodes(state.rate_level, state.rate_lo, state.rate_hi);
-    initial.exact = true;
-
-    RefinementContext ctx{
-        .spot = config.spot,
-        .dividend_yield = config.dividend_yield,
-        .option_type = config.option_type,
-        .min_moneyness = min_m, .max_moneyness = max_m,
-        .min_tau = min_tau, .max_tau = max_tau,
-        .min_vol = min_vol, .max_vol = max_vol,
-        .min_rate = min_rate, .max_rate = max_rate,
-    };
-
-    auto grid_result = run_refinement(
-        params, build_fn, validate_fn, refine_fn, ctx,
-        compute_error_fn, initial);
-    if (!grid_result.has_value()) {
-        return std::unexpected(grid_result.error());
-    }
-    auto& grids = grid_result.value();
-
-    // 5. Build all K_refs with final grid sizes -> typed pieces
-    std::vector<ChebyshevTauSegmented> kref_surfaces;
-    size_t total_solves = pde_cache.total_pde_solves();
-
-    for (double k_ref : K_refs) {
-        auto pieces = build_chebyshev_segmented_pieces(
-            k_ref, config.option_type, config.dividend_yield,
-            config.discrete_dividends, seg_bounds, seg_is_gap,
-            grids.moneyness, grids.tau, grids.vol, grids.rate);
-        if (!pieces.has_value()) {
-            return std::unexpected(pieces.error());
-        }
-        kref_surfaces.emplace_back(
-            std::move(pieces->leaves), std::move(pieces->tau_split));
-    }
-
-    // 6. Compose with MultiKRefSplit -> PriceTable
-    ChebyshevMultiKRefInner inner(
-        std::move(kref_surfaces), MultiKRefSplit(K_refs));
-
-    SurfaceBounds bounds{
-        .m_min = min_m, .m_max = max_m,
-        .tau_min = min_tau, .tau_max = max_tau,
-        .sigma_min = min_vol, .sigma_max = max_vol,
-        .rate_min = min_rate, .rate_max = max_rate,
-    };
-
-    ChebyshevMultiKRefSurface surface(
-        std::move(inner), bounds,
-        config.option_type, config.dividend_yield);
-
-    return ChebyshevSegmentedAdaptiveResult{
-        .surface = std::move(surface),
-        .iterations = std::move(grids.iterations),
-        .achieved_max_error = grids.achieved_max_error,
-        .achieved_avg_error = grids.achieved_avg_error,
-        .target_met = grids.target_met,
-        .total_pde_solves = total_solves,
-    };
+    auto builder = ChebyshevSegmentedBuilder::create(config, domain);
+    if (!builder) return std::unexpected(builder.error());
+    return builder->build_adaptive(params);
 }
 
 std::expected<ChebyshevMultiKRefSurface, PriceTableError>
@@ -1013,133 +971,9 @@ build_chebyshev_segmented_manual(
     const IVGrid& domain,
     std::array<size_t, 4> cc_levels)
 {
-    // 1. Determine K_refs
-    std::vector<double> K_refs = config.kref_config.K_refs;
-    if (K_refs.empty()) {
-        const int count = config.kref_config.K_ref_count;
-        const double span = config.kref_config.K_ref_span;
-        if (count < 1 || span <= 0.0) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-        }
-        const double log_lo = std::log(1.0 - span);
-        const double log_hi = std::log(1.0 + span);
-        K_refs.reserve(static_cast<size_t>(count));
-        if (count == 1) {
-            K_refs.push_back(config.spot);
-        } else {
-            for (int i = 0; i < count; ++i) {
-                double t = static_cast<double>(i) / static_cast<double>(count - 1);
-                K_refs.push_back(config.spot * std::exp(log_lo + t * (log_hi - log_lo)));
-            }
-        }
-    }
-    std::sort(K_refs.begin(), K_refs.end());
-
-    // 2. Domain setup
-    if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-    }
-
-    double min_m = domain.moneyness.front();
-    double max_m = domain.moneyness.back();
-
-    double total_div = total_discrete_dividends(config.discrete_dividends, config.maturity);
-    double ref_min = K_refs.front();
-    double expansion = (ref_min > 0.0) ? total_div / ref_min : 0.0;
-    if (expansion > 0.0) {
-        double m_min_money = std::exp(min_m);
-        double expanded = std::max(m_min_money - expansion, 0.01);
-        min_m = std::log(expanded);
-    }
-
-    double min_vol = domain.vol.front();
-    double max_vol = domain.vol.back();
-    double min_rate = domain.rate.front();
-    double max_rate = domain.rate.back();
-
-    expand_domain_bounds(min_m, max_m, 0.10);
-    expand_domain_bounds(min_vol, max_vol, 0.10, 1e-6);
-    expand_domain_bounds(min_rate, max_rate, 0.04);
-
-    double min_tau = std::min(0.01, config.maturity * 0.5);
-    double max_tau = config.maturity;
-    expand_domain_bounds(min_tau, max_tau, 0.1, 1e-6);
-    max_tau = std::min(max_tau, config.maturity);
-
-    // Headroom from CC node counts
-    auto hfn = [](double lo, double hi, size_t n) {
-        return 3.0 * (hi - lo)
-             / static_cast<double>(std::max(n, size_t{4}) - 1);
-    };
-    double hm = hfn(min_m, max_m, (1u << cc_levels[0]) + 1);
-    double ht = hfn(min_tau, max_tau, (1u << cc_levels[1]) + 1);
-    double hs = hfn(min_vol, max_vol, (1u << cc_levels[2]) + 1);
-    double hr = hfn(min_rate, max_rate, (1u << cc_levels[3]) + 1);
-
-    double m_lo = min_m - hm;
-    double m_hi = max_m + hm;
-    (void)ht;  // tau headroom unused — tau nodes come from per-segment CC grids
-    double sigma_lo = std::max(min_vol - hs, 0.01);
-    double sigma_hi = max_vol + hs;
-    double rate_lo = std::max(min_rate - hr, -0.05);
-    double rate_hi = max_rate + hr;
-
-    // 3. Compute segment boundaries
-    auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(
-        config.discrete_dividends, config.maturity, min_tau, max_tau);
-
-    // 4. Generate CGL grids at fixed CC levels
-    auto m_nodes = cc_level_nodes(cc_levels[0], m_lo, m_hi);
-    auto sigma_nodes = cc_level_nodes(cc_levels[2], sigma_lo, sigma_hi);
-    auto rate_nodes = cc_level_nodes(cc_levels[3], rate_lo, rate_hi);
-
-    // Per-segment tau nodes: union of cc_level_nodes per real segment, then sort+dedup
-    std::vector<double> tau_nodes;
-    for (size_t s = 0; s + 1 < seg_bounds.size(); ++s) {
-        if (seg_is_gap[s]) continue;
-        double seg_lo_t = seg_bounds[s];
-        double seg_hi_t = seg_bounds[s + 1];
-        for (double t : cc_level_nodes(cc_levels[1], seg_lo_t, seg_hi_t))
-            tau_nodes.push_back(t);
-    }
-    if (tau_nodes.empty()) {
-        return std::unexpected(
-            PriceTableError(PriceTableErrorCode::InvalidConfig));
-    }
-    std::sort(tau_nodes.begin(), tau_nodes.end());
-    tau_nodes.erase(std::unique(tau_nodes.begin(), tau_nodes.end(),
-        [](double a, double b) { return std::abs(a - b) < 1e-10; }),
-        tau_nodes.end());
-
-    // 5. Build all K_refs -> typed pieces
-    std::vector<ChebyshevTauSegmented> kref_surfaces;
-
-    for (double k_ref : K_refs) {
-        auto pieces = build_chebyshev_segmented_pieces(
-            k_ref, config.option_type, config.dividend_yield,
-            config.discrete_dividends, seg_bounds, seg_is_gap,
-            m_nodes, tau_nodes, sigma_nodes, rate_nodes);
-        if (!pieces.has_value()) {
-            return std::unexpected(pieces.error());
-        }
-        kref_surfaces.emplace_back(
-            std::move(pieces->leaves), std::move(pieces->tau_split));
-    }
-
-    // 6. Compose with MultiKRefSplit -> PriceTable
-    ChebyshevMultiKRefInner inner(
-        std::move(kref_surfaces), MultiKRefSplit(K_refs));
-
-    SurfaceBounds bounds{
-        .m_min = min_m, .m_max = max_m,
-        .tau_min = min_tau, .tau_max = max_tau,
-        .sigma_min = min_vol, .sigma_max = max_vol,
-        .rate_min = min_rate, .rate_max = max_rate,
-    };
-
-    return ChebyshevMultiKRefSurface(
-        std::move(inner), bounds,
-        config.option_type, config.dividend_yield);
+    auto builder = ChebyshevSegmentedBuilder::create(config, domain);
+    if (!builder) return std::unexpected(builder.error());
+    return builder->build(cc_levels);
 }
 
 }  // namespace mango

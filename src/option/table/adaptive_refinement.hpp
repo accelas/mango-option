@@ -269,6 +269,42 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     const ComputeErrorFn& compute_error,
     const InitialGrids& initial_grids = {});
 
+/// Resolve K_ref values from a MultiKRefConfig.
+/// If config.K_refs is non-empty, returns them sorted.
+/// Otherwise generates K_ref_count log-spaced values spanning
+/// [spot*(1-span), spot*(1+span)].
+[[nodiscard]] std::expected<std::vector<double>, PriceTableError>
+resolve_k_refs(const MultiKRefConfig& config, double spot);
+
+/// Domain bounds for segmented surface construction (log-moneyness space).
+/// Produced by expand_segmented_domain() — backend-specific headroom
+/// (B-spline support, Chebyshev CC margin) is added by the caller.
+struct DomainBounds {
+    double min_m, max_m;
+    double min_tau, max_tau;
+    double min_vol, max_vol;
+    double min_rate, max_rate;
+};
+
+/// Expand domain bounds for segmented (discrete-dividend) surface building.
+///
+/// Converts IVGrid moneyness (already log-moneyness) to domain bounds,
+/// expands for cumulative discrete dividends, applies minimum spreads,
+/// and caps tau at maturity.
+///
+/// @param domain         IVGrid with moneyness already in log(S/K) space
+/// @param maturity       Option maturity (years)
+/// @param dividend_yield Continuous dividend yield (unused in expansion, carried for API)
+/// @param discrete_dividends Discrete dividend schedule
+/// @param min_K_ref      Smallest K_ref value (for dividend expansion denominator)
+/// @return Expanded domain bounds, or error if domain is empty
+[[nodiscard]] std::expected<DomainBounds, PriceTableError>
+expand_segmented_domain(const IVGrid& domain,
+                        double maturity,
+                        double dividend_yield,
+                        const std::vector<Dividend>& discrete_dividends,
+                        double min_K_ref);
+
 /// Extract domain bounds from OptionGrid, expand, and add headroom.
 std::expected<RefinementContext, PriceTableError>
 extract_chain_domain(const OptionGrid& chain);

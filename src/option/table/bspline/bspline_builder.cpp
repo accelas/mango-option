@@ -102,40 +102,11 @@ PriceTableBuilderND<N>::build(const PriceTableAxesND<N>& axes,
     // Count PDE solves (successful results)
     size_t n_pde_solves = batch_result.results.size() - batch_result.failed_count;
 
-    // Step 4: Extract tensor via interpolation
-    auto extraction = extract_tensor(batch_result, axes);
-    if (!extraction.has_value()) {
-        return std::unexpected(extraction.error());
-    }
-
-    // Step 4b: Repair failed slices
-    auto repair_result = repair_failed_slices(
-        extraction->tensor, extraction->failed_pde, extraction->failed_spline, axes);
-    if (!repair_result.has_value()) {
-        return std::unexpected(repair_result.error());
-    }
-    auto repair_stats = repair_result.value();
-
-    // Step 4c: Apply optional tensor transform (e.g., EEP decomposition)
-    if (transform) {
-        transform(extraction->tensor, axes);
-    }
-
-    // Step 5: Fit B-spline coefficients
-    auto coeffs_result = fit_coeffs(extraction->tensor, axes);
-    if (!coeffs_result.has_value()) {
-        return std::unexpected(coeffs_result.error());
-    }
-
-    auto& fit_result = coeffs_result.value();
-    auto coefficients = std::move(fit_result.coefficients);
-    BSplineFittingStats fitting_stats = fit_result.stats;
-
-    // Step 6: Build immutable surface
-    auto surface_result = PriceTableSurfaceND<N>::build(
-        axes, std::move(coefficients), config_.K_ref, config_.dividends);
-    if (!surface_result.has_value()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+    // Steps 4-6: Extract tensor, repair, transform, fit, build surface
+    auto assembly = assemble_surface(
+        batch_result, axes, config_.K_ref, config_.dividends, transform);
+    if (!assembly.has_value()) {
+        return std::unexpected(assembly.error());
     }
 
     // End timing
@@ -145,16 +116,69 @@ PriceTableBuilderND<N>::build(const PriceTableAxesND<N>& axes,
     // Return full result with diagnostics
     const size_t Nt = axes.grids[1].size();
     return PriceTableResult<N>{
-        .surface = std::move(surface_result.value()),
+        .surface = std::move(assembly->surface),
         .n_pde_solves = n_pde_solves,
         .precompute_time_seconds = elapsed,
-        .fitting_stats = fitting_stats,
+        .fitting_stats = assembly->fitting_stats,
+        .failed_pde_slices = assembly->failed_pde_slices,
+        .failed_spline_points = assembly->failed_spline_points,
+        .repaired_full_slices = assembly->repaired_full_slices,
+        .repaired_partial_points = assembly->repaired_partial_points,
+        .total_slices = assembly->total_slices,
+        .total_points = assembly->total_slices * Nt
+    };
+}
+
+template <size_t N>
+std::expected<typename PriceTableBuilderND<N>::AssembleSurfaceResult, PriceTableError>
+PriceTableBuilderND<N>::assemble_surface(
+    const BatchAmericanOptionResult& batch,
+    const PriceTableAxesND<N>& axes,
+    double K_ref,
+    const DividendSpec& dividends,
+    TensorTransformFn transform) const
+{
+    // Step 1: Extract tensor from batch results
+    auto extraction = extract_tensor(batch, axes);
+    if (!extraction.has_value()) {
+        return std::unexpected(extraction.error());
+    }
+
+    // Step 2: Repair failed slices
+    auto repair_result = repair_failed_slices(
+        extraction->tensor, extraction->failed_pde,
+        extraction->failed_spline, axes);
+    if (!repair_result.has_value()) {
+        return std::unexpected(repair_result.error());
+    }
+    auto repair_stats = repair_result.value();
+
+    // Step 3: Apply optional tensor transform (e.g., EEP decomposition)
+    if (transform) {
+        transform(extraction->tensor, axes);
+    }
+
+    // Step 4: Fit B-spline coefficients
+    auto coeffs_result = fit_coeffs(extraction->tensor, axes);
+    if (!coeffs_result.has_value()) {
+        return std::unexpected(coeffs_result.error());
+    }
+
+    // Step 5: Build immutable surface
+    auto surface_result = PriceTableSurfaceND<N>::build(
+        axes, std::move(coeffs_result->coefficients), K_ref, dividends);
+    if (!surface_result.has_value()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+    }
+
+    return AssembleSurfaceResult{
+        .surface = std::move(surface_result.value()),
+        .fitting_stats = coeffs_result->stats,
         .failed_pde_slices = extraction->failed_pde.size(),
         .failed_spline_points = extraction->failed_spline.size(),
         .repaired_full_slices = repair_stats.repaired_full_slices,
         .repaired_partial_points = repair_stats.repaired_partial_points,
         .total_slices = extraction->total_slices,
-        .total_points = extraction->total_slices * Nt
     };
 }
 
@@ -761,52 +785,23 @@ PriceTableBuilderND<N>::find_nearest_valid_neighbor(
 }
 
 template <size_t N>
-std::expected<RepairStats, PriceTableError>
-PriceTableBuilderND<N>::repair_failed_slices(
+RepairStats
+PriceTableBuilderND<N>::repair_spline_failures(
     PriceTensorND<N>& tensor,
-    const std::vector<size_t>& failed_pde,
-    const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
+    const std::map<std::pair<size_t, size_t>, std::vector<size_t>>& spline_failures_by_slice,
+    size_t Nt,
     const PriceTableAxesND<N>& axes) const
 {
     const size_t Nm = axes.grids[0].size();
-    const size_t Nt = axes.grids[1].size();
-    const size_t Nσ = axes.grids[2].size();
-    const size_t Nr = axes.grids[3].size();
-
-    // Group spline failures by (σ,r) to detect full-slice vs partial failures
-    std::map<std::pair<size_t, size_t>, std::vector<size_t>> spline_failures_by_slice;
-    for (auto [σ_idx, r_idx, τ_idx] : failed_spline) {
-        spline_failures_by_slice[{σ_idx, r_idx}].push_back(τ_idx);
-    }
-
-    // Collect slices that need full neighbor copy (PDE failures + all-maturity spline failures)
-    std::unordered_set<size_t> full_slice_set(failed_pde.begin(), failed_pde.end());
     size_t partial_spline_points = 0;
 
     for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
-        if (τ_failures.size() == Nt) {
-            auto [σ_idx, r_idx] = slice_key;
-            size_t flat_idx = σ_idx * Nr + r_idx;
-            full_slice_set.insert(flat_idx);
-        } else {
-            partial_spline_points += τ_failures.size();
-        }
-    }
-
-    std::vector<size_t> full_slice_failures(full_slice_set.begin(), full_slice_set.end());
-
-    // Track which (σ,r) slices are valid donors
-    std::vector<bool> slice_valid(Nσ * Nr, true);
-    for (size_t flat_idx : full_slice_failures) {
-        slice_valid[flat_idx] = false;
-    }
-
-    // ========== PHASE 1: Repair partial spline failures via τ-interpolation ==========
-    for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
         auto [σ_idx, r_idx] = slice_key;
 
-        // Skip full-slice failures (handled in Phase 2)
+        // Skip full-slice failures (handled by repair_pde_failures)
         if (τ_failures.size() == Nt) continue;
+
+        partial_spline_points += τ_failures.size();
 
         // Partial failures: interpolate along τ axis
         for (size_t τ_idx : τ_failures) {
@@ -826,17 +821,19 @@ PriceTableBuilderND<N>::repair_failed_slices(
             if (τ_before && τ_after) {
                 double t = static_cast<double>(τ_idx - *τ_before) /
                            static_cast<double>(*τ_after - *τ_before);
-                #pragma omp simd
+                MANGO_PRAGMA_SIMD
                 for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] =
                         (1.0 - t) * tensor.view[i, *τ_before, σ_idx, r_idx] +
                         t * tensor.view[i, *τ_after, σ_idx, r_idx];
                 }
             } else if (τ_before) {
+                MANGO_PRAGMA_SIMD
                 for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_before, σ_idx, r_idx];
                 }
             } else {
+                MANGO_PRAGMA_SIMD
                 for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_after, σ_idx, r_idx];
                 }
@@ -844,7 +841,25 @@ PriceTableBuilderND<N>::repair_failed_slices(
         }
     }
 
-    // ========== PHASE 2: Repair full-slice failures via neighbor copy ==========
+    return RepairStats{
+        .repaired_full_slices = 0,
+        .repaired_partial_points = partial_spline_points
+    };
+}
+
+template <size_t N>
+std::expected<RepairStats, PriceTableError>
+PriceTableBuilderND<N>::repair_pde_failures(
+    PriceTensorND<N>& tensor,
+    const std::vector<size_t>& full_slice_failures,
+    std::vector<bool>& slice_valid,
+    const PriceTableAxesND<N>& axes) const
+{
+    const size_t Nm = axes.grids[0].size();
+    const size_t Nt = axes.grids[1].size();
+    const size_t Nσ = axes.grids[2].size();
+    const size_t Nr = axes.grids[3].size();
+
     size_t repaired_full_count = 0;
     for (size_t flat_idx : full_slice_failures) {
         size_t σ_idx = flat_idx / Nr;
@@ -859,6 +874,7 @@ PriceTableBuilderND<N>::repair_failed_slices(
 
         // Copy entire (m,τ) surface from neighbor
         for (size_t i = 0; i < Nm; ++i) {
+            MANGO_PRAGMA_SIMD
             for (size_t j = 0; j < Nt; ++j) {
                 tensor.view[i, j, σ_idx, r_idx] = tensor.view[i, j, nσ, nr];
             }
@@ -871,7 +887,61 @@ PriceTableBuilderND<N>::repair_failed_slices(
 
     return RepairStats{
         .repaired_full_slices = repaired_full_count,
-        .repaired_partial_points = partial_spline_points
+        .repaired_partial_points = 0
+    };
+}
+
+template <size_t N>
+std::expected<RepairStats, PriceTableError>
+PriceTableBuilderND<N>::repair_failed_slices(
+    PriceTensorND<N>& tensor,
+    const std::vector<size_t>& failed_pde,
+    const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
+    const PriceTableAxesND<N>& axes) const
+{
+    const size_t Nt = axes.grids[1].size();
+    const size_t Nσ = axes.grids[2].size();
+    const size_t Nr = axes.grids[3].size();
+
+    // Group spline failures by (σ,r) to detect full-slice vs partial failures
+    std::map<std::pair<size_t, size_t>, std::vector<size_t>> spline_failures_by_slice;
+    for (auto [σ_idx, r_idx, τ_idx] : failed_spline) {
+        spline_failures_by_slice[{σ_idx, r_idx}].push_back(τ_idx);
+    }
+
+    // Collect slices that need full neighbor copy (PDE failures + all-maturity spline failures)
+    std::unordered_set<size_t> full_slice_set(failed_pde.begin(), failed_pde.end());
+    for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
+        if (τ_failures.size() == Nt) {
+            auto [σ_idx, r_idx] = slice_key;
+            size_t flat_idx = σ_idx * Nr + r_idx;
+            full_slice_set.insert(flat_idx);
+        }
+    }
+
+    std::vector<size_t> full_slice_failures(full_slice_set.begin(), full_slice_set.end());
+
+    // Track which (σ,r) slices are valid donors
+    std::vector<bool> slice_valid(Nσ * Nr, true);
+    for (size_t flat_idx : full_slice_failures) {
+        slice_valid[flat_idx] = false;
+    }
+
+    // Phase 1: Repair partial spline failures via τ-interpolation
+    auto spline_stats = repair_spline_failures(
+        tensor, spline_failures_by_slice, Nt, axes);
+
+    // Phase 2: Repair full-slice failures via neighbor copy
+    auto pde_result = repair_pde_failures(
+        tensor, full_slice_failures, slice_valid, axes);
+    if (!pde_result.has_value()) {
+        return std::unexpected(pde_result.error());
+    }
+    auto pde_stats = pde_result.value();
+
+    return RepairStats{
+        .repaired_full_slices = pde_stats.repaired_full_slices,
+        .repaired_partial_points = spline_stats.repaired_partial_points
     };
 }
 
