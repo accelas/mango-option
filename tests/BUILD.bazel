@@ -1676,3 +1676,17 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "transform_leaf_greeks_test",
+    size = "medium",
+    srcs = ["transform_leaf_greeks_test.cc"],
+    deps = [
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table:greek_types",
+        "//src/option:option_spec",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
