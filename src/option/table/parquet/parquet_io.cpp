@@ -67,6 +67,8 @@ std::expected<double, PriceTableError> parse_double(const std::string& s) {
 
 std::expected<size_t, PriceTableError> parse_size_t(const std::string& s) {
     try {
+        if (s.empty() || s[0] == '-')
+            return std::unexpected(serialization_error());
         size_t pos = 0;
         auto val = std::stoull(s, &pos);
         if (pos != s.size()) return std::unexpected(serialization_error());
@@ -76,52 +78,59 @@ std::expected<size_t, PriceTableError> parse_size_t(const std::string& s) {
     }
 }
 
-/// Compute CRC64 over all segment fields (not just values).
-/// Hashes structural fields (K_ref, tau_*, ndim, domains, grids, knots)
-/// followed by the values array.
+/// Compute CRC64 over all segment fields with length-prefixed variable
+/// fields.  Every variable-length container is preceded by its element
+/// count as a uint64_t, preventing boundary-shifting collisions.
+/// All integer sizes are hashed as fixed-width uint64_t for cross-platform
+/// consistency (avoids size_t width differences).
 uint64_t segment_checksum(const PriceTableData::Segment& seg) {
     uint64_t crc = 0;
-    auto feed_double = [&](double v) {
+    auto feed_u64 = [&](uint64_t v) {
         crc = CRC64::update(crc,
             reinterpret_cast<const uint8_t*>(&v), sizeof(v));
     };
-    auto feed_int32 = [&](int32_t v) {
+    auto feed_i32 = [&](int32_t v) {
         crc = CRC64::update(crc,
             reinterpret_cast<const uint8_t*>(&v), sizeof(v));
     };
-    auto feed_size = [&](size_t v) {
+    auto feed_f64 = [&](double v) {
         crc = CRC64::update(crc,
             reinterpret_cast<const uint8_t*>(&v), sizeof(v));
     };
     auto feed_string = [&](const std::string& s) {
+        feed_u64(static_cast<uint64_t>(s.size()));
         crc = CRC64::update(crc,
             reinterpret_cast<const uint8_t*>(s.data()), s.size());
     };
-    auto feed_doubles = [&](const std::vector<double>& v) {
+    auto feed_f64_vec = [&](const std::vector<double>& v) {
+        feed_u64(static_cast<uint64_t>(v.size()));
         crc = CRC64::update(crc,
             reinterpret_cast<const uint8_t*>(v.data()),
             v.size() * sizeof(double));
     };
-    auto feed_int32s = [&](const std::vector<int32_t>& v) {
+    auto feed_i32_vec = [&](const std::vector<int32_t>& v) {
+        feed_u64(static_cast<uint64_t>(v.size()));
         crc = CRC64::update(crc,
             reinterpret_cast<const uint8_t*>(v.data()),
             v.size() * sizeof(int32_t));
     };
 
-    feed_int32(seg.segment_id);
-    feed_double(seg.K_ref);
-    feed_double(seg.tau_start);
-    feed_double(seg.tau_end);
-    feed_double(seg.tau_min);
-    feed_double(seg.tau_max);
+    feed_i32(seg.segment_id);
+    feed_f64(seg.K_ref);
+    feed_f64(seg.tau_start);
+    feed_f64(seg.tau_end);
+    feed_f64(seg.tau_min);
+    feed_f64(seg.tau_max);
     feed_string(seg.interp_type);
-    feed_size(seg.ndim);
-    feed_doubles(seg.domain_lo);
-    feed_doubles(seg.domain_hi);
-    feed_int32s(seg.num_pts);
-    for (const auto& g : seg.grids) feed_doubles(g);
-    for (const auto& k : seg.knots) feed_doubles(k);
-    feed_doubles(seg.values);
+    feed_u64(static_cast<uint64_t>(seg.ndim));
+    feed_f64_vec(seg.domain_lo);
+    feed_f64_vec(seg.domain_hi);
+    feed_i32_vec(seg.num_pts);
+    feed_u64(static_cast<uint64_t>(seg.grids.size()));
+    for (const auto& g : seg.grids) feed_f64_vec(g);
+    feed_u64(static_cast<uint64_t>(seg.knots.size()));
+    for (const auto& k : seg.knots) feed_f64_vec(k);
+    feed_f64_vec(seg.values);
     return crc;
 }
 
@@ -746,22 +755,22 @@ read_parquet(const std::filesystem::path& path) {
         seg.domain_hi = read_double_list(*domain_hi_res, i);
         seg.num_pts = read_int32_list(*num_pts_res, i);
 
-        // Read grids: grid_0..grid_3, only include non-empty
+        // Read grids: grid_0..grid_3, skip empty (Chebyshev has none)
         std::shared_ptr<arrow::Array> grid_arrays[] = {
             *grid_0_res, *grid_1_res, *grid_2_res, *grid_3_res};
         seg.grids.clear();
         for (size_t d = 0; d < seg.ndim && d < 4; ++d) {
             auto vec = read_double_list(grid_arrays[d], i);
-            seg.grids.push_back(std::move(vec));
+            if (!vec.empty()) seg.grids.push_back(std::move(vec));
         }
 
-        // Read knots: knots_0..knots_3, only include non-empty
+        // Read knots: knots_0..knots_3, skip empty (Chebyshev has none)
         std::shared_ptr<arrow::Array> knots_arrays[] = {
             *knots_0_res, *knots_1_res, *knots_2_res, *knots_3_res};
         seg.knots.clear();
         for (size_t d = 0; d < seg.ndim && d < 4; ++d) {
             auto vec = read_double_list(knots_arrays[d], i);
-            seg.knots.push_back(std::move(vec));
+            if (!vec.empty()) seg.knots.push_back(std::move(vec));
         }
 
         seg.values = read_double_list(*values_res, i);
