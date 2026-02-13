@@ -120,7 +120,7 @@ jobs:
 
       - name: Run test suite
         run: |
-          bazel test //tests/... --test_output=errors --test_tag_filters=-manual
+          bazel test //tests/... --test_output=errors --test_tag_filters=-manual -c dbg
 
       - name: Display test results
         if: always()
