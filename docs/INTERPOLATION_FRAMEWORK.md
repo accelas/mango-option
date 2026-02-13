@@ -53,7 +53,9 @@ concept SurfaceInterpolant = requires(const S& s, std::array<double, N> coords) 
 };
 ```
 
-Two implementations: `SharedBSplineInterp<N>` (wraps `shared_ptr<const BSplineND<double, N>>`) and `ChebyshevInterpolant<N, Storage>` (barycentric interpolation on Chebyshev-Gauss-Lobatto nodes, with `RawTensor` or `TuckerTensor` storage).
+The generic adapter `SharedInterp<T, N>` (in `table/shared_interp.hpp`) wraps `shared_ptr<const T>` to satisfy the concept while preserving shared ownership. It forwards `eval()` and `partial()` unconditionally; `eval_second_partial()` is conditionally available via a `requires` clause — present only when `T` provides it.
+
+B-spline surfaces use `SharedBSplineInterp<N>`, a convenience alias for `SharedInterp<BSplineND<double, N>, N>`. The other implementation is `ChebyshevInterpolant<N, Storage>` (barycentric interpolation on Chebyshev-Gauss-Lobatto nodes, with `RawTensor` or `TuckerTensor` storage).
 
 Why a concept instead of a base class? The two interpolants have fundamentally different capabilities. B-splines provide analytical second derivatives (`eval_second_partial`); Chebyshev does not. A base class would either leave the method unimplemented (runtime error) or force a least-common-denominator interface. A concept lets `TransformLeaf` detect the capability at compile time:
 
@@ -236,17 +238,17 @@ For reference, here are the full type alias expansions. The naming convention is
 
 | Alias | Expansion |
 |-------|-----------|
-| `BSplinePriceTable` | `PriceTable<EEPLayer<TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>, AnalyticalEEP>>` |
+| `BSplinePriceTable` | `PriceTable<EEPLayer<TransformLeaf<SharedInterp<BSplineND<double,4>,4>, StandardTransform4D>, AnalyticalEEP>>` |
 | `ChebyshevSurface` | Same structure with `ChebyshevInterpolant<4, TuckerTensor<4>>` |
 | `ChebyshevRawSurface` | Same with `RawTensor<4>` (no SVD compression) |
-| `BSpline3DPriceTable` | `PriceTable<EEPLayer<TransformLeaf<SharedBSplineInterp<3>, DimensionlessTransform3D>, AnalyticalEEP>>` |
+| `BSpline3DPriceTable` | `PriceTable<EEPLayer<TransformLeaf<SharedInterp<BSplineND<double,3>,3>, DimensionlessTransform3D>, AnalyticalEEP>>` |
 | `Chebyshev3DPriceTable` | Same with `ChebyshevInterpolant<3, TuckerTensor<3>>` |
 
 **Segmented path** (raw prices, discrete dividends):
 
 | Alias | Expansion |
 |-------|-----------|
-| `BSplineMultiKRefSurface` | `PriceTable<SplitSurface<SplitSurface<TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>, TauSegmentSplit>, MultiKRefSplit>>` |
+| `BSplineMultiKRefSurface` | `PriceTable<SplitSurface<SplitSurface<TransformLeaf<SharedInterp<BSplineND<double,4>,4>, StandardTransform4D>, TauSegmentSplit>, MultiKRefSplit>>` |
 | `ChebyshevMultiKRefSurface` | Same with `ChebyshevInterpolant<4, RawTensor<4>>` |
 
 Segmented leaves do not use `EEPLayer` — they store V/K_ref directly, because the initial condition for each segment comes from the next segment's surface evaluation (not from a closed-form expression), so no clean European decomposition exists.
@@ -266,6 +268,7 @@ Segmented leaves do not use `EEPLayer` — they store V/K_ref directly, because 
 | `table/transforms/dimensionless_3d.hpp` | 3D dimensionless transform with coupled vega weights |
 | `table/splits/tau_segment.hpp` | Tau routing for dividend segments |
 | `table/splits/multi_kref.hpp` | K_ref blending for strike homogeneity |
-| `table/bspline/bspline_surface.hpp` | `SharedBSplineInterp<N>` adapter and all B-spline type aliases |
+| `table/shared_interp.hpp` | `SharedInterp<T, N>` generic shared-ownership adapter |
+| `table/bspline/bspline_surface.hpp` | `SharedBSplineInterp<N>` alias and all B-spline type aliases |
 | `table/chebyshev/chebyshev_surface.hpp` | Chebyshev type aliases |
 | `interpolated_iv_solver.cpp` | Factory dispatch, explicit instantiations, `AnyInterpIVSolver` variant |
