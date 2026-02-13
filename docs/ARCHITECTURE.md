@@ -3,6 +3,7 @@
 How the mango-option library is built, from the PDE solver core up through price tables and batch processing. Each section introduces the C++ patterns and design decisions where they arise, rather than cataloguing them separately.
 
 **Related documents:**
+- [Interpolation Framework](INTERPOLATION_FRAMEWORK.md) — Template composition for price surfaces
 - [Mathematical Foundations](MATHEMATICAL_FOUNDATIONS.md) — PDE formulations, numerical methods
 - [API Guide](API_GUIDE.md) — Usage examples and recipes
 - [Performance Analysis](PERF_ANALYSIS.md) — Instruction-level profiling data
@@ -31,14 +32,12 @@ graph TD
     PDE --> OPS[SpatialOperator]
     PDE --> BC[BoundaryConditions]
     PTABLE[PriceTableBuilder] -->|Pre-compute| AO
-    PTABLE -->|Fit coefficients| SPLINE[B-Spline]
-    PTABLE -->|Produces| SURFACE[PriceTableSurface]
-    PTABLE -->|subtract European| EEP[EEP Surface]
-    EEP -->|stored in| SURFACE
-    APS[AmericanPriceSurface] -->|reconstructs via| SURFACE
-    APS -->|adds back| EU[EuropeanOptionSolver]
-    IVFAST[InterpolatedIVSolver] -->|Newton on surface| ROOT
-    IVFAST -->|Query| APS
+    PTABLE -->|Fit coefficients| SPLINE[B-Spline / Chebyshev]
+    PTABLE -->|subtract European| EEP[EEP Decomposition]
+    EEP -->|stored in| PT[PriceTable]
+    PT -->|EEPLayer adds back| EU[European closed-form]
+    IVFAST[InterpolatedIVSolver] -->|Brent on surface| ROOT
+    IVFAST -->|Query| PT
 ```
 
 The rest of this document walks through these components bottom-up: PDE solver core, American option layer, IV solvers, price tables, memory management, and batch processing.
@@ -180,7 +179,9 @@ Each Brent iteration solves the PDE from scratch (no warm-starting), so total ti
 
 ### Interpolated (InterpolatedIVSolver)
 
-The interpolated solver replaces the nested PDE solve with a lookup into a pre-computed 4D B-spline surface. Newton iteration on the smooth surface converges in 3-5 iterations, each requiring only a surface evaluation (~193ns). Total IV solve: ~3.5us — a 5,400x speedup over FDM.
+The interpolated solver replaces the nested PDE solve with a lookup into a pre-computed price surface. Brent's method on the smooth surface converges in ~4-6 function evaluations, each requiring only a surface evaluation (~193ns). Total IV solve: ~3.5us — a 5,400x speedup over FDM.
+
+Before starting the root search, the solver evaluates surface vega at three representative volatilities (10%, 25%, 50%). If all are below a threshold (default 1e-4), the option has near-zero vega sensitivity and IV is effectively undefined — the solver returns `VegaTooSmall` immediately (~600ns) instead of running a doomed search.
 
 This is the production path. You pay a one-time pre-computation cost (see next section), then amortize it over millions of queries.
 
@@ -195,8 +196,8 @@ This is the production path. You pay a one-time pre-computation cost (see next s
 1. Enumerate grid points across all four dimensions
 2. For each (vol, rate) pair, solve the PDE across all maturities and strikes
 3. Subtract the closed-form European price to obtain the Early Exercise Premium (EEP)
-4. Fit 4D tensor-product B-spline coefficients to the EEP values
-5. Package into a `PriceTableSurface` for fast evaluation
+4. Fit B-spline or Chebyshev interpolant to the EEP values
+5. Wrap in a `PriceTable` for fast evaluation (see [Interpolation Framework](INTERPOLATION_FRAMEWORK.md))
 
 ### Early Exercise Premium (EEP) Decomposition
 
@@ -206,13 +207,17 @@ The American free boundary creates a C1 discontinuity in the price surface that 
 EEP(m, τ, σ, r) = P_American(m, τ, σ, r) − P_European(m, τ, σ, r)
 ```
 
-The EEP surface is smoother (the discontinuity lies in the European component, which is computed exactly at query time), restoring full B-spline convergence. At query time, `AmericanPriceSurface` reconstructs the full price:
+The EEP surface is smoother (the discontinuity lies in the European component, which is computed exactly at query time), restoring full B-spline convergence. At query time, `PriceTable` reconstructs the full price via the `EEPLayer`:
 
 ```
-P_American = (K/K_ref) · EEP_spline(m, τ, σ, r) + P_European(S, K, τ, σ, r, q)
+P_American = (K/K_ref) · EEP_interp(x, τ, σ, r) + P_European(S, K, τ, σ, r, q)
 ```
 
-Greeks follow the same decomposition via chain rule (delta, vega, theta from partial derivatives of the EEP surface plus closed-form European Greeks). Gamma uses finite differences of delta since BSplineND lacks second derivatives. Note: for accurate Greeks, use the PDE solver directly (`AmericanOptionSolver`). The `AmericanPriceSurface` Greek methods are used internally by the IV solver for Newton iteration but may have cancellation issues at extreme moneyness.
+Greeks follow the same decomposition: each Greek is the sum of the interpolated EEP Greek (computed via chain rule through the coordinate transform) and the closed-form European Greek. Gamma uses analytical B-spline second derivatives (not FD), giving O(h^2) accuracy. For Chebyshev surfaces, gamma falls back to central FD.
+
+The `PriceTable` exposes `delta()`, `gamma()`, `theta()`, and `rho()` alongside `price()` and `vega()`. All Greek methods return `std::expected<double, GreekError>`. An early-exit optimization in `EEPLayer` returns the European Greek directly when the EEP is zero (deep OTM), skipping interpolation derivatives.
+
+**For the full template composition architecture, see [INTERPOLATION_FRAMEWORK.md](INTERPOLATION_FRAMEWORK.md).**
 
 A softplus floor (`log1p(exp(100·x))/100`) enforces non-negativity of the EEP during tensor construction, preventing B-spline ringing near τ→0 where the premium vanishes.
 
@@ -260,13 +265,20 @@ Cash dividends break the price homogeneity assumption that underpins the standar
 
 ### Segmented Approach
 
-The library handles discrete dividends by splitting the time axis at each dividend date and solving backward through each segment. The component hierarchy:
+The library handles discrete dividends by splitting the time axis at each dividend date and solving backward through each segment. The component hierarchy uses typed template composition:
 
 ```
-InterpolatedIVSolver<SegmentedMultiKRefSurface>
-  └── SegmentedMultiKRefSurface
-        └── BSplineSegmentedSurface (one per K_ref)
-              └── AmericanPriceSurface segments (one per time segment)
+PriceTable< SplitSurface< SplitSurface< TransformLeaf, TauSegmentSplit >,
+                           MultiKRefSplit > >
+```
+
+Concretely, for B-spline:
+
+```
+BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>
+  └── SplitSurface<BSplineSegmentedSurface, MultiKRefSplit>  (one per K_ref)
+        └── SplitSurface<BSplineSegmentedLeaf, TauSegmentSplit>  (one per tau segment)
+              └── TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>
 ```
 
 **Backward chaining:** Segments are built from expiry backward. The last segment (dividend-free) solves the standard American PDE. Earlier segments use the next segment's price as their initial condition (after adjusting spot for the dividend drop). This propagates the dividend effect through the full maturity range.
@@ -278,14 +290,11 @@ InterpolatedIVSolver<SegmentedMultiKRefSurface>
 - **Last segment** (no dividend boundary): Uses EEP decomposition, same as the standard path. The European component can be computed analytically.
 - **Earlier segments**: Store raw prices. The initial condition comes from the next segment's surface evaluation (not from a closed-form expression), so no clean European decomposition exists.
 
-### PriceSurface Concept
+### Type Erasure
 
-The `PriceSurface` concept type-erases the two solver paths so that `InterpolatedIVSolver` works with either:
+`InterpolatedIVSolver<Surface>` is templated on the concrete surface type, preserving full inlining within each instantiation. The factory returns `AnyInterpIVSolver`, which type-erases via a `std::variant` of all 7 solver instantiations (B-spline 4D, B-spline segmented, Chebyshev Tucker, Chebyshev raw, Chebyshev segmented, B-spline 3D, Chebyshev 3D). `std::visit` dispatches at the solve boundary, keeping the hot path (surface evaluation) monomorphic.
 
-- `AmericanPriceSurface` — single EEP surface (no dividends)
-- `SegmentedMultiKRefSurface` — segmented multi-K_ref surface (with dividends)
-
-Both satisfy the same interface: `price(spot, strike, tau, sigma, rate)` and `vega(spot, strike, tau, sigma, rate)`. The `make_interpolated_iv_solver` factory selects the appropriate path based on whether `discrete_dividends` is empty.
+The `make_interpolated_iv_solver` factory selects the appropriate type based on the `backend` variant and `discrete_dividends` option. See [INTERPOLATION_FRAMEWORK.md](INTERPOLATION_FRAMEWORK.md) for the full dispatch tree.
 
 ---
 
@@ -329,7 +338,7 @@ graph LR
     TWB[ThreadWorkspaceBuffer<br/>64-byte aligned bytes] -->|from_bytes| BSW[BSplineCollocationWorkspace<br/>band matrix, LU, pivots]
     BSW --> FIT["fit(slice[0])<br/>fit(slice[1])<br/>...reused each iteration"]
     FIT -->|output| AV[AlignedVector 64-byte<br/>PriceTensor coefficients]
-    AV --> SURF[PriceTableSurface shared_ptr]
+    AV --> SURF[BSplineND shared_ptr]
 ```
 
 ### Why Three Strategies?
@@ -390,6 +399,7 @@ For reference, here are the C++23 features used and where they appear:
 
 ## Related Documents
 
+- [Interpolation Framework](INTERPOLATION_FRAMEWORK.md) — Template composition for price surfaces
 - [Mathematical Foundations](MATHEMATICAL_FOUNDATIONS.md) — PDE formulations and numerical methods
 - [API Guide](API_GUIDE.md) — Usage examples and recipes
 - [Performance Analysis](PERF_ANALYSIS.md) — Instruction-level profiling

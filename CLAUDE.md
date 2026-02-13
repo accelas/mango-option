@@ -176,7 +176,7 @@ auto result = solver.solve(query);
 **Pattern 2: Price Table Pre-computation and Interpolated IV**
 ```cpp
 #include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/option/table/standard_surface.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 
 // Build price table (always uses EEP for ~5x better interpolation accuracy)
@@ -185,13 +185,14 @@ auto [builder, axes] = mango::PriceTableBuilder<4>::from_vectors(
     mango::GridAccuracyParams{}, mango::OptionType::PUT).value();
 auto result = builder.build(axes);
 
-// Wrap surface for price reconstruction and IV solving
-auto wrapper = mango::make_standard_wrapper(
-    result->surface, mango::OptionType::PUT).value();
+// Wrap B-spline for price reconstruction and IV solving
+auto wrapper = mango::make_bspline_surface(
+    result->spline, result->K_ref, result->dividends.dividend_yield,
+    mango::OptionType::PUT).value();
 double price = wrapper.price(spot, strike, tau, sigma, rate);
 
 // Create interpolated IV solver from wrapper
-auto iv_solver = mango::DefaultInterpolatedIVSolver::create(
+auto iv_solver = mango::InterpolatedIVSolver<mango::BSplinePriceTable>::create(
     std::move(wrapper)).value();
 auto iv_result = iv_solver.solve(iv_query);
 ```
@@ -208,7 +209,10 @@ mango::IVSolverFactoryConfig config{
         .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate = {0.02, 0.03, 0.05, 0.07},
     },
-    .path = mango::SegmentedIVPath{
+    .backend = mango::BSplineBackend{
+        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+    },
+    .discrete_dividends = mango::DiscreteDividendConfig{
         .maturity = 1.0,
         .discrete_dividends = {mango::Dividend{.calendar_time = 0.25, .amount = 1.50}},
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
@@ -227,7 +231,10 @@ mango::IVSolverFactoryConfig config{
     .spot = 100.0,
     .dividend_yield = 0.01,
     .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
-    .path = mango::SegmentedIVPath{
+    .backend = mango::BSplineBackend{
+        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+    },
+    .discrete_dividends = mango::DiscreteDividendConfig{
         .maturity = 1.0,
         .discrete_dividends = {mango::Dividend{.calendar_time = 0.25, .amount = 1.50}},
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
@@ -372,6 +379,7 @@ sudo ./tools/mango-trace monitor ./my_program --preset=debug
 
 - **CLAUDE.md** (this file) - Workflow and project overview
 - **docs/ARCHITECTURE.md** - Software architecture, design patterns, performance
+- **docs/INTERPOLATION_FRAMEWORK.md** - Template composition for price surfaces
 - **docs/MATHEMATICAL_FOUNDATIONS.md** - PDE formulations, numerical methods
 - **docs/API_GUIDE.md** - Usage examples and patterns
 - **docs/PERF_ANALYSIS.md** - Instruction-level performance analysis

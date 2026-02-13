@@ -301,9 +301,10 @@ if (!result.has_value()) {
     return;
 }
 
-// Wrap surface for price reconstruction
+// Wrap B-spline for price reconstruction
 auto wrapper = mango::make_bspline_surface(
-    result->surface, mango::OptionType::PUT).value();
+    result->spline, result->K_ref, result->dividends.dividend_yield,
+    mango::OptionType::PUT).value();
 
 // Query American option prices (~500ns)
 double price = wrapper.price(spot, strike, tau, sigma, rate);
@@ -320,8 +321,25 @@ double price = wrapper.price(spot, strike, tau, sigma, rate);
 | **Vega** | B-spline ∂EEP/∂σ + analytical European vega | Good: same as delta |
 | **Theta** | B-spline ∂EEP/∂τ + analytical European theta | Good: same as delta |
 | **Gamma** | B-spline ∂²EEP/∂m² + analytical European gamma | Good: O(h²) analytical second derivative |
+| **Rho** | B-spline ∂EEP/∂r + analytical European rho | Good: same as delta |
 
-Gamma uses the analytical B-spline second derivative with a log-moneyness chain rule correction: ∂²f/∂m² = (g″(x) − g′(x)) / m².
+Gamma uses the analytical B-spline second derivative with a log-moneyness chain rule correction: gamma = (g″(x) − g′(x)) / S². For Chebyshev surfaces, gamma uses central FD instead.
+
+**Querying Greeks:**
+
+```cpp
+// Greeks take PricingParams, return std::expected<double, GreekError>
+auto delta = wrapper.delta(params);
+auto gamma = wrapper.gamma(params);
+auto theta = wrapper.theta(params);
+auto rho   = wrapper.rho(params);
+
+if (delta.has_value()) {
+    std::cout << "Delta: " << *delta << "\n";
+}
+```
+
+`GreekError::OutOfDomain` is returned when the query point falls outside the surface bounds. `GreekError::NumericalFailure` indicates an FD computation failure near a boundary.
 
 **Measured accuracy** (interpolated vs PDE solver, σ=0.20, r=0.05, q=0.02):
 
@@ -331,8 +349,11 @@ Gamma uses the analytical B-spline second derivative with a log-moneyness chain 
 | **Delta** | 0.0087 | 2.8% | |
 | **Gamma** | 0.0024 | 7.3% | Worst at short τ; < 1.3% for τ ≥ 0.5 |
 | **Theta** | $0.15 | 3.3% | |
+| **Rho** | — | 2.5% | |
 
 Accuracy degrades at short maturities (τ < 0.5yr) where Greeks have sharper curvature. When in doubt, use the PDE solver directly (`AmericanOptionSolver`) for authoritative Greeks.
+
+**For details on how Greeks flow through the template layers, see [INTERPOLATION_FRAMEWORK.md](INTERPOLATION_FRAMEWORK.md).**
 
 ### Factory Methods
 
@@ -412,9 +433,10 @@ surface = mo.build_price_table_surface_from_grid(
 #include "mango/option/interpolated_iv_solver.hpp"
 
 // Create IV solver from BSplinePriceTable
-auto iv_solver = mango::DefaultInterpolatedIVSolver::create(std::move(wrapper)).value();
+auto iv_solver = mango::InterpolatedIVSolver<mango::BSplinePriceTable>::create(
+    std::move(wrapper)).value();
 
-// Solve IV — internally uses EEP reconstruction + Newton iteration
+// Solve IV — internally uses EEP reconstruction + Brent's method
 auto iv_result = iv_solver.solve(iv_query);
 ```
 
@@ -527,7 +549,10 @@ mango::IVSolverFactoryConfig config{
         .vol = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
         .rate = {0.02, 0.03, 0.05, 0.07},
     },
-    .path = mango::SegmentedIVPath{
+    .backend = mango::BSplineBackend{
+        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+    },
+    .discrete_dividends = mango::DiscreteDividendConfig{
         .maturity = 1.0,
         .discrete_dividends = {
             mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
@@ -541,10 +566,12 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 The factory dispatches on two orthogonal variants:
 
-- **`path`**: `StandardIVPath` (continuous dividends) or `SegmentedIVPath` (discrete dividends)
-- **`grid`**: `IVGrid` grid points (exact knots or domain bounds), with optional `adaptive` for automatic density tuning to target IV accuracy
+- **`backend`**: `BSplineBackend`, `ChebyshevBackend`, or `DimensionlessBackend`
+- **`discrete_dividends`**: When set, uses the segmented surface path (tau splits + K_ref blending)
 
-### Standard Path with Manual Grid
+With optional `adaptive` for automatic grid density tuning to a target IV accuracy.
+
+### Standard (Continuous Dividend) with Manual Grid
 
 ```cpp
 mango::IVSolverFactoryConfig config{
@@ -556,7 +583,7 @@ mango::IVSolverFactoryConfig config{
         .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate = {0.02, 0.03, 0.05, 0.07},
     },
-    .path = mango::StandardIVPath{
+    .backend = mango::BSplineBackend{
         .maturity_grid = {0.1, 0.25, 0.5, 1.0},
     },
 };
@@ -564,7 +591,7 @@ mango::IVSolverFactoryConfig config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
-### Standard Path with Adaptive Grid
+### Standard with Adaptive Grid
 
 Instead of choosing grid points manually, specify a target IV accuracy:
 
@@ -574,7 +601,7 @@ mango::IVSolverFactoryConfig config{
     .spot = 100.0,
     .dividend_yield = 0.02,
     .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
-    .path = mango::StandardIVPath{
+    .backend = mango::BSplineBackend{
         .maturity_grid = {0.1, 0.25, 0.5, 1.0},
     },
 };
@@ -584,7 +611,7 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 `IVGrid` includes sensible domain-bound defaults (moneyness 0.7–1.3, vol 0.05–0.50, rate 0.01–0.10). When `adaptive` is set, the builder iteratively refines grid density, validating via Latin Hypercube sampling against fresh PDE solves, until the target is met.
 
-### Segmented Path with Adaptive Grid
+### Discrete Dividends with Adaptive Grid
 
 Adaptive grid also works with discrete dividends. The builder probes 2–3 representative K_ref values using segmented PDE surfaces, takes per-axis maximum grid sizes across probes, then builds all segments with a uniform grid:
 
@@ -594,7 +621,10 @@ mango::IVSolverFactoryConfig config{
     .spot = 100.0,
     .dividend_yield = 0.01,
     .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
-    .path = mango::SegmentedIVPath{
+    .backend = mango::BSplineBackend{
+        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+    },
+    .discrete_dividends = mango::DiscreteDividendConfig{
         .maturity = 1.0,
         .discrete_dividends = {
             mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
@@ -746,18 +776,18 @@ for (size_t i = 0; i < batch.results.size(); ++i) {
 **Price surface batch** — queries a pre-computed B-spline surface (~500ns each):
 
 ```cpp
-auto surface = result->surface;
+auto spline = result->spline;
 
 std::vector<std::array<double, 4>> queries = {
-    {1.00, 0.25, 0.20, 0.05},  // ATM, 3M, 20% vol, 5% rate
-    {0.95, 0.50, 0.25, 0.03},  // ITM, 6M, 25% vol, 3% rate
-    {1.10, 1.00, 0.15, 0.02},  // OTM, 1Y, 15% vol, 2% rate
+    {0.00, 0.25, 0.20, 0.05},  // ATM, 3M, 20% vol, 5% rate (log-moneyness)
+    {-0.05, 0.50, 0.25, 0.03}, // ITM, 6M, 25% vol, 3% rate
+    {0.10, 1.00, 0.15, 0.02},  // OTM, 1Y, 15% vol, 2% rate
 };
 
 for (const auto& coords : queries) {
-    double price = surface->value(coords);
-    double vega = surface->partial(2, coords);  // ∂price/∂σ
-    std::cout << "m=" << coords[0] << ", price=" << price << ", vega=" << vega << "\n";
+    double eep = spline->eval(coords);             // EEP value
+    double deep_dsigma = spline->partial(2, coords);  // ∂EEP/∂σ
+    std::cout << "x=" << coords[0] << ", eep=" << eep << "\n";
 }
 ```
 
@@ -783,8 +813,8 @@ Use FDM batch when you need exact PDE accuracy or have few queries. Use the pric
 |---|---|---|
 | Single option | `IVSolver::solve(query)` | ~19ms |
 | Batch (independent queries) | `IVSolver::solve_batch(queries)` | ~19ms each (parallelized) |
-| Many queries, no dividends | `make_interpolated_iv_solver` + `StandardIVPath` | ~3.5μs/query |
-| Many queries, with dividends | `make_interpolated_iv_solver` + `SegmentedIVPath` | ~3.5μs/query |
+| Many queries, no dividends | `make_interpolated_iv_solver` + `BSplineBackend` | ~3.5μs/query |
+| Many queries, with dividends | `make_interpolated_iv_solver` + `discrete_dividends` | ~3.5μs/query |
 
 **When to use FDM vs interpolated:** FDM solves a full PDE per query — use it for small batches or when you need exact accuracy. Interpolated solvers query a pre-computed B-spline surface — use them when amortizing build cost over thousands of queries. See [Interpolated Greek Accuracy](#interpolated-greek-accuracy) for error bounds.
 
@@ -1062,5 +1092,6 @@ auto [grid_spec, time_domain] = mango::estimate_pde_grid(params, accuracy);
 ## Related Documentation
 
 - **Software Architecture:** [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Interpolation Framework:** [INTERPOLATION_FRAMEWORK.md](INTERPOLATION_FRAMEWORK.md)
 - **Mathematical Foundations:** [MATHEMATICAL_FOUNDATIONS.md](MATHEMATICAL_FOUNDATIONS.md)
 - **USDT Tracing:** [TRACING.md](TRACING.md)
