@@ -172,7 +172,7 @@ if (result.has_value()) {
 
 ## Implied Volatility Calculation
 
-### FDM-Based IV (Robust, ~19ms)
+### FDM-Based IV (Robust, ~8ms ATM)
 
 **Uses Brent's method with nested PDE pricing:**
 
@@ -306,7 +306,7 @@ auto wrapper = mango::make_bspline_surface(
     result->spline, result->K_ref, result->dividends.dividend_yield,
     mango::OptionType::PUT).value();
 
-// Query American option prices (~500ns)
+// Query American option prices (~250ns)
 double price = wrapper.price(spot, strike, tau, sigma, rate);
 ```
 
@@ -750,7 +750,7 @@ auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);
 
 Two batch query modes serve different latency/accuracy tradeoffs.
 
-**FDM batch** — each query solves a full PDE (~19ms each, OpenMP-parallelized):
+**FDM batch** — each query solves a full PDE (~8ms ATM, OpenMP-parallelized):
 
 ```cpp
 std::vector<mango::IVQuery> queries;
@@ -773,7 +773,7 @@ for (size_t i = 0; i < batch.results.size(); ++i) {
 }
 ```
 
-**Price surface batch** — queries a pre-computed B-spline surface (~500ns each):
+**Price surface batch** — queries a pre-computed B-spline surface (~250ns each):
 
 ```cpp
 auto spline = result->spline;
@@ -801,18 +801,18 @@ Use FDM batch when you need exact PDE accuracy or have few queries. Use the pric
 
 | Scenario | Approach | Latency |
 |---|---|---|
-| Single option | `solve_american_option(params)` | ~5–20ms |
-| Single option with discrete dividends | `solve_american_option(params)` with `Dividend` list | ~5–20ms |
-| Batch (same parameters, varying strikes) | `BatchAmericanOptionSolver` with chain solving | ~5–20ms total (1 PDE) |
-| Batch (mixed parameters) | `BatchAmericanOptionSolver` | ~5–20ms per group |
-| Many queries, same parameter space | Pre-compute price table, query `BSplinePriceTable` | ~500ns/query |
+| Single option | `solve_american_option(params)` | ~0.3ms ATM, ~9-19ms off-ATM |
+| Single option with discrete dividends | `solve_american_option(params)` with `Dividend` list | ~0.3–19ms |
+| Batch (same parameters, varying strikes) | `BatchAmericanOptionSolver` with chain solving | ~0.3–19ms total (1 PDE) |
+| Batch (mixed parameters) | `BatchAmericanOptionSolver` | ~0.3–19ms per group |
+| Many queries, same parameter space | Pre-compute price table, query `BSplinePriceTable` | ~250ns/query |
 
 ### Implied Volatility
 
 | Scenario | Approach | Latency |
 |---|---|---|
-| Single option | `IVSolver::solve(query)` | ~19ms |
-| Batch (independent queries) | `IVSolver::solve_batch(queries)` | ~19ms each (parallelized) |
+| Single option | `IVSolver::solve(query)` | ~8ms ATM, ~90-140ms off-ATM |
+| Batch (independent queries) | `IVSolver::solve_batch(queries)` | same per query (parallelized) |
 | Many queries, no dividends | `make_interpolated_iv_solver` + `BSplineBackend` | ~3.5μs/query |
 | Many queries, with dividends | `make_interpolated_iv_solver` + `discrete_dividends` | ~3.5μs/query |
 

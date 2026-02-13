@@ -58,7 +58,7 @@ PricingParams MakeParams(double q = 0.02) {
 
 const BSplinePriceTable& GetBSpline4D() {
     static BSplinePriceTable* surface = [] {
-        auto m_grid    = linspace(0.70, 1.40, 15);
+        auto m_grid    = linspace(-0.40, 0.40, 15);  // log-moneyness ln(S/K)
         auto tau_grid  = linspace(0.05, 2.50, 10);
         auto vol_grid  = linspace(0.08, 0.50, 8);
         auto rate_grid = linspace(0.00, 0.12, 6);

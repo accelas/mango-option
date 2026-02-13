@@ -15,8 +15,8 @@ The core C++ library exposes a pybind11-based Python module, so you can use it f
 **What you get:**
 
 - American option prices and Greeks (delta, gamma, theta, vega) from the PDE solver
-- Implied volatility via FDM (~19ms) or B-spline interpolation (~3.5us)
-- Pre-computed 4D price tables for sub-microsecond lookups (~476ns, ~1 bps near-ATM)
+- Implied volatility via FDM (~8ms ATM) or B-spline interpolation (~3.5μs)
+- Pre-computed 4D price tables for sub-microsecond lookups (~250ns, <5 bps IV error)
 - Batch pricing with OpenMP (10x speedup on multi-core)
 - USDT tracing probes for production monitoring at zero overhead when disabled
 - A general-purpose PDE toolkit if you want to solve your own equations
@@ -100,10 +100,10 @@ Batch processing (64 options): 10x speedup with OpenMP (~0.13ms/option parallel 
 
 | Method | Time/IV | Near-ATM | Full-chain |
 |---|---|---|---|
-| FDM-based | ~19ms | Ground truth | Ground truth |
-| Interpolated (B-spline) | ~3.5us | ~1 bps IV | ~$0.005 price RMSE |
+| FDM-based | ~8ms ATM | Ground truth | Ground truth |
+| Interpolated (B-spline) | ~3.5μs | <5 bps IV | ~$0.005 price RMSE |
 
-The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price table (moneyness x maturity x vol x rate), then query it with B-spline interpolation. EEP decomposition (P = P_European + EEP) improves interpolation accuracy by separating the smooth early exercise premium from the closed-form European component.
+The interpolation path is ~2,000x faster than FDM. You pre-compute a 4D price table (moneyness × maturity × vol × rate), then query it with B-spline interpolation.
 
 ### Price Table Profiles
 
@@ -119,6 +119,25 @@ The table below shows the accuracy/speed tradeoff across grid density profiles, 
 †Deep-ITM and deep-OTM options share the same low-vega characteristic: vega is near zero, so even a tiny price error (< $0.01) maps to thousands of bps in IV space. The actual price-relative error remains small — deep-ITM price RMSE is < $0.001 across all profiles. **Price RMSE is the stable metric** across all moneyness regimes. Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control the density/speed tradeoff.
 
 For detailed profiling data, see [docs/PERF_ANALYSIS.md](docs/PERF_ANALYSIS.md).
+
+### Reproducing Performance Claims
+
+```bash
+bazel run -c opt //benchmarks:latency_sweep
+```
+
+This runs the full latency sweep (9 strikes × 3 maturities) covering PDE pricing, FDM IV, surface queries (7 types), and interpolated IV (3 backends). Each benchmark reports latency, accuracy (price_err_bps, iv_err_bps), and TV/K (time value / strike) for filtering edge cases. To run a specific section:
+
+```bash
+# PDE pricing only
+bazel run -c opt //benchmarks:latency_sweep -- --benchmark_filter="BM_PDE_Pricing"
+
+# B-spline surface queries only
+bazel run -c opt //benchmarks:latency_sweep -- --benchmark_filter="BM_Surface_Query/0/"
+
+# Interpolated IV (B-spline backend)
+bazel run -c opt //benchmarks:latency_sweep -- --benchmark_filter="BM_Interp_IV/0/"
+```
 
 ---
 

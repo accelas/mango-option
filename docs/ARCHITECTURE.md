@@ -17,8 +17,8 @@ The library has three computation paths, each targeting a different latency/accu
 
 | Path | Latency | Use case |
 |------|---------|----------|
-| **FDM pricing** | ~1.4ms/option | Single option or small batch |
-| **FDM-based IV** | ~19ms/IV | Ground-truth implied volatility |
+| **FDM pricing** | ~0.3ms ATM, ~9-19ms off-ATM | Single option or small batch |
+| **FDM-based IV** | ~8ms ATM | Ground-truth implied volatility |
 | **Interpolated IV** | ~3.5us/IV | Production queries against pre-computed table |
 | **Discrete dividend IV** | ~3.5us/IV | Same interpolated speed, with cash dividend handling |
 
@@ -173,13 +173,13 @@ The FDM solver wraps Brent's root-finding method around the American option solv
 IVSolver → Brent's method → AmericanOptionSolver (5-8 calls) → price
 ```
 
-Each Brent iteration solves the PDE from scratch (no warm-starting), so total time is ~5-8 PDE solves. Adaptive volatility bounds narrow the search based on intrinsic value. Typical latency: ~19ms per IV on a 101x498 grid.
+Each Brent iteration solves the PDE from scratch (no warm-starting), so total time is ~5-8 PDE solves. Adaptive volatility bounds narrow the search based on intrinsic value. Typical latency: ~8ms ATM per IV.
 
 **Grid estimation.** Each Brent iteration uses heuristic grid estimation via `GridAccuracyParams`, which scales the grid appropriately for the candidate volatility.
 
 ### Interpolated (InterpolatedIVSolver)
 
-The interpolated solver replaces the nested PDE solve with a lookup into a pre-computed price surface. Brent's method on the smooth surface converges in ~4-6 function evaluations, each requiring only a surface evaluation (~193ns). Total IV solve: ~3.5us — a 5,400x speedup over FDM.
+The interpolated solver replaces the nested PDE solve with a lookup into a pre-computed price surface. Brent's method on the smooth surface converges in ~4-6 function evaluations, each requiring only a surface evaluation (~250ns). Total IV solve: ~3.5μs — a ~2,000x speedup over FDM.
 
 Before starting the root search, the solver evaluates surface vega at three representative volatilities (10%, 25%, 50%). If all are below a threshold (default 1e-4), the option has near-zero vega sensitivity and IV is effectively undefined — the solver returns `VegaTooSmall` immediately (~600ns) instead of running a doomed search.
 
@@ -253,7 +253,7 @@ The builder supports automatic grid estimation via `from_grid_auto_profile()` wi
 | Maturity (tau) | 1.0x | Baseline, sqrt-tau behavior |
 | Rate (r) | 0.6x | Nearly linear discounting |
 
-The default (High) targets ~20 bps average IV error. For tighter tolerance, `AdaptiveGridBuilder` iteratively refines grid density until a target error is met.
+The default (High) targets ~20 bps average IV error. For tighter tolerance, `AdaptiveGridBuilder` iteratively refines grid density until a target error is met — typically achieving <5 bps IV error in the core region (ATM ±30%, T ≥ 0.25).
 
 ---
 

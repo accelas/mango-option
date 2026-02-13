@@ -564,6 +564,46 @@ cc_binary(
 )
 
 cc_binary(
+    name = "latency_sweep",
+    srcs = ["latency_sweep.cc", "iv_benchmark_common.hpp"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    linkstatic = True,
+    deps = [
+        "//src/math:bspline_basis",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_nd_separable",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/option:american_option",
+        "//src/option:interpolated_iv_solver",
+        "//src/option:iv_solver",
+        "//src/option:option_grid",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_tensor_accessor",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table:eep_decomposer",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
     name = "bspline_move_semantics_demo",
     srcs = ["bspline_move_semantics_demo.cc"],
     copts = [
