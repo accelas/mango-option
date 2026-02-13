@@ -1215,5 +1215,116 @@ TEST_F(ParquetIOTest, TauSegmentGapRejected) {
         << "from_data should accept valid tau segments";
 }
 
+// ===========================================================================
+// Test 19: Chebyshev num_pts < 2 and invalid domain rejected
+// ===========================================================================
+
+TEST_F(ParquetIOTest, ChebyshevInvalidDomainRejected) {
+    // Build valid Chebyshev data, then tamper to create invalid segments.
+    ChebyshevTableConfig config{
+        .num_pts = {4, 3, 3, 3},
+        .domain = Domain<4>{
+            .lo = {-0.30, 0.02, 0.10, 0.02},
+            .hi = { 0.30, 1.50, 0.40, 0.08},
+        },
+        .K_ref = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .tucker_epsilon = 0.0,
+    };
+    auto result = build_chebyshev_table(config);
+    ASSERT_TRUE(result.has_value());
+    auto& surface = std::get<ChebyshevRawSurface>(result->surface);
+    auto data = to_data(surface);
+    ASSERT_EQ(data.segments.size(), 1u);
+
+    // num_pts[0] = 1: requires >= 2 for Chebyshev
+    {
+        auto bad = data;
+        bad.segments[0].num_pts[0] = 1;
+        auto r = from_data<ChebyshevRawLeaf>(bad);
+        EXPECT_FALSE(r.has_value())
+            << "from_data should reject num_pts < 2";
+    }
+
+    // Inverted domain: lo > hi
+    {
+        auto bad = data;
+        bad.segments[0].domain_lo[1] = 2.0;
+        bad.segments[0].domain_hi[1] = 0.5;
+        auto r = from_data<ChebyshevRawLeaf>(bad);
+        EXPECT_FALSE(r.has_value())
+            << "from_data should reject inverted domain";
+    }
+
+    // NaN in domain
+    {
+        auto bad = data;
+        bad.segments[0].domain_hi[2] = std::numeric_limits<double>::quiet_NaN();
+        auto r = from_data<ChebyshevRawLeaf>(bad);
+        EXPECT_FALSE(r.has_value())
+            << "from_data should reject NaN domain";
+    }
+
+    // Inf in domain
+    {
+        auto bad = data;
+        bad.segments[0].domain_lo[0] = -std::numeric_limits<double>::infinity();
+        auto r = from_data<ChebyshevRawLeaf>(bad);
+        EXPECT_FALSE(r.has_value())
+            << "from_data should reject Inf domain";
+    }
+}
+
+// ===========================================================================
+// Test 20: Writer rejects invalid metadata
+// ===========================================================================
+
+TEST_F(ParquetIOTest, WriterRejectsInvalidMetadata) {
+    auto setup = PriceTableBuilder::from_vectors(
+        {-0.3, -0.1, 0.0, 0.1, 0.3},
+        {0.1, 0.5, 1.0, 1.5},
+        {0.10, 0.20, 0.30, 0.40},
+        {0.02, 0.04, 0.06, 0.08},
+        100.0, GridAccuracyParams{}, OptionType::PUT, 0.02);
+    ASSERT_TRUE(setup.has_value());
+    auto& [builder, axes] = *setup;
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value());
+    auto surface = make_bspline_surface(
+        result->spline, result->K_ref, result->dividends.dividend_yield,
+        OptionType::PUT);
+    ASSERT_TRUE(surface.has_value());
+    auto data = to_data(*surface);
+
+    // Inverted bounds
+    {
+        auto bad = data;
+        bad.bounds_sigma_min = 0.50;
+        bad.bounds_sigma_max = 0.10;
+        auto r = write_parquet(bad, temp_path_);
+        EXPECT_FALSE(r.has_value())
+            << "write_parquet should reject inverted bounds";
+    }
+
+    // NaN in metadata
+    {
+        auto bad = data;
+        bad.bounds_tau_max = std::numeric_limits<double>::quiet_NaN();
+        auto r = write_parquet(bad, temp_path_);
+        EXPECT_FALSE(r.has_value())
+            << "write_parquet should reject NaN metadata";
+    }
+
+    // Inf dividend_yield
+    {
+        auto bad = data;
+        bad.dividend_yield = std::numeric_limits<double>::infinity();
+        auto r = write_parquet(bad, temp_path_);
+        EXPECT_FALSE(r.has_value())
+            << "write_parquet should reject Inf metadata";
+    }
+}
+
 }  // namespace
 }  // namespace mango

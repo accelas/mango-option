@@ -350,6 +350,26 @@ write_parquet(const PriceTableData& data,
               const std::filesystem::path& path,
               const ParquetWriteOptions& opts) {
 
+    // ---- Validate file-level metadata ----
+    // Reject non-finite scalars and inverted bounds so the writer never
+    // emits files that the reader would reject.
+    if (!std::isfinite(data.dividend_yield) || !std::isfinite(data.maturity) ||
+        !std::isfinite(data.precompute_time_seconds)) {
+        return std::unexpected(serialization_error());
+    }
+    if (!std::isfinite(data.bounds_m_min) || !std::isfinite(data.bounds_m_max) ||
+        !std::isfinite(data.bounds_tau_min) || !std::isfinite(data.bounds_tau_max) ||
+        !std::isfinite(data.bounds_sigma_min) || !std::isfinite(data.bounds_sigma_max) ||
+        !std::isfinite(data.bounds_rate_min) || !std::isfinite(data.bounds_rate_max)) {
+        return std::unexpected(serialization_error());
+    }
+    if (data.bounds_m_min >= data.bounds_m_max ||
+        data.bounds_tau_min >= data.bounds_tau_max ||
+        data.bounds_sigma_min >= data.bounds_sigma_max ||
+        data.bounds_rate_min >= data.bounds_rate_max) {
+        return std::unexpected(serialization_error());
+    }
+
     // ---- Validate segment invariants ----
     // Schema supports up to 4 dimensions (grid_0..grid_3, knots_0..knots_3).
     constexpr size_t MAX_NDIM = 4;

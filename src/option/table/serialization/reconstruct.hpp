@@ -94,8 +94,14 @@ make_chebyshev(const PriceTableData::Segment& seg) {
     for (size_t d = 0; d < N; ++d) {
         domain.lo[d] = seg.domain_lo[d];
         domain.hi[d] = seg.domain_hi[d];
-        // Validate num_pts are positive
-        if (seg.num_pts[d] <= 0) {
+        // Validate domain: finite and lo < hi
+        if (!std::isfinite(domain.lo[d]) || !std::isfinite(domain.hi[d]) ||
+            domain.lo[d] >= domain.hi[d]) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
+        // Chebyshev interpolation requires at least 2 points per axis
+        if (seg.num_pts[d] < 2) {
             return std::unexpected(PriceTableError{
                 PriceTableErrorCode::InvalidConfig});
         }
@@ -200,7 +206,7 @@ template <typename LeafType>
 [[nodiscard]] inline std::expected<void, PriceTableError>
 validate_tau_segments(const std::vector<const PriceTableData::Segment*>& group) {
     double prev_start = -std::numeric_limits<double>::infinity();
-    double prev_end = -std::numeric_limits<double>::infinity();
+    double max_end = -std::numeric_limits<double>::infinity();
     for (const auto* seg : group) {
         if (!std::isfinite(seg->tau_start) || !std::isfinite(seg->tau_end) ||
             !std::isfinite(seg->tau_min) || !std::isfinite(seg->tau_max)) {
@@ -216,14 +222,16 @@ validate_tau_segments(const std::vector<const PriceTableData::Segment*>& group) 
                 PriceTableErrorCode::InvalidConfig});
         }
         // Reject interior gaps: next segment must start at or before
-        // the previous segment's end to ensure full coverage.
-        if (prev_end > -std::numeric_limits<double>::infinity() &&
-            seg->tau_start > prev_end) {
+        // the running maximum end to ensure full coverage. Uses max_end
+        // (not prev_end) so overlapping segments that extend past earlier
+        // ones don't cause false rejections.
+        if (max_end > -std::numeric_limits<double>::infinity() &&
+            seg->tau_start > max_end) {
             return std::unexpected(PriceTableError{
                 PriceTableErrorCode::InvalidConfig});
         }
         prev_start = seg->tau_start;
-        prev_end = seg->tau_end;
+        if (seg->tau_end > max_end) max_end = seg->tau_end;
     }
     return {};
 }
