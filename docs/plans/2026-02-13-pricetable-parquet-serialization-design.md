@@ -147,21 +147,77 @@ For segmented (multi-K_ref) surfaces (N segments):
 4. Compose `SplitSurface<TauSeg, MultiKRefSplit>` across K_refs
 5. Wrap in `PriceTable<Inner>`
 
-### Inner-type traversal concept
+### Generic overload-based dispatch
+
+Extraction and reconstruction use free-function overloads that walk the
+compositional type tree.  No `to_segments()` member functions on internal
+types — the dispatch is entirely external.
+
+**Extraction (`to_data` direction):**
 
 ```cpp
-template <typename T>
-concept DataSerializable = requires(const T& t) {
-    { t.to_segments() } -> std::same_as<std::vector<PriceTableData::Segment>>;
-};
+// Base case: extract one segment from a TransformLeaf holding a B-spline
+template <size_t N, typename Xform>
+void extract_segments(
+    const TransformLeaf<SharedInterp<BSplineND<double, N>, N>, Xform>& leaf,
+    std::vector<PriceTableData::Segment>& out,
+    double K_ref, double tau_start, double tau_end,
+    double tau_min, double tau_max);
+
+// Base case: extract one segment from a TransformLeaf holding Chebyshev (Raw)
+template <size_t N, typename Xform>
+void extract_segments(
+    const TransformLeaf<ChebyshevInterpolant<N, RawTensor<N>>, Xform>& leaf,
+    std::vector<PriceTableData::Segment>& out,
+    double K_ref, double tau_start, double tau_end,
+    double tau_min, double tau_max);
+
+// Base case: Chebyshev (Tucker) — expand to raw, then same as above
+template <size_t N, typename Xform>
+void extract_segments(
+    const TransformLeaf<ChebyshevInterpolant<N, TuckerTensor<N>>, Xform>& leaf,
+    std::vector<PriceTableData::Segment>& out,
+    double K_ref, double tau_start, double tau_end,
+    double tau_min, double tau_max);
+
+// Recursive: EEPLayer delegates to its leaf
+template <typename Leaf, typename EEP>
+void extract_segments(const EEPLayer<Leaf, EEP>& layer, ...);
+
+// Recursive: SplitSurface<Inner, TauSegmentSplit> iterates tau segments
+template <typename Inner>
+void extract_segments(const SplitSurface<Inner, TauSegmentSplit>& split, ...);
+
+// Recursive: SplitSurface<Inner, MultiKRefSplit> iterates K_ref groups
+template <typename Inner>
+void extract_segments(const SplitSurface<Inner, MultiKRefSplit>& split, ...);
 ```
 
-Each layer implements `to_segments()` recursively:
-- `SplitSurface::to_segments` → iterates pieces, delegates to inner
-- `TransformLeaf::to_segments` → produces one Segment
-- `EEPLayer::to_segments` → delegates to leaf
+**Reconstruction (`from_data` direction):**
 
-For `from_data()`, static reconstruction functions per Inner type.
+```cpp
+// reconstruct<Inner>(segments, ...) → Inner
+// Overloads mirror extract_segments, building the type tree bottom-up.
+
+template <size_t N, typename Xform>
+auto reconstruct_leaf(const PriceTableData::Segment& seg)
+    -> std::expected<TransformLeaf<...>, PriceTableError>;
+
+template <typename Inner>
+auto reconstruct_eep(const PriceTableData::Segment& seg,
+                     OptionType opt, double q)
+    -> std::expected<EEPLayer<Inner, AnalyticalEEP>, PriceTableError>;
+
+template <typename Inner>
+auto reconstruct_segmented(std::span<const PriceTableData::Segment> segs)
+    -> std::expected<SplitSurface<...>, PriceTableError>;
+```
+
+**Extensibility:** A new surface type that composes existing interpolants
+(e.g., `NumericalEEPLayer<TransformLeaf<SharedInterp<...>>>`) only needs
+one new `extract_segments` overload for `NumericalEEPLayer` and one
+`reconstruct_eep` overload.  The leaf-level B-spline/Chebyshev overloads
+are reused automatically.
 
 ## Layer 2: Parquet I/O
 

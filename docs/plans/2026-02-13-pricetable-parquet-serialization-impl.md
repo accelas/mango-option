@@ -186,89 +186,152 @@ git commit -m "Add PriceTableData descriptor struct"
 
 ---
 
-### Task 3: Implement `to_data()` — extract data from all surface types
+### Task 3: Implement `to_data()` — generic extraction via overloads
 
-Traverse each surface type's layer tree and produce `PriceTableData`.
+Use free-function overloads of `extract_segments()` to walk the
+compositional type tree.  Each layer type gets one overload; new
+surface types reusing existing interpolants need no leaf-level changes.
 
 **Files:**
+- Create: `src/option/table/serialization/extract_segments.hpp`
 - Create: `src/option/table/serialization/to_data.hpp`
 - Create: `src/option/table/serialization/to_data.cpp`
 - Modify: `src/option/table/serialization/BUILD.bazel`
 
-**Step 1: Write the failing test**
+**Step 1: Implement leaf-level `extract_segments` overloads**
 
-In `tests/price_table_data_test.cc` (created in Task 5):
+In `extract_segments.hpp`:
 
 ```cpp
-TEST(PriceTableDataTest, BSpline4DToDataProducesOneSegment) {
-    auto surface = build_small_bspline_4d();
-    auto data = surface.to_data();
-    EXPECT_EQ(data.surface_type, "bspline_4d");
-    ASSERT_EQ(data.segments.size(), 1);
-    EXPECT_EQ(data.segments[0].interp_type, "bspline");
-    EXPECT_EQ(data.segments[0].ndim, 4);
-    EXPECT_FALSE(data.segments[0].values.empty());
+// B-spline leaf (4D or 3D): reads grid/knots/coefficients from BSplineND
+template <size_t N, typename Xform>
+void extract_segments(
+    const TransformLeaf<SharedInterp<BSplineND<double, N>, N>, Xform>& leaf,
+    std::vector<PriceTableData::Segment>& out,
+    double K_ref, double tau_start, double tau_end,
+    double tau_min, double tau_max) {
+    PriceTableData::Segment seg;
+    seg.interp_type = "bspline";
+    seg.ndim = N;
+    seg.K_ref = K_ref;
+    seg.tau_start = tau_start; seg.tau_end = tau_end;
+    seg.tau_min = tau_min; seg.tau_max = tau_max;
+    seg.segment_id = static_cast<int32_t>(out.size());
+
+    const auto& spline = leaf.interpolant().get();
+    for (size_t d = 0; d < N; ++d) {
+        seg.grids.push_back({spline.grid(d).begin(), spline.grid(d).end()});
+        seg.knots.push_back({spline.knots(d).begin(), spline.knots(d).end()});
+        seg.domain_lo.push_back(spline.grid(d).front());
+        seg.domain_hi.push_back(spline.grid(d).back());
+        seg.num_pts.push_back(static_cast<int32_t>(spline.grid(d).size()));
+    }
+    const auto& c = spline.coefficients();
+    seg.values.assign(c.data(), c.data() + c.size());
+    out.push_back(std::move(seg));
+}
+
+// Chebyshev Raw leaf (4D or 3D): reads domain/num_pts/values
+template <size_t N, typename Xform>
+void extract_segments(
+    const TransformLeaf<ChebyshevInterpolant<N, RawTensor<N>>, Xform>& leaf,
+    std::vector<PriceTableData::Segment>& out,
+    double K_ref, double tau_start, double tau_end,
+    double tau_min, double tau_max) {
+    PriceTableData::Segment seg;
+    seg.interp_type = "chebyshev";
+    seg.ndim = N;
+    seg.K_ref = K_ref;
+    // ... fill domain, num_pts from interpolant().domain(), interpolant().num_pts()
+    // ... fill values from interpolant().storage().values()
+    out.push_back(std::move(seg));
+}
+
+// Chebyshev Tucker leaf: expand to raw, produce same segment as Raw
+template <size_t N, typename Xform>
+void extract_segments(
+    const TransformLeaf<ChebyshevInterpolant<N, TuckerTensor<N>>, Xform>& leaf,
+    std::vector<PriceTableData::Segment>& out,
+    double K_ref, double tau_start, double tau_end,
+    double tau_min, double tau_max) {
+    // ... same as Raw but call storage().expand() for values
+    out.push_back(std::move(seg));
 }
 ```
 
-**Step 2: Implement extraction helpers**
-
-For each leaf type, implement a function that produces one `Segment`:
+**Step 2: Implement recursive layer overloads**
 
 ```cpp
-// Extract from a B-spline TransformLeaf (4D or 3D)
-template <size_t N>
-PriceTableData::Segment extract_bspline_segment(
-    const TransformLeaf<SharedInterp<BSplineND<double, N>, N>,
-                         auto>& leaf,
-    int32_t segment_id, double tau_start, double tau_end,
-    double tau_min, double tau_max);
+// EEPLayer: delegate to leaf
+template <typename Leaf, typename EEP>
+void extract_segments(
+    const EEPLayer<Leaf, EEP>& layer,
+    std::vector<PriceTableData::Segment>& out,
+    double K_ref, double tau_start, double tau_end,
+    double tau_min, double tau_max) {
+    extract_segments(layer.leaf(), out, K_ref, tau_start, tau_end,
+                     tau_min, tau_max);
+}
 
-// Extract from a Chebyshev TransformLeaf (RawTensor)
-template <size_t N>
-PriceTableData::Segment extract_chebyshev_segment(
-    const TransformLeaf<ChebyshevInterpolant<N, RawTensor<N>>,
-                         auto>& leaf,
-    int32_t segment_id, double tau_start, double tau_end,
-    double tau_min, double tau_max);
+// SplitSurface<Inner, TauSegmentSplit>: iterate tau segments
+template <typename Inner>
+void extract_segments(
+    const SplitSurface<Inner, TauSegmentSplit>& surface,
+    std::vector<PriceTableData::Segment>& out,
+    double K_ref, ...) {
+    const auto& split = surface.split();
+    for (size_t i = 0; i < surface.num_pieces(); ++i) {
+        extract_segments(surface.pieces()[i], out, K_ref,
+                         split.tau_start()[i], split.tau_end()[i],
+                         split.tau_min()[i], split.tau_max()[i]);
+    }
+}
+
+// SplitSurface<Inner, MultiKRefSplit>: iterate K_ref groups
+template <typename Inner>
+void extract_segments(
+    const SplitSurface<Inner, MultiKRefSplit>& surface,
+    std::vector<PriceTableData::Segment>& out, ...) {
+    const auto& k_refs = surface.split().k_refs();
+    for (size_t i = 0; i < surface.num_pieces(); ++i) {
+        extract_segments(surface.pieces()[i], out, k_refs[i], ...);
+    }
+}
 ```
 
-For Tucker-based ChebyshevInterpolant, call `storage().expand()` to
-get raw values, then produce the same Segment as RawTensor.
+**Step 3: Implement `to_data()` on PriceTable**
 
-**Step 3: Implement `to_data()` for each PriceTable specialization**
-
-The implementation traverses the type tree:
-
-- **Standard (EEP) types** (BSplinePriceTable, ChebyshevRawSurface,
-  ChebyshevSurface, BSpline3DPriceTable, Chebyshev3DPriceTable):
-  `table.inner().leaf()` → extract one segment.  Set `tau_start=0`,
-  `tau_end=tau_max`, `tau_min=table.tau_min()`, `tau_max=table.tau_max()`.
-
-- **Segmented multi-K_ref types** (BSplineMultiKRefSurface,
-  ChebyshevMultiKRefSurface):
-  `table.inner().pieces()` → iterate K_ref pieces.
-  Each piece: `.pieces()` → iterate tau segments.
-  Extract TauSegmentSplit data for each segment's tau boundaries.
-
-**Step 4: Wire `to_data()` into PriceTable**
-
-In `price_table.hpp`, add:
+In `to_data.hpp` / `to_data.cpp`:
 
 ```cpp
-[[nodiscard]] PriceTableData to_data() const;
+template <typename Inner>
+PriceTableData PriceTable<Inner>::to_data() const {
+    PriceTableData data;
+    data.surface_type = surface_type_string<Inner>();
+    data.option_type = option_type();
+    data.dividend_yield = dividend_yield();
+    // ...
+    extract_segments(inner_, data.segments,
+                     /*K_ref=*/0.0, /*tau_start=*/0.0,
+                     /*tau_end=*/bounds_.tau_max,
+                     /*tau_min=*/bounds_.tau_min,
+                     /*tau_max=*/bounds_.tau_max);
+    return data;
+}
 ```
 
-The implementation lives in `to_data.cpp` with explicit template
-instantiations for all 7 Inner types.
+Provide `surface_type_string<Inner>()` as a constexpr-if or
+template variable mapping each Inner to its string.
 
-**Step 5: Update BUILD.bazel**
+Explicit template instantiations for all 7 Inner types.
+
+**Step 4: Update BUILD.bazel**
 
 ```python
 cc_library(
     name = "to_data",
     srcs = ["to_data.cpp"],
-    hdrs = ["to_data.hpp"],
+    hdrs = ["to_data.hpp", "extract_segments.hpp"],
     deps = [
         ":price_table_data",
         "//src/option/table:price_table",
@@ -284,76 +347,125 @@ cc_library(
 )
 ```
 
-**Step 6: Build**
+**Step 5: Build**
 
 Run: `bazel build //src/option/table/serialization:to_data`
 
-**Step 7: Commit**
+**Step 6: Commit**
 
 ```
-git add src/option/table/serialization/to_data.hpp \
+git add src/option/table/serialization/extract_segments.hpp \
+        src/option/table/serialization/to_data.hpp \
         src/option/table/serialization/to_data.cpp \
         src/option/table/serialization/BUILD.bazel \
         src/option/table/price_table.hpp
-git commit -m "Implement to_data() for all 7 surface types"
+git commit -m "Implement to_data() with generic extract_segments dispatch"
 ```
 
 ---
 
-### Task 4: Implement `from_data()` — reconstruct surfaces from vectors
+### Task 4: Implement `from_data()` — generic reconstruction via overloads
 
-Reconstruct each surface type from `PriceTableData`.
+Mirror the extraction with reconstruction overloads that build the
+type tree bottom-up from `PriceTableData::Segment` vectors.
 
 **Files:**
+- Create: `src/option/table/serialization/reconstruct.hpp`
 - Create: `src/option/table/serialization/from_data.hpp`
 - Create: `src/option/table/serialization/from_data.cpp`
 - Modify: `src/option/table/serialization/BUILD.bazel`
 
-**Step 1: Implement interpolant reconstruction**
+**Step 1: Implement interpolant reconstruction helpers**
+
+In `reconstruct.hpp`:
 
 ```cpp
-// B-spline: grids + knots + coefficients → BSplineND
+// B-spline: grids + knots + coefficients → shared BSplineND
 template <size_t N>
 std::expected<std::shared_ptr<const BSplineND<double, N>>, PriceTableError>
-make_bspline_from_segment(const PriceTableData::Segment& seg);
+make_bspline(const PriceTableData::Segment& seg);
 
-// Chebyshev: domain + num_pts + values → ChebyshevInterpolant
+// Chebyshev: domain + num_pts + values → ChebyshevInterpolant<N, RawTensor<N>>
 template <size_t N>
 std::expected<ChebyshevInterpolant<N, RawTensor<N>>, PriceTableError>
-make_chebyshev_from_segment(const PriceTableData::Segment& seg);
+make_chebyshev(const PriceTableData::Segment& seg);
 ```
 
-**Step 2: Implement surface assembly**
+**Step 2: Implement leaf reconstruction overloads**
 
-For standard (EEP) surfaces:
-1. Reconstruct interpolant from single segment
-2. Wrap in `SharedInterp` (B-spline) or use directly (Chebyshev)
-3. Wrap in `TransformLeaf` with appropriate transform
-4. Wrap in `EEPLayer` with `AnalyticalEEP(option_type, dividend_yield)`
-5. Derive `SurfaceBounds` from domain
-6. Construct `PriceTable<Inner>`
+```cpp
+// B-spline leaf
+template <size_t N, typename Xform>
+auto reconstruct_leaf(const PriceTableData::Segment& seg)
+    -> std::expected<TransformLeaf<SharedInterp<BSplineND<double,N>,N>, Xform>,
+                     PriceTableError> {
+    auto spline = make_bspline<N>(seg);
+    if (!spline) return std::unexpected(spline.error());
+    SharedInterp<BSplineND<double,N>,N> shared(std::move(*spline));
+    return TransformLeaf(std::move(shared), Xform{}, seg.K_ref);
+}
 
-For segmented multi-K_ref:
-1. Group segments by K_ref
-2. For each K_ref group: build leaves + `TauSegmentSplit` + `SplitSurface`
-3. Build `MultiKRefSplit` + outer `SplitSurface`
-4. Construct `PriceTable<Inner>`
+// Chebyshev Raw leaf
+template <size_t N, typename Xform>
+auto reconstruct_leaf(const PriceTableData::Segment& seg)
+    -> std::expected<TransformLeaf<ChebyshevInterpolant<N,RawTensor<N>>, Xform>,
+                     PriceTableError> {
+    auto interp = make_chebyshev<N>(seg);
+    if (!interp) return std::unexpected(interp.error());
+    return TransformLeaf(std::move(*interp), Xform{}, seg.K_ref);
+}
+```
 
-**Step 3: Wire `from_data()` into PriceTable**
+**Step 3: Implement layer reconstruction overloads**
+
+```cpp
+// EEP layer: reconstruct leaf, wrap with AnalyticalEEP
+template <typename LeafType>
+auto reconstruct_eep(const PriceTableData::Segment& seg,
+                     OptionType opt, double q)
+    -> std::expected<EEPLayer<LeafType, AnalyticalEEP>, PriceTableError>;
+
+// Tau-segmented: group segments, build leaves + TauSegmentSplit
+template <typename LeafType>
+auto reconstruct_tau_segmented(
+    std::span<const PriceTableData::Segment> segs)
+    -> std::expected<SplitSurface<LeafType, TauSegmentSplit>, PriceTableError>;
+
+// Multi-K_ref: group by K_ref, build tau segments, compose
+template <typename TauSegType>
+auto reconstruct_multi_kref(
+    std::span<const PriceTableData::Segment> segs)
+    -> std::expected<SplitSurface<TauSegType, MultiKRefSplit>, PriceTableError>;
+```
+
+**Step 4: Wire `from_data()` on PriceTable**
+
+In `from_data.hpp` / `from_data.cpp`:
 
 ```cpp
 template <typename Inner>
-[[nodiscard]] static std::expected<PriceTable<Inner>, PriceTableError>
-PriceTable<Inner>::from_data(const PriceTableData& data);
+std::expected<PriceTable<Inner>, PriceTableError>
+PriceTable<Inner>::from_data(const PriceTableData& data) {
+    // Validate surface_type matches expected string
+    if (data.surface_type != surface_type_string<Inner>())
+        return std::unexpected(PriceTableError{...});
+
+    // Dispatch to appropriate reconstruct chain based on Inner
+    if constexpr (is_eep_surface<Inner>) {
+        auto inner = reconstruct_eep<...>(data.segments[0],
+                                          data.option_type,
+                                          data.dividend_yield);
+        // ... derive SurfaceBounds from segment domain
+    } else if constexpr (is_segmented_surface<Inner>) {
+        auto inner = reconstruct_multi_kref<...>(data.segments);
+        // ...
+    }
+    return PriceTable<Inner>(std::move(*inner), bounds,
+                             data.option_type, data.dividend_yield);
+}
 ```
 
-Explicit instantiations for all 7 Inner types in `from_data.cpp`.
-
-**Step 4: Validate surface_type**
-
-If `data.surface_type` doesn't match the expected string for the
-template Inner type, return `PriceTableError` with
-`PriceTableErrorCode::InvalidConfig`.
+Explicit instantiations for all 7 Inner types.
 
 **Step 5: Build**
 
@@ -362,11 +474,12 @@ Run: `bazel build //src/option/table/serialization:from_data`
 **Step 6: Commit**
 
 ```
-git add src/option/table/serialization/from_data.hpp \
+git add src/option/table/serialization/reconstruct.hpp \
+        src/option/table/serialization/from_data.hpp \
         src/option/table/serialization/from_data.cpp \
         src/option/table/serialization/BUILD.bazel \
         src/option/table/price_table.hpp
-git commit -m "Implement from_data() for all 7 surface types"
+git commit -m "Implement from_data() with generic reconstruct dispatch"
 ```
 
 ---
