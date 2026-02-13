@@ -78,6 +78,10 @@ std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
         clusters.push_back({.center_x = 0.0, .alpha = accuracy.alpha, .weight = 1.0});
     }
     auto grid_spec = GridSpec<double>::multi_sinh_spaced(x_min, x_max, Nx, std::move(clusters));
+    if (!grid_spec.has_value()) {
+        // Fallback: simple sinh grid centered at x0
+        grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, Nx, accuracy.alpha);
+    }
 
     // Temporal resolution: compute actual dx_min from generated grid.
     // The old formula dx_min = dx_avg·exp(-α) was an approximation that became
@@ -145,6 +149,10 @@ std::pair<GridSpec<double>, TimeDomain> estimate_batch_pde_grid(
     auto grid_spec = GridSpec<double>::multi_sinh_spaced(global_x_min, global_x_max, global_Nx, {
         {.center_x = 0.0, .alpha = accuracy.alpha, .weight = 1.0},
     });
+    if (!grid_spec.has_value()) {
+        // Fallback: simple sinh grid
+        grid_spec = GridSpec<double>::sinh_spaced(global_x_min, global_x_max, global_Nx, accuracy.alpha);
+    }
 
     // Collect union of all dividend tau values across the batch
     std::vector<double> all_mandatory_tau;

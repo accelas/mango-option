@@ -445,7 +445,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     size_t workspace_size_bytes = 0;
     size_t shared_n_space = 0;
 
-    if (use_shared_grid) {
+    if (use_shared_grid && shared_grid.has_value()) {
         auto [grid_spec, time_domain] = shared_grid.value();
         shared_n_space = grid_spec.n_points();
         workspace_size_bytes = AmericanPDEWorkspace::required_bytes(shared_n_space);
@@ -474,7 +474,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
         // Per-thread shared grid (only for shared grid strategy)
         std::shared_ptr<Grid<double>> thread_grid;
 
-        if (use_shared_grid) {
+        if (use_shared_grid && shared_grid.has_value()) {
             auto [grid_spec, time_domain] = shared_grid.value();
 
             // Create Grid with solution storage
