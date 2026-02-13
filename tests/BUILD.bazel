@@ -1765,3 +1765,33 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "price_table_data_test",
+    size = "large",
+    timeout = "long",
+    srcs = ["price_table_data_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table/serialization:to_data",
+        "//src/option/table/serialization:from_data",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
+        "//src/option/table:analytical_eep",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_nd_separable",
+        "//src/math:bspline_basis",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+

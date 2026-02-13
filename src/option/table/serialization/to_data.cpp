@@ -44,6 +44,10 @@ template <> constexpr const char* surface_type_string<Chebyshev3DLeaf>() {
     return "chebyshev_3d";
 }
 
+template <> constexpr const char* surface_type_string<Chebyshev3DRawLeaf>() {
+    return "chebyshev_3d_raw";
+}
+
 // ============================================================================
 // to_data implementation
 // ============================================================================
@@ -74,5 +78,6 @@ template PriceTableData to_data<ChebyshevRawLeaf>(const PriceTable<ChebyshevRawL
 template PriceTableData to_data<ChebyshevMultiKRefInner>(const PriceTable<ChebyshevMultiKRefInner>&);
 template PriceTableData to_data<BSpline3DLeaf>(const PriceTable<BSpline3DLeaf>&);
 template PriceTableData to_data<Chebyshev3DLeaf>(const PriceTable<Chebyshev3DLeaf>&);
+template PriceTableData to_data<Chebyshev3DRawLeaf>(const PriceTable<Chebyshev3DRawLeaf>&);
 
 }  // namespace mango

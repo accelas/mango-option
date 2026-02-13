@@ -213,4 +213,35 @@ from_data<Chebyshev3DLeaf>(const PriceTableData& data) {
         PriceTableErrorCode::InvalidConfig});
 }
 
+// ============================================================================
+// Chebyshev3DRawLeaf (chebyshev_3d_raw): 3D dimensionless Raw Chebyshev with EEP
+// ============================================================================
+
+template <>
+std::expected<PriceTable<Chebyshev3DRawLeaf>, PriceTableError>
+from_data<Chebyshev3DRawLeaf>(const PriceTableData& data) {
+    // Accept both "chebyshev_3d" and "chebyshev_3d_raw" since Tucker
+    // surfaces serialize to raw values.
+    if (data.surface_type != kChebyshev3D &&
+        data.surface_type != "chebyshev_3d_raw") {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig});
+    }
+    if (data.segments.size() != 1) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig, 0, data.segments.size()});
+    }
+
+    const auto& seg = data.segments[0];
+    auto leaf = reconstruct_chebyshev_leaf<3, DimensionlessTransform3D>(seg);
+    if (!leaf) return std::unexpected(leaf.error());
+
+    auto eep_leaf = reconstruct_eep(std::move(*leaf),
+                                    data.option_type, data.dividend_yield);
+    auto bounds = bounds_from_3d_segment(seg, data.maturity);
+
+    return PriceTable<Chebyshev3DRawLeaf>(
+        std::move(eep_leaf), bounds, data.option_type, data.dividend_yield);
+}
+
 }  // namespace mango
