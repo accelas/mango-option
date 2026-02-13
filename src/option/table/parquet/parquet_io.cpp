@@ -8,8 +8,11 @@
 #include <parquet/arrow/reader.h>
 #include <parquet/arrow/writer.h>
 
+#include <bit>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -72,66 +75,112 @@ std::expected<size_t, PriceTableError> parse_size_t(const std::string& s) {
         size_t pos = 0;
         auto val = std::stoull(s, &pos);
         if (pos != s.size()) return std::unexpected(serialization_error());
-        return val;
+        if (val > std::numeric_limits<size_t>::max())
+            return std::unexpected(serialization_error());
+        return static_cast<size_t>(val);
     } catch (...) {
         return std::unexpected(serialization_error());
     }
 }
 
-/// Compute CRC64 over all segment fields with length-prefixed variable
-/// fields.  Every variable-length container is preceded by its element
-/// count as a uint64_t, preventing boundary-shifting collisions.
-/// All integer sizes are hashed as fixed-width uint64_t for cross-platform
-/// consistency (avoids size_t width differences).
-uint64_t segment_checksum(const PriceTableData::Segment& seg) {
+// ============================================================================
+// Canonical little-endian CRC helpers
+// ============================================================================
+// All numeric values are converted to little-endian before hashing so that
+// the checksum is portable across architectures.
+
+uint64_t to_le64(uint64_t v) {
+    if constexpr (std::endian::native == std::endian::little) return v;
+    else return std::byteswap(v);
+}
+uint32_t to_le32(uint32_t v) {
+    if constexpr (std::endian::native == std::endian::little) return v;
+    else return std::byteswap(v);
+}
+
+/// CRC hasher that feeds canonical LE bytes incrementally.
+struct CRCHasher {
     uint64_t crc = 0;
-    auto feed_u64 = [&](uint64_t v) {
+
+    void feed_u64(uint64_t v) {
+        auto le = to_le64(v);
         crc = CRC64::update(crc,
-            reinterpret_cast<const uint8_t*>(&v), sizeof(v));
-    };
-    auto feed_i32 = [&](int32_t v) {
+            reinterpret_cast<const uint8_t*>(&le), sizeof(le));
+    }
+    void feed_i32(int32_t v) {
+        auto le = to_le32(static_cast<uint32_t>(v));
         crc = CRC64::update(crc,
-            reinterpret_cast<const uint8_t*>(&v), sizeof(v));
-    };
-    auto feed_f64 = [&](double v) {
+            reinterpret_cast<const uint8_t*>(&le), sizeof(le));
+    }
+    void feed_f64(double v) {
+        // IEEE 754 doubles: hash raw LE bytes
+        uint64_t bits;
+        std::memcpy(&bits, &v, sizeof(bits));
+        auto le = to_le64(bits);
         crc = CRC64::update(crc,
-            reinterpret_cast<const uint8_t*>(&v), sizeof(v));
-    };
-    auto feed_string = [&](const std::string& s) {
+            reinterpret_cast<const uint8_t*>(&le), sizeof(le));
+    }
+    void feed_string(const std::string& s) {
         feed_u64(static_cast<uint64_t>(s.size()));
         crc = CRC64::update(crc,
             reinterpret_cast<const uint8_t*>(s.data()), s.size());
-    };
-    auto feed_f64_vec = [&](const std::vector<double>& v) {
+    }
+    void feed_f64_vec(const std::vector<double>& v) {
         feed_u64(static_cast<uint64_t>(v.size()));
-        crc = CRC64::update(crc,
-            reinterpret_cast<const uint8_t*>(v.data()),
-            v.size() * sizeof(double));
-    };
-    auto feed_i32_vec = [&](const std::vector<int32_t>& v) {
+        for (double d : v) feed_f64(d);
+    }
+    void feed_i32_vec(const std::vector<int32_t>& v) {
         feed_u64(static_cast<uint64_t>(v.size()));
-        crc = CRC64::update(crc,
-            reinterpret_cast<const uint8_t*>(v.data()),
-            v.size() * sizeof(int32_t));
-    };
+        for (int32_t x : v) feed_i32(x);
+    }
+};
 
-    feed_i32(seg.segment_id);
-    feed_f64(seg.K_ref);
-    feed_f64(seg.tau_start);
-    feed_f64(seg.tau_end);
-    feed_f64(seg.tau_min);
-    feed_f64(seg.tau_max);
-    feed_string(seg.interp_type);
-    feed_u64(static_cast<uint64_t>(seg.ndim));
-    feed_f64_vec(seg.domain_lo);
-    feed_f64_vec(seg.domain_hi);
-    feed_i32_vec(seg.num_pts);
-    feed_u64(static_cast<uint64_t>(seg.grids.size()));
-    for (const auto& g : seg.grids) feed_f64_vec(g);
-    feed_u64(static_cast<uint64_t>(seg.knots.size()));
-    for (const auto& k : seg.knots) feed_f64_vec(k);
-    feed_f64_vec(seg.values);
-    return crc;
+/// Compute CRC64 over all segment fields with length-prefixed variable
+/// fields and canonical little-endian encoding for portability.
+uint64_t segment_checksum(const PriceTableData::Segment& seg) {
+    CRCHasher h;
+    h.feed_i32(seg.segment_id);
+    h.feed_f64(seg.K_ref);
+    h.feed_f64(seg.tau_start);
+    h.feed_f64(seg.tau_end);
+    h.feed_f64(seg.tau_min);
+    h.feed_f64(seg.tau_max);
+    h.feed_string(seg.interp_type);
+    h.feed_u64(static_cast<uint64_t>(seg.ndim));
+    h.feed_f64_vec(seg.domain_lo);
+    h.feed_f64_vec(seg.domain_hi);
+    h.feed_i32_vec(seg.num_pts);
+    h.feed_u64(static_cast<uint64_t>(seg.grids.size()));
+    for (const auto& g : seg.grids) h.feed_f64_vec(g);
+    h.feed_u64(static_cast<uint64_t>(seg.knots.size()));
+    for (const auto& k : seg.knots) h.feed_f64_vec(k);
+    h.feed_f64_vec(seg.values);
+    return h.crc;
+}
+
+/// Compute CRC64 over file-level metadata + per-segment checksums.
+/// Covers option_type, dividend_yield, maturity, bounds, surface_type,
+/// and all per-segment checksums (chaining integrity).
+uint64_t metadata_checksum(const PriceTableData& data,
+                           const std::vector<uint64_t>& seg_checksums) {
+    CRCHasher h;
+    h.feed_string(data.surface_type);
+    h.feed_i32(static_cast<int32_t>(data.option_type));
+    h.feed_f64(data.dividend_yield);
+    h.feed_f64(data.maturity);
+    h.feed_f64(data.bounds_m_min);
+    h.feed_f64(data.bounds_m_max);
+    h.feed_f64(data.bounds_tau_min);
+    h.feed_f64(data.bounds_tau_max);
+    h.feed_f64(data.bounds_sigma_min);
+    h.feed_f64(data.bounds_sigma_max);
+    h.feed_f64(data.bounds_rate_min);
+    h.feed_f64(data.bounds_rate_max);
+    h.feed_u64(static_cast<uint64_t>(data.n_pde_solves));
+    h.feed_f64(data.precompute_time_seconds);
+    h.feed_u64(static_cast<uint64_t>(seg_checksums.size()));
+    for (uint64_t sc : seg_checksums) h.feed_u64(sc);
+    return h.crc;
 }
 
 std::string option_type_to_string(OptionType t) {
@@ -188,7 +237,7 @@ std::shared_ptr<arrow::Schema> make_parquet_schema(
         arrow::field("knots_2", list_double, false),
         arrow::field("knots_3", list_double, false),
         arrow::field("values", list_double, false),
-        arrow::field("checksum_values", arrow::int64(), false),
+        arrow::field("checksum_values", arrow::uint64(), false),
     };
 
     return arrow::schema(fields, metadata);
@@ -348,9 +397,11 @@ write_parquet(const PriceTableData& data,
 
     arrow::ListBuilder values_b(pool,
         std::make_shared<arrow::DoubleBuilder>(pool));
-    arrow::Int64Builder checksum_b(pool);
+    arrow::UInt64Builder checksum_b(pool);
 
     // ---- Populate rows ----
+    std::vector<uint64_t> seg_checksums;
+    seg_checksums.reserve(data.segments.size());
     for (const auto& seg : data.segments) {
         MANGO_ARROW_CHECK(segment_id_b.Append(seg.segment_id));
         MANGO_ARROW_CHECK(k_ref_b.Append(seg.K_ref));
@@ -394,8 +445,15 @@ write_parquet(const PriceTableData& data,
         MANGO_ARROW_CHECK(append_double_list(values_b, seg.values));
 
         uint64_t crc = segment_checksum(seg);
-        MANGO_ARROW_CHECK(
-            checksum_b.Append(static_cast<int64_t>(crc)));
+        seg_checksums.push_back(crc);
+        MANGO_ARROW_CHECK(checksum_b.Append(crc));
+    }
+
+    // ---- Compute and store file-level metadata checksum ----
+    {
+        uint64_t meta_crc = metadata_checksum(data, seg_checksums);
+        metadata->Append("mango.metadata_checksum",
+                         std::to_string(meta_crc));
     }
 
     // ---- Finalize arrays ----
@@ -722,7 +780,7 @@ read_parquet(const std::filesystem::path& path) {
         !check_list_type(*knots_2_res, arrow::Type::DOUBLE) ||
         !check_list_type(*knots_3_res, arrow::Type::DOUBLE) ||
         !check_list_type(*values_res, arrow::Type::DOUBLE) ||
-        !check_type(*checksum_res, arrow::Type::INT64)) {
+        !check_type(*checksum_res, arrow::Type::UINT64)) {
         return std::unexpected(serialization_error());
     }
 
@@ -734,10 +792,12 @@ read_parquet(const std::filesystem::path& path) {
     auto tau_max_a = std::static_pointer_cast<arrow::DoubleArray>(*tau_max_res);
     auto interp_type_a = std::static_pointer_cast<arrow::StringArray>(*interp_type_res);
     auto ndim_a = std::static_pointer_cast<arrow::Int32Array>(*ndim_res);
-    auto checksum_a = std::static_pointer_cast<arrow::Int64Array>(*checksum_res);
+    auto checksum_a = std::static_pointer_cast<arrow::UInt64Array>(*checksum_res);
 
     int64_t n_rows = table->num_rows();
     data.segments.resize(static_cast<size_t>(n_rows));
+    std::vector<uint64_t> seg_crcs;
+    seg_crcs.reserve(static_cast<size_t>(n_rows));
 
     for (int64_t i = 0; i < n_rows; ++i) {
         auto& seg = data.segments[static_cast<size_t>(i)];
@@ -775,13 +835,25 @@ read_parquet(const std::filesystem::path& path) {
 
         seg.values = read_double_list(*values_res, i);
 
-        // Verify checksum (covers all segment fields, not just values)
-        uint64_t stored_crc =
-            static_cast<uint64_t>(checksum_a->Value(i));
+        // Verify segment checksum (covers all segment fields)
+        uint64_t stored_crc = checksum_a->Value(i);
         uint64_t computed_crc = segment_checksum(seg);
         if (stored_crc != computed_crc) {
             return std::unexpected(
                 PriceTableError{PriceTableErrorCode::SerializationFailed});
+        }
+        seg_crcs.push_back(stored_crc);
+    }
+
+    // ---- Verify file-level metadata checksum ----
+    {
+        auto meta_crc_str = get_meta("mango.metadata_checksum");
+        if (!meta_crc_str) return std::unexpected(meta_crc_str.error());
+        auto stored_meta_crc = parse_size_t(*meta_crc_str);
+        if (!stored_meta_crc) return std::unexpected(stored_meta_crc.error());
+        uint64_t computed_meta = metadata_checksum(data, seg_crcs);
+        if (static_cast<uint64_t>(*stored_meta_crc) != computed_meta) {
+            return std::unexpected(serialization_error());
         }
     }
 

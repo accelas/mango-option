@@ -482,7 +482,7 @@ TEST_F(ParquetIOTest, ChecksumCorruptionDetected) {
         int crc_idx = table->schema()->GetFieldIndex("checksum_values");
         ASSERT_GE(crc_idx, 0) << "checksum_values column not found";
 
-        arrow::Int64Builder bad_crc_builder(pool);
+        arrow::UInt64Builder bad_crc_builder(pool);
         for (int64_t row = 0; row < table->num_rows(); ++row) {
             ASSERT_TRUE(bad_crc_builder.Append(0).ok());
         }
@@ -975,6 +975,71 @@ TEST_F(ParquetIOTest, TamperedKRefDetectedByCRC) {
     auto bad_result = read_parquet(temp_path_);
     EXPECT_FALSE(bad_result.has_value())
         << "read_parquet should detect tampered K_ref via CRC";
+}
+
+// ===========================================================================
+// Test 16: Tampered metadata detected via metadata checksum
+// ===========================================================================
+
+TEST_F(ParquetIOTest, TamperedMetadataDetectedByCRC) {
+    auto setup = PriceTableBuilder::from_vectors(
+        {-0.3, -0.1, 0.0, 0.1, 0.3},
+        {0.1, 0.5, 1.0, 1.5},
+        {0.10, 0.20, 0.30, 0.40},
+        {0.02, 0.04, 0.06, 0.08},
+        100.0, GridAccuracyParams{}, OptionType::PUT, 0.02);
+    ASSERT_TRUE(setup.has_value());
+    auto& [builder, axes] = *setup;
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value());
+    auto surface = make_bspline_surface(
+        result->spline, result->K_ref, result->dividends.dividend_yield,
+        OptionType::PUT);
+    ASSERT_TRUE(surface.has_value());
+
+    auto data = to_data(*surface);
+    auto write_result = write_parquet(data, temp_path_);
+    ASSERT_TRUE(write_result.has_value());
+
+    // Read as Arrow table, tamper the option_type metadata, write back.
+    // The per-segment CRCs still match, but the metadata checksum should fail.
+    auto pool = arrow::default_memory_pool();
+    auto infile_res = arrow::io::ReadableFile::Open(temp_path_.string());
+    ASSERT_TRUE(infile_res.ok());
+    auto reader_res = parquet::arrow::OpenFile(*infile_res, pool);
+    ASSERT_TRUE(reader_res.ok());
+    std::shared_ptr<arrow::Table> table;
+    ASSERT_TRUE((*reader_res)->ReadTable(&table).ok());
+
+    // Replace metadata: change option_type from PUT to CALL
+    auto old_meta = table->schema()->metadata();
+    ASSERT_TRUE(old_meta != nullptr);
+    auto new_meta = old_meta->Copy();
+    auto opt_idx = new_meta->FindKey("mango.option_type");
+    ASSERT_GE(opt_idx, 0);
+    // Build new metadata with tampered value
+    auto tampered_meta = std::make_shared<arrow::KeyValueMetadata>();
+    for (int i = 0; i < new_meta->size(); ++i) {
+        if (i == opt_idx) {
+            tampered_meta->Append(new_meta->key(i), "CALL");
+        } else {
+            tampered_meta->Append(new_meta->key(i), new_meta->value(i));
+        }
+    }
+    auto tampered_schema = table->schema()->WithMetadata(tampered_meta);
+    auto tampered_table = table->ReplaceSchemaMetadata(tampered_meta);
+
+    auto outfile_res = arrow::io::FileOutputStream::Open(temp_path_.string());
+    ASSERT_TRUE(outfile_res.ok());
+    auto props = parquet::ArrowWriterProperties::Builder()
+        .store_schema()->build();
+    ASSERT_TRUE(parquet::arrow::WriteTable(
+        *tampered_table, pool, *outfile_res, 1024,
+        parquet::default_writer_properties(), props).ok());
+
+    auto bad_result = read_parquet(temp_path_);
+    EXPECT_FALSE(bad_result.has_value())
+        << "read_parquet should detect tampered metadata via metadata checksum";
 }
 
 }  // namespace

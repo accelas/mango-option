@@ -190,6 +190,30 @@ template <typename LeafType>
     return groups;
 }
 
+/// Validate tau-segment invariants: finite values, start <= end, min <= max,
+/// and monotonic ordering (each segment's start >= previous segment's start).
+[[nodiscard]] inline std::expected<void, PriceTableError>
+validate_tau_segments(const std::vector<const PriceTableData::Segment*>& group) {
+    double prev_start = -std::numeric_limits<double>::infinity();
+    for (const auto* seg : group) {
+        if (!std::isfinite(seg->tau_start) || !std::isfinite(seg->tau_end) ||
+            !std::isfinite(seg->tau_min) || !std::isfinite(seg->tau_max)) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
+        if (seg->tau_start > seg->tau_end || seg->tau_min > seg->tau_max) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
+        if (seg->tau_start < prev_start) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
+        prev_start = seg->tau_start;
+    }
+    return {};
+}
+
 /// Build a TauSegmentSplit + vector of B-spline leaves for one K_ref group.
 template <size_t N, typename Xform>
 [[nodiscard]] auto reconstruct_bspline_tau_split(
@@ -199,6 +223,9 @@ template <size_t N, typename Xform>
                      TauSegmentSplit>,
         PriceTableError> {
     using LeafType = TransformLeaf<SharedInterp<BSplineND<double, N>, N>, Xform>;
+
+    auto tau_valid = validate_tau_segments(group);
+    if (!tau_valid) return std::unexpected(tau_valid.error());
 
     std::vector<LeafType> leaves;
     std::vector<double> tau_starts, tau_ends, tau_mins, tau_maxs;
@@ -228,6 +255,9 @@ template <size_t N, typename Xform>
                      TauSegmentSplit>,
         PriceTableError> {
     using LeafType = TransformLeaf<ChebyshevInterpolant<N, RawTensor<N>>, Xform>;
+
+    auto tau_valid = validate_tau_segments(group);
+    if (!tau_valid) return std::unexpected(tau_valid.error());
 
     std::vector<LeafType> leaves;
     std::vector<double> tau_starts, tau_ends, tau_mins, tau_maxs;
