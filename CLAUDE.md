@@ -7,10 +7,10 @@ Guide for Claude Code when working with this repository.
 **mango-option** is a C++23 library for pricing American options using finite difference methods. The core solver uses TR-BDF2 time-stepping with Newton iteration. The library provides high-level APIs for option pricing, implied volatility calculation (FDM and interpolation-based), and price table pre-computation.
 
 **Key capabilities:**
-- American option pricing via PDE solver (~0.3ms ATM, ~6ms OTM, ~19ms deep ITM)
-- Implied volatility calculation (~8ms FDM, ~3.5us interpolated)
+- American option pricing via PDE solver (~0.3ms ATM, ~9-19ms off-ATM)
+- Implied volatility calculation (~8ms FDM, ~3.5μs interpolated)
 - Discrete dividend support via segmented price surfaces
-- Price table pre-computation with B-spline interpolation (~200ns per query)
+- Price table pre-computation with B-spline interpolation (~250ns per query)
 - Batch processing with OpenMP parallelization
 
 **For detailed architecture, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**

@@ -306,7 +306,7 @@ auto wrapper = mango::make_bspline_surface(
     result->spline, result->K_ref, result->dividends.dividend_yield,
     mango::OptionType::PUT).value();
 
-// Query American option prices (~200ns)
+// Query American option prices (~250ns)
 double price = wrapper.price(spot, strike, tau, sigma, rate);
 ```
 
@@ -773,7 +773,7 @@ for (size_t i = 0; i < batch.results.size(); ++i) {
 }
 ```
 
-**Price surface batch** — queries a pre-computed B-spline surface (~200ns each):
+**Price surface batch** — queries a pre-computed B-spline surface (~250ns each):
 
 ```cpp
 auto spline = result->spline;
@@ -801,17 +801,17 @@ Use FDM batch when you need exact PDE accuracy or have few queries. Use the pric
 
 | Scenario | Approach | Latency |
 |---|---|---|
-| Single option | `solve_american_option(params)` | ~0.3ms ATM, ~6ms OTM, ~19ms deep ITM |
+| Single option | `solve_american_option(params)` | ~0.3ms ATM, ~9-19ms off-ATM |
 | Single option with discrete dividends | `solve_american_option(params)` with `Dividend` list | ~0.3–19ms |
 | Batch (same parameters, varying strikes) | `BatchAmericanOptionSolver` with chain solving | ~0.3–19ms total (1 PDE) |
 | Batch (mixed parameters) | `BatchAmericanOptionSolver` | ~0.3–19ms per group |
-| Many queries, same parameter space | Pre-compute price table, query `BSplinePriceTable` | ~200ns/query |
+| Many queries, same parameter space | Pre-compute price table, query `BSplinePriceTable` | ~250ns/query |
 
 ### Implied Volatility
 
 | Scenario | Approach | Latency |
 |---|---|---|
-| Single option | `IVSolver::solve(query)` | ~8ms ATM, ~76ms OTM, ~134ms deep ITM |
+| Single option | `IVSolver::solve(query)` | ~8ms ATM, ~90-140ms off-ATM |
 | Batch (independent queries) | `IVSolver::solve_batch(queries)` | same per query (parallelized) |
 | Many queries, no dividends | `make_interpolated_iv_solver` + `BSplineBackend` | ~3.5μs/query |
 | Many queries, with dividends | `make_interpolated_iv_solver` + `discrete_dividends` | ~3.5μs/query |
