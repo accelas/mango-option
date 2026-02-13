@@ -399,9 +399,9 @@ For a short-dated SPY option ($\sigma \approx 0.15$, $T \approx 0.09$), the defa
 
 # Part II — Price Tables & Interpolation
 
-Part I gave us a PDE solver that prices one option in ~1–2ms. For implied volatility — which requires pricing the option repeatedly at different volatilities until the price matches the market — this is too slow. A single IV solve takes ~15ms (5–8 Brent iterations × 2ms each), and a trading desk needs thousands of IVs per second.
+Part I gave us a PDE solver that prices one option in ~0.3ms (ATM) to ~19ms (deep ITM/OTM). For implied volatility — which requires pricing the option repeatedly at different volatilities until the price matches the market — this is too slow. A single FDM IV solve takes ~8ms ATM (5–8 Brent iterations), and a trading desk needs thousands of IVs per second.
 
-The solution: pre-compute prices across a 4D parameter grid (moneyness, maturity, volatility, rate), fit a B-spline surface, and evaluate the surface at ~500ns per query. This section covers the interpolation machinery, grid estimation, and IV extraction.
+The solution: pre-compute prices across a 4D parameter grid (moneyness, maturity, volatility, rate), fit a B-spline surface, and evaluate the surface at ~200ns per query. This section covers the interpolation machinery, grid estimation, and IV extraction.
 
 ---
 
@@ -471,7 +471,7 @@ $$\nu = \frac{\partial P}{\partial \sigma} = \sum c_{ijkl}N_i(m)N_j(\tau)N_k'(\s
 
 $$\Gamma = \frac{\partial^2 P}{\partial m^2} = \sum c_{ijkl}N_i''(m)N_j(\tau)N_k(\sigma)N_l(r)$$
 
-Each derivative costs the same as a price evaluation (~500ns) because we evaluate one differentiated 1D basis and three undifferentiated ones.
+Each derivative costs the same as a price evaluation (~200ns) because we evaluate one differentiated 1D basis and three undifferentiated ones.
 
 ---
 
@@ -751,7 +751,7 @@ We use Brent's method, which combines bisection, secant, and inverse quadratic i
 - No derivatives required (important — $\partial V / \partial \sigma$ from the PDE is expensive)
 - Typically 5–8 iterations for $\sigma \in [0.01, 3.0]$
 
-Each iteration calls the PDE solver (~2ms), so a single IV solve costs ~15ms. Accurate but too slow for production use with thousands of queries.
+Each iteration calls the PDE solver (~0.3–19ms depending on moneyness), so a single IV solve costs ~8ms ATM. Accurate but too slow for production use with thousands of queries.
 
 ### Interpolated IV (Newton on B-Spline Surface)
 
@@ -759,16 +759,16 @@ The fast approach: pre-compute a 4D price table (Part II, sections 7–8), then 
 
 $$\sigma_{k+1} = \sigma_k - \frac{P(m, \tau, \sigma_k, r) - V_\text{market}}{\partial P / \partial\sigma(m, \tau, \sigma_k, r)}$$
 
-The key advantage: both $P$ and $\partial P / \partial\sigma$ come from B-spline evaluation (~500ns each), not PDE solves. Newton's method converges quadratically (error squares each iteration), typically in 3–4 iterations.
+The key advantage: both $P$ and $\partial P / \partial\sigma$ come from B-spline evaluation (~200ns each), not PDE solves. Newton's method converges quadratically (error squares each iteration), typically in 3–4 iterations.
 
 **Performance comparison:**
 
 | Method | Time per IV | Use case |
 |--------|------------|----------|
-| FDM (Brent) | ~15ms | Ground truth, validation, few queries |
+| FDM (Brent) | ~8ms ATM | Ground truth, validation, few queries |
 | Interpolated (Newton) | ~3.5μs | Production, many queries |
 
-The interpolated solver is ~5,000× faster, at the cost of pre-computation time and interpolation error (typically 10–60 bps depending on grid profile).
+The interpolated solver is ~2,000× faster, at the cost of pre-computation time and interpolation error (typically 10–60 bps depending on grid profile).
 
 ### Vega Pre-Check for Undefined IV
 
