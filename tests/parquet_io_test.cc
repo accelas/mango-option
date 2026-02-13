@@ -827,5 +827,155 @@ TEST_F(ParquetIOTest, NullContainingColumnRejected) {
         << "read_parquet should reject columns containing nulls";
 }
 
+// ===========================================================================
+// Test 13: K_ref=0 rejected via data layer
+// ===========================================================================
+
+TEST_F(ParquetIOTest, ZeroKRefRejected) {
+    // Build a valid surface, extract data, then tamper K_ref
+    auto setup = PriceTableBuilder::from_vectors(
+        {-0.3, -0.1, 0.0, 0.1, 0.3},
+        {0.1, 0.5, 1.0, 1.5},
+        {0.10, 0.20, 0.30, 0.40},
+        {0.02, 0.04, 0.06, 0.08},
+        100.0, GridAccuracyParams{}, OptionType::PUT, 0.02);
+    ASSERT_TRUE(setup.has_value());
+    auto& [builder, axes] = *setup;
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value());
+    auto surface = make_bspline_surface(
+        result->spline, result->K_ref, result->dividends.dividend_yield,
+        OptionType::PUT);
+    ASSERT_TRUE(surface.has_value());
+
+    auto data = to_data(*surface);
+    ASSERT_FALSE(data.segments.empty());
+
+    // Tamper K_ref to zero
+    data.segments[0].K_ref = 0.0;
+    auto bad_result = from_data<BSplineLeaf>(data);
+    EXPECT_FALSE(bad_result.has_value())
+        << "from_data should reject K_ref=0";
+
+    // Tamper K_ref to negative
+    data.segments[0].K_ref = -100.0;
+    auto neg_result = from_data<BSplineLeaf>(data);
+    EXPECT_FALSE(neg_result.has_value())
+        << "from_data should reject negative K_ref";
+
+    // Tamper K_ref to NaN
+    data.segments[0].K_ref = std::numeric_limits<double>::quiet_NaN();
+    auto nan_result = from_data<BSplineLeaf>(data);
+    EXPECT_FALSE(nan_result.has_value())
+        << "from_data should reject NaN K_ref";
+}
+
+// ===========================================================================
+// Test 14: Invalid bounds rejected via data layer
+// ===========================================================================
+
+TEST_F(ParquetIOTest, InvalidBoundsRejected) {
+    auto setup = PriceTableBuilder::from_vectors(
+        {-0.3, -0.1, 0.0, 0.1, 0.3},
+        {0.1, 0.5, 1.0, 1.5},
+        {0.10, 0.20, 0.30, 0.40},
+        {0.02, 0.04, 0.06, 0.08},
+        100.0, GridAccuracyParams{}, OptionType::PUT, 0.02);
+    ASSERT_TRUE(setup.has_value());
+    auto& [builder, axes] = *setup;
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value());
+    auto surface = make_bspline_surface(
+        result->spline, result->K_ref, result->dividends.dividend_yield,
+        OptionType::PUT);
+    ASSERT_TRUE(surface.has_value());
+
+    auto data = to_data(*surface);
+
+    // Inverted bounds (min > max)
+    auto bad_data = data;
+    bad_data.bounds_sigma_min = 0.50;
+    bad_data.bounds_sigma_max = 0.10;
+    auto inv_result = from_data<BSplineLeaf>(bad_data);
+    EXPECT_FALSE(inv_result.has_value())
+        << "from_data should reject inverted bounds";
+
+    // NaN bounds
+    bad_data = data;
+    bad_data.bounds_tau_min = std::numeric_limits<double>::quiet_NaN();
+    auto nan_result = from_data<BSplineLeaf>(bad_data);
+    EXPECT_FALSE(nan_result.has_value())
+        << "from_data should reject NaN bounds";
+
+    // Inf bounds
+    bad_data = data;
+    bad_data.bounds_rate_max = std::numeric_limits<double>::infinity();
+    auto inf_result = from_data<BSplineLeaf>(bad_data);
+    EXPECT_FALSE(inf_result.has_value())
+        << "from_data should reject Inf bounds";
+}
+
+// ===========================================================================
+// Test 15: Tampered K_ref detected via Parquet CRC
+// ===========================================================================
+
+TEST_F(ParquetIOTest, TamperedKRefDetectedByCRC) {
+    // Build and write a valid file
+    auto setup = PriceTableBuilder::from_vectors(
+        {-0.3, -0.1, 0.0, 0.1, 0.3},
+        {0.1, 0.5, 1.0, 1.5},
+        {0.10, 0.20, 0.30, 0.40},
+        {0.02, 0.04, 0.06, 0.08},
+        100.0, GridAccuracyParams{}, OptionType::PUT, 0.02);
+    ASSERT_TRUE(setup.has_value());
+    auto& [builder, axes] = *setup;
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value());
+    auto surface = make_bspline_surface(
+        result->spline, result->K_ref, result->dividends.dividend_yield,
+        OptionType::PUT);
+    ASSERT_TRUE(surface.has_value());
+
+    auto data = to_data(*surface);
+    auto write_result = write_parquet(data, temp_path_);
+    ASSERT_TRUE(write_result.has_value());
+
+    // Read as Arrow table and tamper K_ref column
+    auto pool = arrow::default_memory_pool();
+    auto infile_res = arrow::io::ReadableFile::Open(temp_path_.string());
+    ASSERT_TRUE(infile_res.ok());
+    auto reader_res = parquet::arrow::OpenFile(*infile_res, pool);
+    ASSERT_TRUE(reader_res.ok());
+    std::shared_ptr<arrow::Table> table;
+    ASSERT_TRUE((*reader_res)->ReadTable(&table).ok());
+
+    int kref_idx = table->schema()->GetFieldIndex("K_ref");
+    ASSERT_GE(kref_idx, 0);
+
+    // Replace K_ref with a different value (but keep checksum unchanged)
+    arrow::DoubleBuilder bad_kref_builder(pool);
+    for (int64_t row = 0; row < table->num_rows(); ++row) {
+        ASSERT_TRUE(bad_kref_builder.Append(999.0).ok());
+    }
+    std::shared_ptr<arrow::Array> bad_kref_array;
+    ASSERT_TRUE(bad_kref_builder.Finish(&bad_kref_array).ok());
+
+    auto corrupted_table = table->SetColumn(
+        kref_idx, table->schema()->field(kref_idx),
+        std::make_shared<arrow::ChunkedArray>(bad_kref_array));
+    ASSERT_TRUE(corrupted_table.ok());
+
+    auto outfile_res = arrow::io::FileOutputStream::Open(temp_path_.string());
+    ASSERT_TRUE(outfile_res.ok());
+    ASSERT_TRUE(parquet::arrow::WriteTable(
+        **corrupted_table, pool, *outfile_res, 1024).ok());
+
+    // read_parquet should detect the CRC mismatch since K_ref is now
+    // included in the segment checksum
+    auto bad_result = read_parquet(temp_path_);
+    EXPECT_FALSE(bad_result.has_value())
+        << "read_parquet should detect tampered K_ref via CRC";
+}
+
 }  // namespace
 }  // namespace mango

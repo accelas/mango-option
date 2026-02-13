@@ -8,6 +8,7 @@
 #include <parquet/arrow/reader.h>
 #include <parquet/arrow/writer.h>
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -57,6 +58,7 @@ std::expected<double, PriceTableError> parse_double(const std::string& s) {
         size_t pos = 0;
         double val = std::stod(s, &pos);
         if (pos != s.size()) return std::unexpected(serialization_error());
+        if (!std::isfinite(val)) return std::unexpected(serialization_error());
         return val;
     } catch (...) {
         return std::unexpected(serialization_error());
@@ -72,6 +74,55 @@ std::expected<size_t, PriceTableError> parse_size_t(const std::string& s) {
     } catch (...) {
         return std::unexpected(serialization_error());
     }
+}
+
+/// Compute CRC64 over all segment fields (not just values).
+/// Hashes structural fields (K_ref, tau_*, ndim, domains, grids, knots)
+/// followed by the values array.
+uint64_t segment_checksum(const PriceTableData::Segment& seg) {
+    uint64_t crc = 0;
+    auto feed_double = [&](double v) {
+        crc = CRC64::update(crc,
+            reinterpret_cast<const uint8_t*>(&v), sizeof(v));
+    };
+    auto feed_int32 = [&](int32_t v) {
+        crc = CRC64::update(crc,
+            reinterpret_cast<const uint8_t*>(&v), sizeof(v));
+    };
+    auto feed_size = [&](size_t v) {
+        crc = CRC64::update(crc,
+            reinterpret_cast<const uint8_t*>(&v), sizeof(v));
+    };
+    auto feed_string = [&](const std::string& s) {
+        crc = CRC64::update(crc,
+            reinterpret_cast<const uint8_t*>(s.data()), s.size());
+    };
+    auto feed_doubles = [&](const std::vector<double>& v) {
+        crc = CRC64::update(crc,
+            reinterpret_cast<const uint8_t*>(v.data()),
+            v.size() * sizeof(double));
+    };
+    auto feed_int32s = [&](const std::vector<int32_t>& v) {
+        crc = CRC64::update(crc,
+            reinterpret_cast<const uint8_t*>(v.data()),
+            v.size() * sizeof(int32_t));
+    };
+
+    feed_int32(seg.segment_id);
+    feed_double(seg.K_ref);
+    feed_double(seg.tau_start);
+    feed_double(seg.tau_end);
+    feed_double(seg.tau_min);
+    feed_double(seg.tau_max);
+    feed_string(seg.interp_type);
+    feed_size(seg.ndim);
+    feed_doubles(seg.domain_lo);
+    feed_doubles(seg.domain_hi);
+    feed_int32s(seg.num_pts);
+    for (const auto& g : seg.grids) feed_doubles(g);
+    for (const auto& k : seg.knots) feed_doubles(k);
+    feed_doubles(seg.values);
+    return crc;
 }
 
 std::string option_type_to_string(OptionType t) {
@@ -333,7 +384,7 @@ write_parquet(const PriceTableData& data,
 
         MANGO_ARROW_CHECK(append_double_list(values_b, seg.values));
 
-        uint64_t crc = CRC64::compute(seg.values.data(), seg.values.size());
+        uint64_t crc = segment_checksum(seg);
         MANGO_ARROW_CHECK(
             checksum_b.Append(static_cast<int64_t>(crc)));
     }
@@ -715,11 +766,10 @@ read_parquet(const std::filesystem::path& path) {
 
         seg.values = read_double_list(*values_res, i);
 
-        // Verify checksum
+        // Verify checksum (covers all segment fields, not just values)
         uint64_t stored_crc =
             static_cast<uint64_t>(checksum_a->Value(i));
-        uint64_t computed_crc =
-            CRC64::compute(seg.values.data(), seg.values.size());
+        uint64_t computed_crc = segment_checksum(seg);
         if (stored_crc != computed_crc) {
             return std::unexpected(
                 PriceTableError{PriceTableErrorCode::SerializationFailed});

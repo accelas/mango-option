@@ -124,10 +124,15 @@ make_chebyshev(const PriceTableData::Segment& seg) {
 // ============================================================================
 
 /// Reconstruct a B-spline TransformLeaf from a segment.
+/// Rejects non-finite or non-positive K_ref (used as divisor at runtime).
 template <size_t N, typename Xform>
 [[nodiscard]] auto reconstruct_bspline_leaf(const PriceTableData::Segment& seg)
     -> std::expected<TransformLeaf<SharedInterp<BSplineND<double, N>, N>, Xform>,
                      PriceTableError> {
+    if (!std::isfinite(seg.K_ref) || seg.K_ref <= 0.0) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig});
+    }
     auto spline_ptr = make_bspline<N>(seg);
     if (!spline_ptr) return std::unexpected(spline_ptr.error());
     SharedInterp<BSplineND<double, N>, N> shared(std::move(*spline_ptr));
@@ -136,10 +141,15 @@ template <size_t N, typename Xform>
 }
 
 /// Reconstruct a Chebyshev Raw TransformLeaf from a segment.
+/// Rejects non-finite or non-positive K_ref (used as divisor at runtime).
 template <size_t N, typename Xform>
 [[nodiscard]] auto reconstruct_chebyshev_leaf(const PriceTableData::Segment& seg)
     -> std::expected<TransformLeaf<ChebyshevInterpolant<N, RawTensor<N>>, Xform>,
                      PriceTableError> {
+    if (!std::isfinite(seg.K_ref) || seg.K_ref <= 0.0) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig});
+    }
     auto interp = make_chebyshev<N>(seg);
     if (!interp) return std::unexpected(interp.error());
     return TransformLeaf<ChebyshevInterpolant<N, RawTensor<N>>, Xform>(

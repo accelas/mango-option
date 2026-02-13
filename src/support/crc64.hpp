@@ -19,6 +19,12 @@ public:
     /// @return 64-bit checksum
     static uint64_t compute(const double* data, size_t count);
 
+    /// Compute CRC64-ECMA-182 checksum for raw byte array
+    static uint64_t compute_bytes(const uint8_t* data, size_t byte_count);
+
+    /// Incrementally update a running CRC with more bytes.
+    static uint64_t update(uint64_t crc, const uint8_t* data, size_t byte_count);
+
 private:
     /// CRC64-ECMA-182 polynomial (reversed for LSB-first processing)
     static constexpr uint64_t POLY = 0xC96C5795D7870F42ULL;
