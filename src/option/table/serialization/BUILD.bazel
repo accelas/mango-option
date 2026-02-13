@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT
+
+cc_library(
+    name = "price_table_data",
+    hdrs = ["price_table_data.hpp"],
+    deps = [
+        "//src/option:option_spec",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/serialization",
+    include_prefix = "mango/option/table/serialization",
+)
