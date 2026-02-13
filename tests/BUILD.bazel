@@ -1300,8 +1300,25 @@ cc_test(
         "manual",  # Don't run with bazel test //... (requires Earthly)
     ],
     deps = [
+        "//src/option:american_option",
         "//src/option:american_option_batch",
         "//src/pde/core:grid",
+        "@fuzztest//fuzztest",
+        "@fuzztest//fuzztest:fuzztest_gtest_main",
+    ],
+)
+
+cc_test(
+    name = "iv_solver_fuzz_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["iv_solver_fuzz_test.cc"],
+    tags = [
+        "manual",  # Don't run with bazel test //... (requires Earthly)
+    ],
+    deps = [
+        "//src/option:iv_solver",
+        "//src/option:american_option",
         "@fuzztest//fuzztest",
         "@fuzztest//fuzztest:fuzztest_gtest_main",
     ],
@@ -1743,6 +1760,70 @@ cc_test(
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table:greek_types",
         "//src/option:option_spec",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "price_table_data_test",
+    size = "large",
+    timeout = "long",
+    srcs = ["price_table_data_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table/serialization:to_data",
+        "//src/option/table/serialization:from_data",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
+        "//src/option/table:analytical_eep",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_nd_separable",
+        "//src/math:bspline_basis",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "parquet_io_test",
+    size = "large",
+    timeout = "long",
+    srcs = ["parquet_io_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    tags = ["manual"],  # Requires system Arrow/Parquet libraries
+    deps = [
+        "//src/option/table/serialization:to_data",
+        "//src/option/table/serialization:from_data",
+        "//src/option/table/parquet:parquet_io",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
+        "//src/option/table:analytical_eep",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_nd_separable",
+        "//src/math:bspline_basis",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//third_party/arrow",
+        "//third_party/arrow:parquet",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

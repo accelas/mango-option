@@ -65,6 +65,7 @@ public:
 
     [[nodiscard]] size_t compressed_size() const { return values_.size(); }
     [[nodiscard]] const std::array<size_t, N>& shape() const { return shape_; }
+    [[nodiscard]] const std::vector<double>& values() const noexcept { return values_; }
 
 private:
     std::vector<double> values_;
