@@ -86,6 +86,7 @@ cc_library(
     hdrs = ["chebyshev_3d_surface.hpp"],
     deps = [
         "//src/math/chebyshev:chebyshev_interpolant",
+        "//src/math/chebyshev:raw_tensor",
         "//src/math/chebyshev:tucker_tensor",
         "//src/option/table:transform_leaf",
         "//src/option/table:eep_layer",

@@ -65,6 +65,12 @@ public:
         return combined;
     }
 
+    [[nodiscard]] const std::vector<double>& tau_start() const noexcept { return tau_start_; }
+    [[nodiscard]] const std::vector<double>& tau_end() const noexcept { return tau_end_; }
+    [[nodiscard]] const std::vector<double>& tau_min() const noexcept { return tau_min_; }
+    [[nodiscard]] const std::vector<double>& tau_max() const noexcept { return tau_max_; }
+    [[nodiscard]] double K_ref() const noexcept { return K_ref_; }
+
 private:
     std::vector<double> tau_start_, tau_end_, tau_min_, tau_max_;
     double K_ref_;

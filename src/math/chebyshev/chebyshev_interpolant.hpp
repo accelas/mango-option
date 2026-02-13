@@ -153,6 +153,9 @@ public:
     /// Access the number of points per axis.
     [[nodiscard]] const std::array<size_t, N>& num_pts() const { return num_pts_; }
 
+    /// Access the underlying storage (for serialization).
+    [[nodiscard]] const Storage& storage() const noexcept { return storage_; }
+
 private:
     /// Compute barycentric interpolation coefficients for value x on axis d.
     /// Returns a vector of length num_pts_[d] such that the interpolated

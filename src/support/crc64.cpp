@@ -23,24 +23,22 @@ void CRC64::init_table() {
     }
 }
 
-uint64_t CRC64::compute(const double* data, size_t count) {
-    // Thread-safe lazy initialization
+uint64_t CRC64::update(uint64_t crc, const uint8_t* data, size_t byte_count) {
     std::call_once(init_flag_, init_table);
-
-    // Convert double array to byte array for CRC computation
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(data);
-    size_t byte_count = count * sizeof(double);
-
-    // CRC64-ECMA-182: initial value is 0x0, final XOR is 0x0
-    uint64_t crc = 0x0ULL;
-
     for (size_t i = 0; i < byte_count; ++i) {
-        uint8_t index = static_cast<uint8_t>(crc ^ bytes[i]);
+        uint8_t index = static_cast<uint8_t>(crc ^ data[i]);
         crc = (crc >> 8) ^ table_[index];
     }
-
-    // No final XOR for ECMA-182 standard
     return crc;
+}
+
+uint64_t CRC64::compute_bytes(const uint8_t* data, size_t byte_count) {
+    return update(0x0ULL, data, byte_count);
+}
+
+uint64_t CRC64::compute(const double* data, size_t count) {
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(data);
+    return compute_bytes(bytes, count * sizeof(double));
 }
 
 }  // namespace mango
