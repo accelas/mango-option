@@ -45,23 +45,23 @@ The sections below follow the computation pipeline: formulate the PDE, discretiz
 
 An American option's value $V(S, t)$ satisfies the Black-Scholes PDE in the **continuation region** (where holding is optimal). In the **exercise region** (where immediate exercise is optimal), $V$ equals the intrinsic value. Together, these form a variational inequality — the American option problem:
 
-$$\frac{\partial V}{\partial \tau} \geq \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} + (r - d)S\frac{\partial V}{\partial S} - rV, \qquad V \geq \psi, \qquad \left(\frac{\partial V}{\partial \tau} - \mathcal{L}V\right)(V - \psi) = 0$$
+$$\frac{\partial V}{\partial \tau} \geq \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} + (r - q)S\frac{\partial V}{\partial S} - rV, \qquad V \geq \psi, \qquad \left(\frac{\partial V}{\partial \tau} - \mathcal{L}V\right)(V - \psi) = 0$$
 
 where $\psi$ is the intrinsic (payoff) value and $\mathcal{L}$ is the Black-Scholes operator. The complementarity condition (third equation) says: at each point, either the PDE holds as equality (continuation) or the option is at intrinsic (exercise), but not both. The boundary between these regions — the **early exercise boundary** — is a free boundary that emerges from the solution (section 4).
 
 For the numerical method, we work in backward time $\tau = T - t$ (time remaining to maturity), which turns the problem into a forward-in-time evolution. In the continuation region, $V$ satisfies:
 
-$$\frac{\partial V}{\partial \tau} = \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} + (r - d)S\frac{\partial V}{\partial S} - rV$$
+$$\frac{\partial V}{\partial \tau} = \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} + (r - q)S\frac{\partial V}{\partial S} - rV$$
 
 with initial condition $V(S, 0) = \psi(S)$ and the constraint $V \geq \psi$ enforced at every time step (section 4).
 
-Here $S$ is the spot price, $\sigma$ the volatility, $r$ the risk-free rate, and $d$ the continuous dividend yield. The three terms on the right have intuitive meanings: diffusion (volatility spreads the distribution), drift (the risk-neutral growth rate), and discounting (a dollar tomorrow is worth less today).
+Here $S$ is the spot price, $\sigma$ the volatility, $r$ the risk-free rate, and $q$ the continuous dividend yield. The three terms on the right have intuitive meanings: diffusion (volatility spreads the distribution), drift (the risk-neutral growth rate), and discounting (a dollar tomorrow is worth less today).
 
 ### Log-Price Transformation
 
 Working directly in $S$ is inconvenient — the coefficients depend on $S$, and the domain is $[0, \infty)$. Substituting $x = \ln(S/K)$ fixes both problems:
 
-$$\frac{\partial V}{\partial \tau} = \frac{\sigma^2}{2}\frac{\partial^2 V}{\partial x^2} + \left(r - d - \frac{\sigma^2}{2}\right)\frac{\partial V}{\partial x} - rV$$
+$$\frac{\partial V}{\partial \tau} = \frac{\sigma^2}{2}\frac{\partial^2 V}{\partial x^2} + \left(r - q - \frac{\sigma^2}{2}\right)\frac{\partial V}{\partial x} - rV$$
 
 Now all coefficients are constants, $x = 0$ corresponds to at-the-money ($S = K$), and the domain is symmetric around the strike. This is the form we actually discretize and solve.
 
@@ -117,7 +117,7 @@ where the weights depend on the local spacings $\Delta x_{i-1}$ and $\Delta x_i$
 
 Combining the second derivative, first derivative, and zeroth-order terms from the Black-Scholes PDE into a single operator $\mathcal{L}$:
 
-$$\mathcal{L}(u)_i = \frac{\sigma^2}{2}\left.\frac{\partial^2 u}{\partial x^2}\right|_i + \left(r - d - \frac{\sigma^2}{2}\right)\left.\frac{\partial u}{\partial x}\right|_i - ru_i$$
+$$\mathcal{L}(u)_i = \frac{\sigma^2}{2}\left.\frac{\partial^2 u}{\partial x^2}\right|_i + \left(r - q - \frac{\sigma^2}{2}\right)\left.\frac{\partial u}{\partial x}\right|_i - ru_i$$
 
 This produces a tridiagonal matrix: each grid point couples only to its immediate neighbors. This structure is what makes the solve fast — $O(n)$ per linear solve instead of $O(n^3)$.
 
@@ -269,7 +269,7 @@ For puts, the exercise region is $S < S^*$ (deep ITM). For calls, it's $S > S^*$
 
 ## 5. Discrete Dividends
 
-Sections 1–4 assume a continuous dividend yield $d$ that enters the PDE coefficients. Real equities pay discrete cash dividends at known dates. A dividend $D$ paid at calendar time $t_d$ causes the spot to drop: $S(t_d^+) = S(t_d^-) - D$. The option value must satisfy the jump condition across the dividend:
+Sections 1–4 assume a continuous dividend yield $q$ that enters the PDE coefficients. Real equities pay discrete cash dividends at known dates. A dividend $D$ paid at calendar time $t_d$ causes the spot to drop: $S(t_d^+) = S(t_d^-) - D$. The option value must satisfy the jump condition across the dividend:
 
 $$V(S, t_d^-) = V(S - D, t_d^+)$$
 
@@ -318,7 +318,7 @@ where $\delta_\max = \max_k D_k / K$ is the largest normalized dividend.
 
 ### Interaction with Continuous Yield
 
-Continuous and discrete dividends combine naturally. The continuous yield $d$ enters the Black-Scholes PDE coefficients (drift term $r - d - \sigma^2/2$) and is active throughout the solve. Discrete dividends operate orthogonally through temporal events. The two mechanisms do not interfere.
+Continuous and discrete dividends combine naturally. The continuous yield $q$ enters the Black-Scholes PDE coefficients (drift term $r - q - \sigma^2/2$) and is active throughout the solve. Discrete dividends operate orthogonally through temporal events. The two mechanisms do not interfere.
 
 ---
 

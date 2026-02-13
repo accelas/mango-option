@@ -10,6 +10,7 @@
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/table/transforms/standard_4d.hpp"
+#include "mango/option/table/shared_interp.hpp"
 #include "mango/math/bspline_nd.hpp"
 #include "mango/math/safe_math.hpp"
 #include "mango/support/error_types.hpp"
@@ -101,32 +102,10 @@ struct PriceTableAxesND {
 /// Convenience alias for the common 4D case.
 using PriceTableAxes = PriceTableAxesND<kPriceTableDim>;
 
-/// Adapter that wraps shared_ptr<BSplineND<double, N>> to satisfy
-/// SurfaceInterpolant. Preserves shared ownership semantics.
+/// Backward-compatible alias: SharedBSplineInterp<N> is SharedInterp
+/// specialized for BSplineND.  See shared_interp.hpp for the generic adapter.
 template <size_t N>
-class SharedBSplineInterp {
-public:
-    explicit SharedBSplineInterp(std::shared_ptr<const BSplineND<double, N>> spline)
-        : spline_(std::move(spline)) {}
-
-    [[nodiscard]] double eval(const std::array<double, N>& coords) const {
-        return spline_->eval(coords);
-    }
-
-    [[nodiscard]] double partial(size_t axis, const std::array<double, N>& coords) const {
-        return spline_->partial(axis, coords);
-    }
-
-    [[nodiscard]] double eval_second_partial(size_t axis, const std::array<double, N>& coords) const {
-        return spline_->eval_second_partial(axis, coords);
-    }
-
-    /// Access underlying spline
-    [[nodiscard]] const BSplineND<double, N>& spline() const { return *spline_; }
-
-private:
-    std::shared_ptr<const BSplineND<double, N>> spline_;
-};
+using SharedBSplineInterp = SharedInterp<BSplineND<double, N>, N>;
 
 // ===========================================================================
 // B-spline type aliases — concept-based layered architecture

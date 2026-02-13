@@ -9,6 +9,14 @@ filegroup(
 )
 
 cc_library(
+    name = "shared_interp",
+    hdrs = ["shared_interp.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "adaptive_grid_types",
     hdrs = ["adaptive_grid_types.hpp"],
     deps = [
