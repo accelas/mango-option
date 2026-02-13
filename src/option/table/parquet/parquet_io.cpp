@@ -209,8 +209,12 @@ uint64_t metadata_checksum(
     return h.crc;
 }
 
-std::string option_type_to_string(OptionType t) {
-    return t == OptionType::PUT ? "PUT" : "CALL";
+std::expected<std::string, PriceTableError> option_type_to_string(OptionType t) {
+    switch (t) {
+        case OptionType::PUT: return std::string("PUT");
+        case OptionType::CALL: return std::string("CALL");
+    }
+    return std::unexpected(serialization_error());
 }
 
 std::expected<OptionType, PriceTableError>
@@ -399,6 +403,20 @@ write_parquet(const PriceTableData& data,
         if (seg.grids.size() > seg.ndim || seg.knots.size() > seg.ndim) {
             return std::unexpected(serialization_error());
         }
+        // Semantic: reject segments that would fail reconstruction.
+        if (!std::isfinite(seg.K_ref) || seg.K_ref <= 0.0) {
+            return std::unexpected(serialization_error());
+        }
+        if (!std::isfinite(seg.tau_start) || !std::isfinite(seg.tau_end) ||
+            !std::isfinite(seg.tau_min) || !std::isfinite(seg.tau_max)) {
+            return std::unexpected(serialization_error());
+        }
+        if (seg.tau_start > seg.tau_end || seg.tau_min > seg.tau_max) {
+            return std::unexpected(serialization_error());
+        }
+        if (seg.values.empty()) {
+            return std::unexpected(serialization_error());
+        }
     }
 
     auto pool = arrow::default_memory_pool();
@@ -407,7 +425,11 @@ write_parquet(const PriceTableData& data,
     auto metadata = std::make_shared<arrow::KeyValueMetadata>();
     metadata->Append("mango.format_version", FORMAT_VERSION);
     metadata->Append("mango.surface_type", data.surface_type);
-    metadata->Append("mango.option_type", option_type_to_string(data.option_type));
+    {
+        auto opt_str = option_type_to_string(data.option_type);
+        if (!opt_str) return std::unexpected(opt_str.error());
+        metadata->Append("mango.option_type", *opt_str);
+    }
     metadata->Append("mango.dividend_yield", double_to_string(data.dividend_yield));
     metadata->Append("mango.maturity", double_to_string(data.maturity));
     metadata->Append("mango.bounds_m_min", double_to_string(data.bounds_m_min));

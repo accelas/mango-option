@@ -24,6 +24,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <set>
 #include <span>
 #include <vector>
 
@@ -177,6 +178,21 @@ template <typename LeafType>
 // ============================================================================
 // Level 4: Segmented surface construction helpers
 // ============================================================================
+
+/// Validate that all segment_id values are unique.
+/// Duplicates make canonical CRC ordering ambiguous.
+[[nodiscard]] inline std::expected<void, PriceTableError>
+validate_unique_segment_ids(
+    const std::vector<PriceTableData::Segment>& segments) {
+    std::set<int32_t> seen;
+    for (const auto& seg : segments) {
+        if (!seen.insert(seg.segment_id).second) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
+    }
+    return {};
+}
 
 /// Group segments by K_ref value, preserving segment order within each group.
 /// Returns groups sorted by K_ref. Rejects non-finite K_ref values (NaN/Inf

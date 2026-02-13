@@ -94,6 +94,9 @@ from_data<BSplineMultiKRefInner>(const PriceTableData& data) {
             PriceTableErrorCode::InvalidConfig, 0, 0});
     }
 
+    auto unique_check = validate_unique_segment_ids(data.segments);
+    if (!unique_check) return std::unexpected(unique_check.error());
+
     // Sort segments by segment_id to ensure correct ordering regardless
     // of Parquet row order.
     auto sorted_segments = data.segments;
@@ -186,6 +189,9 @@ from_data<ChebyshevMultiKRefInner>(const PriceTableData& data) {
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::InvalidConfig, 0, 0});
     }
+
+    auto unique_check = validate_unique_segment_ids(data.segments);
+    if (!unique_check) return std::unexpected(unique_check.error());
 
     // Sort segments by segment_id to ensure correct ordering regardless
     // of Parquet row order.
