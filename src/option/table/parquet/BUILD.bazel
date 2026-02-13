@@ -4,6 +4,7 @@ cc_library(
     name = "parquet_io",
     srcs = ["parquet_io.cpp"],
     hdrs = ["parquet_io.hpp"],
+    tags = ["manual"],  # Requires system Arrow/Parquet libraries
     deps = [
         "//src/option/table/serialization:price_table_data",
         "//src/support:crc64",

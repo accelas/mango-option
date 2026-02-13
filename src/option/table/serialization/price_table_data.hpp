@@ -15,6 +15,9 @@ struct PriceTableData {
 
     OptionType option_type = OptionType::PUT;
     double dividend_yield = 0.0;
+    /// Used internally during reconstruction. Note: only dividend_yield is
+    /// serialized to Parquet; discrete_dividends are not persisted (they are
+    /// baked into the segmented surface structure at build time).
     DividendSpec dividends;
     double maturity = 0.0;
 

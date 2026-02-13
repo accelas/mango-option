@@ -1802,6 +1802,7 @@ cc_test(
     srcs = ["parquet_io_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
+    tags = ["manual"],  # Requires system Arrow/Parquet libraries
     deps = [
         "//src/option/table/serialization:to_data",
         "//src/option/table/serialization:from_data",

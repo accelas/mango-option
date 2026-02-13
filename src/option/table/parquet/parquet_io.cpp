@@ -8,6 +8,7 @@
 #include <parquet/arrow/reader.h>
 #include <parquet/arrow/writer.h>
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace mango {
@@ -174,8 +176,12 @@ uint64_t segment_checksum(const PriceTableData::Segment& seg) {
 /// Compute CRC64 over file-level metadata + per-segment checksums.
 /// Covers option_type, dividend_yield, maturity, bounds, surface_type,
 /// and all per-segment checksums (chaining integrity).
-uint64_t metadata_checksum(const PriceTableData& data,
-                           const std::vector<uint64_t>& seg_checksums) {
+///
+/// Segment checksums are fed as (segment_id, checksum) pairs sorted by
+/// segment_id so the metadata CRC is independent of physical row order.
+uint64_t metadata_checksum(
+    const PriceTableData& data,
+    const std::vector<std::pair<int32_t, uint64_t>>& seg_id_checksums) {
     CRCHasher h;
     h.feed_string(data.surface_type);
     h.feed_i32(static_cast<int32_t>(data.option_type));
@@ -191,8 +197,15 @@ uint64_t metadata_checksum(const PriceTableData& data,
     h.feed_f64(data.bounds_rate_max);
     h.feed_u64(static_cast<uint64_t>(data.n_pde_solves));
     h.feed_f64(data.precompute_time_seconds);
-    h.feed_u64(static_cast<uint64_t>(seg_checksums.size()));
-    for (uint64_t sc : seg_checksums) h.feed_u64(sc);
+
+    // Sort by segment_id for canonical ordering
+    auto sorted = seg_id_checksums;
+    std::sort(sorted.begin(), sorted.end());
+    h.feed_u64(static_cast<uint64_t>(sorted.size()));
+    for (const auto& [id, crc] : sorted) {
+        h.feed_i32(id);
+        h.feed_u64(crc);
+    }
     return h.crc;
 }
 
@@ -381,6 +394,11 @@ write_parquet(const PriceTableData& data,
         if (seg.grids.size() > MAX_NDIM || seg.knots.size() > MAX_NDIM) {
             return std::unexpected(serialization_error());
         }
+        // Structural: grids/knots must not exceed ndim (extra axes would
+        // be dropped on read, causing CRC mismatch).
+        if (seg.grids.size() > seg.ndim || seg.knots.size() > seg.ndim) {
+            return std::unexpected(serialization_error());
+        }
     }
 
     auto pool = arrow::default_memory_pool();
@@ -446,8 +464,8 @@ write_parquet(const PriceTableData& data,
     arrow::UInt64Builder checksum_b(pool);
 
     // ---- Populate rows ----
-    std::vector<uint64_t> seg_checksums;
-    seg_checksums.reserve(data.segments.size());
+    std::vector<std::pair<int32_t, uint64_t>> seg_id_checksums;
+    seg_id_checksums.reserve(data.segments.size());
     for (const auto& seg : data.segments) {
         MANGO_ARROW_CHECK(segment_id_b.Append(seg.segment_id));
         MANGO_ARROW_CHECK(k_ref_b.Append(seg.K_ref));
@@ -491,13 +509,13 @@ write_parquet(const PriceTableData& data,
         MANGO_ARROW_CHECK(append_double_list(values_b, seg.values));
 
         uint64_t crc = segment_checksum(seg);
-        seg_checksums.push_back(crc);
+        seg_id_checksums.emplace_back(seg.segment_id, crc);
         MANGO_ARROW_CHECK(checksum_b.Append(crc));
     }
 
     // ---- Compute and store file-level metadata checksum ----
     {
-        uint64_t meta_crc = metadata_checksum(data, seg_checksums);
+        uint64_t meta_crc = metadata_checksum(data, seg_id_checksums);
         metadata->Append("mango.metadata_checksum",
                          std::to_string(meta_crc));
     }
@@ -842,8 +860,8 @@ read_parquet(const std::filesystem::path& path) {
 
     int64_t n_rows = table->num_rows();
     data.segments.resize(static_cast<size_t>(n_rows));
-    std::vector<uint64_t> seg_crcs;
-    seg_crcs.reserve(static_cast<size_t>(n_rows));
+    std::vector<std::pair<int32_t, uint64_t>> seg_id_crcs;
+    seg_id_crcs.reserve(static_cast<size_t>(n_rows));
 
     for (int64_t i = 0; i < n_rows; ++i) {
         auto& seg = data.segments[static_cast<size_t>(i)];
@@ -888,7 +906,7 @@ read_parquet(const std::filesystem::path& path) {
             return std::unexpected(
                 PriceTableError{PriceTableErrorCode::SerializationFailed});
         }
-        seg_crcs.push_back(stored_crc);
+        seg_id_crcs.emplace_back(seg.segment_id, stored_crc);
     }
 
     // ---- Verify file-level metadata checksum ----
@@ -897,7 +915,7 @@ read_parquet(const std::filesystem::path& path) {
         if (!meta_crc_str) return std::unexpected(meta_crc_str.error());
         auto stored_meta_crc = parse_uint64(*meta_crc_str);
         if (!stored_meta_crc) return std::unexpected(stored_meta_crc.error());
-        uint64_t computed_meta = metadata_checksum(data, seg_crcs);
+        uint64_t computed_meta = metadata_checksum(data, seg_id_crcs);
         if (*stored_meta_crc != computed_meta) {
             return std::unexpected(serialization_error());
         }
