@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+
+cc_library(
+    name = "parquet_io",
+    srcs = ["parquet_io.cpp"],
+    hdrs = ["parquet_io.hpp"],
+    deps = [
+        "//src/option/table/serialization:price_table_data",
+        "//src/support:crc64",
+        "//third_party/arrow",
+        "//third_party/arrow:parquet",
+    ],
+    strip_include_prefix = "/src/option/table/parquet",
+    include_prefix = "mango/option/table/parquet",
+    visibility = ["//visibility:public"],
+)
