@@ -143,26 +143,9 @@ if success:
 
 ### Interpolated Solver (Fast)
 
-Build a price table surface first, then solve IV via Newton-Raphson on the interpolant. Orders of magnitude faster than FDM (~4us vs ~5ms per query).
+Build a price surface and solve IV via Brent's method on the interpolant. Orders of magnitude faster than FDM (~4us vs ~5ms per query).
 
 ```python
-# 1. Build price table from option chain
-chain = mo.OptionGrid()
-chain.spot = 100.0
-chain.strikes = [90, 95, 100, 105, 110]
-chain.maturities = [0.25, 0.5, 1.0]
-chain.implied_vols = [0.15, 0.20, 0.25]
-chain.rates = [0.02, 0.03]
-chain.dividend_yield = 0.0
-
-surface = mo.build_price_table_surface_from_grid(
-    chain,
-    option_type=mo.OptionType.PUT,
-    grid_profile=mo.PriceTableGridProfile.HIGH,
-    pde_profile=mo.GridAccuracyProfile.HIGH,
-)
-
-# 2. Create interpolated solver via factory
 config = mo.IVSolverFactoryConfig()
 config.option_type = mo.OptionType.PUT
 config.spot = 100.0
@@ -170,18 +153,56 @@ config.grid.moneyness = [0.8, 0.9, 1.0, 1.1, 1.2]
 config.grid.vol = [0.10, 0.20, 0.30, 0.40]
 config.grid.rate = [0.01, 0.03, 0.05, 0.07]
 
-path = mo.StandardIVPath()
-path.maturity_grid = [0.1, 0.25, 0.5, 1.0]
-config.path = path
+# Backend selection: BSplineBackend (default) or ChebyshevBackend
+backend = mo.BSplineBackend()
+backend.maturity_grid = [0.1, 0.25, 0.5, 1.0]
+config.backend = backend
 
 iv_solver = mo.make_interpolated_iv_solver(config)
 
-# 3. Solve single query
+# Solve single query
 success, result, error = iv_solver.solve(query)
 
-# 4. Solve batch (parallelized with OpenMP)
+# Solve batch (parallelized with OpenMP)
 queries = [query1, query2, query3]
 results, failed_count = iv_solver.solve_batch(queries)
+```
+
+#### Backend Selection
+
+```python
+# B-spline backend (default, best accuracy)
+backend = mo.BSplineBackend()
+backend.maturity_grid = [0.1, 0.25, 0.5, 1.0, 2.0]
+config.backend = backend
+
+# Chebyshev backend (Tucker-compressed)
+backend = mo.ChebyshevBackend()
+backend.maturity = 2.0
+backend.tucker_epsilon = 1e-8  # Set to 0 for RawTensor
+config.backend = backend
+```
+
+#### Discrete Dividends
+
+```python
+div_config = mo.DiscreteDividendConfig()
+div_config.maturity = 1.0
+div_config.discrete_dividends = [mo.Dividend(0.25, 1.50), mo.Dividend(0.50, 1.50)]
+div_config.kref_config.K_refs = [80.0, 100.0, 120.0]
+config.discrete_dividends = div_config
+
+iv_solver = mo.make_interpolated_iv_solver(config)
+```
+
+#### Adaptive Grid
+
+```python
+adaptive = mo.AdaptiveGridParams()
+adaptive.target_iv_error = 0.001  # 10 bps
+config.adaptive = adaptive
+
+iv_solver = mo.make_interpolated_iv_solver(config)
 ```
 
 ### Saving and Loading Price Tables
@@ -219,15 +240,15 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 | `IVQuery` | IV solver input (inherits OptionSpec + market_price) |
 | `IVSolverConfig` | IV solver config with `root_config`, `grid_accuracy`, manual grid overrides |
 | `IVSolver` | PDE-based IV solver |
-| `InterpolatedIVSolver` | Fast B-spline interpolation IV solver (created via `make_interpolated_iv_solver`) |
-| `IVSolverFactoryConfig` | Configuration for IV solver factory (grid, path, solver params) |
+| `InterpolatedIVSolver` | Fast interpolation IV solver (created via `make_interpolated_iv_solver`) |
+| `IVSolverFactoryConfig` | Configuration for IV solver factory (grid, backend, solver params) |
 | `IVGrid` | Grid specification (moneyness, vol, rate arrays) |
-| `StandardIVPath` | Standard (continuous dividend) IV path with maturity grid |
-| `SegmentedIVPath` | Discrete dividend IV path with maturity and dividend schedule |
+| `BSplineBackend` | B-spline interpolation backend config (maturity_grid) |
+| `ChebyshevBackend` | Chebyshev interpolation backend config (maturity, tucker_epsilon) |
+| `DiscreteDividendConfig` | Discrete dividend config (maturity, dividends, kref_config) |
 | `AdaptiveGridParams` | Adaptive grid refinement parameters |
-| `MultiKRefConfig` | Multi-reference-strike configuration for segmented paths |
+| `MultiKRefConfig` | Multi-reference-strike configuration for discrete dividends |
 | `OptionGrid` | Container for chain data (spot, strikes, maturities, vols, rates) |
-| `PriceTableSurface` | 4D B-spline surface with `value(m, tau, sigma, r)` and `partial(axis, ...)` |
 | `PriceTableWorkspace` | Serializable price table data (save/load Arrow IPC) |
 | `SolverError` | Error detail with `code`, `iterations`, `residual` |
 
@@ -237,5 +258,3 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 |----------|-------------|
 | `american_option_price(params, accuracy=None)` | Price a single American option with auto-grid |
 | `make_interpolated_iv_solver(config)` | Create fast IV solver from `IVSolverFactoryConfig` |
-| `build_price_table_surface_from_grid(chain, ...)` | Build 4D B-spline surface from OptionGrid |
-| `build_price_table_surface_from_grid_auto_profile(spot, strikes, ...)` | Same, with positional args instead of OptionGrid |

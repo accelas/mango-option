@@ -23,10 +23,11 @@ Mathematical formulations and numerical methods underlying the mango-option libr
 9. [Segmented Price Surfaces](#9-segmented-price-surfaces)
 10. [Price Table Grid Estimation](#10-price-table-grid-estimation)
 11. [Implied Volatility](#11-implied-volatility)
+12. [Interpolated Greeks via Chain Rule](#12-interpolated-greeks-via-chain-rule)
 
 **Part III — Analysis**
 
-12. [Convergence Analysis](#12-convergence-analysis)
+13. [Convergence Analysis](#13-convergence-analysis)
 
 ---
 
@@ -600,7 +601,7 @@ The library offers two grid specification modes:
 - **Manual grid.** The user supplies explicit grid vectors for moneyness, volatility, and rate (each requiring $\geq 4$ points for the cubic B-spline). Predefined accuracy profiles translate a qualitative accuracy level into concrete grid sizes derived from the curvature-based formula below.
 - **Adaptive grid.** The user specifies a target IV error $\varepsilon_\text{target}$ and domain bounds. The builder automatically determines grid density via iterative refinement, validated against fresh PDE solves. This works for both the standard path (continuous dividends) and the segmented path (discrete dividends; see section 9 for the probe-and-max strategy). This removes the need for manual tuning at the cost of additional PDE solves during construction.
 
-Both modes share the same maturity grid (supplied via the path configuration) and produce the same `PriceTableSurface<4>` — the difference is only in how the per-axis point counts are chosen.
+Both modes share the same maturity grid (supplied via the path configuration) and produce the same `BSplineND<double, 4>` — the difference is only in how the per-axis point counts are chosen.
 
 ### Curvature-Based Budget Allocation
 
@@ -666,7 +667,7 @@ Lower bounds for moneyness, maturity, and volatility are clamped to $10^{-6}$ to
 
 #### Stage 2: Build Price Table
 
-At each iteration, a full `PriceTableSurface<4>` is built from the current grid vectors. The builder computes batch PDE solves for all $(\sigma, r)$ parameter pairs, extracts price snapshots at each maturity, fits the 4D B-spline, and produces the surface.
+At each iteration, a full `BSplineND<double, 4>` is built from the current grid vectors. The builder computes batch PDE solves for all $(\sigma, r)$ parameter pairs, extracts price snapshots at each maturity, fits the 4D B-spline, and produces the surface.
 
 A slice cache keyed by $(\sigma, r)$ pairs (rounded to 6 decimal places) avoids re-solving PDE slices that were computed in previous iterations. When a grid refinement changes only one dimension (e.g., adding moneyness points), all previously computed $(\sigma, r)$ slices remain valid. The cache is invalidated only if the maturity grid changes, since maturity affects the PDE time-stepping.
 
@@ -769,11 +770,79 @@ The key advantage: both $P$ and $\partial P / \partial\sigma$ come from B-spline
 
 The interpolated solver is ~5,000× faster, at the cost of pre-computation time and interpolation error (typically 10–60 bps depending on grid profile).
 
+### Vega Pre-Check for Undefined IV
+
+When an option's vega is near zero (deep OTM/ITM, or very short dated), implied volatility is effectively undefined — any tiny price error maps to huge IV swings.
+
+The interpolated IV solver checks surface vega at three representative volatilities (10%, 25%, 50%) before starting the root search. If $\max(\nu) < \nu_\text{threshold}$ (default $10^{-4}$), it returns `VegaTooSmall` immediately (~600ns) instead of running a doomed Brent search.
+
+This is more robust than a time-value/strike ratio heuristic, and costs only 3 surface evaluations.
+
+---
+
+## 12. Interpolated Greeks via Chain Rule
+
+When American option prices are stored in an interpolated surface, Greeks are computed via the chain rule through the coordinate transform. This section covers the mathematics; see [INTERPOLATION_FRAMEWORK.md](INTERPOLATION_FRAMEWORK.md) for the software architecture.
+
+### First-Order Greeks (Delta, Vega, Theta, Rho)
+
+For a surface parameterized by coordinates $\mathbf{c} = T(S, K, \tau, \sigma, r)$, the chain rule gives:
+
+$$\frac{\partial V}{\partial p} = \sum_{i=1}^{N} \frac{\partial V}{\partial c_i} \cdot \frac{\partial c_i}{\partial p}$$
+
+where $p \in \{S, \sigma, \tau, r\}$ is the physical parameter and $N$ is the dimensionality of the interpolation space.
+
+**StandardTransform4D.** Coordinates: $\mathbf{c} = (\ln(S/K),\; \tau,\; \sigma,\; r)$.
+
+| Greek | Weights $\partial c_i / \partial p$ |
+|-------|-----|
+| Delta | $(1/S,\; 0,\; 0,\; 0)$ |
+| Vega | $(0,\; 0,\; 1,\; 0)$ |
+| Theta | $(0,\; -1,\; 0,\; 0)$ |
+| Rho | $(0,\; 0,\; 0,\; 1)$ |
+
+Each Greek requires exactly one interpolant partial evaluation (the single non-zero weight).
+
+**DimensionlessTransform3D.** Coordinates: $\mathbf{c} = (\ln(S/K),\; \sigma^2\tau/2,\; \ln(2r/\sigma^2))$.
+
+| Greek | Weights $\partial c_i / \partial p$ |
+|-------|-----|
+| Delta | $(1/S,\; 0,\; 0)$ |
+| Vega | $(0,\; \sigma\tau,\; -2/\sigma)$ |
+| Theta | $(0,\; -\sigma^2/2,\; 0)$ |
+| Rho | $(0,\; 0,\; 1/r)$ |
+
+The dimensionless transform's vega couples two axes ($\tau'$ and $\ln\kappa$), requiring two interpolant partial evaluations instead of one. This coupling is inherent in the dimensionless parameterization — $\sigma$ appears in both coordinate definitions.
+
+### Gamma (Second-Order)
+
+Gamma $= \partial^2 V / \partial S^2$ requires a second derivative. For $x = \ln(S/K)$:
+
+$$\frac{\partial^2 V}{\partial S^2} = \frac{1}{S^2}\left(\frac{\partial^2 V}{\partial x^2} - \frac{\partial V}{\partial x}\right)$$
+
+This follows from $\partial x / \partial S = 1/S$ and $\partial^2 x / \partial S^2 = -1/S^2$, applied to the chain rule for second derivatives.
+
+**Analytical (B-spline interpolants).** B-spline interpolants provide `eval_second_partial(axis, coords)` for exact $\partial^2 V / \partial x^2$. The derivative of a cubic B-spline is a quadratic B-spline — computed analytically in $O(n)$ per evaluation.
+
+**Finite difference (Chebyshev interpolants).** When analytical second partials are unavailable, central differences are used:
+
+$$\frac{\partial^2 V}{\partial x^2} \approx \frac{V(x+h) - 2V(x) + V(x-h)}{h^2}$$
+
+with $h = 10^{-4}$ in log-moneyness.
+
+### EEP Decomposition for Greeks
+
+All transform/chain-rule machinery operates on the EEP surface only. European Greeks are added at the final layer via exact Black-Scholes formulas:
+
+$$\text{American Greek} = \text{EEP Greek} + \text{European Greek}$$
+
+**Early exit.** When $\text{EEP} \leq 0$ (deep OTM), the American value equals the European value, so the American Greek equals the European Greek. The EEP layer detects this and returns the analytical European Greek directly, without evaluating any interpolation derivatives.
+
 ---
 
 # Part III — Analysis
 
-## 12. Convergence Analysis
+## 13. Convergence Analysis
 
 ### Overall Error Budget
 
