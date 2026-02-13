@@ -18,6 +18,12 @@ struct PriceTableData {
     DividendSpec dividends;
     double maturity = 0.0;
 
+    /// Original SurfaceBounds (serialized directly, no heuristic inversion).
+    double bounds_m_min = 0.0, bounds_m_max = 0.0;
+    double bounds_tau_min = 0.0, bounds_tau_max = 0.0;
+    double bounds_sigma_min = 0.0, bounds_sigma_max = 0.0;
+    double bounds_rate_min = 0.0, bounds_rate_max = 0.0;
+
     struct Segment {
         int32_t segment_id = 0;
         double K_ref = 0.0;
@@ -37,5 +43,16 @@ struct PriceTableData {
     size_t n_pde_solves = 0;
     double precompute_time_seconds = 0.0;
 };
+
+namespace surface_types {
+inline constexpr const char* kBSpline4D = "bspline_4d";
+inline constexpr const char* kBSpline4DSegmented = "bspline_4d_segmented";
+inline constexpr const char* kChebyshev4D = "chebyshev_4d";
+inline constexpr const char* kChebyshev4DRaw = "chebyshev_4d_raw";
+inline constexpr const char* kChebyshev4DSegmented = "chebyshev_4d_segmented";
+inline constexpr const char* kBSpline3D = "bspline_3d";
+inline constexpr const char* kChebyshev3D = "chebyshev_3d";
+inline constexpr const char* kChebyshev3DRaw = "chebyshev_3d_raw";
+}  // namespace surface_types
 
 }  // namespace mango

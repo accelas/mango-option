@@ -16,12 +16,11 @@
 #include "mango/math/chebyshev/raw_tensor.hpp"
 #include "mango/support/error_types.hpp"
 
-#include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <map>
 #include <memory>
 #include <span>
@@ -90,10 +89,29 @@ make_chebyshev(const PriceTableData::Segment& seg) {
 
     Domain<N> domain;
     std::array<size_t, N> num_pts;
+    size_t expected_size = 1;
     for (size_t d = 0; d < N; ++d) {
         domain.lo[d] = seg.domain_lo[d];
         domain.hi[d] = seg.domain_hi[d];
+        // Validate num_pts are positive
+        if (seg.num_pts[d] <= 0) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
         num_pts[d] = static_cast<size_t>(seg.num_pts[d]);
+        // Overflow check
+        if (expected_size > 0 &&
+            num_pts[d] > std::numeric_limits<size_t>::max() / expected_size) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
+        expected_size *= num_pts[d];
+    }
+
+    // Validate values size matches tensor dimensions
+    if (seg.values.size() != expected_size) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig});
     }
 
     return ChebyshevInterpolant<N, RawTensor<N>>::build_from_values(
@@ -140,118 +158,7 @@ template <typename LeafType>
 }
 
 // ============================================================================
-// Level 4: SurfaceBounds extraction from segment data
-// ============================================================================
-
-/// Derive SurfaceBounds from 4D segment domain (physical coordinates).
-[[nodiscard]] inline SurfaceBounds bounds_from_4d_segment(
-    const PriceTableData::Segment& seg) {
-    return SurfaceBounds{
-        .m_min = seg.domain_lo[0], .m_max = seg.domain_hi[0],
-        .tau_min = seg.domain_lo[1], .tau_max = seg.domain_hi[1],
-        .sigma_min = seg.domain_lo[2], .sigma_max = seg.domain_hi[2],
-        .rate_min = seg.domain_lo[3], .rate_max = seg.domain_hi[3],
-    };
-}
-
-/// Derive SurfaceBounds from 3D dimensionless segment domain.
-///
-/// The 3D axes are [x, tau_prime, ln_kappa] where:
-///   x = ln(S/K)
-///   tau_prime = sigma^2 * tau / 2
-///   ln_kappa = ln(2r / sigma^2)
-///
-/// We reverse-engineer physical bounds from the dimensionless domain:
-///   sigma_min^2 = 2 * tp_min / tau_max  (but we cannot know tau_max alone)
-///
-/// Since we cannot invert the mapping uniquely without the original physical
-/// grid, we store conservative bounds. The SurfaceBounds for 3D surfaces are
-/// set as: m from axis 0, tau/sigma/rate set to the max ranges that could
-/// produce the dimensionless domain. In practice, the bounds are only used
-/// for out-of-range checks, so we use the maturity from PriceTableData.
-[[nodiscard]] inline SurfaceBounds bounds_from_3d_segment(
-    const PriceTableData::Segment& seg, double maturity) {
-    // Dimensionless domain: [m, tp, lk]
-    double m_min = seg.domain_lo[0];
-    double m_max = seg.domain_hi[0];
-    double tp_min = seg.domain_lo[1];
-    double tp_max = seg.domain_hi[1];
-    double lk_min = seg.domain_lo[2];
-    double lk_max = seg.domain_hi[2];
-
-    // Reverse-engineer sigma bounds from tp and maturity:
-    //   tp = sigma^2 * tau / 2
-    //   tp_max = sigma_max^2 * maturity / 2  =>  sigma_max = sqrt(2*tp_max/maturity)
-    //   tp_min = sigma_min^2 * tau_min / 2    (tau_min unknown, use a small value)
-    // For ln_kappa = ln(2r/sigma^2):
-    //   lk_max = ln(2*rate_max/sigma_min^2)
-    //   lk_min = ln(2*rate_min/sigma_max^2)
-    // We solve: sigma_max = sqrt(2*tp_max/maturity)
-    double sigma_max = std::sqrt(2.0 * tp_max / maturity);
-    // sigma_min: from tp_min = sigma_min^2 * tau_min / 2
-    // tau_min is typically small; use the heuristic that tp_min corresponds to
-    // the smallest sigma at some reasonable tau. As a conservative bound:
-    double sigma_min = std::sqrt(2.0 * tp_min / maturity);
-    // rate bounds from lk:
-    //   lk_min = ln(2*rate_min/sigma_max^2) => rate_min = sigma_max^2/2 * exp(lk_min)
-    //   lk_max = ln(2*rate_max/sigma_min^2) => rate_max = sigma_min^2/2 * exp(lk_max)
-    double rate_min = sigma_max * sigma_max / 2.0 * std::exp(lk_min);
-    double rate_max = sigma_min * sigma_min / 2.0 * std::exp(lk_max);
-
-    // Ensure valid ordering
-    if (sigma_min > sigma_max) std::swap(sigma_min, sigma_max);
-    if (rate_min > rate_max) std::swap(rate_min, rate_max);
-
-    return SurfaceBounds{
-        .m_min = m_min, .m_max = m_max,
-        .tau_min = 0.01, .tau_max = maturity,
-        .sigma_min = sigma_min, .sigma_max = sigma_max,
-        .rate_min = rate_min, .rate_max = rate_max,
-    };
-}
-
-/// Derive SurfaceBounds for segmented surfaces from all segments.
-[[nodiscard]] inline SurfaceBounds bounds_from_segments(
-    const std::vector<PriceTableData::Segment>& segments) {
-    if (segments.empty()) {
-        return SurfaceBounds{};
-    }
-
-    // For segmented surfaces, all segments share the same coordinate space.
-    // Compute the union of all segment domains.
-    size_t ndim = segments[0].ndim;
-    SurfaceBounds bounds{
-        .m_min = segments[0].domain_lo[0],
-        .m_max = segments[0].domain_hi[0],
-        .tau_min = segments[0].tau_start,
-        .tau_max = segments[0].tau_end,
-        .sigma_min = ndim >= 3 ? segments[0].domain_lo[2] : 0.0,
-        .sigma_max = ndim >= 3 ? segments[0].domain_hi[2] : 0.0,
-        .rate_min = ndim >= 4 ? segments[0].domain_lo[3] : 0.0,
-        .rate_max = ndim >= 4 ? segments[0].domain_hi[3] : 0.0,
-    };
-
-    for (size_t i = 1; i < segments.size(); ++i) {
-        const auto& seg = segments[i];
-        bounds.m_min = std::min(bounds.m_min, seg.domain_lo[0]);
-        bounds.m_max = std::max(bounds.m_max, seg.domain_hi[0]);
-        bounds.tau_min = std::min(bounds.tau_min, seg.tau_start);
-        bounds.tau_max = std::max(bounds.tau_max, seg.tau_end);
-        if (ndim >= 3) {
-            bounds.sigma_min = std::min(bounds.sigma_min, seg.domain_lo[2]);
-            bounds.sigma_max = std::max(bounds.sigma_max, seg.domain_hi[2]);
-        }
-        if (ndim >= 4) {
-            bounds.rate_min = std::min(bounds.rate_min, seg.domain_lo[3]);
-            bounds.rate_max = std::max(bounds.rate_max, seg.domain_hi[3]);
-        }
-    }
-
-    return bounds;
-}
-
-// ============================================================================
-// Level 5: Segmented surface construction helpers
+// Level 4: Segmented surface construction helpers
 // ============================================================================
 
 /// Group segments by K_ref value, preserving segment order within each group.

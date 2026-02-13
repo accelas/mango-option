@@ -12,7 +12,7 @@ namespace mango {
 /// Reconstruct a PriceTable<Inner> from its serialized PriceTableData.
 ///
 /// Validates that data.surface_type matches the expected type for Inner.
-/// Explicit instantiations are provided for all 7 Inner types.
+/// Explicit instantiations are provided for all 8 Inner types.
 ///
 /// @tparam Inner  The inner surface type (e.g. BSplineLeaf, ChebyshevRawLeaf)
 /// @param data    Serialized price table data

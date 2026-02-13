@@ -20,7 +20,7 @@ template <typename Inner>
 // ============================================================================
 
 /// Convert a PriceTable<Inner> to a serializable PriceTableData.
-/// Explicit instantiations are provided for all 7 Inner types.
+/// Explicit instantiations are provided for all 8 Inner types.
 template <typename Inner>
 [[nodiscard]] PriceTableData to_data(const PriceTable<Inner>& table);
 

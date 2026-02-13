@@ -3,6 +3,8 @@
 #include "mango/option/table/serialization/from_data.hpp"
 #include "mango/option/table/serialization/reconstruct.hpp"
 
+#include <algorithm>
+
 // Surface type headers (define the type aliases)
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
@@ -12,15 +14,21 @@
 
 namespace mango {
 
-// Surface type string constants — must match surface_type_string<> in to_data.cpp.
+// Use centralized surface type string constants.
+using namespace surface_types;
+
 namespace {
-constexpr const char* kBSpline4D            = "bspline_4d";
-constexpr const char* kBSpline4DSegmented   = "bspline_4d_segmented";
-constexpr const char* kChebyshev4D          = "chebyshev_4d";
-constexpr const char* kChebyshev4DRaw       = "chebyshev_4d_raw";
-constexpr const char* kChebyshev4DSegmented = "chebyshev_4d_segmented";
-constexpr const char* kBSpline3D            = "bspline_3d";
-constexpr const char* kChebyshev3D          = "chebyshev_3d";
+
+/// Extract SurfaceBounds directly from serialized PriceTableData fields.
+SurfaceBounds bounds_from_data(const PriceTableData& data) {
+    return SurfaceBounds{
+        .m_min = data.bounds_m_min, .m_max = data.bounds_m_max,
+        .tau_min = data.bounds_tau_min, .tau_max = data.bounds_tau_max,
+        .sigma_min = data.bounds_sigma_min, .sigma_max = data.bounds_sigma_max,
+        .rate_min = data.bounds_rate_min, .rate_max = data.bounds_rate_max,
+    };
+}
+
 }  // anonymous namespace
 
 // ============================================================================
@@ -45,7 +53,7 @@ from_data<BSplineLeaf>(const PriceTableData& data) {
 
     auto eep_leaf = reconstruct_eep(std::move(*leaf),
                                     data.option_type, data.dividend_yield);
-    auto bounds = bounds_from_4d_segment(seg);
+    auto bounds = bounds_from_data(data);
 
     return PriceTable<BSplineLeaf>(
         std::move(eep_leaf), bounds, data.option_type, data.dividend_yield);
@@ -67,7 +75,13 @@ from_data<BSplineMultiKRefInner>(const PriceTableData& data) {
             PriceTableErrorCode::InvalidConfig, 0, 0});
     }
 
-    auto groups = group_segments_by_kref(data.segments);
+    // Sort segments by segment_id to ensure correct ordering regardless
+    // of Parquet row order.
+    auto sorted_segments = data.segments;
+    std::sort(sorted_segments.begin(), sorted_segments.end(),
+        [](const auto& a, const auto& b) { return a.segment_id < b.segment_id; });
+
+    auto groups = group_segments_by_kref(sorted_segments);
     std::vector<double> k_refs;
     std::vector<BSplineSegmentedSurface> kref_surfaces;
 
@@ -81,7 +95,7 @@ from_data<BSplineMultiKRefInner>(const PriceTableData& data) {
 
     MultiKRefSplit multi_split(std::move(k_refs));
     BSplineMultiKRefInner inner(std::move(kref_surfaces), std::move(multi_split));
-    auto bounds = bounds_from_segments(data.segments);
+    auto bounds = bounds_from_data(data);
 
     return PriceTable<BSplineMultiKRefInner>(
         std::move(inner), bounds, data.option_type, data.dividend_yield);
@@ -128,7 +142,7 @@ from_data<ChebyshevRawLeaf>(const PriceTableData& data) {
 
     auto eep_leaf = reconstruct_eep(std::move(*leaf),
                                     data.option_type, data.dividend_yield);
-    auto bounds = bounds_from_4d_segment(seg);
+    auto bounds = bounds_from_data(data);
 
     return PriceTable<ChebyshevRawLeaf>(
         std::move(eep_leaf), bounds, data.option_type, data.dividend_yield);
@@ -150,7 +164,13 @@ from_data<ChebyshevMultiKRefInner>(const PriceTableData& data) {
             PriceTableErrorCode::InvalidConfig, 0, 0});
     }
 
-    auto groups = group_segments_by_kref(data.segments);
+    // Sort segments by segment_id to ensure correct ordering regardless
+    // of Parquet row order.
+    auto sorted_segments = data.segments;
+    std::sort(sorted_segments.begin(), sorted_segments.end(),
+        [](const auto& a, const auto& b) { return a.segment_id < b.segment_id; });
+
+    auto groups = group_segments_by_kref(sorted_segments);
     std::vector<double> k_refs;
     std::vector<ChebyshevTauSegmented> kref_surfaces;
 
@@ -164,7 +184,7 @@ from_data<ChebyshevMultiKRefInner>(const PriceTableData& data) {
 
     MultiKRefSplit multi_split(std::move(k_refs));
     ChebyshevMultiKRefInner inner(std::move(kref_surfaces), std::move(multi_split));
-    auto bounds = bounds_from_segments(data.segments);
+    auto bounds = bounds_from_data(data);
 
     return PriceTable<ChebyshevMultiKRefInner>(
         std::move(inner), bounds, data.option_type, data.dividend_yield);
@@ -192,7 +212,7 @@ from_data<BSpline3DLeaf>(const PriceTableData& data) {
 
     auto eep_leaf = reconstruct_eep(std::move(*leaf),
                                     data.option_type, data.dividend_yield);
-    auto bounds = bounds_from_3d_segment(seg, data.maturity);
+    auto bounds = bounds_from_data(data);
 
     return PriceTable<BSpline3DLeaf>(
         std::move(eep_leaf), bounds, data.option_type, data.dividend_yield);
@@ -223,7 +243,7 @@ from_data<Chebyshev3DRawLeaf>(const PriceTableData& data) {
     // Accept both "chebyshev_3d" and "chebyshev_3d_raw" since Tucker
     // surfaces serialize to raw values.
     if (data.surface_type != kChebyshev3D &&
-        data.surface_type != "chebyshev_3d_raw") {
+        data.surface_type != kChebyshev3DRaw) {
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::InvalidConfig});
     }
@@ -238,7 +258,7 @@ from_data<Chebyshev3DRawLeaf>(const PriceTableData& data) {
 
     auto eep_leaf = reconstruct_eep(std::move(*leaf),
                                     data.option_type, data.dividend_yield);
-    auto bounds = bounds_from_3d_segment(seg, data.maturity);
+    auto bounds = bounds_from_data(data);
 
     return PriceTable<Chebyshev3DRawLeaf>(
         std::move(eep_leaf), bounds, data.option_type, data.dividend_yield);

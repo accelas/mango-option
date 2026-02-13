@@ -52,12 +52,31 @@ PriceTableError serialization_error() {
     }                                             \
     auto var = std::move(_result_##var).ValueUnsafe()
 
+std::expected<double, PriceTableError> parse_double(const std::string& s) {
+    try {
+        return std::stod(s);
+    } catch (...) {
+        return std::unexpected(serialization_error());
+    }
+}
+
+std::expected<size_t, PriceTableError> parse_size_t(const std::string& s) {
+    try {
+        return std::stoull(s);
+    } catch (...) {
+        return std::unexpected(serialization_error());
+    }
+}
+
 std::string option_type_to_string(OptionType t) {
     return t == OptionType::PUT ? "PUT" : "CALL";
 }
 
-OptionType string_to_option_type(const std::string& s) {
-    return s == "PUT" ? OptionType::PUT : OptionType::CALL;
+std::expected<OptionType, PriceTableError>
+string_to_option_type(const std::string& s) {
+    if (s == "PUT") return OptionType::PUT;
+    if (s == "CALL") return OptionType::CALL;
+    return std::unexpected(serialization_error());
 }
 
 std::string double_to_string(double v) {
@@ -211,6 +230,14 @@ write_parquet(const PriceTableData& data,
     metadata->Append("mango.option_type", option_type_to_string(data.option_type));
     metadata->Append("mango.dividend_yield", double_to_string(data.dividend_yield));
     metadata->Append("mango.maturity", double_to_string(data.maturity));
+    metadata->Append("mango.bounds_m_min", double_to_string(data.bounds_m_min));
+    metadata->Append("mango.bounds_m_max", double_to_string(data.bounds_m_max));
+    metadata->Append("mango.bounds_tau_min", double_to_string(data.bounds_tau_min));
+    metadata->Append("mango.bounds_tau_max", double_to_string(data.bounds_tau_max));
+    metadata->Append("mango.bounds_sigma_min", double_to_string(data.bounds_sigma_min));
+    metadata->Append("mango.bounds_sigma_max", double_to_string(data.bounds_sigma_max));
+    metadata->Append("mango.bounds_rate_min", double_to_string(data.bounds_rate_min));
+    metadata->Append("mango.bounds_rate_max", double_to_string(data.bounds_rate_max));
     metadata->Append("mango.n_pde_solves", size_to_string(data.n_pde_solves));
     metadata->Append("mango.precompute_time_seconds",
                      double_to_string(data.precompute_time_seconds));
@@ -415,6 +442,14 @@ read_parquet(const std::filesystem::path& path) {
         return kv->value(idx);
     };
 
+    // Validate format version first
+    {
+        auto v = get_meta("mango.format_version");
+        if (!v) return std::unexpected(v.error());
+        if (*v != FORMAT_VERSION) {
+            return std::unexpected(serialization_error());
+        }
+    }
     {
         auto v = get_meta("mango.surface_type");
         if (!v) return std::unexpected(v.error());
@@ -423,27 +458,96 @@ read_parquet(const std::filesystem::path& path) {
     {
         auto v = get_meta("mango.option_type");
         if (!v) return std::unexpected(v.error());
-        data.option_type = string_to_option_type(*v);
+        auto opt = string_to_option_type(*v);
+        if (!opt) return std::unexpected(opt.error());
+        data.option_type = *opt;
     }
     {
         auto v = get_meta("mango.dividend_yield");
         if (!v) return std::unexpected(v.error());
-        data.dividend_yield = std::stod(*v);
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.dividend_yield = *parsed;
     }
     {
         auto v = get_meta("mango.maturity");
         if (!v) return std::unexpected(v.error());
-        data.maturity = std::stod(*v);
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.maturity = *parsed;
     }
+
+    // ---- Read SurfaceBounds ----
+    {
+        auto v = get_meta("mango.bounds_m_min");
+        if (!v) return std::unexpected(v.error());
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.bounds_m_min = *parsed;
+    }
+    {
+        auto v = get_meta("mango.bounds_m_max");
+        if (!v) return std::unexpected(v.error());
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.bounds_m_max = *parsed;
+    }
+    {
+        auto v = get_meta("mango.bounds_tau_min");
+        if (!v) return std::unexpected(v.error());
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.bounds_tau_min = *parsed;
+    }
+    {
+        auto v = get_meta("mango.bounds_tau_max");
+        if (!v) return std::unexpected(v.error());
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.bounds_tau_max = *parsed;
+    }
+    {
+        auto v = get_meta("mango.bounds_sigma_min");
+        if (!v) return std::unexpected(v.error());
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.bounds_sigma_min = *parsed;
+    }
+    {
+        auto v = get_meta("mango.bounds_sigma_max");
+        if (!v) return std::unexpected(v.error());
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.bounds_sigma_max = *parsed;
+    }
+    {
+        auto v = get_meta("mango.bounds_rate_min");
+        if (!v) return std::unexpected(v.error());
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.bounds_rate_min = *parsed;
+    }
+    {
+        auto v = get_meta("mango.bounds_rate_max");
+        if (!v) return std::unexpected(v.error());
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.bounds_rate_max = *parsed;
+    }
+
     {
         auto v = get_meta("mango.n_pde_solves");
         if (!v) return std::unexpected(v.error());
-        data.n_pde_solves = std::stoull(*v);
+        auto parsed = parse_size_t(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.n_pde_solves = *parsed;
     }
     {
         auto v = get_meta("mango.precompute_time_seconds");
         if (!v) return std::unexpected(v.error());
-        data.precompute_time_seconds = std::stod(*v);
+        auto parsed = parse_double(*v);
+        if (!parsed) return std::unexpected(parsed.error());
+        data.precompute_time_seconds = *parsed;
     }
 
     // Also set dividend_yield in the DividendSpec
@@ -511,6 +615,36 @@ read_parquet(const std::filesystem::path& path) {
         !grid_0_res || !grid_1_res || !grid_2_res || !grid_3_res ||
         !knots_0_res || !knots_1_res || !knots_2_res || !knots_3_res ||
         !values_res || !checksum_res) {
+        return std::unexpected(serialization_error());
+    }
+
+    // Validate column types before casting
+    auto check_type = [](const std::shared_ptr<arrow::Array>& arr,
+                         arrow::Type::type expected) {
+        return arr->type_id() == expected;
+    };
+
+    if (!check_type(*segment_id_res, arrow::Type::INT32) ||
+        !check_type(*k_ref_res, arrow::Type::DOUBLE) ||
+        !check_type(*tau_start_res, arrow::Type::DOUBLE) ||
+        !check_type(*tau_end_res, arrow::Type::DOUBLE) ||
+        !check_type(*tau_min_res, arrow::Type::DOUBLE) ||
+        !check_type(*tau_max_res, arrow::Type::DOUBLE) ||
+        !check_type(*interp_type_res, arrow::Type::STRING) ||
+        !check_type(*ndim_res, arrow::Type::INT32) ||
+        !check_type(*domain_lo_res, arrow::Type::LIST) ||
+        !check_type(*domain_hi_res, arrow::Type::LIST) ||
+        !check_type(*num_pts_res, arrow::Type::LIST) ||
+        !check_type(*grid_0_res, arrow::Type::LIST) ||
+        !check_type(*grid_1_res, arrow::Type::LIST) ||
+        !check_type(*grid_2_res, arrow::Type::LIST) ||
+        !check_type(*grid_3_res, arrow::Type::LIST) ||
+        !check_type(*knots_0_res, arrow::Type::LIST) ||
+        !check_type(*knots_1_res, arrow::Type::LIST) ||
+        !check_type(*knots_2_res, arrow::Type::LIST) ||
+        !check_type(*knots_3_res, arrow::Type::LIST) ||
+        !check_type(*values_res, arrow::Type::LIST) ||
+        !check_type(*checksum_res, arrow::Type::INT64)) {
         return std::unexpected(serialization_error());
     }
 
