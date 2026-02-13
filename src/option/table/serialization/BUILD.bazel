@@ -10,3 +10,37 @@ cc_library(
     strip_include_prefix = "/src/option/table/serialization",
     include_prefix = "mango/option/table/serialization",
 )
+
+cc_library(
+    name = "to_data",
+    srcs = ["to_data.cpp"],
+    hdrs = [
+        "to_data.hpp",
+        "extract_segments.hpp",
+    ],
+    deps = [
+        ":price_table_data",
+        "//src/option/table:price_table",
+        "//src/option/table:split_surface",
+        "//src/option/table:transform_leaf",
+        "//src/option/table:eep_layer",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:shared_interp",
+        "//src/option/table:tau_segment_split",
+        "//src/option/table:multi_kref_split",
+        "//src/option/table:standard_transform_4d",
+        "//src/option/table:dimensionless_transform_3d",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/math:bspline_nd",
+        "//src/math/chebyshev:chebyshev_interpolant",
+        "//src/math/chebyshev:raw_tensor",
+        "//src/math/chebyshev:tucker_tensor",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/serialization",
+    include_prefix = "mango/option/table/serialization",
+)
