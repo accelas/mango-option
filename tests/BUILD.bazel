@@ -1300,8 +1300,25 @@ cc_test(
         "manual",  # Don't run with bazel test //... (requires Earthly)
     ],
     deps = [
+        "//src/option:american_option",
         "//src/option:american_option_batch",
         "//src/pde/core:grid",
+        "@fuzztest//fuzztest",
+        "@fuzztest//fuzztest:fuzztest_gtest_main",
+    ],
+)
+
+cc_test(
+    name = "iv_solver_fuzz_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["iv_solver_fuzz_test.cc"],
+    tags = [
+        "manual",  # Don't run with bazel test //... (requires Earthly)
+    ],
+    deps = [
+        "//src/option:iv_solver",
+        "//src/option:american_option",
         "@fuzztest//fuzztest",
         "@fuzztest//fuzztest:fuzztest_gtest_main",
     ],

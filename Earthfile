@@ -51,21 +51,21 @@ fuzz-build:
     RUN echo 'build --config=fuzz' >> .bazelrc.user
 
     # Build fuzz tests with Clang + libc++
-    RUN bazel build --config=fuzz //tests:batch_solver_fuzz_test
+    RUN bazel build --config=fuzz //tests:batch_solver_fuzz_test //tests:iv_solver_fuzz_test
 
 # Run fuzz tests (quick - 1 second per test)
 fuzz-test:
     FROM +fuzz-build
 
     # Run fuzz tests (unit test mode by default)
-    RUN bazel test --config=fuzz //tests:batch_solver_fuzz_test --test_output=all
+    RUN bazel test --config=fuzz //tests:batch_solver_fuzz_test //tests:iv_solver_fuzz_test --test_output=all
 
 # Run extended fuzz tests (longer duration to find more edge cases)
 fuzz-test-extended:
     FROM +fuzz-build
 
     # Run fuzz tests for 60 seconds per property test
-    RUN bazel test --config=fuzz //tests:batch_solver_fuzz_test \
+    RUN bazel test --config=fuzz //tests:batch_solver_fuzz_test //tests:iv_solver_fuzz_test \
         --test_output=all \
         --test_env=FUZZTEST_MAX_FUZZING_RUNS_PER_TEST=100000 \
         --test_timeout=600
