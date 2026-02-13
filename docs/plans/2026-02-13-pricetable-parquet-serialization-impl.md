@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add `to_parquet()` / `from_parquet()` methods to `PriceTable<Inner>` supporting BSpline (standard + segmented) and Chebyshev segmented surfaces.
+**Goal:** Add two-layer serialization (data + Parquet I/O) to all 7 `PriceTable<Inner>` types, enabling fast surface reconstruction from vectors and cross-language Parquet files.
 
-**Architecture:** Serialization is a method on `PriceTable<Inner>`. Inner types expose const accessors for their data. A shared Parquet schema maps each interpolant segment to one row. Arrow C++ handles all Parquet I/O.
+**Architecture:** Layer 1 converts between live surfaces and a `PriceTableData` struct of plain vectors (no I/O deps). Layer 2 maps `PriceTableData` to/from Parquet via Arrow C++. `PriceTable<Inner>` exposes `to_data()`/`from_data()` and convenience `to_parquet()`/`from_parquet()`.
 
 **Tech Stack:** C++23, Apache Arrow C++ (Parquet module), Bazel, GoogleTest
 
@@ -15,17 +15,18 @@
 ### Task 1: Add serialization accessors to internal types
 
 Several internal types have private members without public accessors.
-Add const accessors needed for serialization traversal.
+Add const accessors needed for data extraction.
 
 **Files:**
-- Modify: `src/option/table/split_surface.hpp:116-121`
-- Modify: `src/option/table/splits/tau_segment.hpp:68-71`
-- Modify: `src/math/chebyshev/raw_tensor.hpp:66-72`
-- Modify: `src/math/chebyshev/chebyshev_interpolant.hpp:150-200`
+- Modify: `src/option/table/split_surface.hpp:116`
+- Modify: `src/option/table/splits/tau_segment.hpp:68`
+- Modify: `src/math/chebyshev/raw_tensor.hpp:67`
+- Modify: `src/math/chebyshev/chebyshev_interpolant.hpp:154`
+- Modify: `src/math/chebyshev/tucker_tensor.hpp:395`
 
 **Step 1: Add accessors to `SplitSurface`**
 
-In `src/option/table/split_surface.hpp`, after `num_pieces()` (line 116), add:
+In `src/option/table/split_surface.hpp`, after `num_pieces()` (line 116):
 
 ```cpp
 [[nodiscard]] const std::vector<Inner>& pieces() const noexcept { return pieces_; }
@@ -34,7 +35,7 @@ In `src/option/table/split_surface.hpp`, after `num_pieces()` (line 116), add:
 
 **Step 2: Add accessors to `TauSegmentSplit`**
 
-In `src/option/table/splits/tau_segment.hpp`, before `private:` (line 68), add:
+In `src/option/table/splits/tau_segment.hpp`, before `private:` (line 68):
 
 ```cpp
 [[nodiscard]] const std::vector<double>& tau_start() const noexcept { return tau_start_; }
@@ -46,7 +47,7 @@ In `src/option/table/splits/tau_segment.hpp`, before `private:` (line 68), add:
 
 **Step 3: Add `values()` accessor to `RawTensor`**
 
-In `src/math/chebyshev/raw_tensor.hpp`, after `shape()` (line 67), add:
+In `src/math/chebyshev/raw_tensor.hpp`, after `shape()` (line 67):
 
 ```cpp
 [[nodiscard]] const std::vector<double>& values() const noexcept { return values_; }
@@ -54,42 +55,388 @@ In `src/math/chebyshev/raw_tensor.hpp`, after `shape()` (line 67), add:
 
 **Step 4: Add `storage()` accessor to `ChebyshevInterpolant`**
 
-In `src/math/chebyshev/chebyshev_interpolant.hpp`, after `num_pts()` (line 154), add:
+In `src/math/chebyshev/chebyshev_interpolant.hpp`, after `num_pts()` (line 154):
 
 ```cpp
 [[nodiscard]] const Storage& storage() const noexcept { return storage_; }
 ```
 
-**Step 5: Build and test**
+**Step 5: Add `expand()` to `TuckerTensor`**
 
-Run: `bazel test //...` from the worktree
-Expected: All 129 tests pass (accessors are additive, no behavior change)
+In `src/math/chebyshev/tucker_tensor.hpp`, after `ranks()` (line 395):
 
-**Step 6: Commit**
+```cpp
+/// Expand Tucker decomposition to full raw tensor.
+/// Returns vector of size product(shape).
+[[nodiscard]] std::vector<double> expand() const {
+    TuckerResult<N> result;
+    result.core = core_;
+    result.factors = factors_;
+    result.shape = shape_;
+    result.ranks = ranks_;
+    return tucker_reconstruct<N>(result);
+}
+
+[[nodiscard]] const std::array<size_t, N>& shape() const { return shape_; }
+```
+
+Note: `TuckerTensor` already has `ranks()` but not `shape()`.
+Check first — if `shape()` already exists, skip that accessor.
+
+**Step 6: Build and test**
+
+Run: `bazel test //...`
+Expected: All 129 tests pass (additive changes only)
+
+**Step 7: Commit**
 
 ```
 git add src/option/table/split_surface.hpp \
         src/option/table/splits/tau_segment.hpp \
         src/math/chebyshev/raw_tensor.hpp \
-        src/math/chebyshev/chebyshev_interpolant.hpp
-git commit -m "Add const accessors for Parquet serialization"
+        src/math/chebyshev/chebyshev_interpolant.hpp \
+        src/math/chebyshev/tucker_tensor.hpp
+git commit -m "Add const accessors for serialization"
 ```
 
 ---
 
-### Task 2: Set up Arrow/Parquet build dependency
+### Task 2: Create `PriceTableData` struct and BUILD target
 
-Wire the Parquet library into the Bazel build and verify it links.
+The data descriptor is a plain struct of vectors — no Arrow, no
+templates, no surface-type dependencies.
+
+**Files:**
+- Create: `src/option/table/serialization/price_table_data.hpp`
+- Create: `src/option/table/serialization/BUILD.bazel`
+
+**Step 1: Create `price_table_data.hpp`**
+
+```cpp
+// SPDX-License-Identifier: MIT
+#pragma once
+
+#include "mango/option/option_spec.hpp"
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace mango {
+
+/// Serializable representation of any PriceTable surface.
+/// Plain vectors — no I/O dependencies.
+struct PriceTableData {
+    std::string surface_type;
+
+    OptionType option_type = OptionType::PUT;
+    double dividend_yield = 0.0;
+    DividendSpec dividends;
+    double maturity = 0.0;
+
+    struct Segment {
+        int32_t segment_id = 0;
+        double K_ref = 0.0;
+        double tau_start = 0.0, tau_end = 0.0;
+        double tau_min = 0.0, tau_max = 0.0;
+        std::string interp_type;  // "bspline" or "chebyshev"
+        size_t ndim = 4;
+
+        std::vector<double> domain_lo, domain_hi;
+        std::vector<int32_t> num_pts;
+        std::vector<std::vector<double>> grids;   // ndim vectors
+        std::vector<std::vector<double>> knots;   // ndim vectors
+        std::vector<double> values;               // coefficients or raw values
+    };
+    std::vector<Segment> segments;
+
+    size_t n_pde_solves = 0;
+    double precompute_time_seconds = 0.0;
+};
+
+}  // namespace mango
+```
+
+**Step 2: Create BUILD.bazel**
+
+```python
+# SPDX-License-Identifier: MIT
+
+cc_library(
+    name = "price_table_data",
+    hdrs = ["price_table_data.hpp"],
+    deps = [
+        "//src/option:option_spec",
+    ],
+    visibility = ["//visibility:public"],
+)
+```
+
+**Step 3: Build**
+
+Run: `bazel build //src/option/table/serialization:price_table_data`
+Expected: Compiles
+
+**Step 4: Commit**
+
+```
+git add src/option/table/serialization/price_table_data.hpp \
+        src/option/table/serialization/BUILD.bazel
+git commit -m "Add PriceTableData descriptor struct"
+```
+
+---
+
+### Task 3: Implement `to_data()` — extract data from all surface types
+
+Traverse each surface type's layer tree and produce `PriceTableData`.
+
+**Files:**
+- Create: `src/option/table/serialization/to_data.hpp`
+- Create: `src/option/table/serialization/to_data.cpp`
+- Modify: `src/option/table/serialization/BUILD.bazel`
+
+**Step 1: Write the failing test**
+
+In `tests/price_table_data_test.cc` (created in Task 5):
+
+```cpp
+TEST(PriceTableDataTest, BSpline4DToDataProducesOneSegment) {
+    auto surface = build_small_bspline_4d();
+    auto data = surface.to_data();
+    EXPECT_EQ(data.surface_type, "bspline_4d");
+    ASSERT_EQ(data.segments.size(), 1);
+    EXPECT_EQ(data.segments[0].interp_type, "bspline");
+    EXPECT_EQ(data.segments[0].ndim, 4);
+    EXPECT_FALSE(data.segments[0].values.empty());
+}
+```
+
+**Step 2: Implement extraction helpers**
+
+For each leaf type, implement a function that produces one `Segment`:
+
+```cpp
+// Extract from a B-spline TransformLeaf (4D or 3D)
+template <size_t N>
+PriceTableData::Segment extract_bspline_segment(
+    const TransformLeaf<SharedInterp<BSplineND<double, N>, N>,
+                         auto>& leaf,
+    int32_t segment_id, double tau_start, double tau_end,
+    double tau_min, double tau_max);
+
+// Extract from a Chebyshev TransformLeaf (RawTensor)
+template <size_t N>
+PriceTableData::Segment extract_chebyshev_segment(
+    const TransformLeaf<ChebyshevInterpolant<N, RawTensor<N>>,
+                         auto>& leaf,
+    int32_t segment_id, double tau_start, double tau_end,
+    double tau_min, double tau_max);
+```
+
+For Tucker-based ChebyshevInterpolant, call `storage().expand()` to
+get raw values, then produce the same Segment as RawTensor.
+
+**Step 3: Implement `to_data()` for each PriceTable specialization**
+
+The implementation traverses the type tree:
+
+- **Standard (EEP) types** (BSplinePriceTable, ChebyshevRawSurface,
+  ChebyshevSurface, BSpline3DPriceTable, Chebyshev3DPriceTable):
+  `table.inner().leaf()` → extract one segment.  Set `tau_start=0`,
+  `tau_end=tau_max`, `tau_min=table.tau_min()`, `tau_max=table.tau_max()`.
+
+- **Segmented multi-K_ref types** (BSplineMultiKRefSurface,
+  ChebyshevMultiKRefSurface):
+  `table.inner().pieces()` → iterate K_ref pieces.
+  Each piece: `.pieces()` → iterate tau segments.
+  Extract TauSegmentSplit data for each segment's tau boundaries.
+
+**Step 4: Wire `to_data()` into PriceTable**
+
+In `price_table.hpp`, add:
+
+```cpp
+[[nodiscard]] PriceTableData to_data() const;
+```
+
+The implementation lives in `to_data.cpp` with explicit template
+instantiations for all 7 Inner types.
+
+**Step 5: Update BUILD.bazel**
+
+```python
+cc_library(
+    name = "to_data",
+    srcs = ["to_data.cpp"],
+    hdrs = ["to_data.hpp"],
+    deps = [
+        ":price_table_data",
+        "//src/option/table:price_table",
+        "//src/option/table:split_surface",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+    ],
+    visibility = ["//visibility:public"],
+)
+```
+
+**Step 6: Build**
+
+Run: `bazel build //src/option/table/serialization:to_data`
+
+**Step 7: Commit**
+
+```
+git add src/option/table/serialization/to_data.hpp \
+        src/option/table/serialization/to_data.cpp \
+        src/option/table/serialization/BUILD.bazel \
+        src/option/table/price_table.hpp
+git commit -m "Implement to_data() for all 7 surface types"
+```
+
+---
+
+### Task 4: Implement `from_data()` — reconstruct surfaces from vectors
+
+Reconstruct each surface type from `PriceTableData`.
+
+**Files:**
+- Create: `src/option/table/serialization/from_data.hpp`
+- Create: `src/option/table/serialization/from_data.cpp`
+- Modify: `src/option/table/serialization/BUILD.bazel`
+
+**Step 1: Implement interpolant reconstruction**
+
+```cpp
+// B-spline: grids + knots + coefficients → BSplineND
+template <size_t N>
+std::expected<std::shared_ptr<const BSplineND<double, N>>, PriceTableError>
+make_bspline_from_segment(const PriceTableData::Segment& seg);
+
+// Chebyshev: domain + num_pts + values → ChebyshevInterpolant
+template <size_t N>
+std::expected<ChebyshevInterpolant<N, RawTensor<N>>, PriceTableError>
+make_chebyshev_from_segment(const PriceTableData::Segment& seg);
+```
+
+**Step 2: Implement surface assembly**
+
+For standard (EEP) surfaces:
+1. Reconstruct interpolant from single segment
+2. Wrap in `SharedInterp` (B-spline) or use directly (Chebyshev)
+3. Wrap in `TransformLeaf` with appropriate transform
+4. Wrap in `EEPLayer` with `AnalyticalEEP(option_type, dividend_yield)`
+5. Derive `SurfaceBounds` from domain
+6. Construct `PriceTable<Inner>`
+
+For segmented multi-K_ref:
+1. Group segments by K_ref
+2. For each K_ref group: build leaves + `TauSegmentSplit` + `SplitSurface`
+3. Build `MultiKRefSplit` + outer `SplitSurface`
+4. Construct `PriceTable<Inner>`
+
+**Step 3: Wire `from_data()` into PriceTable**
+
+```cpp
+template <typename Inner>
+[[nodiscard]] static std::expected<PriceTable<Inner>, PriceTableError>
+PriceTable<Inner>::from_data(const PriceTableData& data);
+```
+
+Explicit instantiations for all 7 Inner types in `from_data.cpp`.
+
+**Step 4: Validate surface_type**
+
+If `data.surface_type` doesn't match the expected string for the
+template Inner type, return `PriceTableError` with
+`PriceTableErrorCode::InvalidConfig`.
+
+**Step 5: Build**
+
+Run: `bazel build //src/option/table/serialization:from_data`
+
+**Step 6: Commit**
+
+```
+git add src/option/table/serialization/from_data.hpp \
+        src/option/table/serialization/from_data.cpp \
+        src/option/table/serialization/BUILD.bazel \
+        src/option/table/price_table.hpp
+git commit -m "Implement from_data() for all 7 surface types"
+```
+
+---
+
+### Task 5: Tests — data layer round-trips for all 7 types
+
+**Files:**
+- Create: `tests/price_table_data_test.cc`
+- Modify: `tests/BUILD.bazel`
+
+**Step 1: Add test target**
+
+```python
+cc_test(
+    name = "price_table_data_test",
+    size = "large",
+    srcs = ["price_table_data_test.cc"],
+    deps = [
+        "//src/option/table/serialization:to_data",
+        "//src/option/table/serialization:from_data",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+```
+
+**Step 2: Write round-trip tests**
+
+For each of the 7 surface types:
+1. Build a small surface (minimal grid for speed)
+2. Call `to_data()`
+3. Verify segment count and interp_type
+4. Call `from_data()`
+5. Evaluate `price()` at 20+ sample points
+6. Verify prices match within 1e-12
+
+Include tests for:
+- **Tucker expansion**: `ChebyshevSurface.to_data()` then
+  `ChebyshevRawSurface::from_data()` — prices must match.
+- **Type mismatch**: `BSplinePriceTable.to_data()` then
+  `ChebyshevRawSurface::from_data()` → returns error.
+
+**Step 3: Run**
+
+Run: `bazel test //tests:price_table_data_test --test_output=all`
+
+**Step 4: Commit**
+
+```
+git add tests/price_table_data_test.cc tests/BUILD.bazel
+git commit -m "Add data-layer round-trip tests for all 7 surface types"
+```
+
+---
+
+### Task 6: Set up Arrow/Parquet build dependency
 
 **Files:**
 - Modify: `third_party/arrow/BUILD.bazel`
-- Create: `src/option/table/parquet/BUILD.bazel`
-- Create: `src/option/table/parquet/parquet_io.hpp` (stub)
-- Create: `src/option/table/parquet/parquet_io.cpp` (stub)
 
-**Step 1: Add Parquet target to `third_party/arrow/BUILD.bazel`**
+**Step 1: Add Parquet target**
 
-Append after the existing `arrow` library:
+Append to `third_party/arrow/BUILD.bazel`:
 
 ```python
 cc_library(
@@ -102,7 +449,66 @@ cc_library(
 )
 ```
 
-**Step 2: Create `src/option/table/parquet/BUILD.bazel`**
+**Step 2: Verify**
+
+Run: `bazel build //third_party/arrow:parquet`
+
+**Step 3: Commit**
+
+```
+git add third_party/arrow/BUILD.bazel
+git commit -m "Add Parquet build target to third_party/arrow"
+```
+
+---
+
+### Task 7: Implement Parquet writer (`write_parquet`)
+
+Map `PriceTableData` to Parquet.  No templates — pure data.
+
+**Files:**
+- Create: `src/option/table/parquet/parquet_io.hpp`
+- Create: `src/option/table/parquet/parquet_io.cpp`
+- Create: `src/option/table/parquet/BUILD.bazel`
+
+**Step 1: Implement `write_parquet(PriceTableData, path, opts)`**
+
+1. Build Arrow schema (20 columns from the design doc)
+2. For each segment in `data.segments`, populate Arrow builders
+3. Compute CRC64 checksum on each segment's values
+4. Encode file-level metadata from `data.*` fields
+5. Write with `parquet::arrow::WriteTable()`
+
+Map `CompressionType` to Arrow compression codec.
+
+**Step 2: Implement `read_parquet(path) → PriceTableData`**
+
+1. Open with `parquet::arrow::FileReader`
+2. Read into Arrow Table
+3. Extract file metadata → populate `data.*`
+4. For each row: extract columns → populate `Segment`
+5. Validate CRC64 checksum; return error on mismatch
+
+**Step 3: Wire convenience methods on PriceTable**
+
+In `price_table.hpp`:
+
+```cpp
+[[nodiscard]] std::expected<void, PriceTableError>
+to_parquet(const std::filesystem::path& path,
+           const ParquetWriteOptions& opts = {}) const {
+    return mango::write_parquet(to_data(), path, opts);
+}
+
+[[nodiscard]] static std::expected<PriceTable, PriceTableError>
+from_parquet(const std::filesystem::path& path) {
+    auto data = mango::read_parquet(path);
+    if (!data.has_value()) return std::unexpected(data.error());
+    return from_data(*data);
+}
+```
+
+**Step 4: BUILD.bazel**
 
 ```python
 # SPDX-License-Identifier: MIT
@@ -112,177 +518,8 @@ cc_library(
     srcs = ["parquet_io.cpp"],
     hdrs = ["parquet_io.hpp"],
     deps = [
-        "//src/option/table:price_table",
-        "//src/option/table:split_surface",
-        "//src/option/table/bspline:bspline_surface",
-        "//src/option/table/chebyshev:chebyshev_surface",
-        "//src/option/table/chebyshev:chebyshev_adaptive",
-        "//src/math:bspline_nd",
-        "//src/math/chebyshev:chebyshev_interpolant",
-        "//src/math/chebyshev:raw_tensor",
+        "//src/option/table/serialization:price_table_data",
         "//src/support:crc64",
-        "//third_party/arrow:parquet",
-    ],
-    visibility = ["//visibility:public"],
-)
-```
-
-**Step 3: Create stub header `src/option/table/parquet/parquet_io.hpp`**
-
-```cpp
-// SPDX-License-Identifier: MIT
-#pragma once
-
-#include "mango/option/table/price_table.hpp"
-#include "mango/support/error_types.hpp"
-#include <expected>
-#include <filesystem>
-#include <string>
-
-namespace mango {
-
-enum class CompressionType { ZSTD, SNAPPY, NONE };
-
-struct ParquetWriteOptions {
-    CompressionType compression = CompressionType::ZSTD;
-};
-
-/// Write a price table to Parquet.
-template <typename Inner>
-[[nodiscard]] std::expected<void, PriceTableError>
-write_parquet(const PriceTable<Inner>& table,
-              const std::filesystem::path& path,
-              const ParquetWriteOptions& opts = {});
-
-/// Read a price table from Parquet.
-template <typename Inner>
-[[nodiscard]] std::expected<PriceTable<Inner>, PriceTableError>
-read_parquet(const std::filesystem::path& path);
-
-}  // namespace mango
-```
-
-**Step 4: Create stub source `src/option/table/parquet/parquet_io.cpp`**
-
-```cpp
-// SPDX-License-Identifier: MIT
-#include "mango/option/table/parquet/parquet_io.hpp"
-
-// Explicit template instantiation stubs — will be implemented in Task 4/5.
-
-namespace mango {
-}  // namespace mango
-```
-
-**Step 5: Verify the build links against libparquet**
-
-Run: `bazel build //src/option/table/parquet:parquet_io`
-Expected: Build succeeds (verifies Arrow + Parquet libraries are found)
-
-**Step 6: Commit**
-
-```
-git add third_party/arrow/BUILD.bazel \
-        src/option/table/parquet/BUILD.bazel \
-        src/option/table/parquet/parquet_io.hpp \
-        src/option/table/parquet/parquet_io.cpp
-git commit -m "Add Parquet build dependency and IO stub"
-```
-
----
-
-### Task 3: Implement Parquet schema and writer helpers
-
-Build the Arrow schema and row-writing utilities used by `write_parquet()`.
-
-**Files:**
-- Create: `src/option/table/parquet/schema.hpp`
-- Create: `src/option/table/parquet/schema.cpp`
-- Modify: `src/option/table/parquet/BUILD.bazel` (add schema target)
-
-**Step 1: Create `src/option/table/parquet/schema.hpp`**
-
-Define:
-- `arrow::Schema` factory (`make_parquet_schema()`)
-- `ParquetSegmentRow` struct holding one row of data
-- Helper to append a `ParquetSegmentRow` to an Arrow `RecordBatchBuilder`
-- Helper to build file-level key-value metadata
-
-```cpp
-// SPDX-License-Identifier: MIT
-#pragma once
-
-#include <arrow/api.h>
-#include <arrow/type.h>
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
-
-namespace mango {
-
-/// One row of the Parquet table (one interpolant segment).
-struct ParquetSegmentRow {
-    int32_t segment_id = 0;
-    double K_ref = 0.0;
-    double tau_start = 0.0;
-    double tau_end = 0.0;
-    double tau_min = 0.0;
-    double tau_max = 0.0;
-    std::string interp_type;              // "bspline" or "chebyshev"
-    std::vector<double> domain_lo;        // N values
-    std::vector<double> domain_hi;        // N values
-    std::vector<int32_t> num_pts;         // N values
-    std::vector<double> grid_0, grid_1, grid_2, grid_3;
-    std::vector<double> knots_0, knots_1, knots_2, knots_3;
-    std::vector<double> values;           // coefficients or function values
-    int64_t checksum_values = 0;          // CRC64, stored as int64
-};
-
-/// Build the Arrow schema for price table Parquet files.
-std::shared_ptr<arrow::Schema> make_parquet_schema();
-
-/// Build file-level key-value metadata.
-std::shared_ptr<arrow::KeyValueMetadata> make_file_metadata(
-    const std::string& surface_type,
-    const std::string& option_type,
-    double dividend_yield,
-    const std::string& discrete_dividends_json,
-    double maturity,
-    size_t n_pde_solves = 0,
-    double precompute_time_seconds = 0.0);
-
-/// Build an Arrow Table from a vector of segment rows + file metadata.
-arrow::Result<std::shared_ptr<arrow::Table>>
-build_arrow_table(const std::vector<ParquetSegmentRow>& rows,
-                  std::shared_ptr<arrow::KeyValueMetadata> metadata);
-
-}  // namespace mango
-```
-
-**Step 2: Implement `schema.cpp`**
-
-The schema has 20 columns matching the design doc. Use `arrow::list(arrow::float64())` for LIST<DOUBLE> columns, `arrow::int32()` / `arrow::float64()` / `arrow::utf8()` for scalars. Use `arrow::int64()` for checksums (reinterpret_cast uint64→int64).
-
-Build the Arrow Table from vectors of segment rows by populating `arrow::DoubleBuilder`, `arrow::ListBuilder`, etc.
-
-This is mechanical Arrow API code. Key Arrow types:
-- `arrow::DoubleBuilder` for scalar doubles
-- `arrow::Int32Builder` for int32 scalars
-- `arrow::StringBuilder` for strings
-- `arrow::ListBuilder` + `arrow::DoubleBuilder` for LIST<DOUBLE>
-- `arrow::ListBuilder` + `arrow::Int32Builder` for LIST<INT32>
-
-**Step 3: Update BUILD.bazel**
-
-Add a `schema` target:
-
-```python
-cc_library(
-    name = "schema",
-    srcs = ["schema.cpp"],
-    hdrs = ["schema.hpp"],
-    deps = [
         "//third_party/arrow",
         "//third_party/arrow:parquet",
     ],
@@ -290,506 +527,102 @@ cc_library(
 )
 ```
 
-And add `":schema"` to the `parquet_io` deps.
+Note: `parquet_io` depends on `price_table_data` only, not on
+any surface types.  This keeps Arrow quarantined.
 
-**Step 4: Build**
-
-Run: `bazel build //src/option/table/parquet:schema`
-Expected: Compiles successfully
-
-**Step 5: Commit**
-
-```
-git add src/option/table/parquet/schema.hpp \
-        src/option/table/parquet/schema.cpp \
-        src/option/table/parquet/BUILD.bazel
-git commit -m "Add Parquet schema and Arrow table builder"
-```
-
----
-
-### Task 4: Implement `write_parquet()` — extract segments from surfaces
-
-Extract `ParquetSegmentRow` vectors from each surface type, then write
-to Parquet via the Arrow table builder.
-
-**Files:**
-- Modify: `src/option/table/parquet/parquet_io.hpp`
-- Modify: `src/option/table/parquet/parquet_io.cpp`
-
-**Step 1: Write the failing test first (in Task 6's test file)**
-
-Before implementing, write a round-trip test that calls `write_parquet`
-on a small B-spline surface → assert file exists → read back. This
-will fail with link errors until the implementation is done.
-
-**Step 2: Implement surface traversal**
-
-The writer needs to traverse the type tree and extract rows:
-
-For **`BSplinePriceTable`** (`PriceTable<EEPLayer<TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>, AnalyticalEEP>>`):
-- `table.inner()` → `EEPLayer`
-- `.leaf()` → `TransformLeaf`
-- `.interpolant()` → `SharedBSplineInterp<4>`
-- `.get()` → `BSplineND<double, 4>`
-- Extract: `.grid(d)`, `.knots(d)`, `.coefficients()`
-- Single row, `interp_type = "bspline"`, `segment_id = 0`
-- `K_ref` from `.K_ref()`, `tau_start = 0`, `tau_end = grid(1).back()`
-
-For **`BSplineMultiKRefSurface`** (`PriceTable<SplitSurface<SplitSurface<TransformLeaf<...>, TauSegmentSplit>, MultiKRefSplit>>`):
-- `table.inner()` → outer `SplitSurface` (MultiKRefSplit)
-- `.pieces()` → vector of tau-segmented surfaces per K_ref
-- `.split().k_refs()` → K_ref values
-- For each K_ref piece: `.pieces()` → vector of `TransformLeaf` leaves
-  - `.split().tau_start()`, `.tau_end()`, `.tau_min()`, `.tau_max()`
-  - Each leaf: `.interpolant().get()` → `BSplineND<double, 4>`
-  - One row per leaf
-
-For **`ChebyshevMultiKRefSurface`** (same structure but Chebyshev leaves):
-- Same traversal as B-spline segmented
-- Each leaf: `.interpolant()` → `ChebyshevInterpolant<4, RawTensor<4>>`
-  - `.domain()` → `Domain<4>` (lo/hi arrays)
-  - `.num_pts()` → `array<size_t, 4>`
-  - `.storage().values()` → raw tensor data
-  - `.storage().shape()` → tensor shape
-- `interp_type = "chebyshev"`, grid/knots columns empty
-
-**Step 3: Write Parquet file**
-
-Use `parquet::arrow::WriteTable()` with the Arrow Table from Task 3.
-Map `CompressionType` to `arrow::Compression::type`:
-- ZSTD → `arrow::Compression::ZSTD`
-- SNAPPY → `arrow::Compression::SNAPPY`
-- NONE → `arrow::Compression::UNCOMPRESSED`
-
-**Step 4: Compute CRC64 checksums**
-
-For each row, compute `CRC64::compute(values.data(), values.size())`
-and store in `checksum_values`. Use the existing `src/support/crc64.hpp`.
-
-**Step 5: Template instantiation**
-
-In `parquet_io.cpp`, explicitly instantiate `write_parquet` for:
-- `BSplineLeaf` (BSplinePriceTable's Inner)
-- `BSplineMultiKRefInner` (BSplineMultiKRefSurface's Inner)
-- `ChebyshevMultiKRefInner` (ChebyshevMultiKRefSurface's Inner)
-
-**Step 6: Build**
+**Step 5: Build**
 
 Run: `bazel build //src/option/table/parquet:parquet_io`
-Expected: Compiles successfully
 
-**Step 7: Commit**
+**Step 6: Commit**
 
 ```
 git add src/option/table/parquet/parquet_io.hpp \
-        src/option/table/parquet/parquet_io.cpp
-git commit -m "Implement write_parquet for all surface types"
+        src/option/table/parquet/parquet_io.cpp \
+        src/option/table/parquet/BUILD.bazel \
+        src/option/table/price_table.hpp
+git commit -m "Implement Parquet read/write for PriceTableData"
 ```
 
 ---
 
-### Task 5: Implement `read_parquet()` — reconstruct surfaces
-
-Read Parquet rows, validate checksums, reconstruct the full typed surface.
-
-**Files:**
-- Modify: `src/option/table/parquet/parquet_io.cpp`
-
-**Step 1: Read and validate**
-
-Use `parquet::arrow::FileReader` to read the Parquet file:
-1. Open file with `arrow::io::ReadableFile::Open(path)`
-2. Create `parquet::arrow::FileReader`
-3. Read all row groups into an `arrow::Table`
-4. Extract file-level metadata (`table->schema()->metadata()`)
-5. Validate `mango.format_version` and `mango.surface_type`
-6. If `surface_type` doesn't match the template Inner type, return error
-
-**Step 2: Extract rows**
-
-For each row in the Arrow Table:
-- Read scalar columns with `arrow::DoubleArray`, `arrow::Int32Array`, `arrow::StringArray`
-- Read LIST columns: cast to `arrow::ListArray`, extract value arrays
-- Populate `ParquetSegmentRow` structs
-- Validate CRC64: recompute from `values` data, compare with `checksum_values`
-
-**Step 3: Reconstruct interpolants**
-
-For `interp_type == "bspline"`:
-```cpp
-std::array<std::vector<double>, 4> grids = {row.grid_0, row.grid_1, row.grid_2, row.grid_3};
-std::array<std::vector<double>, 4> knots = {row.knots_0, row.knots_1, row.knots_2, row.knots_3};
-auto spline = BSplineND<double, 4>::create(grids, knots, row.values).value();
-auto shared = std::make_shared<const BSplineND<double, 4>>(std::move(*spline));
-SharedBSplineInterp<4> interp(shared);
-TransformLeaf leaf(std::move(interp), StandardTransform4D{}, row.K_ref);
-```
-
-For `interp_type == "chebyshev"`:
-```cpp
-Domain<4> domain;
-for (size_t d = 0; d < 4; ++d) { domain.lo[d] = row.domain_lo[d]; domain.hi[d] = row.domain_hi[d]; }
-std::array<size_t, 4> npts;
-for (size_t d = 0; d < 4; ++d) npts[d] = row.num_pts[d];
-auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build_from_values(
-    std::span<const double>(row.values), domain, npts);
-TransformLeaf leaf(std::move(interp), StandardTransform4D{}, row.K_ref);
-```
-
-**Step 4: Assemble surface tree**
-
-For **BSplinePriceTable** (1 row):
-- Wrap leaf in `EEPLayer` with `AnalyticalEEP(option_type, dividend_yield)`
-- Derive `SurfaceBounds` from grid bounds
-- Construct `PriceTable<BSplineLeaf>(leaf, bounds, option_type, dividend_yield)`
-
-For **BSplineMultiKRefSurface** / **ChebyshevMultiKRefSurface**:
-- Group rows by K_ref
-- For each K_ref group:
-  - Sort segments by `segment_id`
-  - Build `TauSegmentSplit` from `tau_start`, `tau_end`, `tau_min`, `tau_max`, `K_ref`
-  - Build `SplitSurface<Leaf, TauSegmentSplit>(leaves, tau_split)`
-- Collect distinct K_refs → build `MultiKRefSplit(k_refs)`
-- Build `SplitSurface<TauSeg, MultiKRefSplit>(per_kref_surfaces, kref_split)`
-- Derive `SurfaceBounds` from min/max across all segments' domains
-- Construct `PriceTable<Inner>(inner, bounds, option_type, dividend_yield)`
-
-**Step 5: Parse metadata**
-
-Parse `mango.discrete_dividends` JSON (simple format: `[{"t":0.25,"amount":1.50}]`).
-Use a minimal hand-parser (the format is trivial fixed-schema JSON)
-or nlohmann-json if already available. Check if the project has a JSON
-dependency first. If not, a simple `sscanf`-based parser suffices for
-this fixed schema.
-
-**Step 6: Template instantiation**
-
-In `parquet_io.cpp`, explicitly instantiate `read_parquet` for the same
-three Inner types as Task 4.
-
-**Step 7: Build**
-
-Run: `bazel build //src/option/table/parquet:parquet_io`
-Expected: Compiles successfully
-
-**Step 8: Commit**
-
-```
-git add src/option/table/parquet/parquet_io.cpp
-git commit -m "Implement read_parquet with full surface reconstruction"
-```
-
----
-
-### Task 6: Add `to_parquet` / `from_parquet` methods to PriceTable
-
-Wire the free functions into `PriceTable<Inner>` as member methods.
-
-**Files:**
-- Modify: `src/option/table/price_table.hpp`
-
-**Step 1: Add methods**
-
-In `PriceTable<Inner>`, after the existing accessor methods, add:
-
-```cpp
-#if __has_include("mango/option/table/parquet/parquet_io.hpp")
-    /// Serialize this price table to a Parquet file.
-    [[nodiscard]] std::expected<void, PriceTableError>
-    to_parquet(const std::filesystem::path& path,
-               const ParquetWriteOptions& opts = {}) const {
-        return write_parquet(*this, path, opts);
-    }
-
-    /// Deserialize a price table from a Parquet file.
-    [[nodiscard]] static std::expected<PriceTable, PriceTableError>
-    from_parquet(const std::filesystem::path& path) {
-        return read_parquet<Inner>(path);
-    }
-#endif
-```
-
-Alternatively, if `__has_include` is undesirable (it makes PriceTable
-depend on parquet_io.hpp at include time), use a simpler approach:
-just include the header unconditionally and add `//src/option/table/parquet:parquet_io`
-to the `price_table` BUILD target deps. The parquet dependency becomes
-mandatory.
-
-**Decision for implementer:** If you want Parquet to be optional
-(not everyone has Arrow installed), use the `__has_include` guard.
-If Parquet is always available in CI and dev, just include directly.
-Check with the project owner's preference. The design doc says Arrow
-is already in CI (`libarrow-dev`), so direct include is likely fine.
-
-**Step 2: Build**
-
-Run: `bazel build //src/option/table/parquet:parquet_io`
-Expected: Compiles
-
-**Step 3: Commit**
-
-```
-git add src/option/table/price_table.hpp
-git commit -m "Add to_parquet/from_parquet methods to PriceTable"
-```
-
----
-
-### Task 7: Write tests — standard B-spline round-trip
+### Task 8: Tests — Parquet round-trips
 
 **Files:**
 - Create: `tests/parquet_io_test.cc`
 - Modify: `tests/BUILD.bazel`
 
-**Step 1: Add test target to `tests/BUILD.bazel`**
+**Step 1: Add test target**
 
-```python
-cc_test(
-    name = "parquet_io_test",
-    size = "large",
-    srcs = ["parquet_io_test.cc"],
-    deps = [
-        "//src/option/table/parquet:parquet_io",
-        "//src/option/table/bspline:bspline_builder",
-        "//src/option/table/bspline:bspline_surface",
-        "//src/option/table/bspline:bspline_adaptive",
-        "//src/option/table/chebyshev:chebyshev_adaptive",
-        "//src/math:bspline_nd",
-        "//src/support:crc64",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
-```
+**Step 2: Write tests**
 
-**Step 2: Write the standard B-spline round-trip test**
+- **Parquet round-trip** for each of the 7 types: build surface →
+  `to_parquet()` → `from_parquet()` → verify prices.
+- **CRC64 corruption**: manually set wrong checksum in
+  `PriceTableData`, write to Parquet, read → verify error.
+- **Type mismatch**: write `bspline_4d`, read as `ChebyshevRawSurface` → error.
+- **Compression**: round-trip with ZSTD, Snappy, None.
+- **Forward compat**: add unknown metadata key to file → loads fine.
 
-```cpp
-#include <gtest/gtest.h>
-#include <filesystem>
-#include <cstdlib>
-
-#include "mango/option/table/parquet/parquet_io.hpp"
-#include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/option/table/bspline/bspline_surface.hpp"
-
-namespace {
-
-class ParquetIOTest : public ::testing::Test {
-protected:
-    std::filesystem::path tmp_path() {
-        auto* tmpdir = std::getenv("TEST_TMPDIR");
-        return std::filesystem::path(tmpdir ? tmpdir : "/tmp")
-             / "parquet_io_test.parquet";
-    }
-};
-
-TEST_F(ParquetIOTest, BSplineStandardRoundTrip) {
-    // Build a small price table
-    std::vector<double> moneyness = {-0.3, -0.1, 0.0, 0.1, 0.3};
-    std::vector<double> maturity = {0.1, 0.25, 0.5, 1.0};
-    std::vector<double> vol = {0.10, 0.20, 0.30, 0.40};
-    std::vector<double> rate = {0.02, 0.03, 0.05, 0.07};
-    double K_ref = 100.0;
-
-    auto setup = mango::PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, vol, rate, K_ref,
-        mango::GridAccuracyParams{}, mango::OptionType::PUT);
-    ASSERT_TRUE(setup.has_value());
-    auto& [builder, axes] = *setup;
-    auto result = builder.build(axes);
-    ASSERT_TRUE(result.has_value());
-
-    // Wrap as BSplinePriceTable
-    auto surface = mango::make_bspline_surface(
-        result->spline, result->K_ref,
-        result->dividends.dividend_yield,
-        mango::OptionType::PUT);
-    ASSERT_TRUE(surface.has_value());
-
-    // Write
-    auto path = tmp_path();
-    auto write_result = mango::write_parquet(*surface, path);
-    ASSERT_TRUE(write_result.has_value()) << "Write failed";
-    EXPECT_TRUE(std::filesystem::exists(path));
-
-    // Read
-    auto loaded = mango::read_parquet<mango::BSplineLeaf>(path);
-    ASSERT_TRUE(loaded.has_value()) << "Read failed";
-
-    // Verify prices match at several query points
-    for (double m : {-0.2, 0.0, 0.2}) {
-        for (double tau : {0.15, 0.5}) {
-            double spot = K_ref * std::exp(m);
-            double p_orig = surface->price(spot, K_ref, tau, 0.20, 0.05);
-            double p_loaded = loaded->price(spot, K_ref, tau, 0.20, 0.05);
-            EXPECT_NEAR(p_orig, p_loaded, 1e-12)
-                << "Mismatch at m=" << m << " tau=" << tau;
-        }
-    }
-}
-
-}  // namespace
-```
-
-**Step 3: Run the test**
+**Step 3: Run**
 
 Run: `bazel test //tests:parquet_io_test --test_output=all`
-Expected: PASS
 
 **Step 4: Commit**
 
 ```
 git add tests/parquet_io_test.cc tests/BUILD.bazel
-git commit -m "Add standard B-spline Parquet round-trip test"
+git commit -m "Add Parquet round-trip tests for all surface types"
 ```
 
 ---
 
-### Task 8: Write tests — checksum corruption, type mismatch, compression
+### Task 9: Run full test suite and CI pre-flight
 
-**Files:**
-- Modify: `tests/parquet_io_test.cc`
-
-**Step 1: CRC64 corruption test**
-
-Write the file, then flip a byte in the Parquet file (read raw bytes,
-modify the values column region, write back). Verify `read_parquet`
-returns a checksum error.
-
-Alternatively: write with correct checksums, then manually construct
-a row with wrong checksum and write it — simpler and more reliable.
-
-**Step 2: Type mismatch test**
-
-Write a `bspline_standard` file, attempt to read as
-`ChebyshevMultiKRefSurface` → verify error.
-
-**Step 3: Compression variants test**
-
-Round-trip with `CompressionType::ZSTD`, `SNAPPY`, and `NONE`.
-Verify all produce correct results.
-
-**Step 4: Run tests**
-
-Run: `bazel test //tests:parquet_io_test --test_output=all`
-Expected: All pass
-
-**Step 5: Commit**
-
-```
-git add tests/parquet_io_test.cc
-git commit -m "Add corruption, type-mismatch, and compression tests"
-```
+**Step 1:** `bazel test //...` — all tests pass
+**Step 2:** `bazel build //benchmarks/...` — benchmarks compile
+**Step 3:** `bazel build //src/python:mango_option` — Python bindings compile
+**Step 4:** Fix any issues, commit
 
 ---
 
-### Task 9: Write tests — segmented B-spline round-trip
-
-Build a segmented B-spline surface with discrete dividends, serialize,
-deserialize, verify prices match.
-
-**Files:**
-- Modify: `tests/parquet_io_test.cc`
-
-**Step 1: Build segmented surface**
-
-Use `BSplineSegmentedBuilder` or the `build_adaptive_bspline_segmented`
-convenience function with a small grid and 1-2 discrete dividends.
-Requires `SegmentedAdaptiveConfig` with K_refs and dividend schedule.
-
-**Step 2: Write and read**
-
-```cpp
-auto write_res = mango::write_parquet(surface, path);
-auto loaded = mango::read_parquet<mango::BSplineMultiKRefInner>(path);
-```
-
-**Step 3: Verify prices**
-
-Sample 50+ random points across the domain, compare original vs loaded.
-Tolerance: 1e-12 (bitwise identical coefficients → identical prices).
-
-**Step 4: Run and commit**
-
-Run: `bazel test //tests:parquet_io_test --test_output=all`
+## Type reference
 
 ```
-git add tests/parquet_io_test.cc
-git commit -m "Add segmented B-spline Parquet round-trip test"
+#1 BSplinePriceTable
+    = PriceTable<EEPLayer<TransformLeaf<SharedInterp<BSplineND<double,4>,4>, StandardTransform4D>, AnalyticalEEP>>
+
+#2 BSplineMultiKRefSurface
+    = PriceTable<SplitSurface<SplitSurface<TransformLeaf<SharedInterp<BSplineND<double,4>,4>, StandardTransform4D>, TauSegmentSplit>, MultiKRefSplit>>
+
+#3 ChebyshevSurface
+    = PriceTable<EEPLayer<TransformLeaf<ChebyshevInterpolant<4,TuckerTensor<4>>, StandardTransform4D>, AnalyticalEEP>>
+
+#4 ChebyshevRawSurface
+    = PriceTable<EEPLayer<TransformLeaf<ChebyshevInterpolant<4,RawTensor<4>>, StandardTransform4D>, AnalyticalEEP>>
+
+#5 ChebyshevMultiKRefSurface
+    = PriceTable<SplitSurface<SplitSurface<TransformLeaf<ChebyshevInterpolant<4,RawTensor<4>>, StandardTransform4D>, TauSegmentSplit>, MultiKRefSplit>>
+
+#6 BSpline3DPriceTable
+    = PriceTable<EEPLayer<TransformLeaf<SharedInterp<BSplineND<double,3>,3>, DimensionlessTransform3D>, AnalyticalEEP>>
+
+#7 Chebyshev3DPriceTable
+    = PriceTable<EEPLayer<TransformLeaf<ChebyshevInterpolant<3,TuckerTensor<3>>, DimensionlessTransform3D>, AnalyticalEEP>>
 ```
-
----
-
-### Task 10: Write tests — Chebyshev segmented round-trip
-
-Same pattern as Task 9 but with `ChebyshevMultiKRefSurface`.
-
-**Files:**
-- Modify: `tests/parquet_io_test.cc`
-
-**Step 1: Build Chebyshev surface**
-
-Use `build_chebyshev_segmented_manual` or `build_adaptive_chebyshev_segmented`
-with a small config.
-
-**Step 2: Write, read, verify prices**
-
-Same flow as Task 9. Use `ChebyshevMultiKRefInner` as the template
-parameter for `read_parquet`.
-
-**Step 3: Run and commit**
-
-```
-git add tests/parquet_io_test.cc
-git commit -m "Add Chebyshev segmented Parquet round-trip test"
-```
-
----
-
-### Task 11: Run full test suite and CI pre-flight
-
-**Step 1: Run all tests**
-
-Run: `bazel test //...`
-Expected: All tests pass (existing 129 + new parquet tests)
-
-**Step 2: Build benchmarks**
-
-Run: `bazel build //benchmarks/...`
-Expected: Build succeeds
-
-**Step 3: Build Python bindings**
-
-Run: `bazel build //src/python:mango_option`
-Expected: Build succeeds
-
-**Step 4: Final commit if any fixups needed**
-
----
 
 ## Accessor summary
 
-| Type | Existing accessors | Accessors to add |
-|------|-------------------|-----------------|
-| `PriceTable<Inner>` | `inner()`, `option_type()`, `dividend_yield()`, bounds | — |
-| `EEPLayer<Leaf, EEP>` | `leaf()`, `interpolant()`, `K_ref()` | — |
-| `TransformLeaf<I, X>` | `interpolant()`, `K_ref()` | — |
-| `SharedInterp<T, N>` | `get()` → `const T&` | — |
-| `BSplineND<T, N>` | `grid(d)`, `knots(d)`, `coefficients()`, `dimensions()` | — |
-| `ChebyshevInterpolant<N, S>` | `domain()`, `num_pts()` | `storage()` |
+| Type | Existing | To add |
+|------|----------|--------|
+| `PriceTable<Inner>` | `inner()`, `option_type()`, `dividend_yield()`, bounds | `to_data()`, `from_data()`, `to_parquet()`, `from_parquet()` |
+| `EEPLayer` | `leaf()`, `interpolant()`, `K_ref()` | — |
+| `TransformLeaf` | `interpolant()`, `K_ref()` | — |
+| `SharedInterp<T,N>` | `get()` → `const T&` | — |
+| `BSplineND<T,N>` | `grid(d)`, `knots(d)`, `coefficients()`, `dimensions()` | — |
+| `ChebyshevInterpolant<N,S>` | `domain()`, `num_pts()` | `storage()` |
 | `RawTensor<N>` | `shape()`, `compressed_size()` | `values()` |
-| `SplitSurface<I, S>` | `num_pieces()` | `pieces()`, `split()` |
+| `TuckerTensor<N>` | `ranks()`, `compressed_size()` | `expand()`, `shape()` |
+| `SplitSurface<I,S>` | `num_pieces()` | `pieces()`, `split()` |
 | `TauSegmentSplit` | — | `tau_start()`, `tau_end()`, `tau_min()`, `tau_max()`, `K_ref()` |
 | `MultiKRefSplit` | `k_refs()` | — |
-
-## Type alias reference
-
-```
-BSplinePriceTable = PriceTable<EEPLayer<TransformLeaf<SharedInterp<BSplineND<double,4>,4>, StandardTransform4D>, AnalyticalEEP>>
-
-BSplineMultiKRefSurface = PriceTable<SplitSurface<SplitSurface<TransformLeaf<SharedInterp<BSplineND<double,4>,4>, StandardTransform4D>, TauSegmentSplit>, MultiKRefSplit>>
-
-ChebyshevMultiKRefSurface = PriceTable<SplitSurface<SplitSurface<TransformLeaf<ChebyshevInterpolant<4,RawTensor<4>>, StandardTransform4D>, TauSegmentSplit>, MultiKRefSplit>>
-```
