@@ -17,6 +17,7 @@
 #include "mango/support/error_types.hpp"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -162,12 +163,18 @@ template <typename LeafType>
 // ============================================================================
 
 /// Group segments by K_ref value, preserving segment order within each group.
-/// Returns groups sorted by K_ref.
+/// Returns groups sorted by K_ref. Rejects non-finite K_ref values (NaN/Inf
+/// would violate strict-weak-ordering for map keys).
 [[nodiscard]] inline auto group_segments_by_kref(
     const std::vector<PriceTableData::Segment>& segments)
-    -> std::map<double, std::vector<const PriceTableData::Segment*>> {
+    -> std::expected<std::map<double, std::vector<const PriceTableData::Segment*>>,
+                     PriceTableError> {
     std::map<double, std::vector<const PriceTableData::Segment*>> groups;
     for (const auto& seg : segments) {
+        if (!std::isfinite(seg.K_ref)) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
         groups[seg.K_ref].push_back(&seg);
     }
     return groups;

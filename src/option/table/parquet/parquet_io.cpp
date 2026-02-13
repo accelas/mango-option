@@ -54,7 +54,10 @@ PriceTableError serialization_error() {
 
 std::expected<double, PriceTableError> parse_double(const std::string& s) {
     try {
-        return std::stod(s);
+        size_t pos = 0;
+        double val = std::stod(s, &pos);
+        if (pos != s.size()) return std::unexpected(serialization_error());
+        return val;
     } catch (...) {
         return std::unexpected(serialization_error());
     }
@@ -62,7 +65,10 @@ std::expected<double, PriceTableError> parse_double(const std::string& s) {
 
 std::expected<size_t, PriceTableError> parse_size_t(const std::string& s) {
     try {
-        return std::stoull(s);
+        size_t pos = 0;
+        auto val = std::stoull(s, &pos);
+        if (pos != s.size()) return std::unexpected(serialization_error());
+        return val;
     } catch (...) {
         return std::unexpected(serialization_error());
     }
@@ -100,28 +106,29 @@ std::shared_ptr<arrow::Schema> make_parquet_schema(
     auto list_double = arrow::list(arrow::float64());
     auto list_int32 = arrow::list(arrow::int32());
 
+    // All fields are non-nullable (false = not nullable).
     auto fields = arrow::FieldVector{
-        arrow::field("segment_id", arrow::int32()),
-        arrow::field("K_ref", arrow::float64()),
-        arrow::field("tau_start", arrow::float64()),
-        arrow::field("tau_end", arrow::float64()),
-        arrow::field("tau_min", arrow::float64()),
-        arrow::field("tau_max", arrow::float64()),
-        arrow::field("interp_type", arrow::utf8()),
-        arrow::field("ndim", arrow::int32()),
-        arrow::field("domain_lo", list_double),
-        arrow::field("domain_hi", list_double),
-        arrow::field("num_pts", list_int32),
-        arrow::field("grid_0", list_double),
-        arrow::field("grid_1", list_double),
-        arrow::field("grid_2", list_double),
-        arrow::field("grid_3", list_double),
-        arrow::field("knots_0", list_double),
-        arrow::field("knots_1", list_double),
-        arrow::field("knots_2", list_double),
-        arrow::field("knots_3", list_double),
-        arrow::field("values", list_double),
-        arrow::field("checksum_values", arrow::int64()),
+        arrow::field("segment_id", arrow::int32(), /*nullable=*/false),
+        arrow::field("K_ref", arrow::float64(), false),
+        arrow::field("tau_start", arrow::float64(), false),
+        arrow::field("tau_end", arrow::float64(), false),
+        arrow::field("tau_min", arrow::float64(), false),
+        arrow::field("tau_max", arrow::float64(), false),
+        arrow::field("interp_type", arrow::utf8(), false),
+        arrow::field("ndim", arrow::int32(), false),
+        arrow::field("domain_lo", list_double, false),
+        arrow::field("domain_hi", list_double, false),
+        arrow::field("num_pts", list_int32, false),
+        arrow::field("grid_0", list_double, false),
+        arrow::field("grid_1", list_double, false),
+        arrow::field("grid_2", list_double, false),
+        arrow::field("grid_3", list_double, false),
+        arrow::field("knots_0", list_double, false),
+        arrow::field("knots_1", list_double, false),
+        arrow::field("knots_2", list_double, false),
+        arrow::field("knots_3", list_double, false),
+        arrow::field("values", list_double, false),
+        arrow::field("checksum_values", arrow::int64(), false),
     };
 
     return arrow::schema(fields, metadata);
@@ -618,10 +625,21 @@ read_parquet(const std::filesystem::path& path) {
         return std::unexpected(serialization_error());
     }
 
-    // Validate column types before casting
+    // Validate column types before casting (scalar types)
     auto check_type = [](const std::shared_ptr<arrow::Array>& arr,
                          arrow::Type::type expected) {
-        return arr->type_id() == expected;
+        return arr->type_id() == expected && arr->null_count() == 0;
+    };
+
+    // Validate list columns: must be LIST with correct child element type
+    // and no nulls at either level.
+    auto check_list_type = [](const std::shared_ptr<arrow::Array>& arr,
+                              arrow::Type::type child_type) {
+        if (arr->type_id() != arrow::Type::LIST || arr->null_count() != 0)
+            return false;
+        auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
+        return list_arr->values()->type_id() == child_type &&
+               list_arr->values()->null_count() == 0;
     };
 
     if (!check_type(*segment_id_res, arrow::Type::INT32) ||
@@ -632,18 +650,18 @@ read_parquet(const std::filesystem::path& path) {
         !check_type(*tau_max_res, arrow::Type::DOUBLE) ||
         !check_type(*interp_type_res, arrow::Type::STRING) ||
         !check_type(*ndim_res, arrow::Type::INT32) ||
-        !check_type(*domain_lo_res, arrow::Type::LIST) ||
-        !check_type(*domain_hi_res, arrow::Type::LIST) ||
-        !check_type(*num_pts_res, arrow::Type::LIST) ||
-        !check_type(*grid_0_res, arrow::Type::LIST) ||
-        !check_type(*grid_1_res, arrow::Type::LIST) ||
-        !check_type(*grid_2_res, arrow::Type::LIST) ||
-        !check_type(*grid_3_res, arrow::Type::LIST) ||
-        !check_type(*knots_0_res, arrow::Type::LIST) ||
-        !check_type(*knots_1_res, arrow::Type::LIST) ||
-        !check_type(*knots_2_res, arrow::Type::LIST) ||
-        !check_type(*knots_3_res, arrow::Type::LIST) ||
-        !check_type(*values_res, arrow::Type::LIST) ||
+        !check_list_type(*domain_lo_res, arrow::Type::DOUBLE) ||
+        !check_list_type(*domain_hi_res, arrow::Type::DOUBLE) ||
+        !check_list_type(*num_pts_res, arrow::Type::INT32) ||
+        !check_list_type(*grid_0_res, arrow::Type::DOUBLE) ||
+        !check_list_type(*grid_1_res, arrow::Type::DOUBLE) ||
+        !check_list_type(*grid_2_res, arrow::Type::DOUBLE) ||
+        !check_list_type(*grid_3_res, arrow::Type::DOUBLE) ||
+        !check_list_type(*knots_0_res, arrow::Type::DOUBLE) ||
+        !check_list_type(*knots_1_res, arrow::Type::DOUBLE) ||
+        !check_list_type(*knots_2_res, arrow::Type::DOUBLE) ||
+        !check_list_type(*knots_3_res, arrow::Type::DOUBLE) ||
+        !check_list_type(*values_res, arrow::Type::DOUBLE) ||
         !check_type(*checksum_res, arrow::Type::INT64)) {
         return std::unexpected(serialization_error());
     }

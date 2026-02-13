@@ -81,7 +81,9 @@ from_data<BSplineMultiKRefInner>(const PriceTableData& data) {
     std::sort(sorted_segments.begin(), sorted_segments.end(),
         [](const auto& a, const auto& b) { return a.segment_id < b.segment_id; });
 
-    auto groups = group_segments_by_kref(sorted_segments);
+    auto groups_result = group_segments_by_kref(sorted_segments);
+    if (!groups_result) return std::unexpected(groups_result.error());
+    auto& groups = *groups_result;
     std::vector<double> k_refs;
     std::vector<BSplineSegmentedSurface> kref_surfaces;
 
@@ -170,7 +172,9 @@ from_data<ChebyshevMultiKRefInner>(const PriceTableData& data) {
     std::sort(sorted_segments.begin(), sorted_segments.end(),
         [](const auto& a, const auto& b) { return a.segment_id < b.segment_id; });
 
-    auto groups = group_segments_by_kref(sorted_segments);
+    auto groups_result = group_segments_by_kref(sorted_segments);
+    if (!groups_result) return std::unexpected(groups_result.error());
+    auto& groups = *groups_result;
     std::vector<double> k_refs;
     std::vector<ChebyshevTauSegmented> kref_surfaces;
 

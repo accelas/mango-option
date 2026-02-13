@@ -698,5 +698,134 @@ TEST_F(ParquetIOTest, MetadataPreservation) {
     EXPECT_NEAR(loaded->dividend_yield(), 0.02, 1e-15);
 }
 
+// ===========================================================================
+// Test 11: Malformed list child type rejected
+// ===========================================================================
+
+TEST_F(ParquetIOTest, MalformedListChildTypeRejected) {
+    // Build a valid file first
+    auto setup = PriceTableBuilder::from_vectors(
+        {-0.3, -0.1, 0.0, 0.1, 0.3},
+        {0.1, 0.5, 1.0, 1.5},
+        {0.10, 0.20, 0.30, 0.40},
+        {0.02, 0.04, 0.06, 0.08},
+        100.0, GridAccuracyParams{}, OptionType::PUT, 0.02);
+    ASSERT_TRUE(setup.has_value());
+    auto& [builder, axes] = *setup;
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value());
+    auto surface = make_bspline_surface(
+        result->spline, result->K_ref, result->dividends.dividend_yield,
+        OptionType::PUT);
+    ASSERT_TRUE(surface.has_value());
+
+    auto data = to_data(*surface);
+    auto write_result = write_parquet(data, temp_path_);
+    ASSERT_TRUE(write_result.has_value());
+
+    // Read the valid file as an Arrow table
+    auto pool = arrow::default_memory_pool();
+    auto infile_res = arrow::io::ReadableFile::Open(temp_path_.string());
+    ASSERT_TRUE(infile_res.ok());
+    auto reader_res = parquet::arrow::OpenFile(*infile_res, pool);
+    ASSERT_TRUE(reader_res.ok());
+    std::shared_ptr<arrow::Table> table;
+    ASSERT_TRUE((*reader_res)->ReadTable(&table).ok());
+
+    // Replace "values" column (list<double>) with list<int32> to create
+    // a type mismatch in the nested child element type.
+    int val_idx = table->schema()->GetFieldIndex("values");
+    ASSERT_GE(val_idx, 0);
+
+    // Build a list<int32> column with the same shape
+    arrow::ListBuilder bad_list_builder(pool,
+        std::make_shared<arrow::Int32Builder>(pool));
+    for (int64_t row = 0; row < table->num_rows(); ++row) {
+        ASSERT_TRUE(bad_list_builder.Append().ok());
+        auto& val_builder =
+            static_cast<arrow::Int32Builder&>(*bad_list_builder.value_builder());
+        ASSERT_TRUE(val_builder.Append(42).ok());
+    }
+    std::shared_ptr<arrow::Array> bad_values_array;
+    ASSERT_TRUE(bad_list_builder.Finish(&bad_values_array).ok());
+
+    auto new_field = arrow::field("values", arrow::list(arrow::int32()), false);
+    auto corrupted_table = table->SetColumn(
+        val_idx, new_field,
+        std::make_shared<arrow::ChunkedArray>(bad_values_array));
+    ASSERT_TRUE(corrupted_table.ok());
+
+    auto outfile_res = arrow::io::FileOutputStream::Open(temp_path_.string());
+    ASSERT_TRUE(outfile_res.ok());
+    ASSERT_TRUE(parquet::arrow::WriteTable(
+        **corrupted_table, pool, *outfile_res, 1024).ok());
+
+    auto bad_result = read_parquet(temp_path_);
+    EXPECT_FALSE(bad_result.has_value())
+        << "read_parquet should reject list<int32> where list<double> expected";
+}
+
+// ===========================================================================
+// Test 12: Null-containing column rejected
+// ===========================================================================
+
+TEST_F(ParquetIOTest, NullContainingColumnRejected) {
+    // Build a valid file first
+    auto setup = PriceTableBuilder::from_vectors(
+        {-0.3, -0.1, 0.0, 0.1, 0.3},
+        {0.1, 0.5, 1.0, 1.5},
+        {0.10, 0.20, 0.30, 0.40},
+        {0.02, 0.04, 0.06, 0.08},
+        100.0, GridAccuracyParams{}, OptionType::PUT, 0.02);
+    ASSERT_TRUE(setup.has_value());
+    auto& [builder, axes] = *setup;
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value());
+    auto surface = make_bspline_surface(
+        result->spline, result->K_ref, result->dividends.dividend_yield,
+        OptionType::PUT);
+    ASSERT_TRUE(surface.has_value());
+
+    auto data = to_data(*surface);
+    auto write_result = write_parquet(data, temp_path_);
+    ASSERT_TRUE(write_result.has_value());
+
+    // Read the valid file as an Arrow table
+    auto pool = arrow::default_memory_pool();
+    auto infile_res = arrow::io::ReadableFile::Open(temp_path_.string());
+    ASSERT_TRUE(infile_res.ok());
+    auto reader_res = parquet::arrow::OpenFile(*infile_res, pool);
+    ASSERT_TRUE(reader_res.ok());
+    std::shared_ptr<arrow::Table> table;
+    ASSERT_TRUE((*reader_res)->ReadTable(&table).ok());
+
+    // Replace "K_ref" column with a nullable double column containing a null
+    int kref_idx = table->schema()->GetFieldIndex("K_ref");
+    ASSERT_GE(kref_idx, 0);
+
+    arrow::DoubleBuilder null_builder(pool);
+    for (int64_t row = 0; row < table->num_rows(); ++row) {
+        ASSERT_TRUE(null_builder.AppendNull().ok());
+    }
+    std::shared_ptr<arrow::Array> null_array;
+    ASSERT_TRUE(null_builder.Finish(&null_array).ok());
+    ASSERT_GT(null_array->null_count(), 0);
+
+    auto nullable_field = arrow::field("K_ref", arrow::float64(), /*nullable=*/true);
+    auto corrupted_table = table->SetColumn(
+        kref_idx, nullable_field,
+        std::make_shared<arrow::ChunkedArray>(null_array));
+    ASSERT_TRUE(corrupted_table.ok());
+
+    auto outfile_res = arrow::io::FileOutputStream::Open(temp_path_.string());
+    ASSERT_TRUE(outfile_res.ok());
+    ASSERT_TRUE(parquet::arrow::WriteTable(
+        **corrupted_table, pool, *outfile_res, 1024).ok());
+
+    auto bad_result = read_parquet(temp_path_);
+    EXPECT_FALSE(bad_result.has_value())
+        << "read_parquet should reject columns containing nulls";
+}
+
 }  // namespace
 }  // namespace mango
