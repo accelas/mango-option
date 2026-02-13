@@ -83,6 +83,19 @@ std::expected<size_t, PriceTableError> parse_size_t(const std::string& s) {
     }
 }
 
+std::expected<uint64_t, PriceTableError> parse_uint64(const std::string& s) {
+    try {
+        if (s.empty() || s[0] == '-')
+            return std::unexpected(serialization_error());
+        size_t pos = 0;
+        auto val = std::stoull(s, &pos);
+        if (pos != s.size()) return std::unexpected(serialization_error());
+        return static_cast<uint64_t>(val);
+    } catch (...) {
+        return std::unexpected(serialization_error());
+    }
+}
+
 // ============================================================================
 // Canonical little-endian CRC helpers
 // ============================================================================
@@ -336,6 +349,19 @@ std::expected<void, PriceTableError>
 write_parquet(const PriceTableData& data,
               const std::filesystem::path& path,
               const ParquetWriteOptions& opts) {
+
+    // ---- Validate segment invariants ----
+    // Schema supports up to 4 dimensions (grid_0..grid_3, knots_0..knots_3).
+    constexpr size_t MAX_NDIM = 4;
+    for (const auto& seg : data.segments) {
+        if (seg.ndim == 0 || seg.ndim > MAX_NDIM) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig, 0, seg.ndim});
+        }
+        if (seg.grids.size() > MAX_NDIM || seg.knots.size() > MAX_NDIM) {
+            return std::unexpected(serialization_error());
+        }
+    }
 
     auto pool = arrow::default_memory_pool();
 
@@ -849,10 +875,10 @@ read_parquet(const std::filesystem::path& path) {
     {
         auto meta_crc_str = get_meta("mango.metadata_checksum");
         if (!meta_crc_str) return std::unexpected(meta_crc_str.error());
-        auto stored_meta_crc = parse_size_t(*meta_crc_str);
+        auto stored_meta_crc = parse_uint64(*meta_crc_str);
         if (!stored_meta_crc) return std::unexpected(stored_meta_crc.error());
         uint64_t computed_meta = metadata_checksum(data, seg_crcs);
-        if (static_cast<uint64_t>(*stored_meta_crc) != computed_meta) {
+        if (*stored_meta_crc != computed_meta) {
             return std::unexpected(serialization_error());
         }
     }

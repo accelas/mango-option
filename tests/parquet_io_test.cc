@@ -1042,5 +1042,178 @@ TEST_F(ParquetIOTest, TamperedMetadataDetectedByCRC) {
         << "read_parquet should detect tampered metadata via metadata checksum";
 }
 
+// ===========================================================================
+// Test 17: Chebyshev segmented multi-K_ref Parquet round-trip
+// ===========================================================================
+
+TEST_F(ParquetIOTest, ChebyshevSegmentedMultiKRefRoundTrip) {
+    // Build a Chebyshev segmented surface with 2 K_ref groups × 2 tau
+    // segments each, then round-trip through Parquet.
+    //
+    // Construction: build ChebyshevInterpolant<4, RawTensor<4>> instances
+    // manually, compose into ChebyshevMultiKRefSurface.
+
+    constexpr size_t N = 4;
+    std::array<size_t, N> num_pts = {4, 3, 3, 3};
+    size_t total = 1;
+    for (auto n : num_pts) total *= n;
+
+    // Two K_ref groups: 80.0 and 120.0, each with 2 tau segments.
+    struct SegmentSpec {
+        double K_ref;
+        double tau_start, tau_end, tau_min, tau_max;
+    };
+    std::vector<SegmentSpec> specs = {
+        {80.0,  0.0, 0.5, 0.01, 0.5},
+        {80.0,  0.5, 1.0, 0.01, 0.5},
+        {120.0, 0.0, 0.5, 0.01, 0.5},
+        {120.0, 0.5, 1.0, 0.01, 0.5},
+    };
+
+    // Build a ChebyshevMultiKRefInner by grouping specs by K_ref.
+    auto make_leaf = [&](const SegmentSpec& spec)
+        -> ChebyshevSegmentedLeaf {
+        Domain<N> domain{
+            .lo = {-0.30, 0.02, 0.10, 0.02},
+            .hi = { 0.30, 1.50, 0.40, 0.08},
+        };
+        // Fill values with a simple polynomial to ensure non-trivial data
+        std::vector<double> values(total);
+        for (size_t i = 0; i < total; ++i) {
+            values[i] = 0.01 + 0.001 * static_cast<double>(i)
+                       + 0.0001 * spec.K_ref;
+        }
+        auto interp = ChebyshevInterpolant<N, RawTensor<N>>::build_from_values(
+            std::span<const double>(values), domain, num_pts);
+        StandardTransform4D xform;
+        return ChebyshevSegmentedLeaf(std::move(interp), xform, spec.K_ref);
+    };
+
+    // Group by K_ref: {80 -> [seg0, seg1], 120 -> [seg2, seg3]}
+    auto make_tau_split = [&](const std::vector<SegmentSpec>& group_specs,
+                               double K_ref)
+        -> ChebyshevTauSegmented {
+        std::vector<ChebyshevSegmentedLeaf> leaves;
+        std::vector<double> tau_starts, tau_ends, tau_mins, tau_maxs;
+        for (const auto& s : group_specs) {
+            leaves.push_back(make_leaf(s));
+            tau_starts.push_back(s.tau_start);
+            tau_ends.push_back(s.tau_end);
+            tau_mins.push_back(s.tau_min);
+            tau_maxs.push_back(s.tau_max);
+        }
+        TauSegmentSplit split(std::move(tau_starts), std::move(tau_ends),
+                              std::move(tau_mins), std::move(tau_maxs), K_ref);
+        return ChebyshevTauSegmented(std::move(leaves), std::move(split));
+    };
+
+    std::vector<ChebyshevTauSegmented> kref_surfaces;
+    kref_surfaces.push_back(make_tau_split({specs[0], specs[1]}, 80.0));
+    kref_surfaces.push_back(make_tau_split({specs[2], specs[3]}, 120.0));
+
+    MultiKRefSplit multi_split(std::vector<double>{80.0, 120.0});
+    ChebyshevMultiKRefInner inner(std::move(kref_surfaces),
+                                   std::move(multi_split));
+
+    SurfaceBounds bounds{
+        .m_min = -0.30, .m_max = 0.30,
+        .tau_min = 0.01, .tau_max = 1.0,
+        .sigma_min = 0.10, .sigma_max = 0.40,
+        .rate_min = 0.02, .rate_max = 0.08,
+    };
+
+    ChebyshevMultiKRefSurface surface(std::move(inner), bounds,
+                                       OptionType::PUT, 0.02);
+
+    // Round-trip through Parquet
+    auto data = to_data(surface);
+    ASSERT_EQ(data.surface_type, "chebyshev_4d_segmented");
+    ASSERT_EQ(data.segments.size(), 4u);
+
+    auto write_result = write_parquet(data, temp_path_);
+    ASSERT_TRUE(write_result.has_value()) << "write_parquet failed";
+
+    auto read_result = read_parquet(temp_path_);
+    ASSERT_TRUE(read_result.has_value()) << "read_parquet failed";
+
+    auto loaded = from_data<ChebyshevMultiKRefInner>(*read_result);
+    ASSERT_TRUE(loaded.has_value()) << "from_data failed";
+
+    // Verify prices match at sample points
+    struct TestPoint { double spot, strike, tau, sigma, rate; };
+    std::vector<TestPoint> test_points = {
+        {100.0, 80.0,  0.3, 0.25, 0.04},
+        {100.0, 120.0, 0.3, 0.25, 0.04},
+        {100.0, 100.0, 0.8, 0.20, 0.03},
+    };
+    for (const auto& p : test_points) {
+        double orig = surface.price(p.spot, p.strike, p.tau, p.sigma, p.rate);
+        double load = loaded->price(p.spot, p.strike, p.tau, p.sigma, p.rate);
+        EXPECT_NEAR(orig, load, 1e-10)
+            << "Mismatch at spot=" << p.spot << " strike=" << p.strike
+            << " tau=" << p.tau;
+    }
+}
+
+// ===========================================================================
+// Test 18: Tau-segment gap rejected
+// ===========================================================================
+
+TEST_F(ParquetIOTest, TauSegmentGapRejected) {
+    // Build valid segmented data, then introduce a gap between tau segments.
+    // from_data should reject it via validate_tau_segments.
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0,
+        .option_type = OptionType::PUT,
+        .dividends = {
+            .dividend_yield = 0.02,
+            .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
+        },
+        .grid = IVGrid{
+            .moneyness = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2}),
+            .vol = {0.15, 0.20, 0.30, 0.40},
+            .rate = {0.02, 0.03, 0.04, 0.05},
+        },
+        .maturity = 1.0,
+    };
+
+    auto bspline_seg = SegmentedPriceTableBuilder::build(config);
+    ASSERT_TRUE(bspline_seg.has_value());
+
+    auto multi = build_multi_kref_surface({BSplineMultiKRefEntry{
+        .K_ref = 100.0, .surface = std::move(*bspline_seg)}});
+    ASSERT_TRUE(multi.has_value());
+
+    SurfaceBounds bounds{
+        .m_min = to_log_m({0.8}).front(), .m_max = to_log_m({1.2}).front(),
+        .tau_min = 0.01, .tau_max = 1.0,
+        .sigma_min = 0.15, .sigma_max = 0.40,
+        .rate_min = 0.02, .rate_max = 0.05,
+    };
+
+    BSplineMultiKRefSurface surface(
+        std::move(*multi), bounds, OptionType::PUT, 0.02);
+
+    auto data = to_data(surface);
+    ASSERT_GE(data.segments.size(), 2u);
+
+    // Introduce a gap: shrink first segment's tau_end so there's a gap
+    // before the second segment's tau_start.
+    double orig_tau_end_0 = data.segments[0].tau_end;
+    double seg1_tau_start = data.segments[1].tau_start;
+    // Create gap: first segment ends at seg1_tau_start - 0.1
+    data.segments[0].tau_end = seg1_tau_start - 0.1;
+
+    auto bad_result = from_data<BSplineMultiKRefInner>(data);
+    EXPECT_FALSE(bad_result.has_value())
+        << "from_data should reject tau segments with interior gaps";
+
+    // Restore and verify the valid data still works
+    data.segments[0].tau_end = orig_tau_end_0;
+    auto good_result = from_data<BSplineMultiKRefInner>(data);
+    EXPECT_TRUE(good_result.has_value())
+        << "from_data should accept valid tau segments";
+}
+
 }  // namespace
 }  // namespace mango

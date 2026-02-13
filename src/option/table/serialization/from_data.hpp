@@ -14,10 +14,16 @@ namespace mango {
 /// Validates that data.surface_type matches the expected type for Inner.
 /// Explicit instantiations are provided for all 8 Inner types.
 ///
-/// **Note:** Tucker-based types (ChebyshevLeaf, Chebyshev3DLeaf) always
-/// return InvalidConfig because Tucker decomposition is not recoverable
-/// from serialized raw values. Use ChebyshevRawLeaf or Chebyshev3DRawLeaf
-/// instead — they accept both Tucker and Raw surface_type strings.
+/// **Tucker surfaces are not directly reconstructible.** Tucker decomposition
+/// loses rank/factor structure during serialization (values are expanded to
+/// raw tensor). The specializations for ChebyshevLeaf and Chebyshev3DLeaf
+/// always return InvalidConfig. Instead, use the Raw equivalents:
+///
+///   from_data<ChebyshevRawLeaf>(data)     — accepts "chebyshev_4d" or "chebyshev_4d_raw"
+///   from_data<Chebyshev3DRawLeaf>(data)   — accepts "chebyshev_3d" or "chebyshev_3d_raw"
+///
+/// The Raw variants produce numerically identical results to the original
+/// Tucker surfaces (they store the same expanded tensor values).
 ///
 /// @tparam Inner  The inner surface type (e.g. BSplineLeaf, ChebyshevRawLeaf)
 /// @param data    Serialized price table data

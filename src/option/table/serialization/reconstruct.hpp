@@ -190,11 +190,17 @@ template <typename LeafType>
     return groups;
 }
 
-/// Validate tau-segment invariants: finite values, start <= end, min <= max,
-/// and monotonic ordering (each segment's start >= previous segment's start).
+/// Validate tau-segment invariants:
+/// - All tau values are finite
+/// - start <= end, min <= max within each segment
+/// - Monotonic ordering: each segment's start >= previous segment's start
+/// - No interior gaps: each segment's start <= previous segment's end
+///   (overlap is OK — bracket routing handles it — but gaps cause
+///   silent fallback to segment 0 which would be silent mispricing)
 [[nodiscard]] inline std::expected<void, PriceTableError>
 validate_tau_segments(const std::vector<const PriceTableData::Segment*>& group) {
     double prev_start = -std::numeric_limits<double>::infinity();
+    double prev_end = -std::numeric_limits<double>::infinity();
     for (const auto* seg : group) {
         if (!std::isfinite(seg->tau_start) || !std::isfinite(seg->tau_end) ||
             !std::isfinite(seg->tau_min) || !std::isfinite(seg->tau_max)) {
@@ -209,7 +215,15 @@ validate_tau_segments(const std::vector<const PriceTableData::Segment*>& group) 
             return std::unexpected(PriceTableError{
                 PriceTableErrorCode::InvalidConfig});
         }
+        // Reject interior gaps: next segment must start at or before
+        // the previous segment's end to ensure full coverage.
+        if (prev_end > -std::numeric_limits<double>::infinity() &&
+            seg->tau_start > prev_end) {
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InvalidConfig});
+        }
         prev_start = seg->tau_start;
+        prev_end = seg->tau_end;
     }
     return {};
 }
