@@ -5,6 +5,11 @@
 
 #include <gtest/gtest.h>
 
+#include <arrow/api.h>
+#include <arrow/io/api.h>
+#include <parquet/arrow/reader.h>
+#include <parquet/arrow/writer.h>
+
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -453,55 +458,53 @@ TEST_F(ParquetIOTest, ChecksumCorruptionDetected) {
     ASSERT_FALSE(data.segments.empty());
     ASSERT_FALSE(data.segments[0].values.empty());
 
-    // Corrupt the values array after to_data (the CRC in the parquet file
-    // will be computed from the *uncorrupted* data, but we tamper the values
-    // before writing so the recomputed CRC on read won't match).
-    //
-    // Strategy: write the original data to get a valid file, then read it back,
-    // modify a value in the raw PriceTableData, and write again. But that would
-    // produce a consistent CRC. Instead, we need to write a file where the stored
-    // CRC does not match the values.
-    //
-    // The write_parquet function computes CRC from seg.values at write time.
-    // So we write the file first, then we need to corrupt the file on disk.
-    // A simpler approach: we can verify that the CRC validation works by
-    // modifying the values *after* extracting data but writing with the
-    // modification. Then the stored CRC (computed from corrupted data) will
-    // be consistent with corrupted values. That won't test corruption detection.
-    //
-    // The correct approach is:
-    // 1. Write a valid parquet file
-    // 2. Read the raw PriceTableData back (which validates CRC - should pass)
-    // 3. To test corruption detection, we need to modify the binary file.
-    //
-    // Actually, since Parquet stores CRC at write time from the values,
-    // and validates at read time by recomputing from the read values,
-    // the only way the CRC fails is if the values column gets corrupted
-    // in the file. We can't easily do binary surgery on a Parquet file.
-    //
-    // Instead, let's test the CRC logic more directly: verify that the CRC
-    // is present and that reading an unmodified file succeeds (implicit test
-    // that CRC validation path is exercised on every read).
-    //
-    // For a more direct test: write a valid file, verify read succeeds,
-    // then verify the checksum field is populated.
+    // 1. Write a valid file and verify it reads back fine
     auto write_result = write_parquet(data, temp_path_);
     ASSERT_TRUE(write_result.has_value()) << "write_parquet failed";
 
     auto read_result = read_parquet(temp_path_);
-    ASSERT_TRUE(read_result.has_value()) << "read_parquet should succeed for valid file";
+    ASSERT_TRUE(read_result.has_value()) << "valid file should read fine";
 
-    // Verify the values survived intact (CRC passed)
-    ASSERT_EQ(read_result->segments.size(), data.segments.size());
-    for (size_t s = 0; s < data.segments.size(); ++s) {
-        ASSERT_EQ(read_result->segments[s].values.size(),
-                  data.segments[s].values.size());
-        for (size_t i = 0; i < data.segments[s].values.size(); ++i) {
-            EXPECT_DOUBLE_EQ(read_result->segments[s].values[i],
-                             data.segments[s].values[i])
-                << "Value mismatch at segment " << s << " index " << i;
+    // 2. Create a corrupted file: use Arrow to rewrite with bad checksum.
+    //    Read the valid file as an Arrow table, replace the checksum column
+    //    with wrong values, write it back.
+    {
+        auto pool = arrow::default_memory_pool();
+        auto infile_res = arrow::io::ReadableFile::Open(temp_path_.string());
+        ASSERT_TRUE(infile_res.ok());
+        auto reader_res = parquet::arrow::OpenFile(
+            *infile_res, pool);
+        ASSERT_TRUE(reader_res.ok());
+        std::shared_ptr<arrow::Table> table;
+        ASSERT_TRUE((*reader_res)->ReadTable(&table).ok());
+
+        // Find checksum_values column and replace with zeros
+        int crc_idx = table->schema()->GetFieldIndex("checksum_values");
+        ASSERT_GE(crc_idx, 0) << "checksum_values column not found";
+
+        arrow::Int64Builder bad_crc_builder(pool);
+        for (int64_t row = 0; row < table->num_rows(); ++row) {
+            ASSERT_TRUE(bad_crc_builder.Append(0).ok());
         }
+        std::shared_ptr<arrow::Array> bad_crc_array;
+        ASSERT_TRUE(bad_crc_builder.Finish(&bad_crc_array).ok());
+
+        auto corrupted_table = table->SetColumn(
+            crc_idx, table->schema()->field(crc_idx),
+            std::make_shared<arrow::ChunkedArray>(bad_crc_array));
+        ASSERT_TRUE(corrupted_table.ok());
+
+        // Write the corrupted table back (overwrite)
+        auto outfile_res = arrow::io::FileOutputStream::Open(temp_path_.string());
+        ASSERT_TRUE(outfile_res.ok());
+        ASSERT_TRUE(parquet::arrow::WriteTable(
+            **corrupted_table, pool, *outfile_res, 1024).ok());
     }
+
+    // 3. read_parquet should detect the CRC mismatch and return an error
+    auto corrupt_result = read_parquet(temp_path_);
+    EXPECT_FALSE(corrupt_result.has_value())
+        << "read_parquet should fail on corrupted CRC";
 }
 
 // ===========================================================================
