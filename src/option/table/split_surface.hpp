@@ -114,6 +114,8 @@ public:
     }
 
     [[nodiscard]] size_t num_pieces() const noexcept { return pieces_.size(); }
+    [[nodiscard]] const std::vector<Inner>& pieces() const noexcept { return pieces_; }
+    [[nodiscard]] const Split& split() const noexcept { return split_; }
 
 private:
     std::vector<Inner> pieces_;

@@ -393,6 +393,18 @@ public:
     }
 
     [[nodiscard]] std::array<size_t, N> ranks() const { return ranks_; }
+    [[nodiscard]] const std::array<size_t, N>& shape() const { return shape_; }
+
+    /// Expand Tucker decomposition to full raw tensor.
+    /// Returns vector of size product(shape).
+    [[nodiscard]] std::vector<double> expand() const {
+        TuckerResult<N> result;
+        result.core = core_;
+        result.factors = factors_;
+        result.shape = shape_;
+        result.ranks = ranks_;
+        return tucker_reconstruct<N>(result);
+    }
 
 private:
     std::vector<double> core_;
