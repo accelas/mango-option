@@ -31,7 +31,7 @@ public:
     ///
     /// Uses sequential axis contraction from the last axis inward.
     /// The innermost loop is a dot product (SIMD + FMA friendly).
-    MANGO_TARGET_CLONES("default", "avx2", "avx512f")
+    MANGO_TARGET_CLONES("default", "avx2")
     [[nodiscard]] double
     contract(const std::array<std::vector<double>, N>& coeffs) const {
         // Sequential axis contraction: contract axis N-1 first, then N-2, ...
