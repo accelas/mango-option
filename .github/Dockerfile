@@ -1,5 +1,5 @@
-# Dockerfile for mango-option CI environment
-# This image pre-installs all dependencies to speed up CI runs
+# Shared CI environment for Bazel C++ projects
+# Used by: mango-option, dbn-pipe
 FROM debian:trixie-slim
 
 # Install all required dependencies
@@ -15,7 +15,10 @@ RUN apt-get update && \
         python3-dev \
         systemtap-sdt-dev \
         libquantlib0-dev \
-        liblapacke-dev && \
+        liblapacke-dev \
+        libssl-dev \
+        libzstd-dev \
+        libpq-dev && \
     # Add Apache Arrow repository and install
     wget -q https://apache.jfrog.io/artifactory/arrow/debian/apache-arrow-apt-source-latest-trixie.deb && \
     apt-get install -y ./apache-arrow-apt-source-latest-trixie.deb && \
