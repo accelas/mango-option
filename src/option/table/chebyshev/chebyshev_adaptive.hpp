@@ -105,7 +105,7 @@ private:
     ChebyshevSegmentedBuilder(
         SegmentedAdaptiveConfig config,
         std::vector<double> K_refs,
-        DomainBounds domain,
+        SurfaceBounds domain,
         std::vector<double> seg_bounds,
         std::vector<bool> seg_is_gap);
 
@@ -126,7 +126,7 @@ private:
 
     SegmentedAdaptiveConfig config_;
     std::vector<double> K_refs_;
-    DomainBounds domain_;
+    SurfaceBounds domain_;
     std::vector<double> seg_bounds_;
     std::vector<bool> seg_is_gap_;
 };

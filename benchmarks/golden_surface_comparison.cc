@@ -10,8 +10,8 @@
 
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/math/bspline_nd.hpp"
-#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
+#include "mango/math/bspline/bspline_basis.hpp"
 #include <array>
 #include <cmath>
 #include <cstdio>

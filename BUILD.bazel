@@ -23,7 +23,7 @@ cc_library(
         "//src/support:error_types",
         "//src/pde/core:grid",
         "//src/pde/core:time_domain",
-        "//src/math:yield_curve",
+        "//src/option:yield_curve",
     ],
 )
 

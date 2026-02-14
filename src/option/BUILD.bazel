@@ -45,6 +45,7 @@ cc_library(
         "//src/pde/operators:black_scholes_pde",
         "//src/math:cubic_spline_solver",
         ":american_option_result",
+        ":dividend_utils",
         ":grid_spec_types",
         ":option_spec",
         "//src/support:error_types",
@@ -166,7 +167,7 @@ cc_library(
         "//src/option/table/dimensionless:dimensionless_builder",
         "//src/option/table/dimensionless:dimensionless_3d_accessor",
         "//src/option/table:dimensionless_transform_3d",
-        "//src/math:bspline_nd_separable",
+        "//src/math/bspline:bspline_nd_separable",
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/math/chebyshev:tucker_tensor",
         "//src/math:root_finding",
@@ -187,13 +188,21 @@ cc_library(
 )
 
 cc_library(
+    name = "yield_curve",
+    hdrs = ["yield_curve.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option",
+    include_prefix = "mango/option",
+)
+
+cc_library(
     name = "option_spec",
     srcs = ["option_spec.cpp"],
     hdrs = ["option_spec.hpp"],
     deps = [
         "//src/support:error_types",
         "//src/support:parallel",
-        "//src/math:yield_curve",
+        ":yield_curve",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option",
@@ -207,7 +216,6 @@ cc_library(
     deps = [
         ":option_spec",
         ":option_concepts",
-        "//src/math:black_scholes_analytics",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option",

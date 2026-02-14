@@ -30,7 +30,9 @@ namespace mango {
  * - delta_u (n): Newton correction
  * - newton_u_old (n): Previous Newton iterate
  * - u_next (n): Next solution buffer
- * - reserved1-3 (3 × n): Reserved for future use
+ * - reserved1 (n): Reserved for future use
+ * - d2u_scratch (n): Second derivative scratch (SpatialOperator)
+ * - du_scratch (n): First derivative scratch (SpatialOperator)
  * - tridiag_workspace (2n): Thomas solver workspace
  */
 struct PDEWorkspace {
@@ -120,10 +122,10 @@ struct PDEWorkspace {
         workspace.reserved1_ = buffer.subspan(offset, n_padded);
         offset += n_padded;
 
-        workspace.reserved2_ = buffer.subspan(offset, n_padded);
+        workspace.d2u_scratch_ = buffer.subspan(offset, n_padded);
         offset += n_padded;
 
-        workspace.reserved3_ = buffer.subspan(offset, n_padded);
+        workspace.du_scratch_ = buffer.subspan(offset, n_padded);
         offset += n_padded;
 
         // tridiag_workspace (2n, padded)
@@ -200,11 +202,11 @@ struct PDEWorkspace {
     std::span<double> reserved1() { return reserved1_.subspan(0, n_); }
     std::span<const double> reserved1() const { return reserved1_.subspan(0, n_); }
 
-    std::span<double> reserved2() { return reserved2_.subspan(0, n_); }
-    std::span<const double> reserved2() const { return reserved2_.subspan(0, n_); }
+    std::span<double> d2u_scratch() { return d2u_scratch_.subspan(0, n_); }
+    std::span<const double> d2u_scratch() const { return d2u_scratch_.subspan(0, n_); }
 
-    std::span<double> reserved3() { return reserved3_.subspan(0, n_); }
-    std::span<const double> reserved3() const { return reserved3_.subspan(0, n_); }
+    std::span<double> du_scratch() { return du_scratch_.subspan(0, n_); }
+    std::span<const double> du_scratch() const { return du_scratch_.subspan(0, n_); }
 
     std::span<double> tridiag_workspace() { return tridiag_workspace_.subspan(0, 2 * n_); }
     std::span<const double> tridiag_workspace() const { return tridiag_workspace_.subspan(0, 2 * n_); }
@@ -235,8 +237,8 @@ private:
     std::span<double> u_next_;
     std::span<double> tridiag_workspace_;
     std::span<double> reserved1_;
-    std::span<double> reserved2_;
-    std::span<double> reserved3_;
+    std::span<double> d2u_scratch_;
+    std::span<double> du_scratch_;
 };
 
 }  // namespace mango

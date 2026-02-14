@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
 #include <cmath>
 #include <vector>
 

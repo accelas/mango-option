@@ -5,9 +5,9 @@
 #include "mango/option/table/dimensionless/dimensionless_3d_accessor.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
 #include "mango/option/american_option.hpp"
-#include "mango/math/bspline_nd_separable.hpp"
-#include "mango/math/bspline_nd.hpp"
-#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
+#include "mango/math/bspline/bspline_basis.hpp"
 #include <cmath>
 #include <memory>
 

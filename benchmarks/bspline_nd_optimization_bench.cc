@@ -9,7 +9,7 @@
  * 3. OpenMP SIMD for slice extraction/write-back
  */
 
-#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>
 #include <vector>
 #include <random>

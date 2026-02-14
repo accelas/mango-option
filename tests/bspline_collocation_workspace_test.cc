@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // tests/bspline_collocation_workspace_test.cc
-#include "mango/math/bspline_collocation_workspace.hpp"
+#include "mango/math/bspline/bspline_collocation_workspace.hpp"
 #include "mango/support/thread_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cstdint>

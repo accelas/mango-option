@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/math/banded_matrix_solver.hpp"
-#include "mango/math/bspline_nd.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 

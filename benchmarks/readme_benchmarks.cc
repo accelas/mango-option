@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
-#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"

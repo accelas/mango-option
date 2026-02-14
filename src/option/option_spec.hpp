@@ -10,7 +10,7 @@
 #include <expected>
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"
-#include "mango/math/yield_curve.hpp"
+#include "mango/option/yield_curve.hpp"
 #include <span>
 #include <string>
 #include <vector>

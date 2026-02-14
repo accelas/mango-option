@@ -43,7 +43,7 @@ cc_library(
     hdrs = ["option_chain.hpp"],
     deps = [
         ":option_types",
-        "//src/math:yield_curve",
+        "//src/option:yield_curve",
         "//src/option:option_spec",
     ],
     strip_include_prefix = "/src/simple",

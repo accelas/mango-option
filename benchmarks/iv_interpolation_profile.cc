@@ -12,9 +12,9 @@
  * Run with: bazel run -c opt //benchmarks:iv_interpolation_profile -- --benchmark_filter="Vega"
  */
 
-#include "mango/math/bspline_nd.hpp"
-#include "mango/math/bspline_nd_separable.hpp"
-#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_basis.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <memory>

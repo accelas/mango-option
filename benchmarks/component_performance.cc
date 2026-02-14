@@ -13,7 +13,7 @@
 
 #include "mango/option/american_option.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
-#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"

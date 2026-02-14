@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/math/black_scholes_analytics.hpp"
+#include "mango/option/european_option.hpp"
 #include <cmath>
 
 namespace mango {

@@ -5,7 +5,7 @@
  */
 
 #include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline/bspline_basis.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <iostream>

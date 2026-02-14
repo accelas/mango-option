@@ -347,13 +347,6 @@ TEST(IVSolverFactoryComparison, AccuracyManualVsAdaptive) {
 
     ASSERT_GT(count, 0u);
 
-    std::cout << "\n=== IV Accuracy Comparison ===\n"
-              << "Manual:   max=" << manual_max_err
-              << "  avg=" << manual_sum_err / count << "\n"
-              << "Adaptive: max=" << adaptive_max_err
-              << "  avg=" << adaptive_sum_err / count << "\n"
-              << "Queries: " << count << "\n";
-
     EXPECT_LT(manual_max_err, 0.05);
     EXPECT_LT(adaptive_max_err, 0.05);
 }

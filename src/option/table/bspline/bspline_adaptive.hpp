@@ -69,7 +69,7 @@ private:
     BSplineSegmentedBuilder(
         SegmentedAdaptiveConfig config,
         std::vector<double> K_refs,
-        DomainBounds domain,
+        SurfaceBounds domain,
         IVGrid initial_grid);
 
     /// Assemble multi-K_ref surface from per-K_ref segmented surfaces.
@@ -78,7 +78,7 @@ private:
 
     SegmentedAdaptiveConfig config_;
     std::vector<double> K_refs_;
-    DomainBounds domain_;
+    SurfaceBounds domain_;
     IVGrid initial_grid_;
 };
 

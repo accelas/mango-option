@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "bspline_basis",
+    hdrs = ["bspline_basis.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/bspline",
+    include_prefix = "mango/math/bspline",
+)
+
+cc_library(
+    name = "bspline_collocation_workspace",
+    hdrs = ["bspline_collocation_workspace.hpp"],
+    deps = [
+        "//src/math:lapack_banded_layout",
+        "//src/support:lifetime",
+        "//src/support:error_types",
+        "@mdspan//:mdspan",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/bspline",
+    include_prefix = "mango/math/bspline",
+)
+
+cc_library(
+    name = "bspline_collocation",
+    hdrs = ["bspline_collocation.hpp"],
+    deps = [
+        "//src/math:banded_matrix_solver",
+        ":bspline_basis",
+        ":bspline_collocation_workspace",
+        "//src/support:error_types",
+        "//src/support:parallel",
+    ],
+    linkopts = ["-llapacke"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/bspline",
+    include_prefix = "mango/math/bspline",
+)
+
+cc_library(
+    name = "bspline_nd",
+    hdrs = ["bspline_nd.hpp"],
+    deps = [
+        ":bspline_basis",
+        "//src/math:safe_math",
+        "//src/support:error_types",
+        "@mdspan//:mdspan",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/bspline",
+    include_prefix = "mango/math/bspline",
+)
+
+cc_library(
+    name = "bspline_nd_separable",
+    hdrs = ["bspline_nd_separable.hpp"],
+    deps = [
+        ":bspline_collocation",
+        ":bspline_collocation_workspace",
+        "//src/math:safe_math",
+        "//src/support:parallel",
+        "//src/support:thread_workspace",
+        "@mdspan//:mdspan",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/bspline",
+    include_prefix = "mango/math/bspline",
+)

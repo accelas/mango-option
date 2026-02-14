@@ -11,7 +11,7 @@
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/table/transforms/standard_4d.hpp"
 #include "mango/option/table/shared_interp.hpp"
-#include "mango/math/bspline_nd.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/math/safe_math.hpp"
 #include "mango/support/error_types.hpp"
 #include <algorithm>

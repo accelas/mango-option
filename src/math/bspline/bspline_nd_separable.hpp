@@ -27,8 +27,8 @@
 
 #pragma once
 
-#include "mango/math/bspline_collocation.hpp"
-#include "mango/math/bspline_collocation_workspace.hpp"
+#include "mango/math/bspline/bspline_collocation.hpp"
+#include "mango/math/bspline/bspline_collocation_workspace.hpp"
 #include "mango/support/parallel.hpp"
 #include "mango/support/thread_workspace.hpp"
 #include "mango/math/safe_math.hpp"

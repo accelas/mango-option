@@ -8,7 +8,7 @@
  * on challenging matrices designed to stress the numerical algorithms.
  */
 
-#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>

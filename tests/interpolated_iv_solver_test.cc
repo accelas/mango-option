@@ -10,8 +10,8 @@
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
-#include "mango/math/bspline_nd.hpp"
-#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
+#include "mango/math/bspline/bspline_basis.hpp"
 
 namespace mango {
 namespace {

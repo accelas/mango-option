@@ -2,6 +2,7 @@
 #pragma once
 
 #include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/price_table.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/option/option_spec.hpp"
@@ -36,10 +37,7 @@ struct RefinementContext {
     double spot;
     double dividend_yield;
     OptionType option_type;
-    double min_moneyness, max_moneyness;
-    double min_tau, max_tau;
-    double min_vol, max_vol;
-    double min_rate, max_rate;
+    SurfaceBounds bounds;
 };
 
 /// Result of grid sizing from the refinement loop
@@ -276,16 +274,6 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 [[nodiscard]] std::expected<std::vector<double>, PriceTableError>
 resolve_k_refs(const MultiKRefConfig& config, double spot);
 
-/// Domain bounds for segmented surface construction (log-moneyness space).
-/// Produced by expand_segmented_domain() — backend-specific headroom
-/// (B-spline support, Chebyshev CC margin) is added by the caller.
-struct DomainBounds {
-    double min_m, max_m;
-    double min_tau, max_tau;
-    double min_vol, max_vol;
-    double min_rate, max_rate;
-};
-
 /// Expand domain bounds for segmented (discrete-dividend) surface building.
 ///
 /// Converts IVGrid moneyness (already log-moneyness) to domain bounds,
@@ -298,7 +286,7 @@ struct DomainBounds {
 /// @param discrete_dividends Discrete dividend schedule
 /// @param min_K_ref      Smallest K_ref value (for dividend expansion denominator)
 /// @return Expanded domain bounds, or error if domain is empty
-[[nodiscard]] std::expected<DomainBounds, PriceTableError>
+[[nodiscard]] std::expected<SurfaceBounds, PriceTableError>
 expand_segmented_domain(const IVGrid& domain,
                         double maturity,
                         double dividend_yield,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "mango/math/bspline_nd.hpp"
-#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
+#include "mango/math/bspline/bspline_basis.hpp"
 #include <gtest/gtest.h>
 #include <numeric>
 

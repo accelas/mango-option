@@ -2,13 +2,12 @@
 #pragma once
 
 #include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
 #include "mango/pde/operators/centered_difference.hpp"
 #include "mango/math/tridiagonal_matrix_view.hpp"
-#include <span>
 #include <memory>
 #include <concepts>
 #include <cassert>
-#include <cmath>
 
 namespace mango::operators {
 
@@ -40,19 +39,15 @@ concept HasJacobianCoefficients = requires(const PDE pde) {
 };
 
 /// SpatialOperator: Composes PDE, GridSpacing, and CenteredDifference
-///
-/// Note: Uses std::fma in Jacobian assembly for improved precision and performance.
-/// Therefore T must be a standard floating-point type (float, double, long double).
 template<typename PDE, std::floating_point T = double>
 class SpatialOperator {
 public:
     SpatialOperator(PDE pde, std::shared_ptr<GridSpacing<T>> spacing,
-                    std::span<T> d2u_scratch, std::span<T> du_scratch)
+                    PDEWorkspace& workspace)
         : pde_(std::move(pde))
         , spacing_(std::move(spacing))
         , stencil_(std::make_shared<CenteredDifference<T>>(*spacing_))
-        , d2u_scratch_(d2u_scratch)
-        , du_scratch_(du_scratch)
+        , workspace_(&workspace)
     {}
 
     // Default copy/move (shared_ptr makes it copyable)
@@ -75,26 +70,29 @@ public:
     }
 
     /// Apply operator to interior points only [start, end)
-    /// Uses scratch buffers provided at construction time
+    /// Uses scratch buffers from the workspace
     void apply_interior(double t,
                        std::span<const T> u,
                        std::span<T> Lu,
                        size_t start,
                        size_t end) const {
+        auto d2u = workspace_->d2u_scratch();
+        auto du = workspace_->du_scratch();
+
         // Zero only the active range to avoid stale values
-        std::fill(d2u_scratch_.begin() + start, d2u_scratch_.begin() + end, T(0));
-        std::fill(du_scratch_.begin() + start, du_scratch_.begin() + end, T(0));
+        std::fill(d2u.begin() + start, d2u.begin() + end, T(0));
+        std::fill(du.begin() + start, du.begin() + end, T(0));
 
         // Compute derivatives using facade
-        stencil_->compute_second_derivative(u, d2u_scratch_, start, end);
-        stencil_->compute_first_derivative(u, du_scratch_, start, end);
+        stencil_->compute_second_derivative(u, d2u, start, end);
+        stencil_->compute_first_derivative(u, du, start, end);
 
         // Apply PDE operator to combine derivatives
         for (size_t i = start; i < end; ++i) {
             if constexpr (TimeDependentPDE<PDE>) {
-                Lu[i] = pde_(t, d2u_scratch_[i], du_scratch_[i], u[i]);
+                Lu[i] = pde_(t, d2u[i], du[i], u[i]);
             } else {
-                Lu[i] = pde_(d2u_scratch_[i], du_scratch_[i], u[i]);
+                Lu[i] = pde_(d2u[i], du[i], u[i]);
             }
         }
     }
@@ -133,62 +131,32 @@ public:
         const T c = -pde_.discount_rate(t);           // -r(t)
 
         const size_t n = jac.size();
+        const auto& grid = spacing_->grid();
 
-        if (spacing_->is_uniform()) {
-            // Uniform grid: constant coefficients (O(1) compute + O(n) fill)
-            const T dx = spacing_->spacing();
-            const T dx_sq = dx * dx;
+        for (size_t i = 1; i < n - 1; ++i) {
+            const T dx_left = grid[i] - grid[i-1];
+            const T dx_right = grid[i+1] - grid[i];
+            const T dx_avg = (dx_left + dx_right) / 2.0;
 
-            // Jacobian of L(u): ∂L/∂u
-            // Use FMA for coefficient computations
-            const T jac_lower_coeff = std::fma(a, T(1) / dx_sq, -b / (T(2) * dx));
-            const T jac_diag_coeff = std::fma(T(-2) * a, T(1) / dx_sq, c);
-            const T jac_upper_coeff = std::fma(a, T(1) / dx_sq, b / (T(2) * dx));
+            // Second derivative coefficients
+            const T d2_coeff_im1 = a / (dx_left * dx_avg);
+            const T d2_coeff_i = -a * (1.0 / dx_left + 1.0 / dx_right) / dx_avg;
+            const T d2_coeff_ip1 = a / (dx_right * dx_avg);
 
-            // F(u) = u - rhs - coeff_dt·L(u)
-            // ∂F/∂u = I - coeff_dt·∂L/∂u
-            const T lower = -coeff_dt * jac_lower_coeff;
-            const T diag = 1.0 - coeff_dt * jac_diag_coeff;
-            const T upper = -coeff_dt * jac_upper_coeff;
+            // First derivative coefficients (weighted central difference)
+            const T d1_denom = dx_left + dx_right;
+            const T d1_coeff_im1 = -b * dx_right / (dx_left * d1_denom);
+            const T d1_coeff_i   =  b * (dx_right - dx_left) / (dx_left * dx_right);
+            const T d1_coeff_ip1 =  b * dx_left / (dx_right * d1_denom);
 
-            // Fill interior points
-            for (size_t i = 1; i < n - 1; ++i) {
-                jac.lower()[i - 1] = lower;
-                jac.diag()[i] = diag;
-                jac.upper()[i] = upper;
-            }
-        } else {
-            // Non-uniform grid: per-point coefficients (O(n))
-            const auto& grid = spacing_->grid();
-            for (size_t i = 1; i < n - 1; ++i) {
-                // Get local grid spacing directly from grid
-                const T dx_left = grid[i] - grid[i-1];      // x[i] - x[i-1]
-                const T dx_right = grid[i+1] - grid[i];     // x[i+1] - x[i]
-                const T dx_avg = (dx_left + dx_right) / 2.0;
+            // F(u) = u - rhs - coeff_dt·L(u), so ∂F/∂u = I - coeff_dt·∂L/∂u
+            const T jac_lower_i = d2_coeff_im1 + d1_coeff_im1;
+            const T jac_diag_i = d2_coeff_i + d1_coeff_i + c;
+            const T jac_upper_i = d2_coeff_ip1 + d1_coeff_ip1;
 
-                // Second derivative: (u[i-1]/dx_left - u[i]*(1/dx_left + 1/dx_right) + u[i+1]/dx_right) / dx_avg
-                const T d2_coeff_im1 = a / (dx_left * dx_avg);
-                const T d2_coeff_i = -a * (1.0 / dx_left + 1.0 / dx_right) / dx_avg;
-                const T d2_coeff_ip1 = a / (dx_right * dx_avg);
-
-                // First derivative: weighted forward/backward (matches CenteredDifference::apply)
-                //   du/dx = w_l·(u[i]-u[i-1])/dx_l + w_r·(u[i+1]-u[i])/dx_r
-                // where w_l = dx_r/(dx_l+dx_r), w_r = dx_l/(dx_l+dx_r)
-                const T d1_denom = dx_left + dx_right;
-                const T d1_coeff_im1 = -b * dx_right / (dx_left * d1_denom);
-                const T d1_coeff_i   =  b * (dx_right - dx_left) / (dx_left * dx_right);
-                const T d1_coeff_ip1 =  b * dx_left / (dx_right * d1_denom);
-
-                // Jacobian of L(u): ∂L_i/∂u
-                const T jac_lower_i = d2_coeff_im1 + d1_coeff_im1;
-                const T jac_diag_i = d2_coeff_i + d1_coeff_i + c;
-                const T jac_upper_i = d2_coeff_ip1 + d1_coeff_ip1;
-
-                // F(u) = u - rhs - coeff_dt·L(u), so ∂F/∂u = I - coeff_dt·∂L/∂u
-                jac.lower()[i - 1] = -coeff_dt * jac_lower_i;
-                jac.diag()[i] = 1.0 - coeff_dt * jac_diag_i;
-                jac.upper()[i] = -coeff_dt * jac_upper_i;
-            }
+            jac.lower()[i - 1] = -coeff_dt * jac_lower_i;
+            jac.diag()[i] = 1.0 - coeff_dt * jac_diag_i;
+            jac.upper()[i] = -coeff_dt * jac_upper_i;
         }
 
         // Note: Boundary rows (i=0, i=n-1) are NOT filled here.
@@ -199,8 +167,7 @@ private:
     PDE pde_;  // Owned by value (PDEs are typically small)
     std::shared_ptr<GridSpacing<T>> spacing_;
     std::shared_ptr<CenteredDifference<T>> stencil_;  // Shared ownership of templated facade
-    std::span<T> d2u_scratch_;  // Caller-owned scratch for second derivatives
-    std::span<T> du_scratch_;   // Caller-owned scratch for first derivatives
+    PDEWorkspace* workspace_;  // Non-owning; workspace outlives operator
 };
 
 } // namespace mango::operators

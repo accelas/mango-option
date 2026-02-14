@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
 #include "mango/math/safe_math.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/option/option_spec.hpp"
