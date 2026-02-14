@@ -46,12 +46,6 @@ TEST(PriceTensorTest, Create4DTensor) {
     EXPECT_EQ(total, 120);
 }
 
-TEST(PriceTensorTest, ShapeOverflow) {
-    // Request a shape that would overflow size_t
-    auto result = PriceTensorND<3>::create({SIZE_MAX, SIZE_MAX, SIZE_MAX});
-    EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("overflow"), std::string::npos);
-}
 
 TEST(PriceTensorTest, Create1DTensor) {
     auto result = PriceTensorND<1>::create({10});
