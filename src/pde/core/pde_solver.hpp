@@ -11,6 +11,7 @@
 #include <expected>
 #include "mango/support/error_types.hpp"
 #include <memory>
+#include "mango/support/parallel.hpp"
 #include <span>
 #include <vector>
 #include <functional>
@@ -289,10 +290,9 @@ private:
             derived().obstacle(t, grid_->x(), psi);
 
             // Project: u[i] = max(u[i], psi[i])
+            MANGO_PRAGMA_SIMD
             for (size_t i = 0; i < u.size(); ++i) {
-                if (u[i] < psi[i]) {
-                    u[i] = psi[i];
-                }
+                u[i] = std::max(u[i], psi[i]);
             }
         }
     }
@@ -350,6 +350,7 @@ private:
         // RHS = u^n + w1·L(u^n)
         // Use FMA for SAXPY-style loop
         auto rhs = workspace_.rhs();
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < n_; ++i) {
             rhs[i] = std::fma(w1, workspace_.lu()[i], u_prev[i]);
         }
@@ -382,6 +383,7 @@ private:
         // RHS = alpha·u^{n+γ} + beta·u^n (u_current currently holds u^{n+γ})
         // Use FMA: alpha*u_current[i] + beta*u_prev[i]
         auto rhs = workspace_.rhs();
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < n_; ++i) {
             rhs[i] = std::fma(alpha, u_current[i], beta * u_prev[i]);
         }
@@ -399,9 +401,7 @@ private:
                                                           std::span<double> u_current,
                                                           std::span<const double> u_prev) {
         auto rhs = workspace_.rhs();
-        for (size_t i = 0; i < n_; ++i) {
-            rhs[i] = u_prev[i];
-        }
+        std::copy(u_prev.begin(), u_prev.end(), rhs.begin());
 
         // Initial guess: u^{n+1} = u^n
         std::copy(u_prev.begin(), u_prev.end(), u_current.begin());
@@ -729,6 +729,7 @@ private:
 
             // Newton method: Solve J·δu = -F(u), then update u ← u + δu
             // Negate residual for RHS
+            MANGO_PRAGMA_SIMD
             for (size_t i = 0; i < n_; ++i) {
                 workspace_.residual()[i] = -workspace_.residual()[i];
             }
@@ -750,6 +751,7 @@ private:
             }
 
             // Update: u ← u + δu
+            MANGO_PRAGMA_SIMD
             for (size_t i = 0; i < n_; ++i) {
                 u[i] += workspace_.delta_u()[i];
             }
@@ -787,6 +789,7 @@ private:
         // F(u) = u - rhs - coeff_dt·L(u) = 0
         // We want to solve u = rhs + coeff_dt·L(u)
         // Use FMA: u[i] - rhs[i] - coeff_dt*Lu[i] = (u[i] - rhs[i]) + (-coeff_dt)*Lu[i]
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < n_; ++i) {
             residual[i] = std::fma(-coeff_dt, Lu[i], u[i] - rhs[i]);
         }
