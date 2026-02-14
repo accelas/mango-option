@@ -11,7 +11,7 @@
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/table/transforms/standard_4d.hpp"
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
-#include "mango/math/bspline_nd.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/math/chebyshev/chebyshev_interpolant.hpp"
 #include "mango/math/chebyshev/raw_tensor.hpp"
 #include "mango/support/error_types.hpp"

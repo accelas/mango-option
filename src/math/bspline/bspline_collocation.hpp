@@ -24,8 +24,8 @@
 #pragma once
 
 #include "mango/math/banded_matrix_solver.hpp"
-#include "mango/math/bspline_basis.hpp"
-#include "mango/math/bspline_collocation_workspace.hpp"
+#include "mango/math/bspline/bspline_basis.hpp"
+#include "mango/math/bspline/bspline_collocation_workspace.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"
 #include <experimental/mdspan>

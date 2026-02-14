@@ -7,7 +7,7 @@
  * when the caller doesn't need the input values after fitting.
  */
 
-#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>
 #include <vector>
 #include <random>

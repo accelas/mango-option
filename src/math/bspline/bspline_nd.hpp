@@ -27,7 +27,7 @@
 
 #pragma once
 
-#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline/bspline_basis.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/math/safe_math.hpp"
 #include <experimental/mdspan>

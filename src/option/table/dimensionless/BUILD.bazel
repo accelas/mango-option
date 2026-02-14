@@ -24,7 +24,7 @@ cc_library(
         ":dimensionless_3d_accessor",
         "//src/option/table:eep_decomposer",
         "//src/option/table:analytical_eep",
-        "//src/math:bspline_nd_separable",
+        "//src/math/bspline:bspline_nd_separable",
         "//src/option/table/bspline:bspline_surface",
     ],
     visibility = ["//visibility:public"],

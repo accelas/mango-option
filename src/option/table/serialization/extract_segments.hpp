@@ -8,7 +8,7 @@
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/table/shared_interp.hpp"
-#include "mango/math/bspline_nd.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/math/chebyshev/chebyshev_interpolant.hpp"
 #include "mango/math/chebyshev/raw_tensor.hpp"
 #include "mango/math/chebyshev/tucker_tensor.hpp"

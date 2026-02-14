@@ -4,7 +4,7 @@ cc_test(
     size = "small",
     srcs = ["black_scholes_analytics_test.cc"],
     deps = [
-        "//src/math:black_scholes_analytics",
+        "//src/option:european_option",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -48,7 +48,7 @@ cc_test(
     size = "small",
     srcs = ["bspline_collocation_workspace_test.cc"],
     deps = [
-        "//src/math:bspline_collocation_workspace",
+        "//src/math/bspline:bspline_collocation_workspace",
         "//src/support:thread_workspace",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -60,8 +60,8 @@ cc_test(
     size = "small",
     srcs = ["bspline_fit_with_workspace_test.cc"],
     deps = [
-        "//src/math:bspline_collocation",
-        "//src/math:bspline_collocation_workspace",
+        "//src/math/bspline:bspline_collocation",
+        "//src/math/bspline:bspline_collocation_workspace",
         "//src/support:thread_workspace",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -73,7 +73,7 @@ cc_test(
     size = "small",
     srcs = ["bspline_nd_workspace_integration_test.cc"],
     deps = [
-        "//src/math:bspline_nd_separable",
+        "//src/math/bspline:bspline_nd_separable",
         "//src/support:thread_workspace",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -98,7 +98,7 @@ cc_test(
     size = "small",
     srcs = ["yield_curve_test.cc"],
     deps = [
-        "//src/math:yield_curve",
+        "//src/option:yield_curve",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -110,7 +110,7 @@ cc_test(
     srcs = ["rate_spec_test.cc"],
     deps = [
         "//src/option:option_spec",
-        "//src/math:yield_curve",
+        "//src/option:yield_curve",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -122,7 +122,7 @@ cc_test(
     srcs = ["black_scholes_pde_rate_fn_test.cc"],
     deps = [
         "//src/pde/operators:black_scholes_pde",
-        "//src/math:yield_curve",
+        "//src/option:yield_curve",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -166,8 +166,8 @@ cc_test(
     size = "small",
     srcs = ["price_table_surface_test.cc"],
     deps = [
-        "//src/math:bspline_nd",
-        "//src/math:bspline_basis",
+        "//src/math/bspline:bspline_nd",
+        "//src/math/bspline:bspline_basis",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -285,7 +285,7 @@ cc_test(
     size = "small",
     srcs = ["bspline_fitting_stats_test.cc"],
     deps = [
-        "//src/math:bspline_nd_separable",
+        "//src/math/bspline:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
 )
@@ -705,7 +705,7 @@ cc_test(
     name = "bspline_collocation_1d_test",
     srcs = ["bspline_collocation_1d_test.cc"],
     deps = [
-        "//src/math:bspline_collocation",
+        "//src/math/bspline:bspline_collocation",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -718,7 +718,7 @@ cc_test(
     name = "bspline_fitter_4d_separable_test",
     srcs = ["bspline_fitter_4d_separable_test.cc"],
     deps = [
-        "//src/math:bspline_nd_separable",
+        "//src/math/bspline:bspline_nd_separable",
         "//src/support:thread_workspace",
         "@googletest//:gtest_main",
     ],
@@ -811,7 +811,7 @@ cc_test(
     name = "bspline_banded_solver_test",
     srcs = ["bspline_banded_solver_test.cc"],
     deps = [
-        "//src/math:bspline_nd_separable",
+        "//src/math/bspline:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -824,7 +824,7 @@ cc_test(
     name = "bspline_workspace_test",
     srcs = ["bspline_workspace_test.cc"],
     deps = [
-        "//src/math:bspline_nd_separable",
+        "//src/math/bspline:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -838,7 +838,7 @@ cc_test(
     name = "bspline_condition_number_stress_test",
     srcs = ["bspline_condition_number_stress_test.cc"],
     deps = [
-        "//src/math:bspline_nd_separable",
+        "//src/math/bspline:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -906,9 +906,9 @@ cc_test(
     size = "small",
     srcs = ["bspline_nd_test.cc"],
     deps = [
-        "//src/math:bspline_nd",
-        "//src/math:bspline_basis",
-        "//src/math:bspline_nd_separable",
+        "//src/math/bspline:bspline_nd",
+        "//src/math/bspline:bspline_basis",
+        "//src/math/bspline:bspline_nd_separable",
         "//src/option/table:surface_concepts",
         "//src/option/table/bspline:bspline_surface",
         "@googletest//:gtest_main",
@@ -924,8 +924,8 @@ cc_test(
     size = "small",
     srcs = ["bspline_nd_mdspan_test.cc"],
     deps = [
-        "//src/math:bspline_nd",
-        "//src/math:bspline_basis",
+        "//src/math/bspline:bspline_nd",
+        "//src/math/bspline:bspline_basis",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -999,7 +999,7 @@ cc_test(
     srcs = ["mdspan_integration_e2e_test.cc"],
     deps = [
         "//src/math:banded_matrix_solver",
-        "//src/math:bspline_nd",
+        "//src/math/bspline:bspline_nd",
         "//src/pde/core:grid",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -1101,8 +1101,8 @@ cc_test(
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/bspline:bspline_tensor_accessor",
-        "//src/math:bspline_nd",
-        "//src/math:bspline_basis",
+        "//src/math/bspline:bspline_nd",
+        "//src/math/bspline:bspline_basis",
         "@googletest//:gtest_main",
     ],
 )
@@ -1652,9 +1652,9 @@ cc_test(
         "//src/option/table/dimensionless:dimensionless_builder",
         "//src/option/table/dimensionless:dimensionless_3d_accessor",
         "//src/option/table:analytical_eep",
-        "//src/math:bspline_nd",
-        "//src/math:bspline_nd_separable",
-        "//src/math:bspline_basis",
+        "//src/math/bspline:bspline_nd",
+        "//src/math/bspline:bspline_nd_separable",
+        "//src/math/bspline:bspline_basis",
         "//src/option:american_option",
         "@googletest//:gtest_main",
     ],
@@ -1713,9 +1713,9 @@ cc_test(
         "//src/option/table/dimensionless:dimensionless_3d_accessor",
         "//src/option/table:analytical_eep",
         "//src/option/table:greek_types",
-        "//src/math:bspline_nd_separable",
-        "//src/math:bspline_nd",
-        "//src/math:bspline_basis",
+        "//src/math/bspline:bspline_nd_separable",
+        "//src/math/bspline:bspline_nd",
+        "//src/math/bspline:bspline_basis",
         "//src/option:american_option",
         "//src/option:european_option",
         "//src/option:option_spec",
@@ -1786,9 +1786,9 @@ cc_test(
         "//src/option/table/dimensionless:dimensionless_builder",
         "//src/option/table/dimensionless:dimensionless_3d_accessor",
         "//src/option/table:analytical_eep",
-        "//src/math:bspline_nd",
-        "//src/math:bspline_nd_separable",
-        "//src/math:bspline_basis",
+        "//src/math/bspline:bspline_nd",
+        "//src/math/bspline:bspline_nd_separable",
+        "//src/math/bspline:bspline_basis",
         "//src/math/chebyshev:chebyshev_nodes",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -1818,9 +1818,9 @@ cc_test(
         "//src/option/table/dimensionless:dimensionless_builder",
         "//src/option/table/dimensionless:dimensionless_3d_accessor",
         "//src/option/table:analytical_eep",
-        "//src/math:bspline_nd",
-        "//src/math:bspline_nd_separable",
-        "//src/math:bspline_basis",
+        "//src/math/bspline:bspline_nd",
+        "//src/math/bspline:bspline_nd_separable",
+        "//src/math/bspline:bspline_basis",
         "//src/math/chebyshev:chebyshev_nodes",
         "//third_party/arrow",
         "//third_party/arrow:parquet",

@@ -35,9 +35,9 @@
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/table/dimensionless/dimensionless_3d_accessor.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
-#include "mango/math/bspline_nd_separable.hpp"
-#include "mango/math/bspline_nd.hpp"
-#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
+#include "mango/math/bspline/bspline_basis.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 
 namespace mango {

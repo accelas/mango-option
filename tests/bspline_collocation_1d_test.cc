@@ -4,7 +4,7 @@
  * @brief Unit tests for 1D B-spline collocation solver
  */
 
-#include "mango/math/bspline_collocation.hpp"
+#include "mango/math/bspline/bspline_collocation.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>

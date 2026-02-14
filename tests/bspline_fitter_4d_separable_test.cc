@@ -13,7 +13,7 @@
  *       the old hardcoded BSplineNDSeparable<double, 4> class.
  */
 
-#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <array>

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
-#include "mango/math/bspline_nd_separable.hpp"
-#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
+#include "mango/math/bspline/bspline_basis.hpp"
 #include "mango/support/ivcalc_trace.h"
 #include "mango/pde/core/time_domain.hpp"
 #include "mango/support/parallel.hpp"
