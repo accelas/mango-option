@@ -16,6 +16,7 @@
 #include "mango/pde/operators/operator_factory.hpp"
 #include "mango/pde/operators/black_scholes_pde.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
+#include "mango/option/dividend_utils.hpp"
 #include <algorithm>
 #include <cmath>
 #include <variant>
@@ -99,6 +100,33 @@ TemporalEventCallback make_dividend_event(
     };
 }
 
+/// Initialize discrete dividend events on a solver.
+/// Builds a cubic spline for solution interpolation and registers temporal events
+/// at each dividend time. The intrinsic_fallback is the normalized payoff value
+/// used when the shifted spot falls below the grid (1.0 for puts, 0.0 for calls).
+template<typename Solver>
+void init_dividend_events(Solver& solver, const PricingParams& params,
+                          std::shared_ptr<Grid<double>> grid,
+                          PDEWorkspace& workspace,
+                          double intrinsic_fallback,
+                          CubicSpline<double>& dividend_spline) {
+    auto divs = filter_and_merge_dividends(params.discrete_dividends, params.maturity);
+    if (divs.empty()) return;
+
+    auto x = grid->x();
+    auto scratch = workspace.reserved1();
+    std::fill(scratch.begin(), scratch.end(), 0.0);
+    [[maybe_unused]] auto err = dividend_spline.build(
+        x, std::span<const double>(scratch.data(), x.size()));
+
+    for (const auto& div : divs) {
+        double tau = params.maturity - div.calendar_time;
+        solver.add_temporal_event(tau,
+            make_dividend_event(div.amount, params.strike, intrinsic_fallback,
+                                &dividend_spline));
+    }
+}
+
 // ============================================================================
 // American Put PDE Solver (CRTP)
 // ============================================================================
@@ -118,7 +146,7 @@ public:
         , workspace_local_(workspace)
         , left_bc_(create_left_bc())
         , right_bc_(create_right_bc())
-        , spatial_op_(create_spatial_op(workspace))
+        , spatial_op_(create_spatial_op(workspace_local_))
     {
         assert(grid_ != nullptr && "Grid cannot be null (programming error)");
     }
@@ -142,21 +170,7 @@ public:
     /// final memory location (e.g. after placement into a std::variant) because
     /// the event callbacks capture &dividend_spline_.
     void init_dividends() {
-        if (params_.discrete_dividends.empty()) return;
-
-        auto x = grid_->x();
-        auto scratch = workspace_local_.reserved1();
-        std::fill(scratch.begin(), scratch.end(), 0.0);
-        [[maybe_unused]] auto err = dividend_spline_.build(
-            x, std::span<const double>(scratch.data(), x.size()));
-
-        for (const auto& div : params_.discrete_dividends) {
-            double tau = params_.maturity - div.calendar_time;
-            if (tau > 0.0 && tau < params_.maturity) {
-                this->add_temporal_event(tau,
-                    make_dividend_event(div.amount, params_.strike, 1.0, &dividend_spline_));
-            }
-        }
+        init_dividend_events(*this, params_, grid_, workspace_local_, 1.0, dividend_spline_);
     }
 
     struct LeftBCFunction {
@@ -216,7 +230,7 @@ public:
         , workspace_local_(workspace)
         , left_bc_(create_left_bc())
         , right_bc_(create_right_bc())
-        , spatial_op_(create_spatial_op(workspace))
+        , spatial_op_(create_spatial_op(workspace_local_))
     {
         assert(grid_ != nullptr && "Grid cannot be null (programming error)");
     }
@@ -240,21 +254,7 @@ public:
     /// final memory location (e.g. after placement into a std::variant) because
     /// the event callbacks capture &dividend_spline_.
     void init_dividends() {
-        if (params_.discrete_dividends.empty()) return;
-
-        auto x = grid_->x();
-        auto scratch = workspace_local_.reserved1();
-        std::fill(scratch.begin(), scratch.end(), 0.0);
-        [[maybe_unused]] auto err = dividend_spline_.build(
-            x, std::span<const double>(scratch.data(), x.size()));
-
-        for (const auto& div : params_.discrete_dividends) {
-            double tau = params_.maturity - div.calendar_time;
-            if (tau > 0.0 && tau < params_.maturity) {
-                this->add_temporal_event(tau,
-                    make_dividend_event(div.amount, params_.strike, 0.0, &dividend_spline_));
-            }
-        }
+        init_dividend_events(*this, params_, grid_, workspace_local_, 0.0, dividend_spline_);
     }
 
     struct LeftBCFunction {
