@@ -661,27 +661,27 @@ build_adaptive_chebyshev(
         return 3.0 * (hi - lo)
              / static_cast<double>(std::max(n, size_t{4}) - 1);
     };
-    double hm = hfn(ctx.min_moneyness, ctx.max_moneyness,
+    double hm = hfn(ctx.bounds.m_min, ctx.bounds.m_max,
                      (1u << kInitMLevel) + 1);
-    double ht = hfn(ctx.min_tau, ctx.max_tau,
+    double ht = hfn(ctx.bounds.tau_min, ctx.bounds.tau_max,
                      (1u << kInitTauLevel) + 1);
-    double hs = hfn(ctx.min_vol, ctx.max_vol,
+    double hs = hfn(ctx.bounds.sigma_min, ctx.bounds.sigma_max,
                      (1u << kInitSigmaLevel) + 1);
-    double hr = hfn(ctx.min_rate, ctx.max_rate,
+    double hr = hfn(ctx.bounds.rate_min, ctx.bounds.rate_max,
                      (1u << kInitRateLevel) + 1);
 
     ChebyshevRefinementState state{
         .m_level = kInitMLevel, .tau_level = kInitTauLevel,
         .sigma_level = kInitSigmaLevel, .rate_level = kInitRateLevel,
         .max_level = 7,
-        .m_lo = ctx.min_moneyness - hm,
-        .m_hi = ctx.max_moneyness + hm,
-        .tau_lo = std::max(ctx.min_tau - ht, 1e-4),
-        .tau_hi = ctx.max_tau + ht,
-        .sigma_lo = std::max(ctx.min_vol - hs, 0.01),
-        .sigma_hi = ctx.max_vol + hs,
-        .rate_lo = std::max(ctx.min_rate - hr, -0.05),
-        .rate_hi = ctx.max_rate + hr,
+        .m_lo = ctx.bounds.m_min - hm,
+        .m_hi = ctx.bounds.m_max + hm,
+        .tau_lo = std::max(ctx.bounds.tau_min - ht, 1e-4),
+        .tau_hi = ctx.bounds.tau_max + ht,
+        .sigma_lo = std::max(ctx.bounds.sigma_min - hs, 0.01),
+        .sigma_hi = ctx.bounds.sigma_max + hs,
+        .rate_lo = std::max(ctx.bounds.rate_min - hr, -0.05),
+        .rate_hi = ctx.bounds.rate_max + hr,
     };
 
     // Keep ctx bounds at the original chain domain (NOT the extended
@@ -747,7 +747,7 @@ build_adaptive_chebyshev(
 ChebyshevSegmentedBuilder::ChebyshevSegmentedBuilder(
     SegmentedAdaptiveConfig config,
     std::vector<double> K_refs,
-    DomainBounds domain,
+    SurfaceBounds domain,
     std::vector<double> seg_bounds,
     std::vector<bool> seg_is_gap)
     : config_(std::move(config)),
@@ -770,7 +770,7 @@ ChebyshevSegmentedBuilder::create(
 
     auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(
         config.discrete_dividends, config.maturity,
-        dom->min_tau, dom->max_tau);
+        dom->tau_min, dom->tau_max);
 
     return ChebyshevSegmentedBuilder(
         config, std::move(*K_refs), *dom,
@@ -790,17 +790,17 @@ ChebyshevSegmentedBuilder::compute_headroom(
         return 3.0 * (hi - lo)
              / static_cast<double>(std::max(n, size_t{4}) - 1);
     };
-    double hm = hfn(domain_.min_m, domain_.max_m, (1u << cc_levels[0]) + 1);
-    double hs = hfn(domain_.min_vol, domain_.max_vol, (1u << cc_levels[2]) + 1);
-    double hr = hfn(domain_.min_rate, domain_.max_rate, (1u << cc_levels[3]) + 1);
+    double hm = hfn(domain_.m_min, domain_.m_max, (1u << cc_levels[0]) + 1);
+    double hs = hfn(domain_.sigma_min, domain_.sigma_max, (1u << cc_levels[2]) + 1);
+    double hr = hfn(domain_.rate_min, domain_.rate_max, (1u << cc_levels[3]) + 1);
 
     return {
-        .m_lo = domain_.min_m - hm,
-        .m_hi = domain_.max_m + hm,
-        .sigma_lo = std::max(domain_.min_vol - hs, 0.01),
-        .sigma_hi = domain_.max_vol + hs,
-        .rate_lo = std::max(domain_.min_rate - hr, -0.05),
-        .rate_hi = domain_.max_rate + hr,
+        .m_lo = domain_.m_min - hm,
+        .m_hi = domain_.m_max + hm,
+        .sigma_lo = std::max(domain_.sigma_min - hs, 0.01),
+        .sigma_hi = domain_.sigma_max + hs,
+        .rate_lo = std::max(domain_.rate_min - hr, -0.05),
+        .rate_hi = domain_.rate_max + hr,
     };
 }
 
@@ -827,16 +827,9 @@ ChebyshevSegmentedBuilder::build_all_krefs(
     ChebyshevMultiKRefInner inner(
         std::move(kref_surfaces), MultiKRefSplit(K_refs_));
 
-    SurfaceBounds bounds{
-        .m_min = domain_.min_m, .m_max = domain_.max_m,
-        .tau_min = domain_.min_tau, .tau_max = domain_.max_tau,
-        .sigma_min = domain_.min_vol, .sigma_max = domain_.max_vol,
-        .rate_min = domain_.min_rate, .rate_max = domain_.max_rate,
-    };
-
     return AssembleResult{
         .surface = ChebyshevMultiKRefSurface(
-            std::move(inner), bounds,
+            std::move(inner), domain_,
             config_.option_type, config_.dividend_yield),
         .pde_solves = total_pde_solves,
     };
@@ -874,7 +867,7 @@ ChebyshevSegmentedBuilder::build_adaptive(
         return 3.0 * (hi - lo)
              / static_cast<double>(std::max(n, size_t{4}) - 1);
     };
-    double ht = hfn(domain_.min_tau, domain_.max_tau,
+    double ht = hfn(domain_.tau_min, domain_.tau_max,
                      (1u << kInitLevels[1]) + 1);
 
     ChebyshevRefinementState state{
@@ -882,8 +875,8 @@ ChebyshevSegmentedBuilder::build_adaptive(
         .sigma_level = kInitLevels[2], .rate_level = kInitLevels[3],
         .max_level = 7,
         .m_lo = ext.m_lo, .m_hi = ext.m_hi,
-        .tau_lo = std::max(domain_.min_tau - ht, 1e-4),
-        .tau_hi = domain_.max_tau + ht,
+        .tau_lo = std::max(domain_.tau_min - ht, 1e-4),
+        .tau_hi = domain_.tau_max + ht,
         .sigma_lo = ext.sigma_lo, .sigma_hi = ext.sigma_hi,
         .rate_lo = ext.rate_lo, .rate_hi = ext.rate_hi,
         .seg_boundaries = seg_bounds_,
@@ -922,10 +915,7 @@ ChebyshevSegmentedBuilder::build_adaptive(
         .spot = config_.spot,
         .dividend_yield = config_.dividend_yield,
         .option_type = config_.option_type,
-        .min_moneyness = domain_.min_m, .max_moneyness = domain_.max_m,
-        .min_tau = domain_.min_tau, .max_tau = domain_.max_tau,
-        .min_vol = domain_.min_vol, .max_vol = domain_.max_vol,
-        .min_rate = domain_.min_rate, .max_rate = domain_.max_rate,
+        .bounds = domain_,
     };
 
     auto grid_result = run_refinement(

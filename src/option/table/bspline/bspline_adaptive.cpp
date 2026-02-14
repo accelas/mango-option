@@ -521,9 +521,9 @@ BSplineSegmentedBuilder::create(const SegmentedAdaptiveConfig& config,
     if (!dom) return std::unexpected(dom.error());
 
     // B-spline support headroom on moneyness
-    double h = spline_support_headroom(dom->max_m - dom->min_m, domain.moneyness.size());
-    dom->min_m -= h;
-    dom->max_m += h;
+    double h = spline_support_headroom(dom->m_max - dom->m_min, domain.moneyness.size());
+    dom->m_min -= h;
+    dom->m_max += h;
 
     return BSplineSegmentedBuilder(config, std::move(*K_refs), *dom, domain);
 }
@@ -531,7 +531,7 @@ BSplineSegmentedBuilder::create(const SegmentedAdaptiveConfig& config,
 BSplineSegmentedBuilder::BSplineSegmentedBuilder(
     SegmentedAdaptiveConfig config,
     std::vector<double> K_refs,
-    DomainBounds domain,
+    SurfaceBounds domain,
     IVGrid initial_grid)
     : config_(std::move(config))
     , K_refs_(std::move(K_refs))
@@ -595,14 +595,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             .spot = config_.spot,
             .dividend_yield = config_.dividend_yield,
             .option_type = config_.option_type,
-            .min_moneyness = domain_.min_m,
-            .max_moneyness = domain_.max_m,
-            .min_tau = domain_.min_tau,
-            .max_tau = domain_.max_tau,
-            .min_vol = domain_.min_vol,
-            .max_vol = domain_.max_vol,
-            .min_rate = domain_.min_rate,
-            .max_rate = domain_.max_rate,
+            .bounds = domain_,
         };
 
         InitialGrids initial_grids;
@@ -632,9 +625,9 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     }
 
     // 4. Build final uniform grids and all surfaces
-    auto final_m = linspace(domain_.min_m, domain_.max_m, gsz.moneyness);
-    auto final_v = linspace(domain_.min_vol, domain_.max_vol, gsz.vol);
-    auto final_r = linspace(domain_.min_rate, domain_.max_rate, gsz.rate);
+    auto final_m = linspace(domain_.m_min, domain_.m_max, gsz.moneyness);
+    auto final_v = linspace(domain_.sigma_min, domain_.sigma_max, gsz.vol);
+    auto final_r = linspace(domain_.rate_min, domain_.rate_max, gsz.rate);
     int max_tau_pts = gsz.tau_points;
 
     auto seg_template = make_seg_config(config_, final_m, final_v, final_r, max_tau_pts);
@@ -656,10 +649,10 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         params.validation_samples, params.lhs_seed + 999);
 
     std::array<std::pair<double, double>, 4> final_bounds = {{
-        {domain_.min_m, domain_.max_m},
-        {domain_.min_tau, domain_.max_tau},
-        {domain_.min_vol, domain_.max_vol},
-        {domain_.min_rate, domain_.max_rate},
+        {domain_.m_min, domain_.m_max},
+        {domain_.tau_min, domain_.tau_max},
+        {domain_.sigma_min, domain_.sigma_max},
+        {domain_.rate_min, domain_.rate_max},
     }};
     auto scaled = scale_lhs_samples(final_samples, final_bounds);
 
@@ -696,9 +689,9 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         int bumped_tau = std::min(gsz.tau_points + 2,
             static_cast<int>(params.max_points_per_dim));
 
-        auto retry_m = linspace(domain_.min_m, domain_.max_m, bumped_m);
-        auto retry_v = linspace(domain_.min_vol, domain_.max_vol, bumped_v);
-        auto retry_r = linspace(domain_.min_rate, domain_.max_rate, bumped_r);
+        auto retry_m = linspace(domain_.m_min, domain_.m_max, bumped_m);
+        auto retry_v = linspace(domain_.sigma_min, domain_.sigma_max, bumped_v);
+        auto retry_r = linspace(domain_.rate_min, domain_.rate_max, bumped_r);
 
         auto retry_template = make_seg_config(config_, retry_m, retry_v, retry_r, bumped_tau);
         auto retry_segs = build_segmented_surfaces(retry_template, K_refs_);

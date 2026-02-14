@@ -1344,18 +1344,18 @@ TEST(ExpandSegmentedDomainTest, NoDividends) {
     // Verify expansion by standard spreads
     // log(0.8) ~ -0.223, log(1.2) ~ 0.182 → width > 0.10, so expand_domain_bounds
     // just ensures spread >= 0.10 (already satisfied), no extra push
-    EXPECT_LE(result->min_m, std::log(0.8));
-    EXPECT_GE(result->max_m, std::log(1.2));
+    EXPECT_LE(result->m_min, std::log(0.8));
+    EXPECT_GE(result->m_max, std::log(1.2));
     // Vol: [0.20, 0.30] width=0.10, exactly spread → no extra push
-    EXPECT_LE(result->min_vol, 0.20);
-    EXPECT_GE(result->max_vol, 0.30);
+    EXPECT_LE(result->sigma_min, 0.20);
+    EXPECT_GE(result->sigma_max, 0.30);
     // Rate: [0.03, 0.05] width=0.02 < 0.04 → should expand to 0.04 wide
-    EXPECT_LT(result->min_rate, 0.03);
-    EXPECT_GT(result->max_rate, 0.05);
+    EXPECT_LT(result->rate_min, 0.03);
+    EXPECT_GT(result->rate_max, 0.05);
     // Tau: min(0.01, 0.5) = 0.01, max=1.0; width=0.99 > 0.1 → no extra push
     // Tau capped at maturity
-    EXPECT_LE(result->max_tau, maturity);
-    EXPECT_GT(result->min_tau, 0.0);
+    EXPECT_LE(result->tau_max, maturity);
+    EXPECT_GT(result->tau_min, 0.0);
 }
 
 TEST(ExpandSegmentedDomainTest, WithDividends) {
@@ -1371,7 +1371,7 @@ TEST(ExpandSegmentedDomainTest, WithDividends) {
     // min_m starts at log(0.8), expanded by shifting exp(log(0.8))-0.02 = 0.78
     // min_m becomes log(0.78) < log(0.8)
     double orig_min_m = std::log(0.8);
-    EXPECT_LT(result->min_m, orig_min_m);
+    EXPECT_LT(result->m_min, orig_min_m);
 }
 
 TEST(ExpandSegmentedDomainTest, EmptyDomain) {
@@ -1391,7 +1391,7 @@ TEST(ExpandSegmentedDomainTest, TauCappedAtMaturity) {
     double maturity = 0.05;
     auto result = expand_segmented_domain(domain, maturity, 0.0, {}, 100.0);
     ASSERT_TRUE(result.has_value());
-    EXPECT_LE(result->max_tau, maturity);
+    EXPECT_LE(result->tau_max, maturity);
 }
 
 TEST(ExpandSegmentedDomainTest, LargeDividendClamps) {
@@ -1407,7 +1407,7 @@ TEST(ExpandSegmentedDomainTest, LargeDividendClamps) {
     auto result = expand_segmented_domain(domain, 1.0, 0.0, divs, 50.0);
     ASSERT_TRUE(result.has_value());
     // min_m should be log(0.01) after clamping
-    EXPECT_GE(result->min_m, std::log(0.01) - 0.1);
+    EXPECT_GE(result->m_min, std::log(0.01) - 0.1);
 }
 
 }  // namespace

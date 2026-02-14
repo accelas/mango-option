@@ -412,10 +412,10 @@ evaluate_samples(
 
         // Normalize position for error bins
         std::array<double, 4> norm_pos = {{
-            (m - ctx.min_moneyness) / (ctx.max_moneyness - ctx.min_moneyness),
-            (tau - ctx.min_tau) / (ctx.max_tau - ctx.min_tau),
-            (sigma - ctx.min_vol) / (ctx.max_vol - ctx.min_vol),
-            (rate - ctx.min_rate) / (ctx.max_rate - ctx.min_rate)
+            (m - ctx.bounds.m_min) / (ctx.bounds.m_max - ctx.bounds.m_min),
+            (tau - ctx.bounds.tau_min) / (ctx.bounds.tau_max - ctx.bounds.tau_min),
+            (sigma - ctx.bounds.sigma_min) / (ctx.bounds.sigma_max - ctx.bounds.sigma_min),
+            (rate - ctx.bounds.rate_min) / (ctx.bounds.rate_max - ctx.bounds.rate_min)
         }};
         error_bins.record_error(norm_pos, iv_error, target_iv_error);
     }
@@ -460,14 +460,14 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         });
     }
 
-    const double min_moneyness = ctx.min_moneyness;
-    const double max_moneyness = ctx.max_moneyness;
-    const double min_tau = ctx.min_tau;
-    const double max_tau = ctx.max_tau;
-    const double min_vol = ctx.min_vol;
-    const double max_vol = ctx.max_vol;
-    const double min_rate = ctx.min_rate;
-    const double max_rate = ctx.max_rate;
+    const double min_moneyness = ctx.bounds.m_min;
+    const double max_moneyness = ctx.bounds.m_max;
+    const double min_tau = ctx.bounds.tau_min;
+    const double max_tau = ctx.bounds.tau_max;
+    const double min_vol = ctx.bounds.sigma_min;
+    const double max_vol = ctx.bounds.sigma_max;
+    const double min_rate = ctx.bounds.rate_min;
+    const double max_rate = ctx.bounds.rate_max;
 
     std::vector<double> moneyness_grid, maturity_grid, vol_grid, rate_grid;
 
@@ -636,7 +636,7 @@ resolve_k_refs(const MultiKRefConfig& config, double spot) {
     return K_refs;
 }
 
-std::expected<DomainBounds, PriceTableError>
+std::expected<SurfaceBounds, PriceTableError>
 expand_segmented_domain(const IVGrid& domain,
                         double maturity,
                         double /*dividend_yield*/,
@@ -674,11 +674,11 @@ expand_segmented_domain(const IVGrid& domain,
     expand_domain_bounds(min_tau, max_tau, 0.1, kMinPositive);
     max_tau = std::min(max_tau, maturity);
 
-    return DomainBounds{
-        .min_m = min_m, .max_m = max_m,
-        .min_tau = min_tau, .max_tau = max_tau,
-        .min_vol = min_vol, .max_vol = max_vol,
-        .min_rate = min_rate, .max_rate = max_rate,
+    return SurfaceBounds{
+        .m_min = min_m, .m_max = max_m,
+        .tau_min = min_tau, .tau_max = max_tau,
+        .sigma_min = min_vol, .sigma_max = max_vol,
+        .rate_min = min_rate, .rate_max = max_rate,
     };
 }
 
@@ -718,10 +718,12 @@ extract_chain_domain(const OptionGrid& chain) {
         .spot = chain.spot,
         .dividend_yield = chain.dividend_yield,
         .option_type = {},  // caller sets this
-        .min_moneyness = min_m, .max_moneyness = max_m,
-        .min_tau = lo_tau, .max_tau = hi_tau,
-        .min_vol = lo_vol, .max_vol = hi_vol,
-        .min_rate = lo_rate, .max_rate = hi_rate,
+        .bounds = {
+            .m_min = min_m, .m_max = max_m,
+            .tau_min = lo_tau, .tau_max = hi_tau,
+            .sigma_min = lo_vol, .sigma_max = hi_vol,
+            .rate_min = lo_rate, .rate_max = hi_rate,
+        },
     };
 }
 
