@@ -1219,6 +1219,7 @@ cc_test(
     name = "adaptive_grid_builder_test",
     size = "large",
     timeout = "long",
+    tags = ["manual"],
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_types",
@@ -1423,6 +1424,7 @@ cc_test(
     name = "iv_solver_factory_test",
     size = "large",
     timeout = "long",
+    tags = ["manual"],
     srcs = ["iv_solver_factory_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],

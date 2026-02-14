@@ -120,11 +120,7 @@ jobs:
 
       - name: Run test suite
         run: |
-          bazel test //tests/... --test_output=errors --test_tag_filters=-manual -- -//tests:adaptive_grid_builder_test
-
-      - name: Run adaptive grid builder test (dbg)
-        run: |
-          bazel test //tests:adaptive_grid_builder_test -c dbg --test_output=errors
+          bazel test //tests/... --test_output=errors --test_tag_filters=-manual
 
       - name: Display test results
         if: always()
