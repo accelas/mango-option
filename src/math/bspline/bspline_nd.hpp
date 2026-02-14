@@ -29,7 +29,6 @@
 
 #include "mango/math/bspline/bspline_basis.hpp"
 #include "mango/support/error_types.hpp"
-#include "mango/math/safe_math.hpp"
 #include <experimental/mdspan>
 #include <array>
 #include <vector>
@@ -102,17 +101,10 @@ public:
             }
         }
 
-        // Compute expected coefficient array size with overflow check
+        // Compute expected coefficient array size
         size_t expected_size = 1;
         for (size_t dim = 0; dim < N; ++dim) {
-            auto result = safe_multiply(expected_size, grids[dim].size());
-            if (!result.has_value()) {
-                return std::unexpected(InterpolationError{
-                    InterpolationErrorCode::ValueSizeMismatch,
-                    grids[dim].size(),
-                    dim});
-            }
-            expected_size = result.value();
+            expected_size *= grids[dim].size();
         }
 
         if (coeffs.size() != expected_size) {

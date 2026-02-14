@@ -42,7 +42,7 @@ cc_library(
     hdrs = ["bspline_nd.hpp"],
     deps = [
         ":bspline_basis",
-        "//src/math:safe_math",
+
         "//src/support:error_types",
         "@mdspan//:mdspan",
     ],
@@ -57,7 +57,7 @@ cc_library(
     deps = [
         ":bspline_collocation",
         ":bspline_collocation_workspace",
-        "//src/math:safe_math",
+
         "//src/support:parallel",
         "//src/support:thread_workspace",
         "@mdspan//:mdspan",
