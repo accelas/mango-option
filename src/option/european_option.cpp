@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/european_option.hpp"
-#include "mango/math/black_scholes_analytics.hpp"
 #include <algorithm>
 #include <cmath>
 

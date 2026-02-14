@@ -18,8 +18,8 @@
 #include "mango/option/option_grid.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/math/black_scholes_analytics.hpp"
-#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/option/european_option.hpp"
+#include "mango/math/bspline/bspline_nd_separable.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
