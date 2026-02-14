@@ -11,7 +11,6 @@
 #include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/math/chebyshev/chebyshev_interpolant.hpp"
 #include "mango/math/chebyshev/raw_tensor.hpp"
-#include "mango/math/chebyshev/tucker_tensor.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -81,29 +80,6 @@ void fill_chebyshev_raw_segment(PriceTableData::Segment& seg,
     seg.values = interp.storage().values();
 }
 
-/// Populate a Segment from a ChebyshevInterpolant<N, TuckerTensor<N>>.
-/// Expands Tucker decomposition to full raw values for serialization.
-template <size_t N>
-void fill_chebyshev_tucker_segment(PriceTableData::Segment& seg,
-                                   const ChebyshevInterpolant<N, TuckerTensor<N>>& interp) {
-    seg.interp_type = "chebyshev";
-    seg.ndim = N;
-    seg.domain_lo.resize(N);
-    seg.domain_hi.resize(N);
-    seg.num_pts.resize(N);
-    seg.grids.clear();
-    seg.knots.clear();
-
-    const auto& dom = interp.domain();
-    const auto& npts = interp.num_pts();
-    for (size_t d = 0; d < N; ++d) {
-        seg.domain_lo[d] = dom.lo[d];
-        seg.domain_hi[d] = dom.hi[d];
-        seg.num_pts[d] = static_cast<int32_t>(npts[d]);
-    }
-    seg.values = interp.storage().expand();
-}
-
 }  // namespace detail
 
 // ---------------------------------------------------------------------------
@@ -147,28 +123,6 @@ void extract_segments(const TransformLeaf<ChebyshevInterpolant<N, RawTensor<N>>,
     seg.tau_max = tau_max;
 
     detail::fill_chebyshev_raw_segment<N>(seg, leaf.interpolant());
-    out.push_back(std::move(seg));
-}
-
-// ---------------------------------------------------------------------------
-// Leaf-level overloads: Chebyshev TuckerTensor
-// ---------------------------------------------------------------------------
-
-/// Chebyshev Tucker leaf: TransformLeaf<ChebyshevInterpolant<N,TuckerTensor<N>>, Xform>
-template <size_t N, typename Xform>
-void extract_segments(const TransformLeaf<ChebyshevInterpolant<N, TuckerTensor<N>>, Xform>& leaf,
-                      std::vector<PriceTableData::Segment>& out,
-                      double /*K_ref_hint*/, double tau_start, double tau_end,
-                      double tau_min, double tau_max) {
-    PriceTableData::Segment seg;
-    seg.segment_id = static_cast<int32_t>(out.size());
-    seg.K_ref = leaf.K_ref();
-    seg.tau_start = tau_start;
-    seg.tau_end = tau_end;
-    seg.tau_min = tau_min;
-    seg.tau_max = tau_max;
-
-    detail::fill_chebyshev_tucker_segment<N>(seg, leaf.interpolant());
     out.push_back(std::move(seg));
 }
 

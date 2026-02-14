@@ -238,7 +238,6 @@ TEST(IVSolverFactoryChebyshev, ContinuousBuildsAndSolves) {
         .backend = ChebyshevBackend{
             .maturity = 1.0,
             .num_pts = {9, 9, 7, 5},
-            .tucker_epsilon = 0.0,  // RawTensor for test speed
         },
     };
 

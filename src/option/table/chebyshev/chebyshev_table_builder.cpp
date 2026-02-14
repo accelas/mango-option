@@ -182,23 +182,12 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
         };
     };
 
-    // Build interpolant: Tucker-compressed or raw based on epsilon
-    if (config.tucker_epsilon > 0) {
-        auto interp = ChebyshevInterpolant<4, TuckerTensor<4>>::build_from_values(
-            eep_span, config.domain, config.num_pts, config.tucker_epsilon);
-        ChebyshevTransformLeaf tleaf(std::move(interp), StandardTransform4D{},
-                                     config.K_ref);
-        ChebyshevLeaf leaf(std::move(tleaf), eep);
-        return make_result(ChebyshevSurface(
-            std::move(leaf), bounds, config.option_type, config.dividend_yield));
-    }
-
     auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build_from_values(
         eep_span, config.domain, config.num_pts);
-    ChebyshevRawTransformLeaf tleaf(std::move(interp), StandardTransform4D{},
-                                    config.K_ref);
-    ChebyshevRawLeaf leaf(std::move(tleaf), eep);
-    return make_result(ChebyshevRawSurface(
+    ChebyshevTransformLeaf tleaf(std::move(interp), StandardTransform4D{},
+                                 config.K_ref);
+    ChebyshevLeaf leaf(std::move(tleaf), eep);
+    return make_result(ChebyshevSurface(
         std::move(leaf), bounds, config.option_type, config.dividend_yield));
 }
 

@@ -26,7 +26,6 @@
 #include "mango/math/bspline/bspline_nd_separable.hpp"
 #include "mango/math/bspline/bspline_basis.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
-#include "mango/math/chebyshev/tucker_tensor.hpp"
 #include <algorithm>
 #include <cmath>
 #include <variant>
@@ -40,7 +39,6 @@ namespace mango {
 template class InterpolatedIVSolver<BSplinePriceTable>;
 template class InterpolatedIVSolver<BSplineMultiKRefSurface>;
 template class InterpolatedIVSolver<ChebyshevSurface>;
-template class InterpolatedIVSolver<ChebyshevRawSurface>;
 template class InterpolatedIVSolver<ChebyshevMultiKRefSurface>;
 template class InterpolatedIVSolver<BSpline3DPriceTable>;
 template class InterpolatedIVSolver<Chebyshev3DPriceTable>;
@@ -158,7 +156,6 @@ struct AnyInterpIVSolver::Impl {
         InterpolatedIVSolver<BSplinePriceTable>,
         InterpolatedIVSolver<BSplineMultiKRefSurface>,
         InterpolatedIVSolver<ChebyshevSurface>,
-        InterpolatedIVSolver<ChebyshevRawSurface>,
         InterpolatedIVSolver<ChebyshevMultiKRefSurface>,
         InterpolatedIVSolver<BSpline3DPriceTable>,
         InterpolatedIVSolver<Chebyshev3DPriceTable>
@@ -420,7 +417,6 @@ build_chebyshev_continuous(const IVSolverFactoryConfig& config,
         .K_ref = config.spot,
         .option_type = config.option_type,
         .dividend_yield = config.dividend_yield,
-        .tucker_epsilon = backend.tucker_epsilon,
     };
 
     auto result = build_chebyshev_table(cheb_config);
@@ -429,14 +425,12 @@ build_chebyshev_continuous(const IVSolverFactoryConfig& config,
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    return std::visit([&](auto&& surface) -> std::expected<AnyInterpIVSolver, ValidationError> {
-        auto solver = InterpolatedIVSolver<std::decay_t<decltype(surface)>>::create(
-            std::move(surface), config.solver_config);
-        if (!solver.has_value()) {
-            return std::unexpected(solver.error());
-        }
-        return make_any_solver(std::move(*solver));
-    }, std::move(result->surface));
+    auto solver = InterpolatedIVSolver<ChebyshevSurface>::create(
+        std::move(result->surface), config.solver_config);
+    if (!solver.has_value()) {
+        return std::unexpected(solver.error());
+    }
+    return make_any_solver(std::move(*solver));
 }
 
 // ---------------------------------------------------------------------------
@@ -623,9 +617,9 @@ build_dimensionless_chebyshev(const IVSolverFactoryConfig& config,
         .hi = {d.m_max, d.tp_max, d.lk_max},
     };
 
-    auto cheb = ChebyshevInterpolant<3, TuckerTensor<3>>::build_from_values(
+    auto cheb = ChebyshevInterpolant<3, RawTensor<3>>::build_from_values(
         std::span<const double>(pde->values),
-        domain, backend.chebyshev_pts, backend.tucker_epsilon);
+        domain, backend.chebyshev_pts);
 
     // 4. Wrap in layered PriceTable (K_ref = config.spot)
     DimensionlessTransform3D xform;

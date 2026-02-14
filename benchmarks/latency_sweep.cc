@@ -137,25 +137,25 @@ static constexpr GridAccuracyParams kHighAccuracy{
 static constexpr GridAccuracyParams kTableAccuracy{
     .min_spatial_points = 201, .max_spatial_points = 301};
 
-/// High-accuracy reference (q=kDivYield): surfaces 0,1,2
+/// High-accuracy reference (q=kDivYield): surfaces 0,1
 static const PriceGrid& get_high_accuracy_prices() {
     static auto prices = solve_prices(kHighAccuracy, kDivYield);
     return prices;
 }
 
-/// Table-accuracy reference (q=kDivYield): surfaces 0,1,2
+/// Table-accuracy reference (q=kDivYield): surfaces 0,1
 static const PriceGrid& get_table_accuracy_prices() {
     static auto prices = solve_prices(kTableAccuracy, kDivYield);
     return prices;
 }
 
-/// High-accuracy reference (q=0): dimensionless surfaces 3,4
+/// High-accuracy reference (q=0): dimensionless surfaces 2,3
 static const PriceGrid& get_q0_prices() {
     static auto prices = solve_prices(kHighAccuracy, 0.0);
     return prices;
 }
 
-/// High-accuracy reference with discrete dividends: segmented surfaces 5,6
+/// High-accuracy reference with discrete dividends: segmented surfaces 4,5
 static const PriceGrid& get_segmented_prices() {
     static auto prices = solve_prices(kHighAccuracy, 0.0, kSegDividends);
     return prices;
@@ -163,14 +163,14 @@ static const PriceGrid& get_segmented_prices() {
 
 /// Per-surface reference price lookup.
 double ref_price_for(int surf_idx, size_t ti, size_t ki) {
-    if (surf_idx <= 2) return get_high_accuracy_prices()[ti][ki];
-    if (surf_idx <= 4) return get_q0_prices()[ti][ki];
+    if (surf_idx <= 1) return get_high_accuracy_prices()[ti][ki];
+    if (surf_idx <= 3) return get_q0_prices()[ti][ki];
     return get_segmented_prices()[ti][ki];
 }
 
 /// Per-surface table-accuracy reference (only for standard 4D).
 double table_price_for(int surf_idx, size_t ti, size_t ki) {
-    if (surf_idx <= 2) return get_table_accuracy_prices()[ti][ki];
+    if (surf_idx <= 1) return get_table_accuracy_prices()[ti][ki];
     return std::numeric_limits<double>::quiet_NaN();  // no table-accuracy for q=0/segmented
 }
 
@@ -337,28 +337,7 @@ const ChebyshevRawSurface& GetChebyshev4DRaw() {
     return *surface;
 }
 
-// Surface 2: Chebyshev 4D (Tucker compressed)
-const ChebyshevTableResult& GetChebyshev4DTucker() {
-    static ChebyshevTableResult* surface = [] {
-        ChebyshevTableConfig config{
-            .num_pts = {12, 8, 8, 5},
-            .domain = Domain<4>{
-                .lo = {-0.50, 0.02, 0.05, 0.00},
-                .hi = { 0.50, 2.50, 0.50, 0.12},
-            },
-            .K_ref = 100.0,
-            .option_type = OptionType::PUT,
-            .dividend_yield = kDivYield,
-            .tucker_epsilon = 1e-6,
-        };
-        auto result = build_chebyshev_table(config);
-        if (!result) throw std::runtime_error("Chebyshev4D Tucker: build failed");
-        return new ChebyshevTableResult(std::move(*result));
-    }();
-    return *surface;
-}
-
-// Surface 3: B-spline 3D dimensionless (q=0)
+// Surface 2: B-spline 3D dimensionless (q=0)
 const BSpline3DPriceTable& GetDimensionless3D() {
     static BSpline3DPriceTable* surface = [] {
         constexpr double K_ref = 100.0;
@@ -418,7 +397,7 @@ const BSpline3DPriceTable& GetDimensionless3D() {
     return *surface;
 }
 
-// Surface 4: Chebyshev 3D (Tucker, dimensionless, q=0)
+// Surface 3: Chebyshev 3D (dimensionless, q=0)
 const Chebyshev3DPriceTable& GetChebyshev3D() {
     static Chebyshev3DPriceTable* surface = [] {
         constexpr double K_ref = 100.0;
@@ -449,9 +428,8 @@ const Chebyshev3DPriceTable& GetChebyshev3D() {
             .hi = {m_max, tp_max, lk_max},
         };
 
-        // tucker_epsilon=0 avoids AVX-512 alignment bug
-        auto cheb = ChebyshevInterpolant<3, TuckerTensor<3>>::build_from_values(
-            std::span<const double>(pde->values), domain, num_pts, 0.0);
+        auto cheb = ChebyshevInterpolant<3, RawTensor<3>>::build_from_values(
+            std::span<const double>(pde->values), domain, num_pts);
 
         DimensionlessTransform3D xform;
         Chebyshev3DTransformLeaf leaf(std::move(cheb), xform, K_ref);
@@ -541,10 +519,10 @@ const ChebyshevMultiKRefSurface& GetChebSegmented() {
 // Section C: BM_Surface_Query
 // ============================================================================
 
-static constexpr size_t kNSurfaces = 7;
+static constexpr size_t kNSurfaces = 6;
 
 static const char* kSurfaceNames[] = {
-    "bspline4d", "cheb4d_raw", "cheb4d_tucker",
+    "bspline4d", "cheb4d_raw",
     "bspline3d", "cheb3d", "seg_bspline", "seg_cheb"
 };
 
@@ -557,11 +535,10 @@ double query_price(int surf_idx, double S, double K, double tau,
     switch (surf_idx) {
         case 0: return GetBSpline4D().price(S, K, tau, sigma, r);
         case 1: return GetChebyshev4DRaw().price(S, K, tau, sigma, r);
-        case 2: return GetChebyshev4DTucker().price(S, K, tau, sigma, r);
-        case 3: return GetDimensionless3D().price(S, K, tau, sigma, r);
-        case 4: return GetChebyshev3D().price(S, K, tau, sigma, r);
-        case 5: return GetSegmented().price(S, K, tau, sigma, r);
-        case 6: return GetChebSegmented().price(S, K, tau, sigma, r);
+        case 2: return GetDimensionless3D().price(S, K, tau, sigma, r);
+        case 3: return GetChebyshev3D().price(S, K, tau, sigma, r);
+        case 4: return GetSegmented().price(S, K, tau, sigma, r);
+        case 5: return GetChebSegmented().price(S, K, tau, sigma, r);
         default: return std::numeric_limits<double>::quiet_NaN();
     }
 }
@@ -750,7 +727,6 @@ int main(int argc, char** argv) {
     // the build time (seconds of PDE solves) in the measurement.
     (void)GetBSpline4D();
     (void)GetChebyshev4DRaw();
-    (void)GetChebyshev4DTucker();
     (void)GetDimensionless3D();
     (void)GetChebyshev3D();
     (void)GetSegmented();

@@ -25,10 +25,6 @@ template <> constexpr const char* surface_type_string<BSplineMultiKRefInner>() {
 }
 
 template <> constexpr const char* surface_type_string<ChebyshevLeaf>() {
-    return surface_types::kChebyshev4D;
-}
-
-template <> constexpr const char* surface_type_string<ChebyshevRawLeaf>() {
     return surface_types::kChebyshev4DRaw;
 }
 
@@ -41,10 +37,6 @@ template <> constexpr const char* surface_type_string<BSpline3DLeaf>() {
 }
 
 template <> constexpr const char* surface_type_string<Chebyshev3DLeaf>() {
-    return surface_types::kChebyshev3D;
-}
-
-template <> constexpr const char* surface_type_string<Chebyshev3DRawLeaf>() {
     return surface_types::kChebyshev3DRaw;
 }
 
@@ -83,10 +75,8 @@ PriceTableData to_data(const PriceTable<Inner>& table) {
 template PriceTableData to_data<BSplineLeaf>(const PriceTable<BSplineLeaf>&);
 template PriceTableData to_data<BSplineMultiKRefInner>(const PriceTable<BSplineMultiKRefInner>&);
 template PriceTableData to_data<ChebyshevLeaf>(const PriceTable<ChebyshevLeaf>&);
-template PriceTableData to_data<ChebyshevRawLeaf>(const PriceTable<ChebyshevRawLeaf>&);
 template PriceTableData to_data<ChebyshevMultiKRefInner>(const PriceTable<ChebyshevMultiKRefInner>&);
 template PriceTableData to_data<BSpline3DLeaf>(const PriceTable<BSpline3DLeaf>&);
 template PriceTableData to_data<Chebyshev3DLeaf>(const PriceTable<Chebyshev3DLeaf>&);
-template PriceTableData to_data<Chebyshev3DRawLeaf>(const PriceTable<Chebyshev3DRawLeaf>&);
 
 }  // namespace mango

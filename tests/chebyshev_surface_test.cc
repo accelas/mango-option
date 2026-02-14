@@ -9,7 +9,6 @@
 using namespace mango;
 
 // Static assertions
-static_assert(SurfaceInterpolant<ChebyshevInterpolant<4, TuckerTensor<4>>, 4>);
 static_assert(SurfaceInterpolant<ChebyshevInterpolant<4, RawTensor<4>>, 4>);
 
 TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
@@ -19,9 +18,9 @@ TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
     };
     std::array<size_t, 4> num_pts = {5, 5, 5, 5};
 
-    auto interp = ChebyshevInterpolant<4, TuckerTensor<4>>::build(
+    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build(
         [](std::array<double, 4>) { return 0.05; },
-        domain, num_pts, 1e-8);
+        domain, num_pts);
 
     ChebyshevTransformLeaf tleaf(
         std::move(interp), StandardTransform4D{}, 100.0);
@@ -55,7 +54,6 @@ TEST(ChebyshevTableBuilderTest, BuildSucceeds) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
-        .tucker_epsilon = 1e-8,
     };
 
     auto result = build_chebyshev_table(config);
@@ -79,7 +77,6 @@ TEST(ChebyshevTableBuilderTest, IVRoundTrip) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
-        .tucker_epsilon = 1e-8,
     };
 
     auto result = build_chebyshev_table(config);

@@ -103,24 +103,28 @@ jobs:
             bazel-v6-
 
       - name: Build all targets
-        run: bazel build -c dbg //... --build_tag_filters=-benchmark
+        run: bazel build //... --build_tag_filters=-benchmark
 
       - name: Build Python bindings
-        run: bazel build -c dbg //src/python:mango_option
+        run: bazel build //src/python:mango_option
 
       - name: Build benchmarks
         run: |
-          bazel build -c dbg //benchmarks:component_performance
-          bazel build -c dbg //benchmarks:readme_benchmarks
-          bazel build -c dbg //benchmarks:quantlib_performance
-          bazel build -c dbg //benchmarks:quantlib_accuracy
-          bazel build -c dbg //benchmarks:bspline_cache_locality
-          bazel build -c dbg //benchmarks:iv_interpolation_profile
-          bazel build -c dbg //benchmarks:market_iv_e2e_benchmark
+          bazel build //benchmarks:component_performance
+          bazel build //benchmarks:readme_benchmarks
+          bazel build //benchmarks:quantlib_performance
+          bazel build //benchmarks:quantlib_accuracy
+          bazel build //benchmarks:bspline_cache_locality
+          bazel build //benchmarks:iv_interpolation_profile
+          bazel build //benchmarks:market_iv_e2e_benchmark
 
       - name: Run test suite
         run: |
-          bazel test -c dbg //tests/... --test_output=errors --test_tag_filters=-manual
+          bazel test //tests/... --test_output=errors --test_tag_filters=-manual -- -//tests:adaptive_grid_builder_test
+
+      - name: Run adaptive grid builder test (dbg)
+        run: |
+          bazel test //tests:adaptive_grid_builder_test -c dbg --test_output=errors
 
       - name: Display test results
         if: always()

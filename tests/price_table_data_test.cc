@@ -147,11 +147,10 @@ TEST(PriceTableDataTest, ChebyshevRaw4DRoundTrip) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
-        .tucker_epsilon = 0.0,  // 0 = raw tensor
     };
     auto result = build_chebyshev_table(config);
     ASSERT_TRUE(result.has_value()) << "build_chebyshev_table failed";
-    auto& surface = std::get<ChebyshevRawSurface>(result->surface);
+    auto& surface = result->surface;
 
     auto data = to_data(surface);
 
@@ -167,68 +166,7 @@ TEST(PriceTableDataTest, ChebyshevRaw4DRoundTrip) {
 }
 
 // ===========================================================================
-// Test 3: Chebyshev Tucker 4D -> to_data -> from_data<ChebyshevRawLeaf>
-// ===========================================================================
-
-TEST(PriceTableDataTest, ChebyshevTucker4DToRawRoundTrip) {
-    ChebyshevTableConfig config{
-        .num_pts = {8, 6, 6, 4},
-        .domain = Domain<4>{
-            .lo = {-0.30, 0.02, 0.10, 0.02},
-            .hi = { 0.30, 1.50, 0.40, 0.08},
-        },
-        .K_ref = 100.0,
-        .option_type = OptionType::PUT,
-        .dividend_yield = 0.02,
-        .tucker_epsilon = 1e-8,
-    };
-    auto result = build_chebyshev_table(config);
-    ASSERT_TRUE(result.has_value()) << "build_chebyshev_table failed";
-    auto& tucker_surface = std::get<ChebyshevSurface>(result->surface);
-
-    auto data = to_data(tucker_surface);
-
-    EXPECT_EQ(data.surface_type, "chebyshev_4d");
-    ASSERT_EQ(data.segments.size(), 1u);
-    EXPECT_EQ(data.segments[0].interp_type, "chebyshev");
-
-    // from_data<ChebyshevRawLeaf> should accept "chebyshev_4d"
-    auto raw_result = from_data<ChebyshevRawLeaf>(data);
-    ASSERT_TRUE(raw_result.has_value()) << "from_data<ChebyshevRawLeaf> failed";
-
-    // Prices should be identical (Tucker expand -> raw storage, same math)
-    verify_prices_match_4d(tucker_surface, *raw_result, 100.0);
-}
-
-// ===========================================================================
-// Test 4: Tucker from_data<ChebyshevLeaf> always returns error
-// ===========================================================================
-
-TEST(PriceTableDataTest, TuckerFromDataReturnsError) {
-    ChebyshevTableConfig config{
-        .num_pts = {8, 6, 6, 4},
-        .domain = Domain<4>{
-            .lo = {-0.30, 0.02, 0.10, 0.02},
-            .hi = { 0.30, 1.50, 0.40, 0.08},
-        },
-        .K_ref = 100.0,
-        .option_type = OptionType::PUT,
-        .dividend_yield = 0.02,
-        .tucker_epsilon = 1e-8,
-    };
-    auto result = build_chebyshev_table(config);
-    ASSERT_TRUE(result.has_value()) << "build_chebyshev_table failed";
-    auto& tucker_surface = std::get<ChebyshevSurface>(result->surface);
-
-    auto data = to_data(tucker_surface);
-
-    auto tucker_result = from_data<ChebyshevLeaf>(data);
-    EXPECT_FALSE(tucker_result.has_value())
-        << "from_data<ChebyshevLeaf> should fail (Tucker not recoverable)";
-}
-
-// ===========================================================================
-// Test 5: BSpline 3D round-trip
+// Test 3: BSpline 3D round-trip
 // ===========================================================================
 
 TEST(PriceTableDataTest, BSpline3DRoundTrip) {
@@ -303,79 +241,7 @@ TEST(PriceTableDataTest, BSpline3DRoundTrip) {
 }
 
 // ===========================================================================
-// Test 6: Chebyshev 3D Tucker -> to_data -> from_data<Chebyshev3DRawLeaf>
-// ===========================================================================
-
-TEST(PriceTableDataTest, Chebyshev3DTuckerToRawRoundTrip) {
-    constexpr double K_ref = 100.0;
-
-    DimensionlessAxes axes;
-    axes.log_moneyness = {-0.30, -0.20, -0.10, -0.05, 0.0, 0.05, 0.10, 0.20, 0.30};
-    axes.tau_prime = {0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.12, 0.16};
-    axes.ln_kappa = {-2.5, -1.5, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 2.8};
-
-    auto pde = solve_dimensionless_pde(axes, K_ref, OptionType::PUT);
-    ASSERT_TRUE(pde.has_value())
-        << "PDE solve failed: code=" << static_cast<int>(pde.error().code);
-
-    Dimensionless3DAccessor accessor(pde->values, axes, K_ref);
-    eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
-
-    std::array<size_t, 3> num_pts = {
-        axes.log_moneyness.size(),
-        axes.tau_prime.size(),
-        axes.ln_kappa.size(),
-    };
-    Domain<3> domain{
-        .lo = {axes.log_moneyness.front(), axes.tau_prime.front(), axes.ln_kappa.front()},
-        .hi = {axes.log_moneyness.back(), axes.tau_prime.back(), axes.ln_kappa.back()},
-    };
-
-    auto cheb = ChebyshevInterpolant<3, TuckerTensor<3>>::build_from_values(
-        std::span<const double>(pde->values),
-        domain, num_pts, 1e-8);
-
-    DimensionlessTransform3D xform;
-    Chebyshev3DTransformLeaf tleaf(std::move(cheb), xform, K_ref);
-    AnalyticalEEP eep_fn(OptionType::PUT, 0.0);
-    Chebyshev3DLeaf eep_leaf(std::move(tleaf), std::move(eep_fn));
-
-    const double sigma_min = 0.10;
-    const double sigma_max = 0.80;
-    SurfaceBounds bounds{
-        .m_min = axes.log_moneyness.front(),
-        .m_max = axes.log_moneyness.back(),
-        .tau_min = 2.0 * axes.tau_prime.front() / (sigma_max * sigma_max),
-        .tau_max = 2.0 * axes.tau_prime.back() / (sigma_min * sigma_min),
-        .sigma_min = sigma_min,
-        .sigma_max = sigma_max,
-        .rate_min = 0.005,
-        .rate_max = 0.10,
-    };
-
-    Chebyshev3DPriceTable tucker_surface(
-        std::move(eep_leaf), bounds, OptionType::PUT, 0.0);
-
-    auto data = to_data(tucker_surface);
-
-    EXPECT_EQ(data.surface_type, "chebyshev_3d");
-    ASSERT_EQ(data.segments.size(), 1u);
-    EXPECT_EQ(data.segments[0].interp_type, "chebyshev");
-    EXPECT_EQ(data.segments[0].ndim, 3u);
-
-    // from_data<Chebyshev3DLeaf> should fail (Tucker not recoverable)
-    auto tucker_result = from_data<Chebyshev3DLeaf>(data);
-    EXPECT_FALSE(tucker_result.has_value());
-
-    // from_data<Chebyshev3DRawLeaf> should succeed
-    auto raw_result = from_data<Chebyshev3DRawLeaf>(data);
-    ASSERT_TRUE(raw_result.has_value()) << "from_data<Chebyshev3DRawLeaf> failed";
-
-    verify_prices_match_3d(tucker_surface, *raw_result, K_ref);
-}
-
-// ===========================================================================
-// Test 7: BSpline segmented round-trip
+// Test 4: BSpline segmented round-trip
 // ===========================================================================
 
 TEST(PriceTableDataTest, BSplineSegmentedRoundTrip) {
@@ -529,17 +395,17 @@ TEST(PriceTableDataTest, TypeMismatchReturnsError) {
     EXPECT_FALSE(result4.has_value())
         << "Chebyshev3DRawLeaf should reject bspline_4d data";
 
-    // from_data<ChebyshevLeaf> always fails
+    // ChebyshevLeaf with bspline segment data -> reconstruction fails
     data.surface_type = "chebyshev_4d";
     auto result5 = from_data<ChebyshevLeaf>(data);
     EXPECT_FALSE(result5.has_value())
-        << "ChebyshevLeaf always returns error (Tucker not recoverable)";
+        << "ChebyshevLeaf should reject bspline segment data";
 
-    // from_data<Chebyshev3DLeaf> always fails
+    // Chebyshev3DLeaf with bspline segment data -> reconstruction fails
     data.surface_type = "chebyshev_3d";
     auto result6 = from_data<Chebyshev3DLeaf>(data);
     EXPECT_FALSE(result6.has_value())
-        << "Chebyshev3DLeaf always returns error (Tucker not recoverable)";
+        << "Chebyshev3DLeaf should reject bspline segment data";
 }
 
 // ===========================================================================
@@ -596,11 +462,10 @@ TEST(PriceTableDataTest, Chebyshev4DSegmentMetadata) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
-        .tucker_epsilon = 0.0,
     };
     auto result = build_chebyshev_table(config);
     ASSERT_TRUE(result.has_value());
-    auto& surface = std::get<ChebyshevRawSurface>(result->surface);
+    auto& surface = result->surface;
 
     auto data = to_data(surface);
     ASSERT_EQ(data.segments.size(), 1u);

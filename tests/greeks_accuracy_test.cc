@@ -408,10 +408,6 @@ protected:
             .K_ref = 100.0,
             .option_type = OptionType::PUT,
             .dividend_yield = 0.02,
-            // tucker_epsilon=0 forces RawTensor (no Tucker decomposition).
-            // Tucker uses Eigen SVD which triggers the known AVX-512 alignment
-            // bug when linked with -march=native translation units (see MEMORY.md).
-            .tucker_epsilon = 0.0,
         };
         auto result = build_chebyshev_table(config);
         ASSERT_TRUE(result.has_value())

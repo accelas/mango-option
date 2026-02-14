@@ -169,7 +169,6 @@ cc_library(
         "//src/option/table:dimensionless_transform_3d",
         "//src/math/bspline:bspline_nd_separable",
         "//src/math/chebyshev:chebyshev_nodes",
-        "//src/math/chebyshev:tucker_tensor",
         "//src/math:root_finding",
         "//src/support:parallel",
         "//src/support:error_types",

@@ -197,7 +197,7 @@
   "moduleExtensions": {
     "//third_party:deps.bzl%non_bcr_deps": {
       "general": {
-        "bzlTransitiveDigest": "yew6lc8rbIZlsUapaudHqUyiq3WVjm0UIrxD8JrqkL8=",
+        "bzlTransitiveDigest": "BKyZDkt4wLqVIo9FSpITcplvuCXCJPHJtIAteFL+9Rk=",
         "usagesDigest": "fyOJBWRT/fApqc/GtiV6fYLF0mFw5g3GkK9sRO4H+Aw=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
@@ -213,18 +213,6 @@
               "strip_prefix": "mdspan-mdspan-0.6.0",
               "sha256": "79f94d7f692cbabfbaff6cd0d3434704435c853ee5087b182965fa929a48a592",
               "build_file_content": "\ncc_library(\n    name = \"mdspan\",\n    hdrs = glob([\n        \"include/**/*.hpp\",\n        \"include/**/*\",\n    ], exclude = [\"include/**/*.txt\"]),\n    strip_include_prefix = \"include\",\n    visibility = [\"//visibility:public\"],\n)\n"
-            }
-          },
-          "eigen": {
-            "bzlFile": "@@bazel_tools//tools/build_defs/repo:http.bzl",
-            "ruleClassName": "http_archive",
-            "attributes": {
-              "urls": [
-                "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz"
-              ],
-              "strip_prefix": "eigen-3.4.0",
-              "sha256": "8586084f71f9bde545ee7fa6d00288b264a2b7ac3607b974e54d13e7162c1c72",
-              "build_file_content": "\ncc_library(\n    name = \"eigen\",\n    hdrs = glob([\"Eigen/**\", \"unsupported/Eigen/**\"]),\n    includes = [\".\"],\n    visibility = [\"//visibility:public\"],\n)\n"
             }
           }
         },

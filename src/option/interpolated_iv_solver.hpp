@@ -159,7 +159,6 @@ struct BSplineBackend {
 struct ChebyshevBackend {
     double maturity = 2.0;                             ///< Domain upper bound for tau
     std::array<size_t, 4> num_pts = {16, 12, 12, 8};  ///< CGL nodes per axis
-    double tucker_epsilon = 1e-8;                      ///< 0 = use RawTensor
 };
 
 /// Dimensionless 3D interpolation backend
@@ -177,7 +176,6 @@ struct DimensionlessBackend {
     double maturity = 2.0;                    ///< Domain upper bound for physical tau
     Interpolant interpolant = Interpolant::BSpline;
     std::array<size_t, 3> chebyshev_pts = {16, 16, 12};  ///< CGL nodes (x, tau', ln_kappa)
-    double tucker_epsilon = 1e-8;             ///< Tucker compression threshold
 };
 
 /// Discrete dividend configuration (optional, orthogonal to backend choice)

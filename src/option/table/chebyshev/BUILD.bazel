@@ -5,7 +5,6 @@ cc_library(
     deps = [
         "//src/math/chebyshev:chebyshev_interpolant",
         "//src/math/chebyshev:raw_tensor",
-        "//src/math/chebyshev:tucker_tensor",
         "//src/option/table:price_table",
         "//src/option/table:analytical_eep",
         "//src/option/table:eep_layer",
@@ -87,7 +86,6 @@ cc_library(
     deps = [
         "//src/math/chebyshev:chebyshev_interpolant",
         "//src/math/chebyshev:raw_tensor",
-        "//src/math/chebyshev:tucker_tensor",
         "//src/option/table:transform_leaf",
         "//src/option/table:eep_layer",
         "//src/option/table:analytical_eep",

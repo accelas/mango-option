@@ -176,11 +176,10 @@ TEST_F(ParquetIOTest, ChebyshevRaw4DRoundTrip) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
-        .tucker_epsilon = 0.0,
     };
     auto result = build_chebyshev_table(config);
     ASSERT_TRUE(result.has_value()) << "build_chebyshev_table failed";
-    auto& surface = std::get<ChebyshevRawSurface>(result->surface);
+    auto& surface = result->surface;
 
     auto data = to_data(surface);
     auto write_result = write_parquet(data, temp_path_);
@@ -196,40 +195,7 @@ TEST_F(ParquetIOTest, ChebyshevRaw4DRoundTrip) {
 }
 
 // ===========================================================================
-// Test 3: Chebyshev Tucker 4D -> Parquet -> ChebyshevRawLeaf round-trip
-// ===========================================================================
-
-TEST_F(ParquetIOTest, ChebyshevTucker4DToRawRoundTrip) {
-    ChebyshevTableConfig config{
-        .num_pts = {8, 6, 6, 4},
-        .domain = Domain<4>{
-            .lo = {-0.30, 0.02, 0.10, 0.02},
-            .hi = { 0.30, 1.50, 0.40, 0.08},
-        },
-        .K_ref = 100.0,
-        .option_type = OptionType::PUT,
-        .dividend_yield = 0.02,
-        .tucker_epsilon = 1e-8,
-    };
-    auto result = build_chebyshev_table(config);
-    ASSERT_TRUE(result.has_value()) << "build_chebyshev_table failed";
-    auto& tucker_surface = std::get<ChebyshevSurface>(result->surface);
-
-    auto data = to_data(tucker_surface);
-    auto write_result = write_parquet(data, temp_path_);
-    ASSERT_TRUE(write_result.has_value()) << "write_parquet failed";
-
-    auto read_result = read_parquet(temp_path_);
-    ASSERT_TRUE(read_result.has_value()) << "read_parquet failed";
-
-    auto loaded = from_data<ChebyshevRawLeaf>(*read_result);
-    ASSERT_TRUE(loaded.has_value()) << "from_data<ChebyshevRawLeaf> failed";
-
-    verify_prices_match_4d(tucker_surface, *loaded, 100.0);
-}
-
-// ===========================================================================
-// Test 4: BSpline 3D Parquet round-trip
+// Test 3: BSpline 3D Parquet round-trip
 // ===========================================================================
 
 TEST_F(ParquetIOTest, BSpline3DRoundTrip) {
@@ -303,10 +269,10 @@ TEST_F(ParquetIOTest, BSpline3DRoundTrip) {
 }
 
 // ===========================================================================
-// Test 5: Chebyshev 3D Tucker -> Parquet -> Chebyshev3DRawLeaf round-trip
+// Test 5: Chebyshev 3D -> Parquet -> Chebyshev3DRawLeaf round-trip
 // ===========================================================================
 
-TEST_F(ParquetIOTest, Chebyshev3DTuckerToRawRoundTrip) {
+TEST_F(ParquetIOTest, Chebyshev3DRoundTrip) {
     constexpr double K_ref = 100.0;
 
     DimensionlessAxes axes;
@@ -331,9 +297,9 @@ TEST_F(ParquetIOTest, Chebyshev3DTuckerToRawRoundTrip) {
         .hi = {axes.log_moneyness.back(), axes.tau_prime.back(), axes.ln_kappa.back()},
     };
 
-    auto cheb = ChebyshevInterpolant<3, TuckerTensor<3>>::build_from_values(
+    auto cheb = ChebyshevInterpolant<3, RawTensor<3>>::build_from_values(
         std::span<const double>(pde->values),
-        domain, num_pts, 1e-8);
+        domain, num_pts);
 
     DimensionlessTransform3D xform;
     Chebyshev3DTransformLeaf tleaf(std::move(cheb), xform, K_ref);
@@ -353,10 +319,10 @@ TEST_F(ParquetIOTest, Chebyshev3DTuckerToRawRoundTrip) {
         .rate_max = 0.10,
     };
 
-    Chebyshev3DPriceTable tucker_surface(
+    Chebyshev3DPriceTable surface(
         std::move(eep_leaf), bounds, OptionType::PUT, 0.0);
 
-    auto data = to_data(tucker_surface);
+    auto data = to_data(surface);
     auto write_result = write_parquet(data, temp_path_);
     ASSERT_TRUE(write_result.has_value()) << "write_parquet failed";
 
@@ -366,7 +332,7 @@ TEST_F(ParquetIOTest, Chebyshev3DTuckerToRawRoundTrip) {
     auto loaded = from_data<Chebyshev3DRawLeaf>(*read_result);
     ASSERT_TRUE(loaded.has_value()) << "from_data<Chebyshev3DRawLeaf> failed";
 
-    verify_prices_match_3d(tucker_surface, *loaded, K_ref);
+    verify_prices_match_3d(surface, *loaded, K_ref);
 }
 
 // ===========================================================================
@@ -1230,11 +1196,10 @@ TEST_F(ParquetIOTest, ChebyshevInvalidDomainRejected) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
-        .tucker_epsilon = 0.0,
     };
     auto result = build_chebyshev_table(config);
     ASSERT_TRUE(result.has_value());
-    auto& surface = std::get<ChebyshevRawSurface>(result->surface);
+    auto& surface = result->surface;
     auto data = to_data(surface);
     ASSERT_EQ(data.segments.size(), 1u);
 
