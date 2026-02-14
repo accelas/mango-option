@@ -29,8 +29,7 @@ struct Domain {
 ///   double contract(array<vector<double>, N> coeffs) const
 ///   size_t compressed_size() const
 ///
-/// ChebyshevTensor<N> = ChebyshevInterpolant<N, RawTensor<N>>   (no Eigen dep)
-/// ChebyshevTucker<N> = ChebyshevInterpolant<N, TuckerTensor<N>> (Tucker compression)
+/// ChebyshevTensor<N> = ChebyshevInterpolant<N, RawTensor<N>>
 template <size_t N, typename Storage>
 class ChebyshevInterpolant {
 public:
@@ -40,7 +39,7 @@ public:
     ///         of Chebyshev nodes, with shape num_pts[0] x ... x num_pts[N-1].
     /// domain: axis bounds [lo, hi] per dimension.
     /// num_pts: number of Chebyshev nodes per axis.
-    /// storage_args: forwarded to Storage::build (e.g., epsilon for Tucker).
+    /// storage_args: forwarded to Storage::build.
     template <typename... Args>
     [[nodiscard]] static ChebyshevInterpolant
     build_from_values(std::span<const double> values,
@@ -70,7 +69,7 @@ public:
     /// f: function mapping N-dim coordinates to scalar.
     /// domain: axis bounds [lo, hi] per dimension.
     /// num_pts: number of Chebyshev nodes per axis.
-    /// storage_args: forwarded to Storage::build (e.g., epsilon for Tucker).
+    /// storage_args: forwarded to Storage::build.
     template <typename... Args>
     [[nodiscard]] static ChebyshevInterpolant
     build(std::function<double(std::array<double, N>)> f,
@@ -112,7 +111,7 @@ public:
 
     /// Evaluate the interpolant at a query point.
     /// Coordinates are clamped to the domain.
-    MANGO_TARGET_CLONES("default", "avx2")
+    MANGO_TARGET_CLONES("default", "avx2", "avx512f")
     [[nodiscard]] double eval(std::array<double, N> query) const {
         // Clamp to domain
         for (size_t d = 0; d < N; ++d) {

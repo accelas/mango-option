@@ -38,7 +38,6 @@ cc_library(
         "//src/math/bspline:bspline_nd",
         "//src/math/chebyshev:chebyshev_interpolant",
         "//src/math/chebyshev:raw_tensor",
-        "//src/math/chebyshev:tucker_tensor",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table/serialization",

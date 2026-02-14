@@ -520,7 +520,6 @@ static ChebyshevTableResult build_chebyshev_surface() {
         .K_ref = kSpot,
         .option_type = OptionType::PUT,
         .dividend_yield = kDivYield,
-        .tucker_epsilon = 1e-8,
     };
 
     auto result = build_chebyshev_table(config);
@@ -595,7 +594,7 @@ static ErrorTable compute_errors_via_solver(
 static std::array<ErrorTable, kNV>
 run_chebyshev_4d(const PriceGrid& prices) {
     std::printf("\n================================================================\n");
-    std::printf("Chebyshev 4D Tucker — vanilla (no dividends)\n");
+    std::printf("Chebyshev 4D — vanilla (no dividends)\n");
     std::printf("================================================================\n\n");
 
     std::printf("--- Building Chebyshev 4D surface...\n");
@@ -605,12 +604,11 @@ run_chebyshev_4d(const PriceGrid& prices) {
     std::array<ErrorTable, kNV> all_errors{};
     std::printf("--- Computing Chebyshev IV errors...\n");
 
-    bool ok = false;
-    std::visit([&](auto s) {
-        auto solver = InterpolatedIVSolver<std::decay_t<decltype(s)>>::create(
-            std::move(s));
-        if (!solver.has_value()) return;
-        ok = true;
+    auto solver = InterpolatedIVSolver<ChebyshevSurface>::create(
+        std::move(surface.surface));
+    if (!solver.has_value()) {
+        std::fprintf(stderr, "Chebyshev 4D solver creation failed\n");
+    } else {
         for (size_t vi = 0; vi < kNV; ++vi) {
             char title[128];
             std::snprintf(title, sizeof(title),
@@ -619,9 +617,7 @@ run_chebyshev_4d(const PriceGrid& prices) {
             all_errors[vi] = compute_errors_via_solver(prices, *solver, vi);
             print_heatmap(title, all_errors[vi]);
         }
-    }, std::move(surface.surface));
-
-    if (!ok) std::fprintf(stderr, "Chebyshev 4D solver creation failed\n");
+    }
     return all_errors;
 }
 

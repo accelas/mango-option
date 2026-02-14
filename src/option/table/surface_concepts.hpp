@@ -9,7 +9,7 @@
 namespace mango {
 
 /// Raw interpolation engine: eval + partial derivative at N-dim coordinates.
-/// Implementations: SharedBSplineInterp<N>, ChebyshevTuckerND<N> (future).
+/// Implementations: SharedBSplineInterp<N>, ChebyshevInterpolant<N, RawTensor<N>>.
 template <typename S, size_t N>
 concept SurfaceInterpolant = requires(const S& s, std::array<double, N> coords) {
     { s.eval(coords) } -> std::same_as<double>;

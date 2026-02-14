@@ -168,8 +168,6 @@ const ChebyshevTableResult& GetChebyshev4D() {
             .K_ref = 100.0,
             .option_type = OptionType::PUT,
             .dividend_yield = 0.02,
-            // tucker_epsilon=0 forces RawTensor to avoid AVX-512 alignment bug
-            .tucker_epsilon = 0.0,
         };
         auto result = build_chebyshev_table(config);
         if (!result) throw std::runtime_error("Chebyshev4D: build failed");
@@ -510,9 +508,8 @@ const Chebyshev3DPriceTable& GetChebyshev3D() {
             .hi = {m_max, tp_max, lk_max},
         };
 
-        // tucker_epsilon=0 avoids AVX-512 alignment bug
-        auto cheb = ChebyshevInterpolant<3, TuckerTensor<3>>::build_from_values(
-            std::span<const double>(pde->values), domain, num_pts, 0.0);
+        auto cheb = ChebyshevInterpolant<3, RawTensor<3>>::build_from_values(
+            std::span<const double>(pde->values), domain, num_pts);
 
         DimensionlessTransform3D xform;
         Chebyshev3DTransformLeaf leaf(std::move(cheb), xform, K_ref);

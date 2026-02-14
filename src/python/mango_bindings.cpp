@@ -595,8 +595,7 @@ PYBIND11_MODULE(mango_option, m) {
     // ChebyshevBackend
     py::class_<mango::ChebyshevBackend>(m, "ChebyshevBackend")
         .def(py::init<>())
-        .def_readwrite("maturity", &mango::ChebyshevBackend::maturity)
-        .def_readwrite("tucker_epsilon", &mango::ChebyshevBackend::tucker_epsilon);
+        .def_readwrite("maturity", &mango::ChebyshevBackend::maturity);
 
     // DiscreteDividendConfig
     py::class_<mango::DiscreteDividendConfig>(m, "DiscreteDividendConfig")

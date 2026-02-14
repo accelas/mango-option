@@ -1555,7 +1555,6 @@ cc_test(
         "//src/math/chebyshev:chebyshev_interpolant",
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/math/chebyshev:raw_tensor",
-        "//src/math/chebyshev:tucker_tensor",
         "//src/option/table:surface_concepts",
         "@googletest//:gtest",
         "@googletest//:gtest_main",

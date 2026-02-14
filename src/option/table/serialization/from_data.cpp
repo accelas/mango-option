@@ -127,30 +127,13 @@ from_data<BSplineMultiKRefInner>(const PriceTableData& data) {
 }
 
 // ============================================================================
-// ChebyshevLeaf (chebyshev_4d): Tucker Chebyshev with EEP
+// ChebyshevLeaf (chebyshev_4d / chebyshev_4d_raw): Chebyshev with EEP
 // ============================================================================
 
-// Tucker Chebyshev surfaces serialize to raw values (Tucker expansion).
-// Reconstruction as Tucker would require re-decomposition which is not
-// supported. Use from_data<ChebyshevRawLeaf> instead, which accepts both
-// "chebyshev_4d" and "chebyshev_4d_raw" surface_type strings.
 template <>
 std::expected<PriceTable<ChebyshevLeaf>, PriceTableError>
 from_data<ChebyshevLeaf>(const PriceTableData& data) {
-    (void)data;
-    return std::unexpected(PriceTableError{
-        PriceTableErrorCode::InvalidConfig});
-}
-
-// ============================================================================
-// ChebyshevRawLeaf (chebyshev_4d_raw): Raw Chebyshev with EEP
-// ============================================================================
-
-template <>
-std::expected<PriceTable<ChebyshevRawLeaf>, PriceTableError>
-from_data<ChebyshevRawLeaf>(const PriceTableData& data) {
-    // Accept both "chebyshev_4d" and "chebyshev_4d_raw" since Tucker
-    // surfaces serialize to raw values.
+    // Accept both surface_type strings for backwards compatibility.
     if (data.surface_type != kChebyshev4DRaw &&
         data.surface_type != kChebyshev4D) {
         return std::unexpected(PriceTableError{
@@ -170,7 +153,7 @@ from_data<ChebyshevRawLeaf>(const PriceTableData& data) {
     auto bounds = bounds_from_data(data);
     if (!bounds) return std::unexpected(bounds.error());
 
-    return PriceTable<ChebyshevRawLeaf>(
+    return PriceTable<ChebyshevLeaf>(
         std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield);
 }
 
@@ -252,29 +235,13 @@ from_data<BSpline3DLeaf>(const PriceTableData& data) {
 }
 
 // ============================================================================
-// Chebyshev3DLeaf (chebyshev_3d): 3D dimensionless Chebyshev with EEP
+// Chebyshev3DLeaf (chebyshev_3d / chebyshev_3d_raw): 3D dimensionless Chebyshev
 // ============================================================================
 
-// The Chebyshev3DLeaf uses TuckerTensor<3>, but Tucker surfaces serialize
-// to raw values. Reconstruction as Tucker would require re-decomposition.
-// Same limitation as the 4D Tucker case.
 template <>
 std::expected<PriceTable<Chebyshev3DLeaf>, PriceTableError>
 from_data<Chebyshev3DLeaf>(const PriceTableData& data) {
-    (void)data;
-    return std::unexpected(PriceTableError{
-        PriceTableErrorCode::InvalidConfig});
-}
-
-// ============================================================================
-// Chebyshev3DRawLeaf (chebyshev_3d_raw): 3D dimensionless Raw Chebyshev with EEP
-// ============================================================================
-
-template <>
-std::expected<PriceTable<Chebyshev3DRawLeaf>, PriceTableError>
-from_data<Chebyshev3DRawLeaf>(const PriceTableData& data) {
-    // Accept both "chebyshev_3d" and "chebyshev_3d_raw" since Tucker
-    // surfaces serialize to raw values.
+    // Accept both surface_type strings for backwards compatibility.
     if (data.surface_type != kChebyshev3D &&
         data.surface_type != kChebyshev3DRaw) {
         return std::unexpected(PriceTableError{
@@ -294,7 +261,7 @@ from_data<Chebyshev3DRawLeaf>(const PriceTableData& data) {
     auto bounds = bounds_from_data(data);
     if (!bounds) return std::unexpected(bounds.error());
 
-    return PriceTable<Chebyshev3DRawLeaf>(
+    return PriceTable<Chebyshev3DLeaf>(
         std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield);
 }
 

@@ -8,7 +8,6 @@
 
 #include <array>
 #include <expected>
-#include <variant>
 
 namespace mango {
 
@@ -18,39 +17,34 @@ struct ChebyshevTableConfig {
     double K_ref;
     OptionType option_type;
     double dividend_yield = 0.0;
-    double tucker_epsilon = 1e-8;    // 0 = use RawTensor
 };
 
 struct ChebyshevTableResult {
-    std::variant<ChebyshevSurface, ChebyshevRawSurface> surface;
+    ChebyshevSurface surface;
     size_t n_pde_solves;
     double build_seconds;
 
     double price(double spot, double strike, double tau,
                  double sigma, double rate) const {
-        return std::visit([&](const auto& s) {
-            return s.price(spot, strike, tau, sigma, rate);
-        }, surface);
+        return surface.price(spot, strike, tau, sigma, rate);
     }
 
     double vega(double spot, double strike, double tau,
                 double sigma, double rate) const {
-        return std::visit([&](const auto& s) {
-            return s.vega(spot, strike, tau, sigma, rate);
-        }, surface);
+        return surface.vega(spot, strike, tau, sigma, rate);
     }
 
     std::expected<double, GreekError> delta(const PricingParams& params) const {
-        return std::visit([&](const auto& s) { return s.delta(params); }, surface);
+        return surface.delta(params);
     }
     std::expected<double, GreekError> gamma(const PricingParams& params) const {
-        return std::visit([&](const auto& s) { return s.gamma(params); }, surface);
+        return surface.gamma(params);
     }
     std::expected<double, GreekError> theta(const PricingParams& params) const {
-        return std::visit([&](const auto& s) { return s.theta(params); }, surface);
+        return surface.theta(params);
     }
     std::expected<double, GreekError> rho(const PricingParams& params) const {
-        return std::visit([&](const auto& s) { return s.rho(params); }, surface);
+        return surface.rho(params);
     }
 };
 

@@ -18,19 +18,6 @@ cc_library(
 )
 
 cc_library(
-    name = "tucker_tensor",
-    hdrs = ["tucker_tensor.hpp"],
-    copts = ["-fopenmp"],
-    deps = [
-        "//src/support:parallel",
-        "@eigen//:eigen",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/math/chebyshev",
-    include_prefix = "mango/math/chebyshev",
-)
-
-cc_library(
     name = "chebyshev_interpolant",
     hdrs = ["chebyshev_interpolant.hpp"],
     copts = ["-fopenmp"],
@@ -50,9 +37,3 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-# Convenience: interpolant + Tucker storage (pulls Eigen)
-cc_library(
-    name = "chebyshev_tucker",
-    deps = [":chebyshev_interpolant", ":tucker_tensor"],
-    visibility = ["//visibility:public"],
-)
