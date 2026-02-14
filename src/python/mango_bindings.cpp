@@ -17,7 +17,7 @@
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
-#include "mango/math/yield_curve.hpp"
+#include "mango/option/yield_curve.hpp"
 #include "mango/option/american_option_batch.hpp"
 
 namespace py = pybind11;

@@ -7,7 +7,7 @@
 #pragma once
 
 #include "mango/simple/option_types.hpp"
-#include "mango/math/yield_curve.hpp"
+#include "mango/option/yield_curve.hpp"
 #include "mango/option/option_spec.hpp"  // For RateSpec
 #include <optional>
 #include <string>

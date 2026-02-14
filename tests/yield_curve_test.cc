@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "mango/math/yield_curve.hpp"
+#include "mango/option/yield_curve.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

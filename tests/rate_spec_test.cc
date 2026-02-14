@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/option_spec.hpp"
-#include "mango/math/yield_curve.hpp"
+#include "mango/option/yield_curve.hpp"
 #include <gtest/gtest.h>
 
 TEST(RateSpecTest, DefaultIsDouble) {

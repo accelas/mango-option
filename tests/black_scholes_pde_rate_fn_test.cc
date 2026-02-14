@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/pde/operators/black_scholes_pde.hpp"
-#include "mango/math/yield_curve.hpp"
+#include "mango/option/yield_curve.hpp"
 #include <gtest/gtest.h>
 
 TEST(BlackScholesPDERateFnTest, ConstantRateFnViaLambda) {
