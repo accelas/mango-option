@@ -8,14 +8,7 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-cc_library(
-    name = "safe_math",
-    hdrs = ["safe_math.hpp"],
-    deps = ["//src/support:error_types"],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/math",
-    include_prefix = "mango/math",
-)
+
 
 cc_library(
     name = "lapack_banded_layout",

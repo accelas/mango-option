@@ -31,7 +31,6 @@
 #include "mango/math/bspline/bspline_collocation_workspace.hpp"
 #include "mango/support/parallel.hpp"
 #include "mango/support/thread_workspace.hpp"
-#include "mango/math/safe_math.hpp"
 #include <experimental/mdspan>
 #include <expected>
 #include <span>
@@ -139,19 +138,6 @@ public:
             }
         }
 
-        // Verify stride computation won't overflow
-        size_t stride_check = 1;
-        for (size_t i = N; i > 0; --i) {
-            auto result = safe_multiply(stride_check, grids[i - 1].size());
-            if (!result.has_value()) {
-                return std::unexpected(InterpolationError{
-                    InterpolationErrorCode::ValueSizeMismatch,
-                    grids[i - 1].size(),
-                    i - 1});
-            }
-            stride_check = result.value();
-        }
-
         // All grids valid, create fitter
         return BSplineNDSeparable(std::move(grids));
     }
@@ -185,17 +171,10 @@ public:
         std::vector<T>&& values,
         const Config& config = {})
     {
-        // Verify size with overflow check
+        // Verify size
         size_t expected_size = 1;
         for (size_t i = 0; i < grids_.size(); ++i) {
-            auto result = safe_multiply(expected_size, grids_[i].size());
-            if (!result.has_value()) {
-                return std::unexpected(InterpolationError{
-                    InterpolationErrorCode::ValueSizeMismatch,
-                    grids_[i].size(),
-                    i});
-            }
-            expected_size = result.value();
+            expected_size *= grids_[i].size();
         }
 
         if (values.size() != expected_size) {

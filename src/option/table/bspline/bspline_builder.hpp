@@ -2,7 +2,6 @@
 #pragma once
 
 #include "mango/math/bspline/bspline_nd_separable.hpp"
-#include "mango/math/safe_math.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
@@ -53,12 +52,8 @@ struct PriceTensorND {
     ///         - Shape overflow (product of dimensions exceeds SIZE_MAX)
     [[nodiscard]] static std::expected<PriceTensorND, std::string>
     create(std::array<size_t, N> shape) {
-        // Calculate total elements with overflow check
-        auto total_result = safe_product(shape);
-        if (!total_result.has_value()) {
-            return std::unexpected("Tensor shape overflow: product of dimensions exceeds SIZE_MAX");
-        }
-        size_t total = total_result.value();
+        size_t total = 1;
+        for (auto s : shape) total *= s;
 
         // Allocate aligned storage
         auto storage_ptr = std::make_shared<AlignedVector<double>>(total);
