@@ -55,7 +55,7 @@ concept SurfaceInterpolant = requires(const S& s, std::array<double, N> coords) 
 
 The generic adapter `SharedInterp<T, N>` (in `table/shared_interp.hpp`) wraps `shared_ptr<const T>` to satisfy the concept while preserving shared ownership. It forwards `eval()` and `partial()` unconditionally; `eval_second_partial()` is conditionally available via a `requires` clause — present only when `T` provides it.
 
-B-spline surfaces use `SharedBSplineInterp<N>`, a convenience alias for `SharedInterp<BSplineND<double, N>, N>`. The other implementation is `ChebyshevInterpolant<N, Storage>` (barycentric interpolation on Chebyshev-Gauss-Lobatto nodes, with `RawTensor` or `TuckerTensor` storage).
+B-spline surfaces use `SharedBSplineInterp<N>`, a convenience alias for `SharedInterp<BSplineND<double, N>, N>`. The other implementation is `ChebyshevInterpolant<N, RawTensor<N>>` (barycentric interpolation on Chebyshev-Gauss-Lobatto nodes).
 
 Why a concept instead of a base class? The two interpolants have fundamentally different capabilities. B-splines provide analytical second derivatives (`eval_second_partial`); Chebyshev does not. A base class would either leave the method unimplemented (runtime error) or force a least-common-denominator interface. A concept lets `TransformLeaf` detect the capability at compile time:
 
@@ -239,10 +239,9 @@ For reference, here are the full type alias expansions. The naming convention is
 | Alias | Expansion |
 |-------|-----------|
 | `BSplinePriceTable` | `PriceTable<EEPLayer<TransformLeaf<SharedInterp<BSplineND<double,4>,4>, StandardTransform4D>, AnalyticalEEP>>` |
-| `ChebyshevSurface` | Same structure with `ChebyshevInterpolant<4, TuckerTensor<4>>` |
-| `ChebyshevRawSurface` | Same with `RawTensor<4>` (no SVD compression) |
+| `ChebyshevSurface` | Same structure with `ChebyshevInterpolant<4, RawTensor<4>>` |
 | `BSpline3DPriceTable` | `PriceTable<EEPLayer<TransformLeaf<SharedInterp<BSplineND<double,3>,3>, DimensionlessTransform3D>, AnalyticalEEP>>` |
-| `Chebyshev3DPriceTable` | Same with `ChebyshevInterpolant<3, TuckerTensor<3>>` |
+| `Chebyshev3DPriceTable` | Same with `ChebyshevInterpolant<3, RawTensor<3>>` |
 
 **Segmented path** (raw prices, discrete dividends):
 

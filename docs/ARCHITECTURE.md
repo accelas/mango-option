@@ -292,7 +292,7 @@ BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>
 
 ### Type Erasure
 
-`InterpolatedIVSolver<Surface>` is templated on the concrete surface type, preserving full inlining within each instantiation. The factory returns `AnyInterpIVSolver`, which type-erases via a `std::variant` of all 7 solver instantiations (B-spline 4D, B-spline segmented, Chebyshev Tucker, Chebyshev raw, Chebyshev segmented, B-spline 3D, Chebyshev 3D). `std::visit` dispatches at the solve boundary, keeping the hot path (surface evaluation) monomorphic.
+`InterpolatedIVSolver<Surface>` is templated on the concrete surface type, preserving full inlining within each instantiation. The factory returns `AnyInterpIVSolver`, which type-erases via a `std::variant` of all 6 solver instantiations (B-spline 4D, B-spline segmented, Chebyshev 4D, Chebyshev segmented, B-spline 3D, Chebyshev 3D). `std::visit` dispatches at the solve boundary, keeping the hot path (surface evaluation) monomorphic.
 
 The `make_interpolated_iv_solver` factory selects the appropriate type based on the `backend` variant and `discrete_dividends` option. See [INTERPOLATION_FRAMEWORK.md](INTERPOLATION_FRAMEWORK.md) for the full dispatch tree.
 

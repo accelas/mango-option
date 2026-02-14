@@ -176,10 +176,9 @@ backend = mo.BSplineBackend()
 backend.maturity_grid = [0.1, 0.25, 0.5, 1.0, 2.0]
 config.backend = backend
 
-# Chebyshev backend (Tucker-compressed)
+# Chebyshev backend
 backend = mo.ChebyshevBackend()
 backend.maturity = 2.0
-backend.tucker_epsilon = 1e-8  # Set to 0 for RawTensor
 config.backend = backend
 ```
 
@@ -244,7 +243,7 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 | `IVSolverFactoryConfig` | Configuration for IV solver factory (grid, backend, solver params) |
 | `IVGrid` | Grid specification (moneyness, vol, rate arrays) |
 | `BSplineBackend` | B-spline interpolation backend config (maturity_grid) |
-| `ChebyshevBackend` | Chebyshev interpolation backend config (maturity, tucker_epsilon) |
+| `ChebyshevBackend` | Chebyshev interpolation backend config (maturity) |
 | `DiscreteDividendConfig` | Discrete dividend config (maturity, dividends, kref_config) |
 | `AdaptiveGridParams` | Adaptive grid refinement parameters |
 | `MultiKRefConfig` | Multi-reference-strike configuration for discrete dividends |
