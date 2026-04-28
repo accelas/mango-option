@@ -34,13 +34,11 @@
 #include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/math/bspline/bspline_basis.hpp"
 #include "mango/option/option_grid.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <array>
 #include <cmath>
 #include <format>
 #include <memory>
-#include <memory_resource>
 #include <stdexcept>
 #include <vector>
 
@@ -108,16 +106,8 @@ solve_prices(const GridAccuracyParams& accuracy, double q,
                 kVol, discrete_divs);
 
             auto [grid_spec, time_domain] = estimate_pde_grid(params, accuracy);
-            size_t n = grid_spec.n_points();
-            std::pmr::vector<double> buffer(
-                PDEWorkspace::required_size(n), std::pmr::get_default_resource());
-            auto workspace = PDEWorkspace::from_buffer(buffer, n);
-            if (!workspace) {
-                result[ti][ki] = std::numeric_limits<double>::quiet_NaN();
-                continue;
-            }
             auto solver = AmericanOptionSolver::create(
-                params, *workspace,
+                params,
                 PDEGridConfig{.grid_spec = grid_spec,
                               .n_time = time_domain.n_steps()});
             if (!solver) {
@@ -195,15 +185,10 @@ static void BM_PDE_Pricing(benchmark::State& state) {
     size_t n = grid_spec.n_points();
     size_t nt = time_domain.n_steps();
 
-    // Pre-allocate workspace outside timing loop
-    std::pmr::vector<double> buffer(
-        PDEWorkspace::required_size(n), std::pmr::get_default_resource());
-
     double price = 0.0;
     for (auto _ : state) {
-        auto workspace = PDEWorkspace::from_buffer(buffer, n);
         auto solver = AmericanOptionSolver::create(
-            params, *workspace,
+            params,
             PDEGridConfig{.grid_spec = grid_spec, .n_time = nt});
         auto result = solver->solve();
         price = result ? result->value_at(kSpot) : 0.0;

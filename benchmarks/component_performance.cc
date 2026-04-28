@@ -12,7 +12,6 @@
  */
 
 #include "mango/option/american_option.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
 #include "mango/math/bspline/bspline_nd_separable.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
@@ -23,7 +22,6 @@
 #include <chrono>
 #include <cmath>
 #include <memory>
-#include <memory_resource>
 #include <stdexcept>
 #include <vector>
 
@@ -100,22 +98,8 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20};
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        state.SkipWithError(workspace_result.error().c_str());
-        return;
-    }
-    auto workspace = workspace_result.value();
-
     for (auto _ : state) {
-        auto solver = AmericanOptionSolver::create(params, workspace).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -131,22 +115,8 @@ BENCHMARK(BM_AmericanPut_ATM_1Y)->Arg(101)->Arg(201)->Arg(501);
 static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.30};
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        state.SkipWithError(workspace_result.error().c_str());
-        return;
-    }
-    auto workspace = workspace_result.value();
-
     for (auto _ : state) {
-        auto solver = AmericanOptionSolver::create(params, workspace).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -162,22 +132,8 @@ BENCHMARK(BM_AmericanPut_OTM_3M)->Arg(500)->Arg(1000)->Arg(2000);
 static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.25};
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        state.SkipWithError(workspace_result.error().c_str());
-        return;
-    }
-    auto workspace = workspace_result.value();
-
     for (auto _ : state) {
-        auto solver = AmericanOptionSolver::create(params, workspace).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -197,22 +153,8 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
         {Dividend{0.25, 2.0}, Dividend{0.5, 2.0}, Dividend{0.75, 2.0}}
     };
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        state.SkipWithError(workspace_result.error().c_str());
-        return;
-    }
-    auto workspace = workspace_result.value();
-
     for (auto _ : state) {
-        auto solver = AmericanOptionSolver::create(params, workspace).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -331,24 +273,12 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
 
     auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        state.SkipWithError(workspace_result.error().c_str());
-        return;
-    }
-    auto workspace = workspace_result.value();
-
     double total_time_ns = 0.0;
     size_t iterations = 0;
 
     for (auto _ : state) {
         auto start = std::chrono::high_resolution_clock::now();
-        auto solver = AmericanOptionSolver::create(params, workspace).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         auto end = std::chrono::high_resolution_clock::now();
 
@@ -391,27 +321,13 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
         batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
-    auto [grid_spec, time_domain] = estimate_batch_pde_grid(batch);
-    (void)time_domain;  // Not used in this benchmark
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        state.SkipWithError(workspace_result.error().c_str());
-        return;
-    }
-
     for (auto _ : state) {
         std::vector<std::expected<AmericanOptionResult, SolverError>> results;
         results.reserve(batch_size);
 
         // Sequential processing for now (batch API may not exist)
         for (const auto& params : batch) {
-            auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
+            auto solver = AmericanOptionSolver::create(params).value();
             results.push_back(solver.solve());
         }
 

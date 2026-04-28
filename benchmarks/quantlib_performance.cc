@@ -14,9 +14,7 @@
  */
 
 #include "mango/option/american_option.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
 #include <benchmark/benchmark.h>
-#include <memory_resource>
 #include <stdexcept>
 
 // QuantLib includes
@@ -86,21 +84,8 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        state.SkipWithError(workspace_result.error().c_str());
-        return;
-    }
-
     for (auto _ : state) {
-        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -141,21 +126,8 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.30);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        state.SkipWithError(workspace_result.error().c_str());
-        return;
-    }
-
     for (auto _ : state) {
-        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -196,21 +168,8 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.25);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        state.SkipWithError(workspace_result.error().c_str());
-        return;
-    }
-
     for (auto _ : state) {
-        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -255,19 +214,8 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
 
     auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        state.SkipWithError(workspace_result.error().c_str());
-        return;
-    }
-
     for (auto _ : state) {
-        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));

@@ -63,10 +63,7 @@ int main() {
                 .rate = rate, .dividend_yield = div_yield, .option_type = OptionType::PUT},
             tc.vol_true);
         auto [gs, td] = estimate_pde_grid(params, make_grid_accuracy(GridAccuracyProfile::High));
-        std::pmr::synchronized_pool_resource pool;
-        std::pmr::vector<double> buf(PDEWorkspace::required_size(gs.n_points()), &pool);
-        auto ws = PDEWorkspace::from_buffer(buf, gs.n_points()).value();
-        auto solver = AmericanOptionSolver::create(params, ws,
+        auto solver = AmericanOptionSolver::create(params,
             PDEGridConfig{gs, td.n_steps(), {}}).value();
         auto result = solver.solve();
         if (!result) continue;

@@ -14,12 +14,10 @@
  */
 
 #include "mango/option/american_option.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <array>
 #include <cmath>
 #include <format>
-#include <memory_resource>
 #include <vector>
 
 // QuantLib includes
@@ -114,11 +112,7 @@ static double solve_mango_vanilla(const TestCase& tc, const BaseGrid& base,
     auto grid_spec = GridSpec<double>::sinh_spaced(base.x_min, base.x_max, nx, alpha).value();
     PDEGridConfig grid_config{.grid_spec = grid_spec, .n_time = nt};
 
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(nx), &pool);
-    auto workspace = PDEWorkspace::from_buffer(buffer, nx).value();
-
-    auto solver = AmericanOptionSolver::create(params, workspace, grid_config).value();
+    auto solver = AmericanOptionSolver::create(params, grid_config).value();
     auto result = solver.solve();
     if (!result) throw std::runtime_error("Vanilla solver error");
     return result->value_at(tc.spot);
@@ -351,11 +345,7 @@ static double solve_mango_div(const DivTestCase& tc, const BaseGrid& base, int s
         .mandatory_times = mandatory_tau,
     };
 
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(nx), &pool);
-    auto workspace = PDEWorkspace::from_buffer(buffer, nx).value();
-
-    auto solver = AmericanOptionSolver::create(params, workspace, grid_config).value();
+    auto solver = AmericanOptionSolver::create(params, grid_config).value();
     auto result = solver.solve();
     if (!result) throw std::runtime_error("Dividend solver error");
     return result->value_at(tc.spot);

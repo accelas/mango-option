@@ -139,13 +139,7 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
 
     auto solve_price = [&](double K, double tau) -> double {
         PricingParams p{OptionSpec{.spot = spot, .strike = K, .maturity = tau, .rate = rate, .dividend_yield = fix.dividend_yield, .option_type = OptionType::PUT}, sigma};
-        auto [gs, td] = estimate_pde_grid(p);
-        size_t n = gs.n_points();
-        std::pmr::synchronized_pool_resource pool;
-        std::pmr::vector<double> buf(PDEWorkspace::required_size(n), &pool);
-        auto ws = PDEWorkspace::from_buffer(buf, n);
-        if (!ws) throw std::runtime_error("Failed to create workspace");
-        auto solver = AmericanOptionSolver::create(p, ws.value()).value();
+        auto solver = AmericanOptionSolver::create(p).value();
         auto r = solver.solve();
         if (!r) throw std::runtime_error("PDE solver failed");
         return r->value_at(spot);
@@ -156,15 +150,7 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
     for (double K : strikes) {
         for (double tau : maturities) {
             PricingParams params{OptionSpec{.spot = spot, .strike = K, .maturity = tau, .rate = rate, .dividend_yield = fix.dividend_yield, .option_type = OptionType::PUT}, sigma};
-            auto [grid_spec, time_domain] = estimate_pde_grid(params);
-            size_t n = grid_spec.n_points();
-            std::pmr::synchronized_pool_resource pool;
-            std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-            auto workspace = PDEWorkspace::from_buffer(buffer, n);
-            if (!workspace) {
-                throw std::runtime_error("Failed to create workspace");
-            }
-            auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
+            auto solver = AmericanOptionSolver::create(params).value();
             auto result = solver.solve();
             if (!result) {
                 throw std::runtime_error("PDE solver failed");
