@@ -8,7 +8,6 @@
 #define MANGO_AMERICAN_OPTION_HPP
 
 #include "mango/pde/core/trbdf2_config.hpp"
-#include "mango/pde/operators/black_scholes_pde.hpp"
 #include "mango/option/option_concepts.hpp"
 #include <expected>
 #include "mango/support/error_types.hpp"
@@ -18,8 +17,6 @@
 #include "mango/option/grid_spec_types.hpp"
 #include <vector>
 #include <memory>
-#include <memory_resource>
-#include <cmath>
 #include <functional>
 #include <optional>
 
