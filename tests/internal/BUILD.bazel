@@ -4,15 +4,14 @@ load("@rules_cc//cc:defs.bzl", "cc_test")
 package(default_visibility = ["//visibility:private"])
 
 # White-box tests for PDE solver internals. These exercise types
-# (PDEWorkspace, PDESolver, SpatialOperator) that move to
-# //src/pde/internal:workspace in Task 13. For now, deps still
-# reference //src/pde/core: targets — Task 13 swaps them.
+# (PDEWorkspace, PDESolver, SpatialOperator) that live in
+# //src/pde/internal:workspace.
 
 cc_test(
     name = "pde_workspace_test",
     srcs = ["pde_workspace_test.cc"],
     deps = [
-        "//src/pde/core:pde_workspace",
+        "//src/pde/internal:workspace",
         "@googletest//:gtest_main",
     ],
 )
@@ -22,7 +21,7 @@ cc_test(
     size = "small",
     srcs = ["american_pde_workspace_test.cc"],
     deps = [
-        "//src/pde/core:american_pde_workspace",
+        "//src/pde/internal:workspace",
         "//src/support:thread_workspace",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -47,11 +46,9 @@ cc_test(
     name = "pde_solver_test",
     srcs = ["pde_solver_test.cc"],
     deps = [
-        "//src/pde/core:pde_solver",
-        "//src/pde/core:pde_workspace",
+        "//src/pde/internal:workspace",
         "//src/pde/core:grid",
         "//src/pde/core:boundary_conditions",
-        "//src/pde/operators:operator_factory",
         "//src/pde/operators:laplacian_pde",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -69,11 +66,9 @@ cc_test(
 #     size = "small",
 #     srcs = ["temporal_event_test.cc"],
 #     deps = [
-#         "//src/pde/core:pde_solver",
-#         "//src/pde/core:pde_workspace",
+#         "//src/pde/internal:workspace",
 #         "//src/pde/core:grid",
 #         "//src/pde/operators:laplacian_pde",
-#         "//src/pde/operators:operator_factory",
 #         "//src/pde/core:boundary_conditions",
 #         "@googletest//:gtest_main",
 #     ],
@@ -84,11 +79,9 @@ cc_test(
     name = "spatial_operator_jacobian_test",
     srcs = ["spatial_operator_jacobian_test.cc"],
     deps = [
-        "//src/pde/operators:spatial_operator",
+        "//src/pde/internal:workspace",
         "//src/pde/operators:black_scholes_pde",
-        "//src/pde/operators:operator_factory",
         "//src/pde/core:grid",
-        "//src/pde/core:pde_workspace",
         "@googletest//:gtest_main",
     ],
 )
@@ -97,11 +90,9 @@ cc_test(
     name = "pde_solver_snapshot_test",
     srcs = ["pde_solver_snapshot_test.cc"],
     deps = [
-        "//src/pde/core:pde_solver",
-        "//src/pde/core:pde_workspace",
+        "//src/pde/internal:workspace",
         "//src/pde/core:grid",
         "//src/pde/core:boundary_conditions",
-        "//src/pde/operators:operator_factory",
         "//src/pde/operators:laplacian_pde",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -118,11 +109,9 @@ cc_test(
     size = "small",
     srcs = ["obstacle_test.cc"],
     deps = [
-        "//src/pde/core:pde_solver",
+        "//src/pde/internal:workspace",
         "//src/pde/core:grid",
-        "//src/pde/core:pde_workspace",
         "//src/pde/operators:laplacian_pde",
-        "//src/pde/operators:operator_factory",
         "//src/pde/core:boundary_conditions",
         "@googletest//:gtest_main",
     ],

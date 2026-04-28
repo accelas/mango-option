@@ -7,7 +7,7 @@
 #ifndef MANGO_AMERICAN_OPTION_HPP
 #define MANGO_AMERICAN_OPTION_HPP
 
-#include "mango/pde/core/pde_solver.hpp"
+#include "mango/pde/core/trbdf2_config.hpp"
 #include "mango/pde/operators/black_scholes_pde.hpp"
 #include "mango/option/option_concepts.hpp"
 #include <expected>

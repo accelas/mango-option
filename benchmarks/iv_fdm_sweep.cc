@@ -19,7 +19,7 @@
 #include "iv_benchmark_ql.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/iv_solver.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/pde/internal/pde_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <array>
 #include <chrono>

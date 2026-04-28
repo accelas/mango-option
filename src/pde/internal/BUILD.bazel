@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: MIT
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:private"])
+
+cc_library(
+    name = "workspace",
+    hdrs = [
+        "pde_workspace.hpp",
+        "american_pde_workspace.hpp",
+        "pde_solver.hpp",
+        "spatial_operator.hpp",
+        "operator_factory.hpp",
+    ],
+    visibility = [
+        "//src/option:__pkg__",
+        "//tests/internal:__pkg__",
+        "//benchmarks:__pkg__",
+    ],
+    deps = [
+        "//src/math:thomas_solver",
+        "//src/math:tridiagonal_matrix_view",
+        "//src/math:root_finding",
+        "//src/pde/core:grid",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/core:time_domain",
+        "//src/pde/core:trbdf2_config",
+        "//src/pde/operators:centered_difference",
+        "//src/support:error_types",
+        "//src/support:lifetime",
+        "//src/support:parallel",
+    ],
+    strip_include_prefix = "/src/pde/internal",
+    include_prefix = "mango/pde/internal",
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+)

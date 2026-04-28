@@ -9,12 +9,12 @@
  */
 
 #include "mango/option/american_option.hpp"
-#include "mango/pde/core/pde_solver.hpp"
-#include "mango/pde/core/american_pde_workspace.hpp"
+#include "mango/pde/internal/pde_solver.hpp"
+#include "mango/pde/internal/american_pde_workspace.hpp"
 #include "mango/pde/core/boundary_conditions.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/pde/core/time_domain.hpp"
-#include "mango/pde/operators/operator_factory.hpp"
+#include "mango/pde/internal/operator_factory.hpp"
 #include "mango/pde/operators/black_scholes_pde.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/dividend_utils.hpp"

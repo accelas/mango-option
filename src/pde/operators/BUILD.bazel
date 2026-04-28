@@ -24,30 +24,6 @@ cc_library(
     include_prefix = "mango/pde/operators",
 )
 
-cc_library(
-    name = "spatial_operator",
-    hdrs = ["spatial_operator.hpp"],
-    deps = [
-        ":centered_difference",
-        "//src/pde/core:grid",
-        "//src/math:tridiagonal_matrix_view",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/pde/operators",
-    include_prefix = "mango/pde/operators",
-)
-
-cc_library(
-    name = "operator_factory",
-    hdrs = ["operator_factory.hpp"],
-    deps = [
-        ":spatial_operator",
-        "//src/pde/core:grid",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/pde/operators",
-    include_prefix = "mango/pde/operators",
-)
 
 cc_library(
     name = "centered_difference",

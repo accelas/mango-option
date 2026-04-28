@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mango/pde/operators/spatial_operator.hpp"
+#include "mango/pde/internal/spatial_operator.hpp"
 #include "mango/pde/core/grid.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/pde/internal/pde_workspace.hpp"
 #include <memory>
 
 namespace mango::operators {
