@@ -28,17 +28,12 @@ bool run_gamma_oscillation_case(const SweepCase& test_case) {
             .rate = kRate, .dividend_yield = kDividendYield, .option_type = OptionType::PUT},
         test_case.vol);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-    size_t n = grid_spec.n_points();
-
-    std::vector<double> buffer(PDEWorkspace::required_size(n));
-    auto workspace = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace.has_value()) {
-        ADD_FAILURE() << "Workspace creation failed";
+    auto solver_result = AmericanOptionSolver::create(params);
+    if (!solver_result.has_value()) {
+        ADD_FAILURE() << "Solver creation failed";
         return false;
     }
-
-    auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
+    auto solver = std::move(*solver_result);
     auto result = solver.solve();
     if (!result.has_value()) {
         ADD_FAILURE() << "Solver failed";
@@ -46,6 +41,7 @@ bool run_gamma_oscillation_case(const SweepCase& test_case) {
     }
 
     auto grid = result->grid();
+    size_t n = grid->n_space();
     auto solution = grid->solution();
     auto x_grid = grid->x();
 

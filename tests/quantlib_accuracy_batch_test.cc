@@ -224,17 +224,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
             .option_type = OptionType::PUT},
         0.20);
 
-    // Use automatic grid estimation
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    ASSERT_TRUE(workspace_result.has_value());
-
-    auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
+    auto solver = AmericanOptionSolver::create(params).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
@@ -245,8 +235,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
     EXPECT_LT(rel_error, 1.0)
         << "Convergence test: " << rel_error << "%"
         << "\n  Mango: $" << mango_price
-        << "\n  Reference: $" << ql_reference.price
-        << "\n  Grid: " << grid_spec.n_points() << "x" << time_domain.n_steps();
+        << "\n  Reference: $" << ql_reference.price;
 }
 
 // ============================================================================
@@ -260,16 +249,7 @@ TEST(QuantLibBatchTest, Greeks_ATM) {
             .option_type = OptionType::PUT},
         0.20);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    ASSERT_TRUE(workspace_result.has_value());
-
-    auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
+    auto solver = AmericanOptionSolver::create(params).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 

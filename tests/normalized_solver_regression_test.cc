@@ -101,15 +101,9 @@ TEST(NormalizedSolverRegressionTest, SetSnapshotTimesMethod) {
     ASSERT_TRUE(grid_spec_result.has_value());
     auto grid_spec = grid_spec_result.value();
 
-    size_t n_points = grid_spec.n_points();
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n_points), std::pmr::get_default_resource());
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n_points);
-    ASSERT_TRUE(workspace_result.has_value());
-    auto workspace = workspace_result.value();
-
     // Create solver with custom grid to avoid auto-estimation
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params.maturity, 100);
-    auto solver = AmericanOptionSolver::create(params, workspace,
+    auto solver = AmericanOptionSolver::create(params,
         PDEGridConfig{grid_spec, time_domain.n_steps(), {}}).value();
 
     // Set snapshot times using the new method

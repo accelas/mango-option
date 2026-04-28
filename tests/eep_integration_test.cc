@@ -6,9 +6,7 @@
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/american_option.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
 #include <gtest/gtest.h>
-#include <memory_resource>
 #include <cmath>
 
 namespace mango {
@@ -70,17 +68,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
 
     // Direct PDE solve for comparison
     PricingParams params(OptionSpec{.spot = S, .strike = K, .maturity = tau, .rate = r, .option_type = OptionType::PUT}, sigma);
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    size_t n_space = grid_spec.n_points();
-    size_t ws_size = PDEWorkspace::required_size(n_space);
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(ws_size, &pool);
-
-    auto ws = PDEWorkspace::from_buffer(buffer, n_space);
-    ASSERT_TRUE(ws.has_value()) << ws.error();
-
-    auto solver = AmericanOptionSolver::create(params, std::move(*ws)).value();
+    auto solver = AmericanOptionSolver::create(params).value();
     auto pde_result = solver.solve();
     ASSERT_TRUE(pde_result.has_value())
         << "PDE solve failed: " << static_cast<int>(pde_result.error().code);

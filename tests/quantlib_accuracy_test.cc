@@ -19,7 +19,6 @@
 #include "mango/option/iv_solver.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
-#include <memory_resource>
 
 // QuantLib includes
 #include <ql/quantlib.hpp>
@@ -103,24 +102,14 @@ void test_scenario(
 
     // Mango-Option pricing with auto-estimation (production mode)
     PricingParams mango_params(
-        spot, strike, maturity, rate, dividend_yield,
-        is_call ? OptionType::CALL : OptionType::PUT, volatility);
+        OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+            .rate = rate, .dividend_yield = dividend_yield,
+            .option_type = is_call ? OptionType::CALL : OptionType::PUT},
+        volatility);
 
-    // Use automatic grid estimation (matches production usage)
-    auto [grid_spec, time_domain] = estimate_pde_grid(mango_params);
-
-    // Allocate workspace buffer
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
-    auto workspace = workspace_result.value();
-
-    auto solver = AmericanOptionSolver::create(mango_params, workspace).value();
+    auto solver = AmericanOptionSolver::create(mango_params).value();
     auto mango_result = solver.solve();
-    ASSERT_TRUE(mango_result.has_value()) << mango_result.error().message;
+    ASSERT_TRUE(mango_result.has_value()) << mango_result.error();
 
     // QuantLib reference
     auto ql_result = price_american_option_quantlib(
@@ -206,21 +195,11 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
         1001, 10000);
 
     PricingParams params(
-        100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
+        0.20);
 
-    // Use automatic grid estimation (production mode)
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate workspace buffer
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    ASSERT_TRUE(workspace_result.has_value());
-    auto workspace = workspace_result.value();
-
-    auto solver = AmericanOptionSolver::create(params, workspace).value();
+    auto solver = AmericanOptionSolver::create(params).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
@@ -232,8 +211,7 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
     EXPECT_LT(rel_error, 1.0)
         << "Convergence test failed"
         << "\n  Mango:     $" << mango_price
-        << "\n  Reference: $" << ql_reference.price
-        << "\n  Grid:      " << grid_spec.n_points() << "x" << n_time;
+        << "\n  Reference: $" << ql_reference.price;
 }
 
 // ============================================================================
@@ -242,21 +220,11 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
 
 TEST(QuantLibAccuracyTest, Greeks_ATM) {
     PricingParams params(
-        100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
+        0.20);
 
-    // Use automatic grid estimation (production mode)
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate workspace buffer
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    ASSERT_TRUE(workspace_result.has_value());
-    auto workspace = workspace_result.value();
-
-    auto solver = AmericanOptionSolver::create(params, workspace).value();
+    auto solver = AmericanOptionSolver::create(params).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
@@ -307,11 +275,11 @@ void test_iv_scenario(
         201, 2000);
 
     // Solve for IV using mango with auto-estimation (production mode)
-    IVQuery query{
-        spot, strike, maturity, rate, dividend_yield,
-        is_call ? OptionType::CALL : OptionType::PUT,
-        ql_result.price
-    };
+    IVQuery query(
+        OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+            .rate = rate, .dividend_yield = dividend_yield,
+            .option_type = is_call ? OptionType::CALL : OptionType::PUT},
+        ql_result.price);
 
     IVSolverConfig config;
     config.root_config.max_iter = 100;
@@ -321,19 +289,19 @@ void test_iv_scenario(
     IVSolver solver(config);
     auto iv_result = solver.solve(query);
 
-    ASSERT_TRUE(iv_result.converged)
-        << "IV solver failed: " << iv_result.failure_reason.value_or("unknown");
+    ASSERT_TRUE(iv_result.has_value())
+        << "IV solver failed: " << static_cast<int>(iv_result.error().code);
 
     // Check accuracy
-    double vol_error = std::abs(iv_result.implied_vol - true_volatility);
+    double vol_error = std::abs(iv_result->implied_vol - true_volatility);
     double vol_rel_error = (vol_error / true_volatility) * 100.0;
 
     EXPECT_LT(vol_rel_error, tolerance_pct)
         << "IV relative error: " << vol_rel_error << "%"
         << "\n  True vol:     " << true_volatility
-        << "\n  Recovered IV: " << iv_result.implied_vol
+        << "\n  Recovered IV: " << iv_result->implied_vol
         << "\n  Abs error:    " << vol_error
-        << "\n  Iterations:   " << iv_result.iterations;
+        << "\n  Iterations:   " << iv_result->iterations;
 }
 
 TEST(QuantLibAccuracyTest, IV_ATM_Put_1Y) {

@@ -5,7 +5,6 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <memory>
-#include <memory_resource>
 #include <vector>
 
 namespace mango {
@@ -13,10 +12,6 @@ namespace {
 
 class AmericanOptionPricingTest : public ::testing::Test {
 protected:
-    void SetUp() override {
-        pool_ = std::make_unique<std::pmr::synchronized_pool_resource>();
-    }
-
     [[nodiscard]] AmericanOptionResult Solve(const PricingParams& params) const {
         // Use convenience function that creates appropriately-sized workspace
         auto result = solve_american_option(params);
@@ -31,8 +26,6 @@ protected:
         }
         return std::move(result.value());
     }
-
-    std::unique_ptr<std::pmr::synchronized_pool_resource> pool_;
 };
 
 TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {
@@ -321,29 +314,6 @@ TEST_F(AmericanOptionPricingTest, NormalizedChainFallsBackWithDividends) {
         ASSERT_TRUE(results.results[i].has_value()) << "Batch solve failed for index " << i;
         EXPECT_GT(results.results[i]->value_at(batch[i].spot), 0.0);
     }
-}
-
-// ===========================================================================
-// Regression: create() must validate workspace/grid at construction time
-// Bug: Mismatch between workspace size and grid was only caught at solve()
-// ===========================================================================
-
-TEST(AmericanOptionTest, CreateRejectsMismatchedWorkspace) {
-    // #306: Mismatch should fail at create(), not at solve()
-    PricingParams params(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-                   .rate = 0.05, .option_type = OptionType::PUT},
-        0.20);
-
-    // Create a workspace that is deliberately too small (10 points)
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(10));
-    auto ws = PDEWorkspace::from_buffer(buffer, 10);
-    ASSERT_TRUE(ws.has_value());
-
-    // create() should now fail because auto-estimated grid needs ~100+ points
-    auto result = AmericanOptionSolver::create(params, ws.value());
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
 }
 
 // ===========================================================================
