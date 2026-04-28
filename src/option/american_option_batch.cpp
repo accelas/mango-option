@@ -6,8 +6,6 @@
 
 #include "mango/option/american_option_batch.hpp"
 #include "mango/support/ivcalc_trace.h"
-#include "mango/support/thread_workspace.hpp"
-#include "mango/pde/core/american_pde_workspace.hpp"
 #include <cmath>
 #include <algorithm>
 #include <ranges>
@@ -441,153 +439,32 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
         }
     }
 
-    // Precompute workspace size outside parallel region
-    size_t workspace_size_bytes = 0;
-    size_t shared_n_space = 0;
-
-    if (use_shared_grid && shared_grid.has_value()) {
-        auto [grid_spec, time_domain] = shared_grid.value();
-        shared_n_space = grid_spec.n_points();
-        workspace_size_bytes = AmericanPDEWorkspace::required_bytes(shared_n_space);
-    } else {
-        // For per-option grids, estimate max workspace size across all options
-        if (resolved_custom_grid.has_value()) {
-            // Use resolved custom grid size
-            auto [grid_spec, time_domain] = resolved_custom_grid.value();
-            size_t n = grid_spec.n_points();
-            workspace_size_bytes = AmericanPDEWorkspace::required_bytes(n);
-        } else {
-            // Estimate based on all options
-            for (const auto& p : params) {
-                auto [grid_spec, time_domain] = estimate_pde_grid(p, grid_accuracy_);
-                size_t n = grid_spec.n_points();
-                workspace_size_bytes = std::max(workspace_size_bytes, AmericanPDEWorkspace::required_bytes(n));
-            }
-        }
-    }
-
     MANGO_PRAGMA_PARALLEL
     {
-        // Per-thread workspace buffer (64-byte aligned)
-        ThreadWorkspaceBuffer buffer(workspace_size_bytes);
-
-        // Per-thread shared grid (only for shared grid strategy)
-        std::shared_ptr<Grid<double>> thread_grid;
-
-        if (use_shared_grid && shared_grid.has_value()) {
-            auto [grid_spec, time_domain] = shared_grid.value();
-
-            // Create Grid with solution storage
-            auto grid_result = Grid<double>::create(grid_spec, time_domain);
-            if (grid_result.has_value()) {
-                thread_grid = grid_result.value();
-            }
-            // If creation failed, thread_grid remains null and we'll fail in loop
-        }
-
         // Use static scheduling to avoid false sharing on results vector
         // Each thread gets a contiguous block of iterations
         MANGO_PRAGMA_FOR_STATIC
         for (size_t i = 0; i < params.size(); ++i) {
-            // Get or create grid and workspace for this iteration
-            std::shared_ptr<Grid<double>> grid;
-            PDEWorkspace* workspace_ptr = nullptr;
-            std::optional<AmericanPDEWorkspace> workspace_storage;
-            std::vector<std::byte> heap_buffer_storage;  // Heap fallback buffer (persists for iteration)
-
-            // Track the grid config used for this solve (to pass to solver)
-            std::optional<std::pair<GridSpec<double>, TimeDomain>> solver_grid_config;
-
+            // Resolve grid spec for this contract
+            std::optional<PDEGridSpec> solver_grid_spec;
             if (use_shared_grid) {
-                // Shared grid: reuse thread grid and buffer
-                grid = thread_grid;
-                solver_grid_config = shared_grid;  // Use shared grid config
-                if (grid) {
-                    auto ws_result = AmericanPDEWorkspace::from_bytes(buffer.bytes(), shared_n_space);
-                    if (ws_result.has_value()) {
-                        workspace_storage = std::move(ws_result.value());
-                        workspace_ptr = &workspace_storage->workspace();
-                    }
-                }
+                solver_grid_spec = PDEGridSpec{PDEGridConfig{
+                    shared_grid->first,
+                    shared_grid->second.n_steps(), {}}};
             } else {
-                // Per-option grid: create workspace for this option
                 auto [grid_spec, time_domain] = resolved_custom_grid.has_value()
                     ? resolved_custom_grid.value()
                     : estimate_pde_grid(params[i], grid_accuracy_);
-
-                solver_grid_config = std::make_pair(grid_spec, time_domain);
-
-                // Create Grid with solution storage
-                auto grid_result = Grid<double>::create(grid_spec, time_domain);
-                if (grid_result.has_value()) {
-                    grid = grid_result.value();
-
-                    // Create workspace from buffer (zero allocations)
-                    size_t n = grid_spec.n_points();
-                    auto ws_result = AmericanPDEWorkspace::from_bytes(buffer.bytes(), n);
-                    if (ws_result.has_value()) {
-                        workspace_storage = std::move(ws_result.value());
-                        workspace_ptr = &workspace_storage->workspace();
-                    }
-                }
+                solver_grid_spec = PDEGridSpec{PDEGridConfig{
+                    grid_spec, time_domain.n_steps(), {}}};
             }
 
-            // Fallback to heap if buffer allocation failed
-            if (!grid || !workspace_ptr) {
-                // Try allocating from default resource (heap) as fallback
-                // Determine grid to use
-                auto [grid_spec, time_domain] = use_shared_grid && shared_grid.has_value()
-                    ? shared_grid.value()
-                    : (resolved_custom_grid.has_value()
-                        ? resolved_custom_grid.value()
-                        : estimate_pde_grid(params[i], grid_accuracy_));
-
-                // Update solver_grid_config for fallback path
-                solver_grid_config = std::make_pair(grid_spec, time_domain);
-
-                auto grid_result = Grid<double>::create(grid_spec, time_domain);
-                if (grid_result.has_value()) {
-                    grid = grid_result.value();
-
-                    size_t n = grid_spec.n_points();
-                    // Allocate heap buffer that persists for the entire iteration
-                    heap_buffer_storage.resize(AmericanPDEWorkspace::required_bytes(n));
-                    auto ws_result = AmericanPDEWorkspace::from_bytes(heap_buffer_storage, n);
-                    if (ws_result.has_value()) {
-                        workspace_storage = std::move(ws_result.value());
-                        workspace_ptr = &workspace_storage->workspace();
-                    }
-                }
-
-                // If still failed after heap fallback, report error
-                if (!grid || !workspace_ptr) {
-                    results[i] = std::unexpected(SolverError{
-                        .code = SolverErrorCode::InvalidConfiguration,
-                        // error code set above,
-                        .iterations = 0
-                    });
-                    MANGO_PRAGMA_ATOMIC
-                    ++failed_count;
-                    continue;
-                }
-            }
-
-            // Create solver using PDEWorkspace API with explicit grid config
-            // This ensures workspace size matches the grid that will be used
-            // Convert resolved pair to PDEGridConfig for new constructor API
-            std::optional<PDEGridSpec> solver_grid_spec;
-            if (solver_grid_config.has_value()) {
-                auto& [gs, td] = *solver_grid_config;
-                solver_grid_spec = PDEGridConfig{gs, td.n_steps(), {}};
-            }
-            auto solver_result = AmericanOptionSolver::create(params[i], *workspace_ptr, solver_grid_spec);
+            auto solver_result = AmericanOptionSolver::create(params[i], solver_grid_spec);
             if (!solver_result) {
-                results[i].~expected();
-                new (&results[i]) std::expected<AmericanOptionResult, SolverError>(
-                    std::unexpected(SolverError{
-                        .code = SolverErrorCode::InvalidConfiguration,
-                        .iterations = 0
-                    }));
+                results[i] = std::unexpected(SolverError{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .iterations = 0
+                });
                 MANGO_PRAGMA_ATOMIC
                 ++failed_count;
                 continue;
@@ -619,7 +496,6 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 ++failed_count;
             }
 
-            // ThreadWorkspaceBuffer handles memory automatically - no release() needed
         }
     }
 
