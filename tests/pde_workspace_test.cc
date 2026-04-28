@@ -163,5 +163,11 @@ TEST(PDEWorkspaceTest, ConstAccessors) {
     }
 }
 
+TEST(PDEWorkspaceTest, RequiredSizeIsConstexpr) {
+    constexpr size_t s = PDEWorkspace::required_size(1024);
+    static_assert(s > 0, "required_size must be usable in constant expressions");
+    EXPECT_GT(s, 0u);
+}
+
 }  // namespace
 }  // namespace mango
