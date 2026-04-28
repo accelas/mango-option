@@ -880,7 +880,6 @@ cc_test(
     srcs = ["american_option_auto_api_test.cc"],
     deps = [
         "//src/option:american_option",
-        "//src/pde/core:pde_workspace",
         "@googletest//:gtest_main",
     ],
 )

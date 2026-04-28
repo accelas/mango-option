@@ -324,7 +324,6 @@ using AmericanSolverVariant = std::variant<AmericanPutSolver, AmericanCallSolver
 std::expected<AmericanOptionSolver, ValidationError>
 AmericanOptionSolver::create(
     const PricingParams& params,
-    PDEWorkspace workspace,
     std::optional<PDEGridSpec> grid,
     std::optional<std::span<const double>> snapshot_times)
 {
@@ -335,42 +334,14 @@ AmericanOptionSolver::create(
 
     auto grid_config = resolve_grid(params, grid);
 
-    if (workspace.size() != grid_config.first.n_points()) {
-        return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidGridSize,
-            static_cast<double>(workspace.size()),
-            grid_config.first.n_points()));
-    }
-
-    return AmericanOptionSolver(params,
-                                std::optional<PDEWorkspace>{std::move(workspace)},
-                                std::move(grid_config), snapshot_times);
-}
-
-std::expected<AmericanOptionSolver, ValidationError>
-AmericanOptionSolver::create(
-    const PricingParams& params,
-    std::optional<PDEGridSpec> grid,
-    std::optional<std::span<const double>> snapshot_times)
-{
-    auto validation = validate_pricing_params(params);
-    if (!validation) {
-        return std::unexpected(validation.error());
-    }
-
-    auto grid_config = resolve_grid(params, grid);
-
-    return AmericanOptionSolver(params, std::nullopt,
-                                std::move(grid_config), snapshot_times);
+    return AmericanOptionSolver(params, std::move(grid_config), snapshot_times);
 }
 
 AmericanOptionSolver::AmericanOptionSolver(
     const PricingParams& params,
-    std::optional<PDEWorkspace> workspace,
     std::pair<GridSpec<double>, TimeDomain> grid_config,
     std::optional<std::span<const double>> snapshot_times)
     : params_(params)
-    , explicit_workspace_(std::move(workspace))
     , grid_config_(std::move(grid_config))
 {
     trbdf2_config_.rannacher_startup = true;
@@ -384,47 +355,29 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     auto& [grid_spec, time_domain] = grid_config_;
     size_t n = grid_spec.n_points();
 
-    // Pick workspace source.
-    // - Legacy explicit path: caller provided a PDEWorkspace at create-time;
-    //   it lives in explicit_workspace_ for the solver's lifetime.
-    // - Auto path: build a fresh PMR arena over tls_storage; the
-    //   AmericanPDEWorkspace lives only for this solve() invocation.
-    std::optional<std::pmr::monotonic_buffer_resource> arena;
-    std::optional<AmericanPDEWorkspace> arena_ws;
-    PDEWorkspace* ws_ptr = nullptr;
+    // Always use the thread-local PMR arena. Reconstruct (rather than
+    // release()) on each solve to avoid release-discipline bugs.
+    std::pmr::monotonic_buffer_resource arena(
+        tls_storage.data(), tls_storage.size(),
+        std::pmr::new_delete_resource());
 
-    if (explicit_workspace_.has_value()) {
-        ws_ptr = &*explicit_workspace_;
-    } else {
-        // Construct the resource in place so the bump pointer starts at
-        // offset 0 of tls_storage. Reconstruct (rather than release()) on
-        // each solve to avoid release-discipline bugs.
-        arena.emplace(
-            tls_storage.data(), tls_storage.size(),
-            std::pmr::new_delete_resource());
+    size_t bytes_needed = PDEWorkspace::required_size(n) * sizeof(double);
+    auto* raw_bytes = static_cast<std::byte*>(
+        arena.allocate(bytes_needed, 64));
 
-        size_t bytes_needed = PDEWorkspace::required_size(n) * sizeof(double);
-        auto* raw_bytes = static_cast<std::byte*>(
-            arena->allocate(bytes_needed, 64));
-
-        // Route through AmericanPDEWorkspace::from_bytes which calls
-        // start_array_lifetime<double> internally — preserves
-        // aliasing-safety (do NOT cast raw bytes directly to double*).
-        // Construct in place to avoid moving the AmericanPDEWorkspace
-        // unnecessarily. (Move would also be safe because PDEWorkspace
-        // contains only spans pointing into raw_bytes, which survive
-        // moves; emplace just skips the redundant move step.)
-        auto from_bytes_result = AmericanPDEWorkspace::from_bytes(
-            std::span<std::byte>(raw_bytes, bytes_needed), n);
-        if (!from_bytes_result.has_value()) {
-            return std::unexpected(SolverError{
-                .code = SolverErrorCode::InvalidConfiguration,
-                .iterations = 0
-            });
-        }
-        arena_ws.emplace(std::move(*from_bytes_result));
-        ws_ptr = &arena_ws->workspace();
+    // Route through AmericanPDEWorkspace::from_bytes which calls
+    // start_array_lifetime<double> internally — preserves
+    // aliasing-safety (do NOT cast raw bytes directly to double*).
+    auto from_bytes_result = AmericanPDEWorkspace::from_bytes(
+        std::span<std::byte>(raw_bytes, bytes_needed), n);
+    if (!from_bytes_result.has_value()) {
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .iterations = 0
+        });
     }
+    AmericanPDEWorkspace arena_ws = std::move(*from_bytes_result);
+    PDEWorkspace* ws_ptr = &arena_ws.workspace();
 
     // === Below: faithful relocation of the original solve() body ===
     auto grid_result = Grid<double>::create(

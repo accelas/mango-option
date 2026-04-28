@@ -16,7 +16,6 @@
 #include "mango/option/american_option_result.hpp"
 #include "mango/option/option_spec.hpp"  // For OptionType enum
 #include "mango/option/grid_spec_types.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
 #include <vector>
 #include <memory>
 #include <memory_resource>
@@ -35,25 +34,6 @@ namespace mango {
  */
 class AmericanOptionSolver {
 public:
-    /**
-     * Factory method to create AmericanOptionSolver with validation.
-     *
-     * Validates option parameters before construction, providing type-safe
-     * error handling via std::expected. Use this instead of the constructor.
-     *
-     * @param params Option pricing parameters
-     * @param workspace PDEWorkspace with pre-allocated buffers
-     * @param grid Optional grid specification (GridAccuracyParams or PDEGridConfig).
-     *             When nullopt, auto-estimates from option parameters.
-     * @param snapshot_times Optional times to record solution snapshots
-     * @return AmericanOptionSolver on success, ValidationError on failure
-     */
-    static std::expected<AmericanOptionSolver, ValidationError>
-    create(const PricingParams& params,
-           PDEWorkspace workspace,
-           std::optional<PDEGridSpec> grid = std::nullopt,
-           std::optional<std::span<const double>> snapshot_times = std::nullopt);
-
     /**
      * Create solver with auto-managed scratch buffer.
      *
@@ -101,18 +81,11 @@ public:
 
 private:
     AmericanOptionSolver(const PricingParams& params,
-                        std::optional<PDEWorkspace> workspace,
                         std::pair<GridSpec<double>, TimeDomain> grid_config,
                         std::optional<std::span<const double>> snapshot_times = std::nullopt);
 
     // Parameters
     PricingParams params_;
-
-    // Set when constructed via the legacy explicit-workspace API path;
-    // empty when constructed via the auto API (solve() uses tls_storage).
-    // The legacy path is removed in Task 10; this field then becomes
-    // unconditionally empty and is deleted alongside it.
-    std::optional<PDEWorkspace> explicit_workspace_;
 
     // Snapshot times for Grid creation
     std::vector<double> snapshot_times_;
