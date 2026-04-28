@@ -445,18 +445,30 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
         // Each thread gets a contiguous block of iterations
         MANGO_PRAGMA_FOR_STATIC
         for (size_t i = 0; i < params.size(); ++i) {
+            // Collect dividend boundary points for this contract.
+            // The shared/custom TimeDomain.n_steps() doesn't carry mandatory
+            // points through PDEGridConfig, so we reconstruct them per-contract
+            // from the dividend schedule. Same filter as estimate_pde_grid.
+            std::vector<double> mandatory_tau;
+            for (const auto& div : params[i].discrete_dividends) {
+                double tau = params[i].maturity - div.calendar_time;
+                if (tau > 0.0 && tau < params[i].maturity) {
+                    mandatory_tau.push_back(tau);
+                }
+            }
+
             // Resolve grid spec for this contract
             std::optional<PDEGridSpec> solver_grid_spec;
             if (use_shared_grid) {
                 solver_grid_spec = PDEGridSpec{PDEGridConfig{
                     shared_grid->first,
-                    shared_grid->second.n_steps(), {}}};
+                    shared_grid->second.n_steps(), std::move(mandatory_tau)}};
             } else {
                 auto [grid_spec, time_domain] = resolved_custom_grid.has_value()
                     ? resolved_custom_grid.value()
                     : estimate_pde_grid(params[i], grid_accuracy_);
                 solver_grid_spec = PDEGridSpec{PDEGridConfig{
-                    grid_spec, time_domain.n_steps(), {}}};
+                    grid_spec, time_domain.n_steps(), std::move(mandatory_tau)}};
             }
 
             auto solver_result = AmericanOptionSolver::create(params[i], solver_grid_spec);
