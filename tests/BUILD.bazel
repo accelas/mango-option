@@ -513,18 +513,6 @@ cc_test(
 )
 
 cc_test(
-    name = "american_option_solver_test",
-    size = "small",
-    srcs = ["american_option_solver_test.cc"],
-    deps = [
-        "//src/option:american_option",
-        "//src/option:american_option_batch",
-        "@googletest//:gtest_main",
-    ],
-    tags = ["manual"],  # Disabled: validation expectations changed with new API
-)
-
-cc_test(
     name = "american_option_gamma_oscillation_test",
     size = "small",
     srcs = ["american_option_gamma_oscillation_test.cc"],
