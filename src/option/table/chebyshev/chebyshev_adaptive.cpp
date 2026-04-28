@@ -286,16 +286,57 @@ static BuildFn make_chebyshev_build_fn(
                 make_grid_accuracy(GridAccuracyProfile::Ultra));
             std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
             solver.set_snapshot_times(std::span<const double>(tau_vec));
+
+            // [DEBUG-CI] tau_vec contents
+            std::fprintf(stderr, "[DEBUG-CI] tau_vec.size()=%zu first=%.6f last=%.6f\n",
+                tau_vec.size(),
+                tau_vec.empty() ? 0.0 : tau_vec.front(),
+                tau_vec.empty() ? 0.0 : tau_vec.back());
+            // [DEBUG-CI] dividend in first batch param
+            std::fprintf(stderr, "[DEBUG-CI] batch[0].discrete_dividends.size()=%zu maturity=%.6f\n",
+                batch[0].discrete_dividends.size(),
+                batch[0].maturity);
+
             auto batch_result = solver.solve_batch(
                 std::span<const PricingParams>(batch), /*use_shared_grid=*/true);
             new_solves = batch.size() - batch_result.failed_count;
 
+            std::fprintf(stderr, "[DEBUG-CI] batch_result: total=%zu failed=%zu\n",
+                batch_result.results.size(), batch_result.failed_count);
+
             for (size_t bi = 0; bi < missing.size(); ++bi) {
                 auto [si, ri] = missing[bi];
-                if (!batch_result.results[bi].has_value()) continue;
+                if (!batch_result.results[bi].has_value()) {
+                    std::fprintf(stderr, "[DEBUG-CI] result[%zu] has no value\n", bi);
+                    continue;
+                }
                 const auto& result = batch_result.results[bi].value();
                 auto grid = result.grid();
                 auto x_grid = grid->x();
+
+                // [DEBUG-CI] dump slice statistics for first batch contract
+                if (bi == 0) {
+                    std::fprintf(stderr, "[DEBUG-CI] result[0]: x_grid n=%zu, num_snapshots=%zu, has_snapshots=%d\n",
+                        x_grid.size(), result.num_snapshots(),
+                        static_cast<int>(result.has_snapshots()));
+                    auto snap_times = result.snapshot_times();
+                    std::fprintf(stderr, "[DEBUG-CI] snap_times: ");
+                    for (size_t k = 0; k < snap_times.size() && k < 6; ++k) {
+                        std::fprintf(stderr, "%.6f ", snap_times[k]);
+                    }
+                    std::fprintf(stderr, "...\n");
+                    for (size_t j = 0; j < tau_nodes.size() && j < 4; ++j) {
+                        auto spatial = result.at_time(j);
+                        double minv = spatial.empty() ? 0.0 : spatial[0];
+                        double maxv = minv;
+                        double sumv = 0.0;
+                        for (double v : spatial) { minv = std::min(minv, v); maxv = std::max(maxv, v); sumv += v; }
+                        std::fprintf(stderr, "[DEBUG-CI] result[0].at_time(%zu): n=%zu min=%.6g max=%.6g sum=%.6g first=%.6g\n",
+                            j, spatial.size(), minv, maxv, sumv,
+                            spatial.empty() ? 0.0 : spatial[0]);
+                    }
+                }
+
                 for (size_t j = 0; j < tau_nodes.size(); ++j) {
                     auto spatial = result.at_time(j);
                     cache.store_slice(sigma_nodes[si], rate_nodes[ri],

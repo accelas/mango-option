@@ -439,6 +439,24 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
         }
     }
 
+    // [DEBUG-CI] log shared TimeDomain info
+    if (shared_grid.has_value()) {
+        const auto& td = shared_grid->second;
+        std::fprintf(stderr,
+            "[DEBUG-CI] shared_grid TimeDomain: t_start=%.6f t_end=%.6f "
+            "dt=%.10f n_steps=%zu has_time_points=%d\n",
+            td.t_start(), td.t_end(), td.dt(), td.n_steps(),
+            static_cast<int>(td.has_time_points()));
+        if (td.has_time_points()) {
+            const auto& pts = td.time_points_ref();
+            std::fprintf(stderr, "[DEBUG-CI]   time_points first 8: ");
+            for (size_t k = 0; k < pts.size() && k < 8; ++k) {
+                std::fprintf(stderr, "%.6f ", pts[k]);
+            }
+            std::fprintf(stderr, "... (size=%zu)\n", pts.size());
+        }
+    }
+
     MANGO_PRAGMA_PARALLEL
     {
         // Use static scheduling to avoid false sharing on results vector

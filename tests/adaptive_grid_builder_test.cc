@@ -9,6 +9,8 @@
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
 #include <iostream>
 
 namespace mango {
@@ -841,12 +843,39 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
     double tau_left  = 0.4999;   // left of gap mid
     double tau_right = 0.5001;   // right of gap mid
 
+    // [DEBUG-CI] print CPU info + ISA features
+    {
+        FILE* f = std::fopen("/proc/cpuinfo", "r");
+        if (f) {
+            char buf[1024];
+            int seen_model = 0;
+            while (std::fgets(buf, sizeof(buf), f)) {
+                if (!seen_model && std::strstr(buf, "model name")) {
+                    std::fprintf(stderr, "[DEBUG-CI] CPU: %s", buf);
+                    seen_model = 1;
+                    break;
+                }
+            }
+            std::fclose(f);
+        }
+        std::fprintf(stderr, "[DEBUG-CI] cpu_supports avx512f=%d avx2=%d sse2=%d\n",
+            __builtin_cpu_supports("avx512f"),
+            __builtin_cpu_supports("avx2"),
+            __builtin_cpu_supports("sse2"));
+        std::fprintf(stderr, "[DEBUG-CI] cpu_is intel=%d amd=%d\n",
+            __builtin_cpu_is("intel"),
+            __builtin_cpu_is("amd"));
+    }
+
     auto pf = [&](double tau) {
         return result->surface.price(100.0, 100.0, tau, 0.20, 0.05);
     };
 
     double p_left  = pf(tau_left);
     double p_right = pf(tau_right);
+
+    std::fprintf(stderr,
+        "[DEBUG-CI] FINAL p_left=%.17g p_right=%.17g\n", p_left, p_right);
 
     EXPECT_TRUE(std::isfinite(p_left));
     EXPECT_TRUE(std::isfinite(p_right));
