@@ -55,6 +55,23 @@ public:
            std::optional<std::span<const double>> snapshot_times = std::nullopt);
 
     /**
+     * Create solver with auto-managed scratch buffer.
+     *
+     * Internally uses a thread-local PMR arena (~270 KB per thread)
+     * for typical grid sizes; falls back to heap for n > 2048.
+     *
+     * @param params Option pricing parameters
+     * @param grid Optional grid specification. When nullopt, auto-estimates
+     *             from option parameters.
+     * @param snapshot_times Optional times to record solution snapshots
+     * @return AmericanOptionSolver on success, ValidationError on failure
+     */
+    static std::expected<AmericanOptionSolver, ValidationError>
+    create(const PricingParams& params,
+           std::optional<PDEGridSpec> grid = std::nullopt,
+           std::optional<std::span<const double>> snapshot_times = std::nullopt);
+
+    /**
      * Set snapshot times for solution recording.
      *
      * Must be called before solve(). Allows setup callbacks to register
@@ -84,15 +101,18 @@ public:
 
 private:
     AmericanOptionSolver(const PricingParams& params,
-                        PDEWorkspace workspace,
+                        std::optional<PDEWorkspace> workspace,
                         std::pair<GridSpec<double>, TimeDomain> grid_config,
                         std::optional<std::span<const double>> snapshot_times = std::nullopt);
 
     // Parameters
     PricingParams params_;
 
-    // PDEWorkspace (owns spans to external buffer)
-    PDEWorkspace workspace_;
+    // Set when constructed via the legacy explicit-workspace API path;
+    // empty when constructed via the auto API (solve() uses tls_storage).
+    // The legacy path is removed in Task 10; this field then becomes
+    // unconditionally empty and is deleted alongside it.
+    std::optional<PDEWorkspace> explicit_workspace_;
 
     // Snapshot times for Grid creation
     std::vector<double> snapshot_times_;
@@ -118,59 +138,10 @@ private:
 
 static_assert(OptionSolver<AmericanOptionSolver>);
 
-/// Solve a single American option with automatic grid determination
-///
-/// Convenience API that automatically determines optimal grid parameters
-/// based on option characteristics, eliminating need for manual grid specification.
-///
-/// Note: Allocates temporary workspace buffer (discarded after solve).
-/// For reusable workspaces, caller should manage buffer and use PDEWorkspace directly.
-///
-/// @param params Option parameters
-/// @return Expected containing result on success, error on failure
-inline std::expected<AmericanOptionResult, SolverError> solve_american_option(
-    const PricingParams& params)
-{
-    // Estimate grid for this option
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate workspace buffer (local, temporary)
-    size_t n = grid_spec.n_points();
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), std::pmr::get_default_resource());
-
-    // Create workspace spans from buffer
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result.has_value()) {
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            // error code set above + workspace_result.error(),
-            .iterations = 0
-        });
-    }
-
-    // Collect mandatory tau values for discrete dividends
-    std::vector<double> mandatory_tau;
-    for (const auto& div : params.discrete_dividends) {
-        double tau = params.maturity - div.calendar_time;
-        if (tau > 0.0 && tau < params.maturity) {
-            mandatory_tau.push_back(tau);
-        }
-    }
-
-    // Create and solve using PDEWorkspace API
-    // Buffer stays alive during solve(), result contains Grid with solution
-    auto solver_result = AmericanOptionSolver::create(
-        params, workspace_result.value(),
-        PDEGridConfig{.grid_spec = grid_spec, .n_time = time_domain.n_steps(),
-                        .mandatory_times = std::move(mandatory_tau)});
-    if (!solver_result) {
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            .iterations = 0
-        });
-    }
-    return solver_result.value().solve();
-}
+/// Solve a single American option with automatic grid determination.
+/// Convenience wrapper around AmericanOptionSolver::create + solve.
+std::expected<AmericanOptionResult, SolverError>
+solve_american_option(const PricingParams& params);
 
 }  // namespace mango
 

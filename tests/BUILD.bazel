@@ -875,6 +875,17 @@ cc_test(
 )
 
 cc_test(
+    name = "american_option_auto_api_test",
+    size = "small",
+    srcs = ["american_option_auto_api_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/pde/core:pde_workspace",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "american_option_new_api_test",
     size = "small",
     srcs = ["american_option_new_api_test.cc"],
