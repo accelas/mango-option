@@ -410,10 +410,10 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         // Route through AmericanPDEWorkspace::from_bytes which calls
         // start_array_lifetime<double> internally — preserves
         // aliasing-safety (do NOT cast raw bytes directly to double*).
-        // Construct in place via emplace to avoid moving the workspace
-        // (its spans point into raw_bytes; moves are unsafe even though
-        // spans are POD, because semantics require the constructed
-        // object to remain at the storage address).
+        // Construct in place to avoid moving the AmericanPDEWorkspace
+        // unnecessarily. (Move would also be safe because PDEWorkspace
+        // contains only spans pointing into raw_bytes, which survive
+        // moves; emplace just skips the redundant move step.)
         auto from_bytes_result = AmericanPDEWorkspace::from_bytes(
             std::span<std::byte>(raw_bytes, bytes_needed), n);
         if (!from_bytes_result.has_value()) {
