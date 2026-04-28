@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: MIT
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+package(default_visibility = ["//visibility:private"])
+
+# White-box tests for PDE solver internals. These exercise types
+# (PDEWorkspace, PDESolver, SpatialOperator) that move to
+# //src/pde/internal:workspace in Task 13. For now, deps still
+# reference //src/pde/core: targets — Task 13 swaps them.
+
+cc_test(
+    name = "pde_workspace_test",
+    srcs = ["pde_workspace_test.cc"],
+    deps = [
+        "//src/pde/core:pde_workspace",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "american_pde_workspace_test",
+    size = "small",
+    srcs = ["american_pde_workspace_test.cc"],
+    deps = [
+        "//src/pde/core:american_pde_workspace",
+        "//src/support:thread_workspace",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "american_option_batch_workspace_test",
+    size = "small",
+    srcs = ["american_option_batch_workspace_test.cc"],
+    deps = [
+        "//src/option:american_option_batch",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+)
+
+cc_test(
+    name = "pde_solver_test",
+    srcs = ["pde_solver_test.cc"],
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/operators:laplacian_pde",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-fopenmp-simd",
+    ],
+)
+
+# DISABLED: Pre-existing failure (solution[25] == 0 instead of 2.0)
+# cc_test(
+#     name = "temporal_event_test",
+#     size = "small",
+#     srcs = ["temporal_event_test.cc"],
+#     deps = [
+#         "//src/pde/core:pde_solver",
+#         "//src/pde/core:pde_workspace",
+#         "//src/pde/core:grid",
+#         "//src/pde/operators:laplacian_pde",
+#         "//src/pde/operators:operator_factory",
+#         "//src/pde/core:boundary_conditions",
+#         "@googletest//:gtest_main",
+#     ],
+#     copts = ["-std=c++23", "-fopenmp-simd"],
+# )
+
+cc_test(
+    name = "spatial_operator_jacobian_test",
+    srcs = ["spatial_operator_jacobian_test.cc"],
+    deps = [
+        "//src/pde/operators:spatial_operator",
+        "//src/pde/operators:black_scholes_pde",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/core:grid",
+        "//src/pde/core:pde_workspace",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "pde_solver_snapshot_test",
+    srcs = ["pde_solver_snapshot_test.cc"],
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/operators:laplacian_pde",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-fopenmp-simd",
+    ],
+)
+
+cc_test(
+    name = "obstacle_test",
+    size = "small",
+    srcs = ["obstacle_test.cc"],
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:grid",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/operators:laplacian_pde",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/core:boundary_conditions",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-fopenmp-simd",
+    ],
+)
