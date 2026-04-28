@@ -848,6 +848,25 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
     double p_left  = pf(tau_left);
     double p_right = pf(tau_right);
 
+    // [DEBUG-CI] sample several points across the maturity axis to
+    // see whether the surface is uniformly zero or just zero in
+    // the gap region.
+    std::fprintf(stderr,
+        "[DEBUG-CI] p_left=%.17g p_right=%.17g diff=%.17g\n"
+        "[DEBUG-CI] tau=0.10 -> %.17g\n"
+        "[DEBUG-CI] tau=0.25 -> %.17g\n"
+        "[DEBUG-CI] tau=0.49 -> %.17g\n"
+        "[DEBUG-CI] tau=0.51 -> %.17g\n"
+        "[DEBUG-CI] tau=0.75 -> %.17g\n"
+        "[DEBUG-CI] tau=0.95 -> %.17g\n",
+        p_left, p_right, std::abs(p_left - p_right),
+        result->surface.price(100.0, 100.0, 0.10, 0.20, 0.05),
+        result->surface.price(100.0, 100.0, 0.25, 0.20, 0.05),
+        result->surface.price(100.0, 100.0, 0.49, 0.20, 0.05),
+        result->surface.price(100.0, 100.0, 0.51, 0.20, 0.05),
+        result->surface.price(100.0, 100.0, 0.75, 0.20, 0.05),
+        result->surface.price(100.0, 100.0, 0.95, 0.20, 0.05));
+
     EXPECT_TRUE(std::isfinite(p_left));
     EXPECT_TRUE(std::isfinite(p_right));
     EXPECT_GT(p_left, 0.0);
