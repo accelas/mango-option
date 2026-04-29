@@ -8,7 +8,9 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <functional>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -54,6 +56,26 @@ public:
         for (size_t d = 0; d < N; ++d) {
             interp.nodes_[d] = chebyshev_nodes(num_pts[d], domain.lo[d], domain.hi[d]);
             interp.weights_[d] = chebyshev_barycentric_weights(num_pts[d]);
+        }
+
+        // [CHEB-BUILD] check input values for NaN/inf and basic stats
+        size_t n_nan = 0, n_inf = 0;
+        double vmin = std::numeric_limits<double>::infinity();
+        double vmax = -std::numeric_limits<double>::infinity();
+        for (double v : values) {
+            if (std::isnan(v)) ++n_nan;
+            else if (std::isinf(v)) ++n_inf;
+            else { vmin = std::min(vmin, v); vmax = std::max(vmax, v); }
+        }
+        std::fprintf(stderr,
+            "[CHEB-BUILD/%zu] values.size=%zu nan=%zu inf=%zu min=%.6g max=%.6g\n",
+            N, values.size(), n_nan, n_inf, vmin, vmax);
+        if constexpr (N == 4) {
+            std::fprintf(stderr, "[CHEB-BUILD/4]   shape=%zux%zux%zux%zu domain="
+                "lo=(%.4f,%.4f,%.4f,%.4f) hi=(%.4f,%.4f,%.4f,%.4f)\n",
+                num_pts[0], num_pts[1], num_pts[2], num_pts[3],
+                domain.lo[0], domain.lo[1], domain.lo[2], domain.lo[3],
+                domain.hi[0], domain.hi[1], domain.hi[2], domain.hi[3]);
         }
 
         // Build storage from values
@@ -187,6 +209,14 @@ private:
             denom += c[j];
         }
         double inv_denom = 1.0 / denom;
+        // [BARY] check for issues
+        if (!std::isfinite(denom) || std::abs(denom) < 1e-300) {
+            std::fprintf(stderr,
+                "[BARY/d=%zu] x=%.17g denom=%.6g inv_denom=%.6g n=%zu nodes_first=%.6g nodes_last=%.6g\n",
+                d, x, denom, inv_denom, n,
+                nodes.empty() ? 0.0 : nodes.front(),
+                nodes.empty() ? 0.0 : nodes.back());
+        }
         MANGO_PRAGMA_SIMD
         for (size_t j = 0; j < n; ++j) {
             c[j] *= inv_denom;
