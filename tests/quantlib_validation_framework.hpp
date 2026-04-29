@@ -25,7 +25,6 @@
 #include <vector>
 #include <string>
 #include <functional>
-#include <memory_resource>
 
 namespace mango::testing {
 
@@ -142,20 +141,7 @@ inline PricingValidationResult validate_pricing(
             .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
         scenario.volatility);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(mango_params);
-
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result.has_value()) {
-        validation.passed = false;
-        validation.failure_message = "Failed to create workspace: " + workspace_result.error();
-        return validation;
-    }
-
-    auto solver = AmericanOptionSolver::create(mango_params, workspace_result.value()).value();
+    auto solver = AmericanOptionSolver::create(mango_params).value();
     auto mango_result = solver.solve();
     if (!mango_result.has_value()) {
         validation.passed = false;

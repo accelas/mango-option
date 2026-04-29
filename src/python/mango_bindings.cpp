@@ -16,7 +16,6 @@
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
 #include "mango/option/yield_curve.hpp"
 #include "mango/option/american_option_batch.hpp"
 
@@ -353,19 +352,9 @@ PYBIND11_MODULE(mango_option, m) {
             // Estimate grid automatically (sinh-spaced, clustered near strike)
             auto [grid_spec, time_domain] = mango::estimate_pde_grid(params, accuracy);
 
-            // Allocate workspace buffer
-            size_t n = grid_spec.n_points();
-            std::vector<double> buffer(mango::PDEWorkspace::required_size(n));
-
-            auto workspace_result = mango::PDEWorkspace::from_buffer(buffer, n);
-            if (!workspace_result) {
-                throw py::value_error(
-                    "Failed to create workspace: " + workspace_result.error());
-            }
-
+            // Create solver with auto-managed workspace (thread-local PMR arena)
             auto solver_result = mango::AmericanOptionSolver::create(
-                params, workspace_result.value(),
-                mango::PDEGridConfig{grid_spec, time_domain.n_steps(), {}});
+                params, mango::PDEGridSpec{mango::PDEGridConfig{grid_spec, time_domain.n_steps(), {}}});
             if (!solver_result) {
                 throw py::value_error(
                     "Failed to create solver (validation error code " +

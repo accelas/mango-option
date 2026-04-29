@@ -10,7 +10,6 @@
 #define MANGO_AMERICAN_OPTION_BATCH_HPP
 
 #include "mango/option/american_option.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"

@@ -32,7 +32,6 @@
 #include <format>
 #include <map>
 #include <memory>
-#include <memory_resource>
 #include <numeric>
 #include <vector>
 
@@ -72,16 +71,8 @@ static std::vector<double> solve_reference_prices(const GridAccuracyParams& accu
             kTrueVol);
 
         auto [grid_spec, time_domain] = estimate_pde_grid(params, accuracy);
-        size_t n = grid_spec.n_points();
-        std::pmr::vector<double> buffer(
-            PDEWorkspace::required_size(n), std::pmr::get_default_resource());
-        auto workspace = PDEWorkspace::from_buffer(buffer, n);
-        if (!workspace) {
-            p.push_back(std::numeric_limits<double>::quiet_NaN());
-            continue;
-        }
         auto solver = AmericanOptionSolver::create(
-            params, *workspace,
+            params,
             PDEGridConfig{.grid_spec = grid_spec, .n_time = time_domain.n_steps()});
         if (!solver) {
             p.push_back(std::numeric_limits<double>::quiet_NaN());

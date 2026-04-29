@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-#include "mango/pde/core/pde_solver.hpp"
+#include "mango/pde/internal/pde_solver.hpp"
 #include "mango/pde/core/boundary_conditions.hpp"
-#include "mango/pde/operators/operator_factory.hpp"
+#include "mango/pde/internal/operator_factory.hpp"
 #include "mango/pde/operators/laplacian_pde.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/pde/internal/pde_workspace.hpp"
 #include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>

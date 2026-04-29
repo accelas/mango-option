@@ -2,7 +2,7 @@
 #pragma once
 
 #include "mango/pde/core/grid.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/pde/internal/pde_workspace.hpp"
 #include "mango/pde/operators/centered_difference.hpp"
 #include "mango/math/tridiagonal_matrix_view.hpp"
 #include <memory>

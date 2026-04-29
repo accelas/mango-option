@@ -185,19 +185,10 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
 
     // Use automatic grid estimation
     auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace) {
-        throw std::runtime_error("Failed to create workspace: " + workspace.error());
-    }
 
     auto run_once = [&]() {
-        auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -243,17 +234,7 @@ static void BM_README_AmericanSequential(benchmark::State& state) {
         // Sequential processing - no batch API
         for (size_t idx = 0; idx < batch.size(); ++idx) {
             const auto& params = batch[idx];
-            auto [grid_spec, time_domain] = estimate_pde_grid(params);
-            size_t n = grid_spec.n_points();
-            std::pmr::synchronized_pool_resource pool;
-            std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-            auto workspace = PDEWorkspace::from_buffer(buffer, n);
-            if (!workspace) {
-                throw std::runtime_error("Failed to create workspace");
-            }
-
-            auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
+            auto solver = AmericanOptionSolver::create(params).value();
             auto result = solver.solve();
             if (!result) {
                 throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));

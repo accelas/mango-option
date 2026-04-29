@@ -9,26 +9,42 @@
  */
 
 #include "mango/option/american_option.hpp"
-#include "mango/pde/core/pde_solver.hpp"
+#include "mango/pde/internal/pde_solver.hpp"
+#include "mango/pde/internal/american_pde_workspace.hpp"
 #include "mango/pde/core/boundary_conditions.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/pde/core/time_domain.hpp"
-#include "mango/pde/operators/operator_factory.hpp"
+#include "mango/pde/internal/operator_factory.hpp"
 #include "mango/pde/operators/black_scholes_pde.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/dividend_utils.hpp"
 #include <algorithm>
+#include <array>
+#include <cassert>
 #include <cmath>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <memory_resource>
+#include <span>
 #include <variant>
 #include <vector>
 #include <format>
-#include <cassert>
-#include <functional>
-#include <memory>
-#include <span>
 
 namespace mango {
 namespace {
+
+// Sized to cover GridAccuracyParams::max_spatial_points (1200 by
+// default) without heap fallback. Per-thread footprint:
+// ~270 KB (33920 doubles × 8 bytes).
+constexpr size_t TLS_RESERVE_N = 2048;
+constexpr size_t TLS_RESERVE_BYTES =
+    PDEWorkspace::required_size(TLS_RESERVE_N) * sizeof(double);
+
+// alignas on the array itself; std::array layout guarantees the data
+// starts at the array's address, so this gives a 64-byte-aligned
+// starting address for the bump-pointer allocator.
+alignas(64) thread_local std::array<std::byte, TLS_RESERVE_BYTES> tls_storage;
 
 // Helper for std::visit with multiple lambdas
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
@@ -308,7 +324,6 @@ using AmericanSolverVariant = std::variant<AmericanPutSolver, AmericanCallSolver
 std::expected<AmericanOptionSolver, ValidationError>
 AmericanOptionSolver::create(
     const PricingParams& params,
-    PDEWorkspace workspace,
     std::optional<PDEGridSpec> grid,
     std::optional<std::span<const double>> snapshot_times)
 {
@@ -319,23 +334,14 @@ AmericanOptionSolver::create(
 
     auto grid_config = resolve_grid(params, grid);
 
-    if (workspace.size() != grid_config.first.n_points()) {
-        return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidGridSize,
-            static_cast<double>(workspace.size()),
-            grid_config.first.n_points()));
-    }
-
-    return AmericanOptionSolver(params, workspace, std::move(grid_config), snapshot_times);
+    return AmericanOptionSolver(params, std::move(grid_config), snapshot_times);
 }
 
 AmericanOptionSolver::AmericanOptionSolver(
     const PricingParams& params,
-    PDEWorkspace workspace,
     std::pair<GridSpec<double>, TimeDomain> grid_config,
     std::optional<std::span<const double>> snapshot_times)
     : params_(params)
-    , workspace_(workspace)
     , grid_config_(std::move(grid_config))
 {
     trbdf2_config_.rannacher_startup = true;
@@ -347,10 +353,38 @@ AmericanOptionSolver::AmericanOptionSolver(
 
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     auto& [grid_spec, time_domain] = grid_config_;
+    size_t n = grid_spec.n_points();
 
+    // Always use the thread-local PMR arena. Reconstruct (rather than
+    // release()) on each solve to avoid release-discipline bugs.
+    std::pmr::monotonic_buffer_resource arena(
+        tls_storage.data(), tls_storage.size(),
+        std::pmr::new_delete_resource());
+
+    size_t bytes_needed = PDEWorkspace::required_size(n) * sizeof(double);
+    auto* raw_bytes = static_cast<std::byte*>(
+        arena.allocate(bytes_needed, 64));
+
+    // Route through AmericanPDEWorkspace::from_bytes which calls
+    // start_array_lifetime<double> internally — preserves
+    // aliasing-safety (do NOT cast raw bytes directly to double*).
+    auto from_bytes_result = AmericanPDEWorkspace::from_bytes(
+        std::span<std::byte>(raw_bytes, bytes_needed), n);
+    if (!from_bytes_result.has_value()) {
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .iterations = 0
+        });
+    }
+    AmericanPDEWorkspace arena_ws = std::move(*from_bytes_result);
+    PDEWorkspace* ws_ptr = &arena_ws.workspace();
+
+    // === Below: faithful relocation of the original solve() body ===
     auto grid_result = Grid<double>::create(
         grid_spec, time_domain,
-        snapshot_times_.empty() ? std::span<const double>() : std::span<const double>(snapshot_times_));
+        snapshot_times_.empty()
+            ? std::span<const double>()
+            : std::span<const double>(snapshot_times_));
 
     if (!grid_result.has_value()) {
         return std::unexpected(SolverError{
@@ -362,25 +396,34 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     auto grid = grid_result.value();
 
     // Initialize dx in workspace from grid spacing
-    auto dx_span = workspace_.dx();
+    auto dx_span = ws_ptr->dx();
     auto grid_points = grid->x();
     for (size_t i = 0; i < grid_points.size() - 1; ++i) {
         dx_span[i] = grid_points[i + 1] - grid_points[i];
     }
 
-    // Construct variant solver
+    // Variant construction with std::in_place_type — required because
+    // AmericanPutSolver::spatial_op_ holds a non-owning pointer into
+    // workspace_local_ (spatial_operator.hpp:170). Constructing the
+    // solver as a temporary and moving it into the variant would
+    // leave spatial_op_ pointing at the moved-from object's member.
     AmericanSolverVariant solver = (params_.option_type == OptionType::PUT)
-        ? AmericanSolverVariant{AmericanPutSolver(params_, grid, workspace_)}
-        : AmericanSolverVariant{AmericanCallSolver(params_, grid, workspace_)};
+        ? AmericanSolverVariant{
+              std::in_place_type<AmericanPutSolver>,
+              params_, grid, *ws_ptr}
+        : AmericanSolverVariant{
+              std::in_place_type<AmericanCallSolver>,
+              params_, grid, *ws_ptr};
 
-    // Initialize dividends after variant construction so that the captured
-    // &dividend_spline_ pointer refers to the object's final location.
+    // init_dividends() must come AFTER variant construction so callbacks
+    // capture the post-construction address of dividend_spline_.
     auto solve_result = std::visit([&](auto& pde_solver) {
         pde_solver.init_dividends();
         if (custom_ic_) {
             pde_solver.initialize(*custom_ic_);
         } else {
-            pde_solver.initialize(std::remove_reference_t<decltype(pde_solver)>::payoff);
+            pde_solver.initialize(
+                std::remove_reference_t<decltype(pde_solver)>::payoff);
         }
         pde_solver.set_config(trbdf2_config_);
         return pde_solver.solve();
@@ -391,6 +434,19 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     }
 
     return AmericanOptionResult(grid, params_);
+    // arena destructs here; any heap-fallback allocation is freed
+}
+
+std::expected<AmericanOptionResult, SolverError>
+solve_american_option(const PricingParams& params) {
+    auto solver_result = AmericanOptionSolver::create(params);
+    if (!solver_result.has_value()) {
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .iterations = 0
+        });
+    }
+    return solver_result->solve();
 }
 
 }  // namespace mango

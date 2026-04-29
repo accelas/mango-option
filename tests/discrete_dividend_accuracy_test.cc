@@ -3,7 +3,6 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include <cmath>
-#include <memory_resource>
 #include <ql/quantlib.hpp>
 
 using namespace mango;
@@ -71,11 +70,7 @@ double price_american_discrete_div_quantlib(
 double solve_mango(const PricingParams& params,
                    const GridAccuracyParams& accuracy = GridAccuracyParams{}) {
     auto [grid_spec, time_domain] = estimate_pde_grid(params, accuracy);
-    size_t n = grid_spec.n_points();
-    std::pmr::vector<double> buffer(
-        PDEWorkspace::required_size(n), std::pmr::get_default_resource());
-    auto ws = PDEWorkspace::from_buffer(buffer, n).value();
-    auto solver = AmericanOptionSolver::create(params, ws,
+    auto solver = AmericanOptionSolver::create(params,
                                 PDEGridConfig{grid_spec, time_domain.n_steps(), {}}).value();
     auto result = solver.solve();
     return result->value();

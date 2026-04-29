@@ -27,7 +27,6 @@
 #include <format>
 #include <iomanip>
 #include <memory>
-#include <memory_resource>
 #include <set>
 #include <string>
 #include <vector>
@@ -183,16 +182,9 @@ static void BM_RealData_AmericanSingle(benchmark::State& state) {
 
     auto [grid_spec, time_domain] = estimate_pde_grid(params);
     size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace) {
-        throw std::runtime_error("Failed to create workspace: " + workspace.error());
-    }
 
     auto run_once = [&]() {
-        auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error");
@@ -229,17 +221,7 @@ static void BM_RealData_AmericanSequential(benchmark::State& state) {
 
     auto run_once = [&]() {
         for (const auto& params : batch) {
-            auto [grid_spec, time_domain] = estimate_pde_grid(params);
-            size_t n = grid_spec.n_points();
-            std::pmr::synchronized_pool_resource pool;
-            std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-            auto workspace = PDEWorkspace::from_buffer(buffer, n);
-            if (!workspace) {
-                throw std::runtime_error("Failed to create workspace");
-            }
-
-            auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
+            auto solver = AmericanOptionSolver::create(params).value();
             auto result = solver.solve();
             if (!result) {
                 throw std::runtime_error("Solver error");

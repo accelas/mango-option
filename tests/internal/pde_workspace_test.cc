@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/pde/internal/pde_workspace.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -161,6 +161,12 @@ TEST(PDEWorkspaceTest, ConstAccessors) {
     for (size_t i = 0; i < n; ++i) {
         EXPECT_DOUBLE_EQ(rhs_const[i], static_cast<double>(i));
     }
+}
+
+TEST(PDEWorkspaceTest, RequiredSizeIsConstexpr) {
+    constexpr size_t s = PDEWorkspace::required_size(1024);
+    static_assert(s > 0, "required_size must be usable in constant expressions");
+    EXPECT_GT(s, 0u);
 }
 
 }  // namespace

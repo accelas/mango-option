@@ -14,7 +14,6 @@
 #include "mango/option/american_option.hpp"
 #include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
-#include <memory_resource>
 #include <optional>
 
 class CustomGridTest : public ::testing::Test {
@@ -29,8 +28,6 @@ class CustomGridTest : public ::testing::Test {
         spec.option_type = mango::OptionType::PUT;
         return mango::PricingParams(spec, 0.20);
     }
-
-    std::pmr::synchronized_pool_resource pool;
 };
 
 TEST_F(CustomGridTest, AutoEstimatedGrid) {
@@ -42,10 +39,7 @@ TEST_F(CustomGridTest, AutoEstimatedGrid) {
     EXPECT_LT(grid_spec.x_min(), 0.0);
     EXPECT_GT(grid_spec.x_max(), 0.0);
 
-    size_t n = grid_spec.n_points();
-    std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
-    auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
-    auto solver = mango::AmericanOptionSolver::create(params, workspace).value();
+    auto solver = mango::AmericanOptionSolver::create(params).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -59,12 +53,8 @@ TEST_F(CustomGridTest, UniformGrid) {
     ASSERT_TRUE(uniform_spec.has_value());
     EXPECT_EQ(uniform_spec->n_points(), 201u);
 
-    size_t n = uniform_spec->n_points();
-    std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
-    auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
-
     mango::TimeDomain time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
-    auto solver = mango::AmericanOptionSolver::create(params, workspace,
+    auto solver = mango::AmericanOptionSolver::create(params,
         mango::PDEGridConfig{uniform_spec.value(), time.n_steps(), {}}).value();
     auto result = solver.solve();
 
@@ -78,12 +68,8 @@ TEST_F(CustomGridTest, SinhSpacedGrid) {
     auto sinh_spec = mango::GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, alpha);
     ASSERT_TRUE(sinh_spec.has_value());
 
-    size_t n = sinh_spec->n_points();
-    std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
-    auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
-
     mango::TimeDomain time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
-    auto solver = mango::AmericanOptionSolver::create(params, workspace,
+    auto solver = mango::AmericanOptionSolver::create(params,
         mango::PDEGridConfig{sinh_spec.value(), time.n_steps(), {}}).value();
     auto result = solver.solve();
 
@@ -102,12 +88,8 @@ TEST_F(CustomGridTest, MultiSinhGrid) {
     auto multi_sinh_spec = mango::GridSpec<double>::multi_sinh_spaced(-3.0, 3.0, 201, clusters);
     ASSERT_TRUE(multi_sinh_spec.has_value());
 
-    size_t n = multi_sinh_spec->n_points();
-    std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
-    auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
-
     mango::TimeDomain time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
-    auto solver = mango::AmericanOptionSolver::create(params, workspace,
+    auto solver = mango::AmericanOptionSolver::create(params,
         mango::PDEGridConfig{multi_sinh_spec.value(), time.n_steps(), {}}).value();
     auto result = solver.solve();
 
@@ -132,10 +114,7 @@ TEST_F(CustomGridTest, FastAccuracyParams) {
     EXPECT_GE(grid.n_points(), 100u);
     EXPECT_LE(grid.n_points(), 200u);
 
-    size_t n = grid.n_points();
-    std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
-    auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
-    auto solver = mango::AmericanOptionSolver::create(params, workspace).value();
+    auto solver = mango::AmericanOptionSolver::create(params).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -158,12 +137,8 @@ TEST_F(CustomGridTest, HighAccuracyParams) {
     auto [grid, time_domain] = mango::estimate_pde_grid(params, high_accuracy);
     EXPECT_GE(grid.n_points(), 300u);
 
-    size_t n = grid.n_points();
-    std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
-    auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
-
     // Pass the estimated grid config to the solver
-    auto solver = mango::AmericanOptionSolver::create(params, workspace,
+    auto solver = mango::AmericanOptionSolver::create(params,
         mango::PDEGridConfig{grid, time_domain.n_steps(), {}}).value();
     auto result = solver.solve();
 
@@ -175,11 +150,7 @@ TEST_F(CustomGridTest, AllGridTypesProduceSimilarPrices) {
     auto params = make_atm_put();
 
     // Auto-estimated
-    auto [auto_grid, auto_time] = mango::estimate_pde_grid(params);
-    size_t n_auto = auto_grid.n_points();
-    std::pmr::vector<double> auto_buf(mango::PDEWorkspace::required_size(n_auto), &pool);
-    auto auto_ws = mango::PDEWorkspace::from_buffer(auto_buf, n_auto).value();
-    auto auto_solver = mango::AmericanOptionSolver::create(params, auto_ws).value();
+    auto auto_solver = mango::AmericanOptionSolver::create(params).value();
     auto auto_result = auto_solver.solve();
     ASSERT_TRUE(auto_result.has_value());
     double auto_price = auto_result->value();
@@ -187,11 +158,8 @@ TEST_F(CustomGridTest, AllGridTypesProduceSimilarPrices) {
     // Sinh-spaced
     auto sinh_spec = mango::GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
     ASSERT_TRUE(sinh_spec.has_value());
-    size_t n_sinh = sinh_spec->n_points();
-    std::pmr::vector<double> sinh_buf(mango::PDEWorkspace::required_size(n_sinh), &pool);
-    auto sinh_ws = mango::PDEWorkspace::from_buffer(sinh_buf, n_sinh).value();
     mango::TimeDomain sinh_time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
-    auto sinh_solver = mango::AmericanOptionSolver::create(params, sinh_ws,
+    auto sinh_solver = mango::AmericanOptionSolver::create(params,
         mango::PDEGridConfig{sinh_spec.value(), sinh_time.n_steps(), {}}).value();
     auto sinh_result = sinh_solver.solve();
     ASSERT_TRUE(sinh_result.has_value());

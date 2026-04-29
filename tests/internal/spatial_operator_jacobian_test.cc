@@ -3,11 +3,11 @@
 // Regression test for Jacobian/operator stencil consistency on non-uniform grids.
 // See issue #329: the Jacobian used a different first-derivative stencil than apply().
 
-#include "mango/pde/operators/spatial_operator.hpp"
+#include "mango/pde/internal/spatial_operator.hpp"
 #include "mango/pde/operators/black_scholes_pde.hpp"
 #include "mango/pde/core/grid.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
-#include "mango/pde/operators/operator_factory.hpp"
+#include "mango/pde/internal/pde_workspace.hpp"
+#include "mango/pde/internal/operator_factory.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>

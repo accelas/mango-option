@@ -370,26 +370,6 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "pde_workspace_test",
-    srcs = ["pde_workspace_test.cc"],
-    deps = [
-        "//src/pde/core:pde_workspace",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "american_pde_workspace_test",
-    size = "small",
-    srcs = ["american_pde_workspace_test.cc"],
-    deps = [
-        "//src/pde/core:american_pde_workspace",
-        "//src/support:thread_workspace",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
 
 cc_test(
     name = "boundary_conditions_test",
@@ -418,45 +398,6 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "pde_solver_test",
-    srcs = ["pde_solver_test.cc"],
-    deps = [
-        "//src/pde/core:pde_solver",
-        "//src/pde/core:pde_workspace",
-        "//src/pde/core:grid",
-        "//src/pde/core:boundary_conditions",
-        "//src/pde/operators:operator_factory",
-        "//src/pde/operators:laplacian_pde",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
-        "-fopenmp-simd",
-    ],
-)
-
-cc_test(
-    name = "pde_solver_snapshot_test",
-    srcs = ["pde_solver_snapshot_test.cc"],
-    deps = [
-        "//src/pde/core:pde_solver",
-        "//src/pde/core:pde_workspace",
-        "//src/pde/core:grid",
-        "//src/pde/core:boundary_conditions",
-        "//src/pde/operators:operator_factory",
-        "//src/pde/operators:laplacian_pde",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
-        "-fopenmp-simd",
-    ],
-)
 
 cc_test(
     name = "time_domain_test",
@@ -543,40 +484,6 @@ cc_test(
 #     ],
 # )
 
-# DISABLED: Pre-existing failure (solution[25] == 0 instead of 2.0)
-# cc_test(
-#     name = "temporal_event_test",
-#     size = "small",
-#     srcs = ["temporal_event_test.cc"],
-#     deps = [
-#         "//src/pde/core:pde_solver",
-#         "//src/pde/core:pde_workspace",
-#         "//src/pde/core:grid",
-#         "//src/pde/operators:laplacian_pde",
-#         "//src/pde/operators:operator_factory",
-#         "//src/pde/core:boundary_conditions",
-#         "@googletest//:gtest_main",
-#     ],
-#     copts = ["-std=c++23", "-fopenmp-simd"],
-# )
-
-cc_test(
-    name = "obstacle_test",
-    size = "small",
-    srcs = ["obstacle_test.cc"],
-    deps = [
-        "//src/pde/core:pde_solver",
-        "//src/pde/core:grid",
-        "//src/pde/core:pde_workspace",
-        "//src/pde/operators:laplacian_pde",
-        "//src/pde/operators:operator_factory",
-        "//src/pde/core:boundary_conditions",
-        "@googletest//:gtest_main",
-    ],
-    copts = [
-        "-fopenmp-simd",
-    ],
-)
 
 cc_test(
     name = "grid_spacing_test",
@@ -603,18 +510,6 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-)
-
-cc_test(
-    name = "american_option_solver_test",
-    size = "small",
-    srcs = ["american_option_solver_test.cc"],
-    deps = [
-        "//src/option:american_option",
-        "//src/option:american_option_batch",
-        "@googletest//:gtest_main",
-    ],
-    tags = ["manual"],  # Disabled: validation expectations changed with new API
 )
 
 cc_test(
@@ -732,18 +627,6 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "spatial_operator_jacobian_test",
-    srcs = ["spatial_operator_jacobian_test.cc"],
-    deps = [
-        "//src/pde/operators:spatial_operator",
-        "//src/pde/operators:black_scholes_pde",
-        "//src/pde/operators:operator_factory",
-        "//src/pde/core:grid",
-        "//src/pde/core:pde_workspace",
-        "@googletest//:gtest_main",
-    ],
-)
 
 cc_test(
     name = "target_clones_test",
@@ -875,21 +758,15 @@ cc_test(
 )
 
 cc_test(
-    name = "american_option_new_api_test",
+    name = "american_option_auto_api_test",
     size = "small",
-    srcs = ["american_option_new_api_test.cc"],
+    srcs = ["american_option_auto_api_test.cc"],
     deps = [
         "//src/option:american_option",
-        "//src/option:american_option_result",
-        "//src/pde/core:pde_workspace",
-        "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = [
-        "-Wall",
-        "-Wextra",
-    ],
 )
+
 
 cc_test(
     name = "bspline_nd_test",
@@ -938,19 +815,6 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "american_option_batch_workspace_test",
-    size = "small",
-    srcs = ["american_option_batch_workspace_test.cc"],
-    deps = [
-        "//src/option:american_option_batch",
-        "@googletest//:gtest_main",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
-    ],
-)
 
 cc_test(
     name = "batch_solver_custom_grid_test",
@@ -1370,7 +1234,6 @@ cc_test(
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/bspline:bspline_tensor_accessor",
         "//src/option:american_option",
-        "//src/pde/core:pde_workspace",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -1456,7 +1319,6 @@ cc_test(
     deps = [
         "//src/option:american_option",
         "//src/option:american_option_batch",
-        "//src/pde/core:pde_workspace",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

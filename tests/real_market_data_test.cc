@@ -38,13 +38,7 @@ TEST(RealMarketDataTest, ATMPutPricing) {
     // Price the ATM put option from real market data
     auto params = make_params(bdata::ATM_PUT);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(grid_spec.n_points()), &pool);
-    auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
-    ASSERT_TRUE(workspace.has_value()) << workspace.error();
-
-    auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
+    auto solver = AmericanOptionSolver::create(params).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << "Solver failed: " << static_cast<int>(result.error().code);
 
@@ -65,13 +59,7 @@ TEST(RealMarketDataTest, PutPricingAcrossStrikes) {
         const auto& opt = bdata::REAL_PUTS[i];
         auto params = make_params(opt);
 
-        auto [grid_spec, time_domain] = estimate_pde_grid(params);
-        std::pmr::synchronized_pool_resource pool;
-        std::pmr::vector<double> buffer(PDEWorkspace::required_size(grid_spec.n_points()), &pool);
-        auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
-        ASSERT_TRUE(workspace.has_value()) << "Workspace creation failed for option " << i;
-
-        auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
+        auto solver = AmericanOptionSolver::create(params).value();
         auto result = solver.solve();
         ASSERT_TRUE(result.has_value())
             << "Solver failed for K=" << opt.strike << ": code " << static_cast<int>(result.error().code);
@@ -171,13 +159,7 @@ TEST(RealMarketDataTest, IVSanityCheck) {
     // Now price with computed IV
     auto params = make_params(bdata::ATM_PUT, iv);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(grid_spec.n_points()), &pool);
-    auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
-    ASSERT_TRUE(workspace.has_value());
-
-    auto price_solver = AmericanOptionSolver::create(params, workspace.value()).value();
+    auto price_solver = AmericanOptionSolver::create(params).value();
     auto price_result = price_solver.solve();
     ASSERT_TRUE(price_result.has_value());
 

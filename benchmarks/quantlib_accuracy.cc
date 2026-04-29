@@ -116,21 +116,7 @@ static void compare_scenario(
             .option_type = is_call ? OptionType::CALL : OptionType::PUT},
         volatility);
 
-    // Create workspace (use automatic grid determination)
-    auto [grid_spec, time_domain] = estimate_pde_grid(mango_params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
-    }
-    auto workspace = workspace_result.value();
-
-    auto solver = AmericanOptionSolver::create(mango_params, workspace).value();
+    auto solver = AmericanOptionSolver::create(mango_params).value();
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
@@ -248,19 +234,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
         0.20);
 
     auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        throw std::runtime_error("Failed to create workspace");
-    }
-    auto workspace = workspace_result.value();
-
-    auto solver = AmericanOptionSolver::create(params, workspace).value();
+    auto solver = AmericanOptionSolver::create(params).value();
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
@@ -300,20 +274,7 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        throw std::runtime_error("Failed to create workspace");
-    }
-    auto workspace = workspace_result.value();
-
-    auto solver = AmericanOptionSolver::create(params, workspace).value();
+    auto solver = AmericanOptionSolver::create(params).value();
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
@@ -616,21 +577,7 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
         volatility,
         dividends);
 
-    // Create workspace (use automatic grid determination)
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        throw std::runtime_error("Failed to create workspace");
-    }
-    auto workspace = workspace_result.value();
-
-    auto solver = AmericanOptionSolver::create(params, workspace).value();
+    auto solver = AmericanOptionSolver::create(params).value();
     auto result = solver.solve();
 
     if (!result) {
@@ -684,20 +631,7 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
         volatility,
         dividends);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
-
-    // Allocate buffer for workspace
-    size_t n = grid_spec.n_points();
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
-
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result) {
-        throw std::runtime_error("Failed to create workspace");
-    }
-    auto workspace = workspace_result.value();
-
-    auto solver = AmericanOptionSolver::create(params, workspace).value();
+    auto solver = AmericanOptionSolver::create(params).value();
     auto result = solver.solve();
 
     if (!result) {

@@ -2,13 +2,11 @@
 #include "mango/option/iv_solver.hpp"
 #include "mango/math/root_finding.hpp"
 #include "mango/option/american_option.hpp"
-#include "mango/pde/core/pde_workspace.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/support/parallel.hpp"
 #include "mango/support/ivcalc_trace.h"
 #include <cmath>
 #include <algorithm>
-#include <memory>
 #include <type_traits>
 #include <variant>
 
@@ -80,29 +78,6 @@ double IVSolver::objective_function(const IVQuery& query, double volatility) con
         }
     }, config_.grid);
 
-    // Single grow-only buffer per thread — avoids unordered_map overhead.
-    // Grid size may vary across Brent iterations (volatility changes grid estimation)
-    // but a single buffer that grows to the max is simpler and faster.
-    thread_local std::vector<double> workspace_buffer;
-
-    size_t n = grid_spec.n_points();
-    size_t required_size = PDEWorkspace::required_size(n);
-
-    if (workspace_buffer.size() < required_size) {
-        workspace_buffer.resize(required_size);
-    }
-
-    auto pde_workspace_result = PDEWorkspace::from_buffer(
-        std::span<double>(workspace_buffer.data(), workspace_buffer.size()), n);
-    if (!pde_workspace_result.has_value()) {
-        last_solver_error_ = SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            // error code set above + pde_workspace_result.error(),
-            .iterations = 0
-        };
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-
     // Collect mandatory tau values for discrete dividends
     std::vector<double> mandatory_tau;
     for (const auto& div : option_params.discrete_dividends) {
@@ -112,12 +87,12 @@ double IVSolver::objective_function(const IVQuery& query, double volatility) con
         }
     }
 
-    // Create solver and solve — always pass grid config to ensure the solver
-    // uses the same grid we computed (matching the workspace size)
+    // Create solver with auto-managed workspace — the auto API handles
+    // the thread_local buffer internally, preserving the grow-only strategy
     auto explicit_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), std::move(mandatory_tau)};
 
     auto solver_result = AmericanOptionSolver::create(
-        option_params, pde_workspace_result.value(), PDEGridSpec{explicit_grid});
+        option_params, PDEGridSpec{explicit_grid});
     if (!solver_result) {
         last_solver_error_ = SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
