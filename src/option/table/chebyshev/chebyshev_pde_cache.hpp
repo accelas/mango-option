@@ -3,7 +3,9 @@
 
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/table/pde_cache.hpp"
+#include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <map>
 #include <span>
 #include <utility>
@@ -27,6 +29,30 @@ public:
         auto& entry = tau_map[tau_idx];
         auto err = entry.spline.build(x_grid, values);
         entry.valid = !err.has_value();
+
+        // [STORE] sanity-check: values fed in, then spline.eval at a fixed
+        // point. If values are clean but eval is NaN, spline build is buggy.
+        if (entry.valid) {
+            size_t n_nan_in = 0;
+            for (double v : values) if (std::isnan(v)) ++n_nan_in;
+            // Probe the spline at the first grid point (must equal values[0]
+            // for a natural cubic spline interpolating those values).
+            double probe_at_first = entry.spline.eval(x_grid.front());
+            double probe_at_mid = entry.spline.eval(
+                (x_grid.front() + x_grid.back()) * 0.5);
+            if (std::isnan(probe_at_first) || std::isnan(probe_at_mid) || n_nan_in > 0) {
+                std::fprintf(stderr,
+                    "[STORE-NaN] sigma=%.6f rate=%.6f tau_idx=%zu x_grid.size=%zu "
+                    "values_nan=%zu probe_at_first=%.6g (expected %.6g) probe_mid=%.6g\n",
+                    sigma, rate, tau_idx, x_grid.size(), n_nan_in,
+                    probe_at_first, values.empty() ? 0.0 : values.front(),
+                    probe_at_mid);
+            }
+        } else {
+            std::fprintf(stderr,
+                "[STORE-FAIL] sigma=%.6f rate=%.6f tau_idx=%zu — spline.build error\n",
+                sigma, rate, tau_idx);
+        }
     }
 
     /// Check if any tau slices exist for (sigma, rate).
