@@ -1552,6 +1552,18 @@ cc_test(
 )
 
 cc_test(
+    name = "chebyshev_minimal_repro_test",
+    size = "small",
+    srcs = ["chebyshev_minimal_repro_test.cc"],
+    deps = [
+        "//src/math/chebyshev:chebyshev_interpolant",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/math/chebyshev:raw_tensor",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "split_surface_test",
     size = "small",
     srcs = ["split_surface_test.cc"],
