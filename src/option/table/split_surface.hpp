@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <concepts>
 #include <expected>
 #include <tuple>
@@ -40,15 +41,30 @@ public:
     [[nodiscard]] double price(double spot, double strike,
                                 double tau, double sigma, double rate) const {
         auto br = split_.bracket(spot, strike, tau, sigma, rate);
+        std::fprintf(stderr,
+            "[SPLIT] price in: spot=%.6f K=%.6f tau=%.10f sigma=%.6f rate=%.6f "
+            "bracket: count=%zu pieces.size=%zu\n",
+            spot, strike, tau, sigma, rate, br.count, pieces_.size());
+
         double result = 0.0;
         for (size_t i = 0; i < br.count; ++i) {
             auto [ls, lk, lt, lv, lr] = split_.to_local(
                 br.entries[i].index, spot, strike, tau, sigma, rate);
             double raw = pieces_[br.entries[i].index].price(ls, lk, lt, lv, lr);
             double norm = split_.normalize(br.entries[i].index, strike, raw);
+
+            std::fprintf(stderr,
+                "[SPLIT]  piece %zu: idx=%zu weight=%.6f local=(s=%.4f k=%.4f t=%.10f v=%.4f r=%.4f) "
+                "raw=%.10g norm=%.10g\n",
+                i, br.entries[i].index, br.entries[i].weight,
+                ls, lk, lt, lv, lr, raw, norm);
+
             result += br.entries[i].weight * norm;
         }
-        return split_.denormalize(result, spot, strike, tau, sigma, rate);
+        double final_v = split_.denormalize(result, spot, strike, tau, sigma, rate);
+        std::fprintf(stderr,
+            "[SPLIT] result_pre_denorm=%.10g final=%.10g\n", result, final_v);
+        return final_v;
     }
 
     [[nodiscard]] double vega(double spot, double strike,

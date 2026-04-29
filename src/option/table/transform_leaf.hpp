@@ -6,6 +6,7 @@
 #include "mango/option/option_spec.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <expected>
 
 namespace mango {
@@ -29,7 +30,16 @@ public:
                                 double tau, double sigma, double rate) const {
         auto coords = xform_.to_coords(spot, strike, tau, sigma, rate);
         double raw = interp_.eval(coords);
-        return std::max(0.0, raw) * strike / K_ref_;
+        double clamped = std::max(0.0, raw);
+        std::fprintf(stderr,
+            "[LEAF] in: spot=%.6f K=%.6f tau=%.10f sigma=%.6f rate=%.6f -> "
+            "coords=(%.6f,%.6f,%.6f,%.6f) raw_eval=%.10g clamped=%.10g K_ref=%.6f -> "
+            "price=%.10g\n",
+            spot, strike, tau, sigma, rate,
+            coords[0], coords[1], coords[2], coords[3],
+            raw, clamped, K_ref_,
+            clamped * strike / K_ref_);
+        return clamped * strike / K_ref_;
     }
 
     [[nodiscard]] double vega(double spot, double strike,
