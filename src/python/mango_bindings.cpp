@@ -256,6 +256,14 @@ double greek_or_raise(std::expected<double, mango::GreekError> result,
     return *result;
 }
 
+void validate_price_table_params_or_raise(const mango::AnyPriceTable& table,
+                                          const mango::PricingParams& params) {
+    auto validation = table.validate_pricing_params(params);
+    if (!validation.has_value()) {
+        raise_validation_error(validation.error());
+    }
+}
+
 }  // namespace
 
 PYBIND11_MODULE(mango_option, m) {
@@ -422,12 +430,17 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("iterations", &mango::IVSuccess::iterations)
         .def_readwrite("final_error", &mango::IVSuccess::final_error)
         .def_readwrite("vega", &mango::IVSuccess::vega)
+        .def_readwrite("used_rate_approximation",
+                       &mango::IVSuccess::used_rate_approximation)
         .def("__repr__", [](const mango::IVSuccess& r) {
             std::string repr = "<IVSuccess iv=" + std::to_string(r.implied_vol) +
                        " iters=" + std::to_string(r.iterations) +
                        " error=" + std::to_string(r.final_error);
             if (r.vega.has_value()) {
                 repr += " vega=" + std::to_string(*r.vega);
+            }
+            if (r.used_rate_approximation) {
+                repr += " used_rate_approximation=true";
             }
             return repr + ">";
         });
@@ -451,6 +464,9 @@ PYBIND11_MODULE(mango_option, m) {
                 case mango::IVErrorCode::BracketingFailed: return "Bracketing failed";
                 case mango::IVErrorCode::NumericalInstability: return "Numerical instability";
                 case mango::IVErrorCode::InvalidGridConfig: return "Invalid grid configuration";
+                case mango::IVErrorCode::OptionTypeMismatch: return "Option type mismatch";
+                case mango::IVErrorCode::DividendYieldMismatch: return "Dividend yield mismatch";
+                case mango::IVErrorCode::VegaTooSmall: return "Vega too small";
                 case mango::IVErrorCode::PDESolveFailed: return "PDE solve failed";
                 default: return "Unknown error";
             }
@@ -476,6 +492,7 @@ PYBIND11_MODULE(mango_option, m) {
         .value("InvalidGridConfig", mango::IVErrorCode::InvalidGridConfig)
         .value("OptionTypeMismatch", mango::IVErrorCode::OptionTypeMismatch)
         .value("DividendYieldMismatch", mango::IVErrorCode::DividendYieldMismatch)
+        .value("VegaTooSmall", mango::IVErrorCode::VegaTooSmall)
         .value("PDESolveFailed", mango::IVErrorCode::PDESolveFailed)
         .export_values();
 
@@ -970,25 +987,39 @@ PYBIND11_MODULE(mango_option, m) {
         .def_property_readonly("surface_type", &mango::AnyPriceTable::surface_type)
         .def_property_readonly("option_type", &mango::AnyPriceTable::option_type)
         .def_property_readonly("dividend_yield", &mango::AnyPriceTable::dividend_yield)
-        .def("price", &mango::AnyPriceTable::price, py::arg("params"))
-        .def("vega", &mango::AnyPriceTable::vega, py::arg("params"))
+        .def("price",
+            [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
+                validate_price_table_params_or_raise(table, params);
+                return table.price(params);
+            },
+            py::arg("params"))
+        .def("vega",
+            [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
+                validate_price_table_params_or_raise(table, params);
+                return table.vega(params);
+            },
+            py::arg("params"))
         .def("delta",
             [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
+                validate_price_table_params_or_raise(table, params);
                 return greek_or_raise(table.delta(params), "delta");
             },
             py::arg("params"))
         .def("gamma",
             [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
+                validate_price_table_params_or_raise(table, params);
                 return greek_or_raise(table.gamma(params), "gamma");
             },
             py::arg("params"))
         .def("theta",
             [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
+                validate_price_table_params_or_raise(table, params);
                 return greek_or_raise(table.theta(params), "theta");
             },
             py::arg("params"))
         .def("rho",
             [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
+                validate_price_table_params_or_raise(table, params);
                 return greek_or_raise(table.rho(params), "rho");
             },
             py::arg("params"))
@@ -1129,6 +1160,6 @@ PYBIND11_MODULE(mango_option, m) {
                 InterpolatedIVSolver instance
 
             Raises:
-                ValueError: If validation or surface building fails
+                ValidationError: If validation or surface building fails
         )pbdoc");
 }

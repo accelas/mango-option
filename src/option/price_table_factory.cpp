@@ -697,6 +697,52 @@ double AnyPriceTable::dividend_yield() const noexcept {
     }, impl_->table);
 }
 
+std::expected<void, ValidationError>
+AnyPriceTable::validate_pricing_params(const PricingParams& params) const {
+    auto base_validation = mango::validate_pricing_params(params);
+    if (!base_validation.has_value()) {
+        return base_validation;
+    }
+
+    if (params.option_type != option_type()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::OptionTypeMismatch,
+            static_cast<double>(params.option_type)});
+    }
+
+    if (std::abs(params.dividend_yield - dividend_yield()) > 1e-10) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::DividendYieldMismatch,
+            params.dividend_yield});
+    }
+
+    const double log_moneyness = std::log(params.spot / params.strike);
+    const double rate = get_zero_rate(params.rate, params.maturity);
+    return std::visit([&](const auto& table_ptr)
+        -> std::expected<void, ValidationError> {
+        if (log_moneyness < table_ptr->m_min() ||
+            log_moneyness > table_ptr->m_max()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::OutOfRange, log_moneyness, 0});
+        }
+        if (params.maturity < table_ptr->tau_min() ||
+            params.maturity > table_ptr->tau_max()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::OutOfRange, params.maturity, 1});
+        }
+        if (params.volatility < table_ptr->sigma_min() ||
+            params.volatility > table_ptr->sigma_max()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::OutOfRange, params.volatility, 2});
+        }
+        if (rate < table_ptr->rate_min() || rate > table_ptr->rate_max()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::OutOfRange, rate, 3});
+        }
+        return {};
+    }, impl_->table);
+}
+
 double AnyPriceTable::price(const PricingParams& params) const {
     const double rate = get_zero_rate(params.rate, params.maturity);
     return std::visit([&](const auto& table_ptr) {

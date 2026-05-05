@@ -273,6 +273,9 @@ The binding accepts Python-native values for common inputs:
 - persistence paths: strings or `pathlib.Path`
 
 The core binding does not require numpy, pandas, pyarrow, or dataframe objects.
+Price-table persistence is implemented by the native C++ Arrow/Parquet backend,
+so deployable wheels must still provide the corresponding native shared
+libraries.
 
 ## Errors
 

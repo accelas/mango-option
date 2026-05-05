@@ -80,7 +80,7 @@ result = mo.american_option_price(params)
 ```
 
 Reusable price tables build the primary 4D B-spline interpolation surface over
-moneyness, maturity, volatility, and rate:
+log-moneyness, maturity, volatility, and rate:
 
 ```python
 config = mo.PriceTableConfig()

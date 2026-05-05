@@ -116,6 +116,28 @@ TEST(PriceTableFactoryTest, BuildsContinuous4DBSplineAndEvaluatesOffGridPoint) {
     EXPECT_NEAR(iv_via_solver->implied_vol, params.volatility, 0.08);
 }
 
+TEST(PriceTableFactoryTest, ValidatesReusableTablePricingQueries) {
+    auto table_result = make_price_table(bspline_4d_config());
+    ASSERT_TRUE(table_result.has_value()) << "make_price_table failed";
+    auto table = std::move(*table_result);
+
+    auto params = off_grid_pricing_params();
+    EXPECT_TRUE(table.validate_pricing_params(params).has_value());
+
+    auto wrong_type = params;
+    wrong_type.option_type = OptionType::CALL;
+    auto type_error = table.validate_pricing_params(wrong_type);
+    ASSERT_FALSE(type_error.has_value());
+    EXPECT_EQ(type_error.error().code, ValidationErrorCode::OptionTypeMismatch);
+
+    auto out_of_range = params;
+    out_of_range.volatility = 0.75;
+    auto bounds_error = table.validate_pricing_params(out_of_range);
+    ASSERT_FALSE(bounds_error.has_value());
+    EXPECT_EQ(bounds_error.error().code, ValidationErrorCode::OutOfRange);
+    EXPECT_EQ(bounds_error.error().index, 2u);
+}
+
 TEST(PriceTableFactoryTest, ParquetRoundTripPreserves4DBSplineSurface) {
     auto table_result = make_price_table(bspline_4d_config());
     ASSERT_TRUE(table_result.has_value());

@@ -172,6 +172,11 @@ def test_bspline_4d_price_table_workflow_and_persistence_paths():
     iv = table.solve_iv(q)
     assert isinstance(iv, mo.IVSuccess)
 
+    curve_query = make_iv_query(price, p)
+    curve_query.rate = mo.YieldCurve.flat(0.037)
+    curve_iv = table.solve_iv(curve_query)
+    assert curve_iv.used_rate_approximation
+
     solver = table.make_iv_solver()
     success, result, error = solver.solve(q)
     assert success
@@ -183,6 +188,34 @@ def test_bspline_4d_price_table_workflow_and_persistence_paths():
         loaded = mo.PriceTable.load(path)
         assert loaded.surface_type == table.surface_type
         assert_finite_number(loaded.price(p))
+
+
+def test_price_table_validation_and_iv_error_parity():
+    table = mo.make_price_table(make_price_table_config())
+    p = make_bspline_4d_off_grid_params()
+    price = table.price(p)
+
+    wrong_type = make_bspline_4d_off_grid_params()
+    wrong_type.option_type = mo.OptionType.CALL
+    try:
+        table.price(wrong_type)
+        raise AssertionError("option type mismatch should fail")
+    except mo.ValidationError as e:
+        assert hasattr(e, "code")
+
+    solver_config = mo.InterpolatedIVSolverConfig()
+    solver_config.vega_threshold = 1e12
+    solver = table.make_iv_solver(solver_config)
+    success, result, error = solver.solve(make_iv_query(price, p))
+    assert not success
+    assert error.code == mo.IVErrorCode.VegaTooSmall
+    assert "Vega" in error.message
+
+    try:
+        table.solve_iv(make_iv_query(price, p), solver_config)
+        raise AssertionError("direct solve_iv should raise on IV failure")
+    except mo.SolverException as e:
+        assert hasattr(e, "code")
 
 
 def test_legacy_interpolated_iv_solver_factory_still_works():
@@ -219,6 +252,7 @@ def main():
         test_optional_and_backend_variant_conversions,
         test_dividend_conversions,
         test_bspline_4d_price_table_workflow_and_persistence_paths,
+        test_price_table_validation_and_iv_error_parity,
         test_legacy_interpolated_iv_solver_factory_still_works,
         test_typed_exceptions_for_validation_and_persistence,
     ]

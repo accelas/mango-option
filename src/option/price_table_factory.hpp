@@ -27,6 +27,9 @@ public:
     [[nodiscard]] OptionType option_type() const noexcept;
     [[nodiscard]] double dividend_yield() const noexcept;
 
+    [[nodiscard]] std::expected<void, ValidationError>
+    validate_pricing_params(const PricingParams& params) const;
+
     [[nodiscard]] double price(const PricingParams& params) const;
     [[nodiscard]] double vega(const PricingParams& params) const;
     [[nodiscard]] std::expected<double, GreekError> delta(const PricingParams& params) const;
