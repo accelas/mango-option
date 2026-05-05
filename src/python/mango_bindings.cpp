@@ -247,6 +247,15 @@ std::string rate_spec_to_string(const mango::RateSpec& spec) {
     }, spec);
 }
 
+double greek_or_raise(std::expected<double, mango::GreekError> result,
+                      const char* name) {
+    if (!result.has_value()) {
+        raise_with_code(g_solver_error,
+            std::string(name) + " failed", static_cast<int>(result.error()));
+    }
+    return *result;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(mango_option, m) {
@@ -283,6 +292,11 @@ PYBIND11_MODULE(mango_option, m) {
         .value("MEDIUM", mango::PriceTableGridProfile::Medium)
         .value("HIGH", mango::PriceTableGridProfile::High)
         .value("ULTRA", mango::PriceTableGridProfile::Ultra);
+
+    py::enum_<mango::PriceTableCompression>(m, "PriceTableCompression")
+        .value("NONE", mango::PriceTableCompression::NONE)
+        .value("SNAPPY", mango::PriceTableCompression::SNAPPY)
+        .value("ZSTD", mango::PriceTableCompression::ZSTD);
 
     py::enum_<mango::GridAccuracyProfile>(m, "GridAccuracyProfile")
         .value("LOW", mango::GridAccuracyProfile::Low)
@@ -951,6 +965,78 @@ PYBIND11_MODULE(mango_option, m) {
 
     m.attr("PriceTableConfig") = m.attr("IVSolverFactoryConfig");
 
+    // AnyPriceTable (exposed as PriceTable for Python)
+    py::class_<mango::AnyPriceTable>(m, "PriceTable")
+        .def_property_readonly("surface_type", &mango::AnyPriceTable::surface_type)
+        .def_property_readonly("option_type", &mango::AnyPriceTable::option_type)
+        .def_property_readonly("dividend_yield", &mango::AnyPriceTable::dividend_yield)
+        .def("price", &mango::AnyPriceTable::price, py::arg("params"))
+        .def("vega", &mango::AnyPriceTable::vega, py::arg("params"))
+        .def("delta",
+            [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
+                return greek_or_raise(table.delta(params), "delta");
+            },
+            py::arg("params"))
+        .def("gamma",
+            [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
+                return greek_or_raise(table.gamma(params), "gamma");
+            },
+            py::arg("params"))
+        .def("theta",
+            [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
+                return greek_or_raise(table.theta(params), "theta");
+            },
+            py::arg("params"))
+        .def("rho",
+            [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
+                return greek_or_raise(table.rho(params), "rho");
+            },
+            py::arg("params"))
+        .def("make_iv_solver",
+            [](const mango::AnyPriceTable& table,
+               const std::optional<mango::InterpolatedIVSolverConfig>& solver_config) {
+                auto result = table.make_iv_solver(solver_config.value_or(
+                    mango::InterpolatedIVSolverConfig{}));
+                if (!result.has_value()) {
+                    raise_validation_error(result.error());
+                }
+                return std::move(*result);
+            },
+            py::arg("solver_config") = py::none())
+        .def("solve_iv",
+            [](const mango::AnyPriceTable& table, const mango::IVQuery& query,
+               const std::optional<mango::InterpolatedIVSolverConfig>& solver_config) {
+                auto result = table.solve_iv(
+                    query, solver_config.value_or(mango::InterpolatedIVSolverConfig{}));
+                if (!result.has_value()) {
+                    raise_iv_error(result.error());
+                }
+                return *result;
+            },
+            py::arg("query"),
+            py::arg("solver_config") = py::none())
+        .def("save",
+            [](const mango::AnyPriceTable& table, const py::object& path,
+               mango::PriceTableCompression compression) {
+                auto result = table.save(
+                    std::filesystem::path(python_path_to_string(path)), compression);
+                if (!result.has_value()) {
+                    raise_price_table_error(result.error());
+                }
+            },
+            py::arg("path"),
+            py::arg("compression") = mango::PriceTableCompression::ZSTD)
+        .def_static("load",
+            [](const py::object& path) {
+                auto result = mango::load_price_table(
+                    std::filesystem::path(python_path_to_string(path)));
+                if (!result.has_value()) {
+                    raise_price_table_error(result.error());
+                }
+                return std::move(*result);
+            },
+            py::arg("path"));
+
     // AnyInterpIVSolver (exposed as InterpolatedIVSolver for Python)
     py::class_<mango::AnyInterpIVSolver>(m, "InterpolatedIVSolver")
         .def("solve",
@@ -999,13 +1085,33 @@ PYBIND11_MODULE(mango_option, m) {
             )pbdoc");
 
     // Factory function
+    m.def("make_price_table",
+        [](const mango::IVSolverFactoryConfig& config) {
+            auto result = mango::make_price_table(config);
+            if (!result.has_value()) {
+                raise_validation_error(result.error());
+            }
+            return std::move(*result);
+        },
+        py::arg("config"),
+        R"pbdoc(
+            Create a reusable price table from configuration.
+
+            Args:
+                config: PriceTableConfig with grid, backend, and market parameters
+
+            Returns:
+                PriceTable instance
+
+            Raises:
+                ValidationError: If validation or surface building fails
+        )pbdoc");
+
     m.def("make_interpolated_iv_solver",
         [](const mango::IVSolverFactoryConfig& config) {
             auto result = mango::make_interpolated_iv_solver(config);
             if (!result.has_value()) {
-                throw py::value_error(
-                    "Failed to create IV solver: validation error code " +
-                    std::to_string(static_cast<int>(result.error().code)));
+                raise_validation_error(result.error());
             }
             return std::move(*result);
         },
