@@ -23,6 +23,11 @@
 #include "mango/option/iv_result.hpp"
 #include "mango/option/table/price_table.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/bspline/bspline_3d_surface.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/chebyshev/chebyshev_3d_surface.hpp"
+#include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
+#include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"
 #include "mango/math/root_finding.hpp"
@@ -225,6 +230,85 @@ public:
 private:
     std::unique_ptr<Impl> impl_;
 };
+
+namespace detail {
+
+/// Cheap immutable surface view used when building solvers from AnyPriceTable.
+template <typename Table>
+class SharedPriceTableSurface {
+public:
+    using inner_type = typename Table::inner_type;
+
+    explicit SharedPriceTableSurface(std::shared_ptr<const Table> table)
+        : table_(std::move(table)) {}
+
+    [[nodiscard]] double price(double spot, double strike,
+                               double tau, double sigma, double rate) const {
+        return table_->price(spot, strike, tau, sigma, rate);
+    }
+
+    [[nodiscard]] double vega(double spot, double strike,
+                              double tau, double sigma, double rate) const {
+        return table_->vega(spot, strike, tau, sigma, rate);
+    }
+
+    [[nodiscard]] std::expected<double, GreekError>
+    delta(const PricingParams& params) const { return table_->delta(params); }
+
+    [[nodiscard]] std::expected<double, GreekError>
+    gamma(const PricingParams& params) const { return table_->gamma(params); }
+
+    [[nodiscard]] std::expected<double, GreekError>
+    theta(const PricingParams& params) const { return table_->theta(params); }
+
+    [[nodiscard]] std::expected<double, GreekError>
+    rho(const PricingParams& params) const { return table_->rho(params); }
+
+    [[nodiscard]] double m_min() const noexcept { return table_->m_min(); }
+    [[nodiscard]] double m_max() const noexcept { return table_->m_max(); }
+    [[nodiscard]] double tau_min() const noexcept { return table_->tau_min(); }
+    [[nodiscard]] double tau_max() const noexcept { return table_->tau_max(); }
+    [[nodiscard]] double sigma_min() const noexcept { return table_->sigma_min(); }
+    [[nodiscard]] double sigma_max() const noexcept { return table_->sigma_max(); }
+    [[nodiscard]] double rate_min() const noexcept { return table_->rate_min(); }
+    [[nodiscard]] double rate_max() const noexcept { return table_->rate_max(); }
+    [[nodiscard]] OptionType option_type() const noexcept { return table_->option_type(); }
+    [[nodiscard]] double dividend_yield() const noexcept { return table_->dividend_yield(); }
+
+private:
+    std::shared_ptr<const Table> table_;
+};
+
+}  // namespace detail
+
+template <typename Surface>
+using SharedPriceTableSolver =
+    InterpolatedIVSolver<detail::SharedPriceTableSurface<Surface>>;
+
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    InterpolatedIVSolver<BSplinePriceTable> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    InterpolatedIVSolver<BSplineMultiKRefSurface> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    InterpolatedIVSolver<ChebyshevSurface> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    InterpolatedIVSolver<ChebyshevMultiKRefSurface> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    InterpolatedIVSolver<BSpline3DPriceTable> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    InterpolatedIVSolver<Chebyshev3DPriceTable> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    SharedPriceTableSolver<BSplinePriceTable> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    SharedPriceTableSolver<BSplineMultiKRefSurface> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    SharedPriceTableSolver<ChebyshevSurface> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    SharedPriceTableSolver<ChebyshevMultiKRefSurface> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    SharedPriceTableSolver<BSpline3DPriceTable> solver);
+[[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
+    SharedPriceTableSolver<Chebyshev3DPriceTable> solver);
 
 /// Factory function: build price surface and IV solver from config
 ///

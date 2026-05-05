@@ -1304,6 +1304,7 @@ cc_test(
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option:interpolated_iv_solver",
+        "//src/option:price_table_factory",
         "//src/option:american_option",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -1318,6 +1319,7 @@ cc_test(
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option:interpolated_iv_solver",
+        "//src/option:price_table_factory",
         "//src/option:american_option",
         "//src/option:american_option_batch",
         "@googletest//:gtest_main",
@@ -1530,6 +1532,7 @@ cc_test(
     srcs = ["dimensionless_iv_test.cc"],
     deps = [
         "//src/option:interpolated_iv_solver",
+        "//src/option:price_table_factory",
         "//src/option:iv_solver",
         "//src/option:american_option",
         "@googletest//:gtest_main",

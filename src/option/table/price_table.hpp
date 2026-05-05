@@ -20,6 +20,8 @@ struct SurfaceBounds {
 template <typename Inner>
 class PriceTable {
 public:
+    using inner_type = Inner;
+
     PriceTable(Inner inner, const SurfaceBounds& bounds,
                    OptionType option_type, double dividend_yield)
         : inner_(std::move(inner))
