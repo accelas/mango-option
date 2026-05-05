@@ -7,12 +7,18 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
+#include <array>
+#include <filesystem>
+#include <sstream>
+#include <string>
+#include <vector>
 #include "mango/option/option_spec.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/option/option_grid.hpp"
+#include "mango/option/price_table_factory.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
@@ -21,6 +27,144 @@
 
 namespace py = pybind11;
 
+namespace {
+
+PyObject* g_validation_error = nullptr;
+PyObject* g_price_table_error = nullptr;
+PyObject* g_solver_error = nullptr;
+PyObject* g_type_conversion_error = nullptr;
+
+[[noreturn]] void raise_with_code(PyObject* exc_type,
+                                  const std::string& message,
+                                  int code) {
+    py::object message_obj = py::str(message);
+    py::object exc = py::reinterpret_steal<py::object>(
+        PyObject_CallFunctionObjArgs(exc_type, message_obj.ptr(), nullptr));
+    if (!exc) {
+        throw py::error_already_set();
+    }
+    exc.attr("code") = code;
+    PyErr_SetObject(exc_type, exc.ptr());
+    throw py::error_already_set();
+}
+
+[[noreturn]] [[maybe_unused]] void raise_validation_error(const mango::ValidationError& error) {
+    std::ostringstream message;
+    message << error;
+    raise_with_code(g_validation_error, message.str(), static_cast<int>(error.code));
+}
+
+[[noreturn]] [[maybe_unused]] void raise_price_table_error(const mango::PriceTableError& error) {
+    std::ostringstream message;
+    message << error;
+    raise_with_code(g_price_table_error, message.str(), static_cast<int>(error.code));
+}
+
+[[noreturn]] [[maybe_unused]] void raise_iv_error(const mango::IVError& error) {
+    std::ostringstream message;
+    message << "IVError{code=" << static_cast<int>(error.code)
+            << ", iterations=" << error.iterations
+            << ", final_error=" << error.final_error;
+    if (error.last_vol.has_value()) {
+        message << ", last_vol=" << *error.last_vol;
+    }
+    message << "}";
+    raise_with_code(g_solver_error, message.str(), static_cast<int>(error.code));
+}
+
+[[noreturn]] void raise_type_conversion_error(const std::string& message) {
+    raise_with_code(g_type_conversion_error, message, -1);
+}
+
+[[maybe_unused]] std::string python_path_to_string(const py::object& path) {
+    try {
+        return py::module_::import("os").attr("fspath")(path).cast<std::string>();
+    } catch (const py::error_already_set&) {
+        raise_type_conversion_error("path must be path-like and convertible to str");
+    } catch (const py::cast_error&) {
+        raise_type_conversion_error("path must be path-like and convertible to str");
+    }
+}
+
+[[maybe_unused]] std::vector<double> python_to_double_vector(const py::handle& obj,
+                                                             const char* field_name) {
+    if (!PySequence_Check(obj.ptr())) {
+        raise_type_conversion_error(
+            std::string(field_name) + " must be a Python sequence");
+    }
+
+    py::sequence seq = py::reinterpret_borrow<py::sequence>(obj);
+    std::vector<double> values;
+    values.reserve(seq.size());
+    for (py::handle item : seq) {
+        try {
+            values.push_back(py::cast<double>(item));
+        } catch (const py::cast_error&) {
+            raise_type_conversion_error(
+                std::string(field_name) + " entries must be convertible to float");
+        } catch (const py::error_already_set&) {
+            raise_type_conversion_error(
+                std::string(field_name) + " entries must be convertible to float");
+        }
+    }
+    return values;
+}
+
+[[maybe_unused]] std::vector<mango::Dividend> python_to_dividends(const py::handle& obj) {
+    if (!PySequence_Check(obj.ptr())) {
+        raise_type_conversion_error("dividends must be a Python sequence");
+    }
+
+    py::sequence seq = py::reinterpret_borrow<py::sequence>(obj);
+    std::vector<mango::Dividend> dividends;
+    dividends.reserve(seq.size());
+    for (py::handle item : seq) {
+        if (py::isinstance<mango::Dividend>(item)) {
+            try {
+                dividends.push_back(py::cast<mango::Dividend>(item));
+            } catch (const py::cast_error&) {
+                raise_type_conversion_error("dividend objects could not be converted");
+            } catch (const py::error_already_set&) {
+                raise_type_conversion_error("dividend objects could not be converted");
+            }
+            continue;
+        }
+
+        if (!PySequence_Check(item.ptr())) {
+            raise_type_conversion_error(
+                "dividends entries must be Dividend objects or (time, amount) pairs");
+        }
+
+        py::sequence pair = py::reinterpret_borrow<py::sequence>(item);
+        if (pair.size() != 2) {
+            raise_type_conversion_error(
+                "dividends entries must be Dividend objects or (time, amount) pairs");
+        }
+
+        try {
+            dividends.push_back(mango::Dividend{
+                .calendar_time = py::cast<double>(pair[0]),
+                .amount = py::cast<double>(pair[1]),
+            });
+        } catch (const py::cast_error&) {
+            raise_type_conversion_error(
+                "dividend time and amount must be convertible to float");
+        } catch (const py::error_already_set&) {
+            raise_type_conversion_error(
+                "dividend time and amount must be convertible to float");
+        }
+    }
+    return dividends;
+}
+
+[[maybe_unused]] py::list dividends_to_python(const std::vector<mango::Dividend>& dividends) {
+    py::list result;
+    for (const auto& dividend : dividends) {
+        result.append(py::cast(dividend));
+    }
+    return result;
+}
+
 // Helper to convert Python object to RateSpec
 mango::RateSpec python_to_rate_spec(const py::object& obj) {
     if (py::isinstance<py::float_>(obj) || py::isinstance<py::int_>(obj)) {
@@ -28,7 +172,7 @@ mango::RateSpec python_to_rate_spec(const py::object& obj) {
     } else if (py::isinstance<mango::YieldCurve>(obj)) {
         return obj.cast<mango::YieldCurve>();
     } else {
-        throw py::type_error("rate must be a float or YieldCurve");
+        raise_type_conversion_error("rate must be a float, int, or YieldCurve");
     }
 }
 
@@ -56,8 +200,30 @@ std::string rate_spec_to_string(const mango::RateSpec& spec) {
     }, spec);
 }
 
+}  // namespace
+
 PYBIND11_MODULE(mango_option, m) {
     m.doc() = "Python bindings for mango-option American option pricing and IV solver";
+
+    py::object mango_error = py::reinterpret_steal<py::object>(
+        PyErr_NewException("mango_option.MangoError", PyExc_Exception, nullptr));
+    m.attr("MangoError") = mango_error;
+
+    g_validation_error = PyErr_NewException(
+        "mango_option.ValidationError", mango_error.ptr(), nullptr);
+    m.attr("ValidationError") = py::reinterpret_borrow<py::object>(g_validation_error);
+
+    g_price_table_error = PyErr_NewException(
+        "mango_option.PriceTableError", mango_error.ptr(), nullptr);
+    m.attr("PriceTableError") = py::reinterpret_borrow<py::object>(g_price_table_error);
+
+    g_solver_error = PyErr_NewException(
+        "mango_option.SolverException", mango_error.ptr(), nullptr);
+    m.attr("SolverException") = py::reinterpret_borrow<py::object>(g_solver_error);
+
+    g_type_conversion_error = PyErr_NewException(
+        "mango_option.TypeConversionError", mango_error.ptr(), nullptr);
+    m.attr("TypeConversionError") = py::reinterpret_borrow<py::object>(g_type_conversion_error);
 
     // OptionType enum
     py::enum_<mango::OptionType>(m, "OptionType")
