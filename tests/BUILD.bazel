@@ -1688,6 +1688,9 @@ cc_test(
         "//src/math/bspline:bspline_nd_separable",
         "//src/math/bspline:bspline_basis",
         "//src/math/chebyshev:chebyshev_nodes",
+        # parquet_io_test.cc rewrites malformed files through Arrow and
+        # Parquet APIs directly, in addition to testing mango parquet_io.
+        "//third_party/arrow",
         "//third_party/arrow:parquet",
         "@googletest//:gtest",
         "@googletest//:gtest_main",

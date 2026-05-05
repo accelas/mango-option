@@ -8,6 +8,9 @@ cc_library(
     deps = [
         "//src/option/table/serialization:price_table_data",
         "//src/support:crc64",
+        # parquet_io.cpp uses Arrow arrays/builders/file streams directly,
+        # and Parquet for the parquet::arrow reader/writer bridge.
+        "//third_party/arrow",
         "//third_party/arrow:parquet",
     ],
     strip_include_prefix = "/src/option/table/parquet",
