@@ -176,6 +176,19 @@ cc_test(
 )
 
 cc_test(
+    name = "price_table_factory_test",
+    size = "medium",
+    srcs = ["price_table_factory_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option:price_table_factory",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "european_option_test",
     size = "small",
     srcs = ["european_option_test.cc"],
@@ -1679,4 +1692,3 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
-
