@@ -21,7 +21,7 @@ The Docker image includes:
 - systemtap-sdt-dev (USDT tracing)
 - libquantlib0-dev (benchmarks)
 - liblapacke-dev
-- libarrow-dev (Apache Arrow)
+- libarrow-dev and libparquet-dev (Apache Arrow/Parquet C++)
 - Bazelisk (as `/usr/local/bin/bazel`)
 
 **How it works:**
