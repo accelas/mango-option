@@ -87,6 +87,12 @@ IVQuery off_grid_iv_query(const PricingParams& params, double market_price) {
     return query;
 }
 
+IVQuery yield_curve_iv_query(const PricingParams& params, double market_price) {
+    auto query = off_grid_iv_query(params, market_price);
+    query.rate = YieldCurve::flat(0.037);
+    return query;
+}
+
 TEST(PriceTableFactoryTest, BuildsContinuous4DBSplineAndEvaluatesOffGridPoint) {
     auto table_result = make_price_table(bspline_4d_config());
     ASSERT_TRUE(table_result.has_value()) << "make_price_table failed";
@@ -114,6 +120,27 @@ TEST(PriceTableFactoryTest, BuildsContinuous4DBSplineAndEvaluatesOffGridPoint) {
     auto iv_via_solver = solver->solve(query);
     ASSERT_TRUE(iv_via_solver.has_value()) << "solver.solve failed";
     EXPECT_NEAR(iv_via_solver->implied_vol, params.volatility, 0.08);
+}
+
+TEST(PriceTableFactoryTest, ReportsInterpolatedIVApproximationAndVegaFailures) {
+    auto table_result = make_price_table(bspline_4d_config());
+    ASSERT_TRUE(table_result.has_value()) << "make_price_table failed";
+    auto table = std::move(*table_result);
+
+    auto params = off_grid_pricing_params();
+    const double market_price = table.price(params);
+
+    auto curve_iv = table.solve_iv(yield_curve_iv_query(params, market_price));
+    ASSERT_TRUE(curve_iv.has_value()) << "yield curve IV solve failed";
+    EXPECT_TRUE(curve_iv->used_rate_approximation);
+
+    InterpolatedIVSolverConfig config;
+    config.vega_threshold = 1e12;
+    auto solver = table.make_iv_solver(config);
+    ASSERT_TRUE(solver.has_value()) << "make_iv_solver failed";
+    auto low_vega = solver->solve(off_grid_iv_query(params, market_price));
+    ASSERT_FALSE(low_vega.has_value());
+    EXPECT_EQ(low_vega.error().code, IVErrorCode::VegaTooSmall);
 }
 
 TEST(PriceTableFactoryTest, ValidatesReusableTablePricingQueries) {
