@@ -165,7 +165,7 @@ PyObject* g_type_conversion_error = nullptr;
 }
 
 template <size_t N>
-std::array<size_t, N> python_to_size_array(const py::handle& obj, const char* field_name) {
+std::array<size_t, N> python_to_size_sequence(const py::handle& obj, const char* field_name) {
     if (!PySequence_Check(obj.ptr())) {
         raise_type_conversion_error(std::string(field_name) + " must be a Python sequence");
     }
@@ -192,7 +192,7 @@ std::array<size_t, N> python_to_size_array(const py::handle& obj, const char* fi
 }
 
 template <size_t N>
-py::list size_array_to_python(const std::array<size_t, N>& values) {
+py::list size_sequence_to_python(const std::array<size_t, N>& values) {
     py::list result;
     for (size_t value : values) {
         result.append(value);
@@ -873,10 +873,10 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("maturity", &mango::ChebyshevBackend::maturity)
         .def_property("num_pts",
             [](const mango::ChebyshevBackend& self) {
-                return size_array_to_python(self.num_pts);
+                return size_sequence_to_python(self.num_pts);
             },
             [](mango::ChebyshevBackend& self, const py::object& obj) {
-                self.num_pts = python_to_size_array<4>(obj, "num_pts");
+                self.num_pts = python_to_size_sequence<4>(obj, "num_pts");
             });
 
     py::enum_<mango::DimensionlessBackend::Interpolant>(m, "DimensionlessInterpolant")
@@ -889,10 +889,10 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("interpolant", &mango::DimensionlessBackend::interpolant)
         .def_property("chebyshev_pts",
             [](const mango::DimensionlessBackend& self) {
-                return size_array_to_python(self.chebyshev_pts);
+                return size_sequence_to_python(self.chebyshev_pts);
             },
             [](mango::DimensionlessBackend& self, const py::object& obj) {
-                self.chebyshev_pts = python_to_size_array<3>(obj, "chebyshev_pts");
+                self.chebyshev_pts = python_to_size_sequence<3>(obj, "chebyshev_pts");
             });
 
     // DiscreteDividendConfig

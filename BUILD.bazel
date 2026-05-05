@@ -183,7 +183,6 @@ py_wheel(
         "@platforms//os:linux": "linux_x86_64",
         "//conditions:default": "any",
     }),
-    requires = ["numpy"],
     strip_path_prefixes = ["src/python"],
     deps = ["//src/python:mango_option"],
 )
