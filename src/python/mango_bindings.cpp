@@ -6,7 +6,6 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <pybind11/numpy.h>
 #include <array>
 #include <filesystem>
 #include <sstream>
@@ -163,6 +162,54 @@ PyObject* g_type_conversion_error = nullptr;
         result.append(py::cast(dividend));
     }
     return result;
+}
+
+template <size_t N>
+std::array<size_t, N> python_to_size_array(const py::handle& obj, const char* field_name) {
+    if (!PySequence_Check(obj.ptr())) {
+        raise_type_conversion_error(std::string(field_name) + " must be a Python sequence");
+    }
+
+    py::sequence seq = py::reinterpret_borrow<py::sequence>(obj);
+    if (seq.size() != N) {
+        raise_type_conversion_error(
+            std::string(field_name) + " must contain exactly " + std::to_string(N) + " integers");
+    }
+
+    std::array<size_t, N> values{};
+    for (size_t i = 0; i < N; ++i) {
+        try {
+            values[i] = py::cast<size_t>(seq[i]);
+        } catch (const py::cast_error&) {
+            raise_type_conversion_error(
+                std::string(field_name) + " entries must be convertible to integer");
+        } catch (const py::error_already_set&) {
+            raise_type_conversion_error(
+                std::string(field_name) + " entries must be convertible to integer");
+        }
+    }
+    return values;
+}
+
+template <size_t N>
+py::list size_array_to_python(const std::array<size_t, N>& values) {
+    py::list result;
+    for (size_t value : values) {
+        result.append(value);
+    }
+    return result;
+}
+
+py::list double_vector_to_python(const std::vector<double>& values) {
+    py::list result;
+    for (double value : values) {
+        result.append(value);
+    }
+    return result;
+}
+
+bool is_python_string_like(const py::handle& obj) {
+    return py::isinstance<py::str>(obj) || py::isinstance<py::bytes>(obj);
 }
 
 // Helper to convert Python object to RateSpec
@@ -450,7 +497,13 @@ PYBIND11_MODULE(mango_option, m) {
     py::class_<mango::DividendSpec>(m, "DividendSpec")
         .def(py::init<>())
         .def_readwrite("dividend_yield", &mango::DividendSpec::dividend_yield)
-        .def_readwrite("discrete_dividends", &mango::DividendSpec::discrete_dividends);
+        .def_property("discrete_dividends",
+            [](const mango::DividendSpec& self) {
+                return dividends_to_python(self.discrete_dividends);
+            },
+            [](mango::DividendSpec& self, const py::object& obj) {
+                self.discrete_dividends = python_to_dividends(obj);
+            });
 
     // PricingParams structure
     py::class_<mango::PricingParams>(m, "PricingParams")
@@ -465,7 +518,13 @@ PYBIND11_MODULE(mango_option, m) {
             "Risk-free rate (float or YieldCurve)")
         .def_readwrite("dividend_yield", &mango::PricingParams::dividend_yield)
         .def_readwrite("option_type", &mango::PricingParams::option_type)
-        .def_readwrite("discrete_dividends", &mango::PricingParams::discrete_dividends);
+        .def_property("discrete_dividends",
+            [](const mango::PricingParams& self) {
+                return dividends_to_python(self.discrete_dividends);
+            },
+            [](mango::PricingParams& self, const py::object& obj) {
+                self.discrete_dividends = python_to_dividends(obj);
+            });
 
     // AmericanOptionResult structure
     py::class_<mango::AmericanOptionResult>(m, "AmericanOptionResult")
@@ -668,17 +727,22 @@ PYBIND11_MODULE(mango_option, m) {
             [](const mango::PriceTableAxes& self) {
                 py::list result;
                 for (const auto& grid : self.grids) {
-                    result.append(py::array_t<double>(grid.size(), grid.data()));
+                    result.append(double_vector_to_python(grid));
                 }
                 return result;
             },
-            [](mango::PriceTableAxes& self, const py::list& grids) {
+            [](mango::PriceTableAxes& self, const py::object& grids_obj) {
+                if (!PySequence_Check(grids_obj.ptr())) {
+                    raise_type_conversion_error("grids must be a Python sequence");
+                }
+                py::sequence grids = py::reinterpret_borrow<py::sequence>(grids_obj);
                 if (grids.size() != 4) {
-                    throw py::value_error("Must provide exactly 4 grids");
+                    raise_validation_error(mango::ValidationError{
+                        mango::ValidationErrorCode::InvalidGridSize,
+                        static_cast<double>(grids.size())});
                 }
                 for (size_t i = 0; i < 4; ++i) {
-                    auto arr = grids[i].cast<py::array_t<double>>();
-                    self.grids[i] = std::vector<double>(arr.data(), arr.data() + arr.size());
+                    self.grids[i] = python_to_double_vector(grids[i], "grid");
                 }
             })
         .def_property("names",
@@ -689,12 +753,24 @@ PYBIND11_MODULE(mango_option, m) {
                 }
                 return result;
             },
-            [](mango::PriceTableAxes& self, const py::list& names) {
+            [](mango::PriceTableAxes& self, const py::object& names_obj) {
+                if (is_python_string_like(names_obj) || !PySequence_Check(names_obj.ptr())) {
+                    raise_type_conversion_error("names must be a Python sequence");
+                }
+                py::sequence names = py::reinterpret_borrow<py::sequence>(names_obj);
                 if (names.size() != 4) {
-                    throw py::value_error("Must provide exactly 4 names");
+                    raise_validation_error(mango::ValidationError{
+                        mango::ValidationErrorCode::InvalidGridSize,
+                        static_cast<double>(names.size())});
                 }
                 for (size_t i = 0; i < 4; ++i) {
-                    self.names[i] = names[i].cast<std::string>();
+                    try {
+                        self.names[i] = names[i].cast<std::string>();
+                    } catch (const py::cast_error&) {
+                        raise_type_conversion_error("names entries must be convertible to str");
+                    } catch (const py::error_already_set&) {
+                        raise_type_conversion_error("names entries must be convertible to str");
+                    }
                 }
             })
         .def("total_points", [](const mango::PriceTableAxes& self) {
@@ -718,14 +794,33 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("max_iter", &mango::InterpolatedIVSolverConfig::max_iter)
         .def_readwrite("tolerance", &mango::InterpolatedIVSolverConfig::tolerance)
         .def_readwrite("sigma_min", &mango::InterpolatedIVSolverConfig::sigma_min)
-        .def_readwrite("sigma_max", &mango::InterpolatedIVSolverConfig::sigma_max);
+        .def_readwrite("sigma_max", &mango::InterpolatedIVSolverConfig::sigma_max)
+        .def_readwrite("vega_threshold", &mango::InterpolatedIVSolverConfig::vega_threshold);
 
     // IVGrid config
     py::class_<mango::IVGrid>(m, "IVGrid")
         .def(py::init<>())
-        .def_readwrite("moneyness", &mango::IVGrid::moneyness)
-        .def_readwrite("vol", &mango::IVGrid::vol)
-        .def_readwrite("rate", &mango::IVGrid::rate);
+        .def_property("moneyness",
+            [](const mango::IVGrid& self) {
+                return double_vector_to_python(self.moneyness);
+            },
+            [](mango::IVGrid& self, const py::object& obj) {
+                self.moneyness = python_to_double_vector(obj, "moneyness");
+            })
+        .def_property("vol",
+            [](const mango::IVGrid& self) {
+                return double_vector_to_python(self.vol);
+            },
+            [](mango::IVGrid& self, const py::object& obj) {
+                self.vol = python_to_double_vector(obj, "vol");
+            })
+        .def_property("rate",
+            [](const mango::IVGrid& self) {
+                return double_vector_to_python(self.rate);
+            },
+            [](mango::IVGrid& self, const py::object& obj) {
+                self.rate = python_to_double_vector(obj, "rate");
+            });
 
     // AdaptiveGridParams config
     py::class_<mango::AdaptiveGridParams>(m, "AdaptiveGridParams")
@@ -733,7 +828,12 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("target_iv_error", &mango::AdaptiveGridParams::target_iv_error)
         .def_readwrite("max_iter", &mango::AdaptiveGridParams::max_iter)
         .def_readwrite("max_points_per_dim", &mango::AdaptiveGridParams::max_points_per_dim)
-        .def_readwrite("min_moneyness_points", &mango::AdaptiveGridParams::min_moneyness_points);
+        .def_readwrite("min_moneyness_points", &mango::AdaptiveGridParams::min_moneyness_points)
+        .def_readwrite("validation_samples", &mango::AdaptiveGridParams::validation_samples)
+        .def_readwrite("refinement_factor", &mango::AdaptiveGridParams::refinement_factor)
+        .def_readwrite("lhs_seed", &mango::AdaptiveGridParams::lhs_seed)
+        .def_readwrite("vega_floor", &mango::AdaptiveGridParams::vega_floor)
+        .def_readwrite("max_failure_rate", &mango::AdaptiveGridParams::max_failure_rate);
 
     // MultiKRefConfig
     py::class_<mango::MultiKRefConfig>(m, "MultiKRefConfig")
@@ -745,18 +845,53 @@ PYBIND11_MODULE(mango_option, m) {
     // BSplineBackend
     py::class_<mango::BSplineBackend>(m, "BSplineBackend")
         .def(py::init<>())
-        .def_readwrite("maturity_grid", &mango::BSplineBackend::maturity_grid);
+        .def_property("maturity_grid",
+            [](const mango::BSplineBackend& self) {
+                return double_vector_to_python(self.maturity_grid);
+            },
+            [](mango::BSplineBackend& self, const py::object& obj) {
+                self.maturity_grid = python_to_double_vector(obj, "maturity_grid");
+            });
 
     // ChebyshevBackend
     py::class_<mango::ChebyshevBackend>(m, "ChebyshevBackend")
         .def(py::init<>())
-        .def_readwrite("maturity", &mango::ChebyshevBackend::maturity);
+        .def_readwrite("maturity", &mango::ChebyshevBackend::maturity)
+        .def_property("num_pts",
+            [](const mango::ChebyshevBackend& self) {
+                return size_array_to_python(self.num_pts);
+            },
+            [](mango::ChebyshevBackend& self, const py::object& obj) {
+                self.num_pts = python_to_size_array<4>(obj, "num_pts");
+            });
+
+    py::enum_<mango::DimensionlessBackend::Interpolant>(m, "DimensionlessInterpolant")
+        .value("BSPLINE", mango::DimensionlessBackend::Interpolant::BSpline)
+        .value("CHEBYSHEV", mango::DimensionlessBackend::Interpolant::Chebyshev);
+
+    py::class_<mango::DimensionlessBackend>(m, "DimensionlessBackend")
+        .def(py::init<>())
+        .def_readwrite("maturity", &mango::DimensionlessBackend::maturity)
+        .def_readwrite("interpolant", &mango::DimensionlessBackend::interpolant)
+        .def_property("chebyshev_pts",
+            [](const mango::DimensionlessBackend& self) {
+                return size_array_to_python(self.chebyshev_pts);
+            },
+            [](mango::DimensionlessBackend& self, const py::object& obj) {
+                self.chebyshev_pts = python_to_size_array<3>(obj, "chebyshev_pts");
+            });
 
     // DiscreteDividendConfig
     py::class_<mango::DiscreteDividendConfig>(m, "DiscreteDividendConfig")
         .def(py::init<>())
         .def_readwrite("maturity", &mango::DiscreteDividendConfig::maturity)
-        .def_readwrite("discrete_dividends", &mango::DiscreteDividendConfig::discrete_dividends)
+        .def_property("discrete_dividends",
+            [](const mango::DiscreteDividendConfig& self) {
+                return dividends_to_python(self.discrete_dividends);
+            },
+            [](mango::DiscreteDividendConfig& self, const py::object& obj) {
+                self.discrete_dividends = python_to_dividends(obj);
+            })
         .def_readwrite("kref_config", &mango::DiscreteDividendConfig::kref_config);
 
     // IVSolverFactoryConfig
@@ -772,8 +907,13 @@ PYBIND11_MODULE(mango_option, m) {
                 return py::none();
             },
             [](mango::IVSolverFactoryConfig& c, const py::object& obj) {
-                if (obj.is_none()) c.adaptive = std::nullopt;
-                else c.adaptive = obj.cast<mango::AdaptiveGridParams>();
+                if (obj.is_none()) {
+                    c.adaptive = std::nullopt;
+                } else if (py::isinstance<mango::AdaptiveGridParams>(obj)) {
+                    c.adaptive = obj.cast<mango::AdaptiveGridParams>();
+                } else {
+                    raise_type_conversion_error("adaptive must be AdaptiveGridParams or None");
+                }
             })
         .def_readwrite("solver_config", &mango::IVSolverFactoryConfig::solver_config)
         .def_property("backend",
@@ -787,8 +927,11 @@ PYBIND11_MODULE(mango_option, m) {
                     c.backend = obj.cast<mango::BSplineBackend>();
                 else if (py::isinstance<mango::ChebyshevBackend>(obj))
                     c.backend = obj.cast<mango::ChebyshevBackend>();
+                else if (py::isinstance<mango::DimensionlessBackend>(obj))
+                    c.backend = obj.cast<mango::DimensionlessBackend>();
                 else
-                    throw py::type_error("backend must be BSplineBackend or ChebyshevBackend");
+                    raise_type_conversion_error(
+                        "backend must be BSplineBackend, ChebyshevBackend, or DimensionlessBackend");
             })
         .def_property("discrete_dividends",
             [](const mango::IVSolverFactoryConfig& c) -> py::object {
@@ -796,9 +939,17 @@ PYBIND11_MODULE(mango_option, m) {
                 return py::none();
             },
             [](mango::IVSolverFactoryConfig& c, const py::object& obj) {
-                if (obj.is_none()) c.discrete_dividends = std::nullopt;
-                else c.discrete_dividends = obj.cast<mango::DiscreteDividendConfig>();
+                if (obj.is_none()) {
+                    c.discrete_dividends = std::nullopt;
+                } else if (py::isinstance<mango::DiscreteDividendConfig>(obj)) {
+                    c.discrete_dividends = obj.cast<mango::DiscreteDividendConfig>();
+                } else {
+                    raise_type_conversion_error(
+                        "discrete_dividends must be DiscreteDividendConfig or None");
+                }
             });
+
+    m.attr("PriceTableConfig") = m.attr("IVSolverFactoryConfig");
 
     // AnyInterpIVSolver (exposed as InterpolatedIVSolver for Python)
     py::class_<mango::AnyInterpIVSolver>(m, "InterpolatedIVSolver")
