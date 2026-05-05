@@ -79,6 +79,26 @@ result = mo.american_option_price(params)
 # result.value_at(100.0), result.delta(), result.gamma()
 ```
 
+Reusable price tables build the primary 4D B-spline interpolation surface over
+moneyness, maturity, volatility, and rate:
+
+```python
+config = mo.PriceTableConfig()
+config.option_type = mo.OptionType.PUT
+config.spot = 100.0
+config.dividend_yield = 0.02
+config.grid.moneyness = [0.8, 0.9, 1.0, 1.1, 1.2]
+config.grid.vol = [0.10, 0.20, 0.30, 0.40]
+config.grid.rate = [0.01, 0.03, 0.05, 0.07]
+
+backend = mo.BSplineBackend()
+backend.maturity_grid = [0.1, 0.25, 0.5, 1.0]
+config.backend = backend
+
+table = mo.make_price_table(config)
+price = table.price(params)
+```
+
 The library also supports batch pricing, price table pre-computation, implied volatility solvers, and market data integration. See the [API Guide](docs/API_GUIDE.md) for C++ and the [Python Guide](docs/PYTHON_GUIDE.md) for Python.
 
 ---
