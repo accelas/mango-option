@@ -8,7 +8,6 @@ cc_library(
     deps = [
         "//src/option/table/serialization:price_table_data",
         "//src/support:crc64",
-        "//third_party/arrow",
         "//third_party/arrow:parquet",
     ],
     strip_include_prefix = "/src/option/table/parquet",

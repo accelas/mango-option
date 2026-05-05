@@ -1688,7 +1688,6 @@ cc_test(
         "//src/math/bspline:bspline_nd_separable",
         "//src/math/bspline:bspline_basis",
         "//src/math/chebyshev:chebyshev_nodes",
-        "//third_party/arrow",
         "//third_party/arrow:parquet",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
