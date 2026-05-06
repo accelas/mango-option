@@ -10,6 +10,7 @@
 
 #include "mango/option/american_option_batch.hpp"
 #include <gtest/gtest.h>
+#include <atomic>
 #include <mutex>
 #include <vector>
 
@@ -145,7 +146,7 @@ TEST(NormalizedSolverRegressionTest, CallbackForcesRegularBatch) {
     EXPECT_EQ(result_without_callback.failed_count, 0);
 
     // With callback, regular batch path should be used
-    size_t callback_count = 0;
+    std::atomic<size_t> callback_count{0};
     auto setup_callback = [&callback_count]([[maybe_unused]] size_t idx,
                                             [[maybe_unused]] AmericanOptionSolver& solver) {
         ++callback_count;
@@ -155,7 +156,7 @@ TEST(NormalizedSolverRegressionTest, CallbackForcesRegularBatch) {
     EXPECT_EQ(result_with_callback.failed_count, 0);
 
     // Critical assertion: Callback should be invoked for each option
-    EXPECT_EQ(callback_count, 3) << "SetupCallback should force regular batch path";
+    EXPECT_EQ(callback_count.load(), 3) << "SetupCallback should force regular batch path";
 }
 
 // Test that normalized solver WORKS with snapshot_times (via dedicated API)
