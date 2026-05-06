@@ -7,6 +7,7 @@
 #include <arrow/io/api.h>
 #include <parquet/arrow/reader.h>
 #include <parquet/arrow/writer.h>
+#include <parquet/parquet_version.h>
 
 #include <algorithm>
 #include <bit>
@@ -627,13 +628,12 @@ read_parquet(const std::filesystem::path& path) {
     MANGO_ARROW_ASSIGN(reader,
         parquet::arrow::OpenFile(infile, pool));
 
+#if PARQUET_VERSION_MAJOR >= 24
+    MANGO_ARROW_ASSIGN(table, reader->ReadTable());
+#else
     std::shared_ptr<arrow::Table> table;
-    {
-        auto status = reader->ReadTable(&table);
-        if (!status.ok()) {
-            return std::unexpected(serialization_error());
-        }
-    }
+    MANGO_ARROW_CHECK(reader->ReadTable(&table));
+#endif
 
     // ---- Read file-level metadata ----
     auto kv = table->schema()->metadata();

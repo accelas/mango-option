@@ -22,7 +22,7 @@ params.maturity = 1.0
 params.volatility = 0.20
 params.rate = 0.05
 params.dividend_yield = 0.02
-params.type = mo.OptionType.PUT
+params.option_type = mo.OptionType.PUT
 
 result = mo.american_option_price(params)
 
@@ -64,11 +64,12 @@ params.discrete_dividends = [(0.25, 2.0), (0.75, 2.0)]  # (time, amount) pairs
 result = mo.american_option_price(params)
 ```
 
-Note: The discrete dividends field is plumbed through to the C++ solver. The solver's handling of discrete dividends is a work in progress.
+Python accepts `(time, amount)` pairs or `Dividend` objects and uses the C++
+discrete-dividend event path.
 
 ## Batch Pricing
 
-`BatchAmericanOptionSolver` prices many options in parallel with OpenMP. When options share the same maturity, volatility, rate, dividend yield, and type, the solver automatically uses a normalized chain optimization that solves one PDE and reuses it for all strikes.
+`BatchAmericanOptionSolver` prices many options in parallel with OpenMP. When options share the same maturity, volatility, rate, dividend yield, and option type, the solver automatically uses a normalized chain optimization that solves one PDE and reuses it for all strikes.
 
 ```python
 # Build a batch of puts at different strikes
@@ -81,11 +82,10 @@ for K in [90, 95, 100, 105, 110]:
     p.volatility = 0.20
     p.rate = 0.05
     p.dividend_yield = 0.02
-    p.type = mo.OptionType.PUT
+    p.option_type = mo.OptionType.PUT
     batch.append(p)
 
 solver = mo.BatchAmericanOptionSolver()
-solver.set_grid_accuracy(mo.GridAccuracyProfile.LOW)
 
 # use_shared_grid=True enables the normalized chain optimization
 results, failed_count = solver.solve_batch(batch, use_shared_grid=True)
@@ -105,16 +105,6 @@ When options have different maturities, use `use_shared_grid=False` (the default
 results, failed = solver.solve_batch(batch, use_shared_grid=False)
 ```
 
-### Fine-Grained Grid Control
-
-```python
-accuracy = mo.GridAccuracyParams()
-accuracy.tol = 1e-6            # tighter truncation error
-accuracy.min_spatial_points = 300
-accuracy.max_time_steps = 10000
-solver.set_grid_accuracy_params(accuracy)
-```
-
 ## Implied Volatility
 
 ### FDM Solver
@@ -123,18 +113,19 @@ Solves for IV by repeatedly pricing with the PDE solver and root-finding:
 
 ```python
 config = mo.IVSolverConfig()
-
-# Optional: control PDE grid accuracy (higher accuracy = lower IV error)
-config.grid_accuracy = mo.GridAccuracyParams()
-config.grid_accuracy.tol = 1e-3  # Medium accuracy (~0.02 bps IV error)
+config.root_config.tolerance = 1e-8
+config.batch_parallel_threshold = 64
 
 solver = mo.IVSolver(config)
 
-query = mo.IVQuery(
-    spot=100.0, strike=100.0, maturity=1.0,
-    rate=0.05, dividend_yield=0.02,
-    type=mo.OptionType.PUT, market_price=10.0,
-)
+query = mo.IVQuery()
+query.spot = 100.0
+query.strike = 100.0
+query.maturity = 1.0
+query.rate = 0.05
+query.dividend_yield = 0.02
+query.option_type = mo.OptionType.PUT
+query.market_price = 10.0
 
 success, result, error = solver.solve(query)
 if success:
@@ -153,7 +144,7 @@ config.grid.moneyness = [0.8, 0.9, 1.0, 1.1, 1.2]
 config.grid.vol = [0.10, 0.20, 0.30, 0.40]
 config.grid.rate = [0.01, 0.03, 0.05, 0.07]
 
-# Backend selection: BSplineBackend (default) or ChebyshevBackend
+# Backend selection: BSplineBackend (default), ChebyshevBackend, or DimensionlessBackend
 backend = mo.BSplineBackend()
 backend.maturity_grid = [0.1, 0.25, 0.5, 1.0]
 config.backend = backend
@@ -179,6 +170,13 @@ config.backend = backend
 # Chebyshev backend
 backend = mo.ChebyshevBackend()
 backend.maturity = 2.0
+backend.num_pts = [5, 5, 4, 4]
+config.backend = backend
+
+# Dimensionless 3D backend
+backend = mo.DimensionlessBackend()
+backend.maturity = 2.0
+backend.chebyshev_pts = [5, 5, 4]
 config.backend = backend
 ```
 
@@ -204,17 +202,93 @@ config.adaptive = adaptive
 iv_solver = mo.make_interpolated_iv_solver(config)
 ```
 
-### Saving and Loading Price Tables
+### Reusable Price Tables
 
-Price tables can be saved to Arrow IPC format for reuse:
+Build a reusable interpolation surface once, then use it for pricing, Greeks,
+fast implied volatility, and persistence. With `BSplineBackend` and no discrete
+dividends, this builds the standard 4D B-spline table over log-moneyness,
+maturity, volatility, and rate.
 
 ```python
-# Save
-workspace.save("spy_puts.arrow", ticker="SPY", option_type=0)  # 0=PUT
+import mango_option as mo
 
-# Load
-workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
+config = mo.PriceTableConfig()
+config.option_type = mo.OptionType.PUT
+config.spot = 100.0
+config.dividend_yield = 0.02
+config.grid.moneyness = [0.8, 0.9, 1.0, 1.1, 1.2]
+config.grid.vol = [0.10, 0.20, 0.30, 0.40]
+config.grid.rate = [0.01, 0.03, 0.05, 0.07]
+
+backend = mo.BSplineBackend()
+backend.maturity_grid = [0.1, 0.25, 0.5, 1.0]
+config.backend = backend
+
+table = mo.make_price_table(config)
+assert table.surface_type == "bspline_4d"
+
+params = mo.PricingParams()
+params.spot = 100.0
+params.strike = 100.0
+params.maturity = 0.5
+params.volatility = 0.20
+params.rate = 0.05
+params.dividend_yield = 0.02
+params.option_type = mo.OptionType.PUT
+
+print(table.price(params))
+print(table.delta(params))
+print(table.gamma(params))
+
+query = mo.IVQuery()
+query.spot = 100.0
+query.strike = 100.0
+query.maturity = 0.5
+query.rate = 0.05
+query.dividend_yield = 0.02
+query.option_type = mo.OptionType.PUT
+query.market_price = table.price(params)
+
+iv = table.solve_iv(query)
+solver = table.make_iv_solver()
+success, result, error = solver.solve(query)  # Back-compatible tuple API
+
+table.save("spy_puts.parquet")
+loaded = mo.PriceTable.load("spy_puts.parquet")
 ```
+
+`bspline_4d` is the main high-throughput interpolation path. Use it when the
+surface domain is described by log-moneyness, maturity, volatility, and rate.
+Use segmented B-spline surfaces for discrete cash dividends and dimensionless
+3D surfaces only when those model constraints are intentional.
+
+## Python Conversions
+
+The binding accepts Python-native values for common inputs:
+
+- rates: `float`, `int`, or `YieldCurve`
+- grids and vector fields: lists or tuples of numbers
+- dividend schedules: `Dividend` objects or `(time, amount)` pairs
+- optional config fields: assign `None` to clear
+- persistence paths: strings or `pathlib.Path`
+
+The core binding does not require numpy, pandas, pyarrow, or dataframe objects.
+Price-table persistence is implemented by the native C++ Arrow/Parquet backend,
+so the runtime environment must provide the corresponding native shared
+libraries, including `libarrow`, `libparquet`, and their system-level
+dependencies.
+
+## Errors
+
+New price-table APIs raise typed exceptions:
+
+- `ValidationError`
+- `PriceTableError`
+- `SolverException`
+- `TypeConversionError`
+
+Existing IV solver methods keep the back-compatible `(success, result, error)`
+return shape.
 
 ## API Reference
 
@@ -231,24 +305,27 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 
 | Class | Purpose |
 |-------|---------|
-| `PricingParams` | Option contract parameters (spot, strike, maturity, volatility, rate, dividend_yield, type, discrete_dividends) |
+| `PricingParams` | Option contract parameters (spot, strike, maturity, volatility, rate, dividend_yield, option_type, discrete_dividends) |
 | `AmericanOptionResult` | Pricing result with `value_at(spot)`, `delta()`, `gamma()`, `theta()` |
 | `BatchAmericanOptionSolver` | Parallel batch pricing with normalized chain optimization |
 | `GridAccuracyParams` | Fine-grained grid control (tol, n_sigma, alpha, spatial/time limits) |
 | `YieldCurve` | Term structure via `flat(rate)` or `from_discounts(tenors, discounts)` |
 | `IVQuery` | IV solver input (inherits OptionSpec + market_price) |
-| `IVSolverConfig` | IV solver config with `root_config`, `grid_accuracy`, manual grid overrides |
+| `IVSolverConfig` | IV solver config with `root_config` and `batch_parallel_threshold` |
 | `IVSolver` | PDE-based IV solver |
 | `InterpolatedIVSolver` | Fast interpolation IV solver (created via `make_interpolated_iv_solver`) |
 | `IVSolverFactoryConfig` | Configuration for IV solver factory (grid, backend, solver params) |
+| `PriceTableConfig` | Alias for `IVSolverFactoryConfig` when building reusable price tables |
+| `InterpolatedIVSolverConfig` | Interpolated IV config (`max_iter`, `tolerance`, `sigma_min`, `sigma_max`, `vega_threshold`) |
 | `IVGrid` | Grid specification (moneyness, vol, rate arrays) |
 | `BSplineBackend` | B-spline interpolation backend config (maturity_grid) |
-| `ChebyshevBackend` | Chebyshev interpolation backend config (maturity) |
+| `ChebyshevBackend` | Chebyshev interpolation backend config (maturity, num_pts) |
+| `DimensionlessBackend` | Dimensionless 3D interpolation backend config (maturity, interpolant, chebyshev_pts) |
 | `DiscreteDividendConfig` | Discrete dividend config (maturity, dividends, kref_config) |
 | `AdaptiveGridParams` | Adaptive grid refinement parameters |
 | `MultiKRefConfig` | Multi-reference-strike configuration for discrete dividends |
 | `OptionGrid` | Container for chain data (spot, strikes, maturities, vols, rates) |
-| `PriceTableWorkspace` | Serializable price table data (save/load Arrow IPC) |
+| `PriceTable` | Reusable price table with `price`, `delta`, `gamma`, `vega`, IV solving, and save/load |
 | `SolverError` | Error detail with `code`, `iterations`, `residual` |
 
 ### Functions
@@ -257,3 +334,4 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 |----------|-------------|
 | `american_option_price(params, accuracy=None)` | Price a single American option with auto-grid |
 | `make_interpolated_iv_solver(config)` | Create fast IV solver from `IVSolverFactoryConfig` |
+| `make_price_table(config)` | Build a reusable `PriceTable` from `PriceTableConfig` |

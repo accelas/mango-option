@@ -144,30 +144,19 @@ cc_library(
 )
 
 cc_library(
-    name = "interpolated_iv_solver",
+    name = "interpolated_iv_solver_core",
     srcs = ["interpolated_iv_solver.cpp"],
     hdrs = ["interpolated_iv_solver.hpp"],
     deps = [
-        ":american_option",
         ":iv_result",
         ":option_spec",
-        "//src/option/table/bspline:bspline_tensor_accessor",
-        "//src/option/table/bspline:bspline_surface",
-        "//src/option/table:price_table",
         "//src/option/table:adaptive_grid_types",
-        "//src/option/table/bspline:bspline_adaptive",
-        "//src/option/table/bspline:bspline_builder",
-        "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table:price_table",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
         "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option/table/chebyshev:chebyshev_surface",
-        "//src/option/table/chebyshev:chebyshev_table_builder",
-        "//src/option/table/bspline:bspline_3d_surface",
-        "//src/option/table/chebyshev:chebyshev_3d_surface",
-        "//src/option/table/dimensionless:dimensionless_builder",
-        "//src/option/table/dimensionless:dimensionless_3d_accessor",
-        "//src/option/table:dimensionless_transform_3d",
-        "//src/math/bspline:bspline_nd_separable",
-        "//src/math/chebyshev:chebyshev_nodes",
         "//src/math:root_finding",
         "//src/support:parallel",
         "//src/support:error_types",
@@ -183,6 +172,65 @@ cc_library(
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option",
     include_prefix = "mango/option",
+)
+
+cc_library(
+    name = "price_table_factory",
+    srcs = ["price_table_factory.cpp"],
+    hdrs = ["price_table_factory.hpp"],
+    deps = [
+        ":american_option",
+        ":interpolated_iv_solver_core",
+        ":iv_result",
+        ":option_grid",
+        ":option_spec",
+        "//src/math/bspline:bspline_nd_separable",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:dimensionless_transform_3d",
+        "//src/option/table:eep_decomposer",
+        "//src/option/table:price_table",
+        "//src/option/table/bspline:bspline_3d_surface",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_tensor_accessor",
+        "//src/option/table/chebyshev:chebyshev_3d_surface",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
+        "//src/option/table/dimensionless:dimensionless_3d_accessor",
+        "//src/option/table/dimensionless:dimensionless_builder",
+        "//src/option/table/parquet:parquet_io",
+        "//src/option/table/serialization:from_data",
+        "//src/option/table/serialization:price_table_data",
+        "//src/option/table/serialization:to_data",
+        "//src/support:error_types",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = [
+        "-fopenmp",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option",
+    include_prefix = "mango/option",
+)
+
+cc_library(
+    name = "interpolated_iv_solver",
+    deps = [
+        ":interpolated_iv_solver_core",
+        ":price_table_factory",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
@@ -268,5 +316,3 @@ cc_library(
     strip_include_prefix = "/src/option",
     include_prefix = "mango/option",
 )
-
-

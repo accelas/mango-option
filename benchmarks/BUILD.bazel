@@ -179,6 +179,7 @@ cc_binary(
         "//src/option:american_option",
         "//src/option:iv_solver",
         "//src/option:interpolated_iv_solver",
+        "//src/option:price_table_factory",
         "//src/option:option_grid",
         "//src/option/table/bspline:bspline_adaptive",
         "//src/option/table/bspline:bspline_builder",
@@ -527,6 +528,7 @@ cc_binary(
         "//src/option:american_option_batch",
         "//src/option:iv_solver",
         "//src/option:interpolated_iv_solver",
+        "//src/option:price_table_factory",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option/table/chebyshev:chebyshev_table_builder",
@@ -583,6 +585,7 @@ cc_binary(
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:american_option",
         "//src/option:interpolated_iv_solver",
+        "//src/option:price_table_factory",
         "//src/option:iv_solver",
         "//src/option:option_grid",
         "//src/option/table/bspline:bspline_3d_surface",
@@ -622,4 +625,3 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
-

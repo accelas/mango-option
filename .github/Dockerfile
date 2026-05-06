@@ -24,7 +24,7 @@ RUN apt-get update && \
     apt-get install -y ./apache-arrow-apt-source-latest-trixie.deb && \
     rm apache-arrow-apt-source-latest-trixie.deb && \
     apt-get update && \
-    apt-get install -y --no-install-recommends libarrow-dev && \
+    apt-get install -y --no-install-recommends libarrow-dev libparquet-dev && \
     # Install Bazelisk
     wget -q https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel && \
     chmod +x /usr/local/bin/bazel && \

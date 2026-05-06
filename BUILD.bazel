@@ -14,6 +14,7 @@ cc_library(
         "//src/option:iv_solver",
         "//src/option:interpolated_iv_solver",
         "//src/option:option_spec",
+        "//src/option:price_table_factory",
         # Price tables
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
@@ -182,7 +183,6 @@ py_wheel(
         "@platforms//os:linux": "linux_x86_64",
         "//conditions:default": "any",
     }),
-    requires = ["numpy"],
     strip_path_prefixes = ["src/python"],
     deps = ["//src/python:mango_option"],
 )

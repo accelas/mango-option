@@ -51,7 +51,8 @@ non_bcr_deps = use_extension("//third_party:deps.bzl", "non_bcr_deps")
 use_repo(non_bcr_deps, "mdspan")
 
 # Apache Arrow C++ (required for price table persistence)
-# NOTE: Using system-installed Arrow packages in CI (libarrow-dev)
+# NOTE: Using system-installed Arrow packages in CI
+# (libarrow-dev and libparquet-dev)
 # For local development, run: ./tools/enable_arrow.sh
 # See CONAN_SETUP.MD for details
 # conan_extension = use_extension("//conan_deps:conan_deps_module_extension.bzl", "conan_extension")
