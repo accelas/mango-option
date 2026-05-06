@@ -32,16 +32,16 @@ register_toolchains("//toolchain:cc_toolchain_for_k8")
 # Python configuration - allow running as root for CI/Docker environments
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(
-    python_version = "3.11",
+    python_version = "3.13",
     ignore_root_user_error = True,
 )
-use_repo(python, "python_3_11")
+use_repo(python, "python_3_13")
 
 # Python pip dependencies
 pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
 pip.parse(
     hub_name = "pip",
-    python_version = "3.11",
+    python_version = "3.13",
     requirements_lock = "//third_party:requirements.txt",
 )
 use_repo(pip, "pip")
