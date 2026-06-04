@@ -26,23 +26,23 @@ C++), not a port.
 1. Price American options from Rust: `value`, `value_at(spot)`, `delta`,
    `gamma`, `theta`.
 2. Solve FDM implied volatility from Rust, with optional solver config.
-3. Input fidelity matching each underlying C++ API:
-   - **Pricing**: constant rate **or** yield curve; continuous **and** discrete
-     dividends (`PricingParams` supports all of these).
-   - **IV**: constant rate **or** yield curve; continuous dividend yield.
-     Discrete dividends are **not** supported — `IVQuery : OptionSpec` has no
-     discrete-dividend field and `IVSolver::objective_function` prices with none
-     (see `src/option/iv_solver.cpp`). The Rust IV API therefore rejects queries
-     carrying discrete dividends rather than silently ignoring them.
+3. **Symmetric full input fidelity** for both pricing and IV: constant rate
+   **or** yield curve; continuous **and** discrete dividends.
+   - Pricing already supports all of these via `PricingParams`.
+   - The FDM `IVSolver` was extended to honor discrete dividends as a
+     prerequisite of this binding (commit `8030bbe3`): `IVQuery` gained a
+     `discrete_dividends` field, `objective_function` now feeds it into the
+     per-candidate `PricingParams` (activating the pre-existing ex-dividend
+     mandatory-time machinery), and `validate_iv_query` validates the schedule.
+     This is a small, self-contained C++ library change with its own round-trip
+     and validation tests; it is **not** a Rust-only shim workaround.
 4. Idiomatic Rust surface: callers write zero `unsafe`; errors are `Result`.
 5. Build and test in-tree via Bazel `rules_rust`; leave existing C++ targets
-   untouched.
+   otherwise untouched (the IVSolver extension above is the only library change).
 
 ## Non-Goals (v1)
 
 - Batch solving (`solve_batch`), price tables, interpolated IV solver.
-- Discrete-dividend implied volatility (unsupported by the FDM IV API; needs the
-  interpolated solver, which is itself out of scope).
 - Explicit custom PDE grids (`PDEGridSpec` variant), snapshots, custom initial
   conditions. Pricing uses the auto-grid convenience path
   (`solve_american_option`).
@@ -158,21 +158,24 @@ typedef struct {
   MangoOptionType option_type;
 } MangoPricingParams;
 
-// IV has no discrete-dividend field: the FDM IV API does not support them.
+// IV mirrors pricing inputs, including discrete dividends (FDM IVSolver now
+// honors them — see Goals).
 typedef struct {
   double spot;
   double strike;
   double maturity;
-  double dividend_yield;            // continuous yield only
+  double dividend_yield;            // continuous yield
   double market_price;
   double rate_const;
   const MangoTenorPoint* tenor_points;
   uint64_t n_tenor_points;
+  const MangoDividend* dividends;   // discrete schedule (may be null/0)
+  uint64_t n_dividends;
   MangoOptionType option_type;
 } MangoIvQuery;
 ```
 
-(`n_tenor_points` is also `uint64_t` in `MangoPricingParams`.) The exact field
+(`n_tenor_points`/`n_dividends` are `uint64_t` in both structs.) The exact field
 order/padding is the ABI contract; pinned by per-field `static_assert(offsetof
 …))` in the header and mirrored by per-field offset asserts in `-sys` (see ABI
 guard).
@@ -252,7 +255,8 @@ MangoStatus mango_solve_iv(const MangoIvQuery* query,
   `MangoIvConfig.max_iter` before converting to `size_t`.
 - Rebuild `RateSpec`: `n_tenor_points == 0` → `double rate_const`; else
   construct a `YieldCurve` from the validated `(tenor, log_discount)` points.
-- Rebuild discrete dividends into `std::vector<Dividend>` (pricing only).
+- Rebuild discrete dividends into `std::vector<Dividend>` for both pricing
+  (`PricingParams`) and IV (`IVQuery::discrete_dividends`).
 - Map `OptionType` ↔ `MangoOptionType`.
 - **Pricing path** (to preserve validation errors): call
   `AmericanOptionSolver::create(params)` directly — **not** the
@@ -260,9 +264,10 @@ MangoStatus mango_solve_iv(const MangoIvQuery* query,
   `ValidationError` into `SolverError::InvalidConfiguration` (see
   `american_option.cpp`). Map the `create()` `ValidationError`, then call
   `solve()` and map its `SolverError`. Auto grid (default) is used.
-- **IV path**: build `IVSolverConfig` by overriding only the non-zero
-  `root_config` fields (`max_iter`, `brent_tol_abs`); leave `grid` at its
-  default (`GridAccuracyParams{}`). Then `IVSolver::solve(query)`.
+- **IV path**: populate `IVQuery` (including `discrete_dividends`), build
+  `IVSolverConfig` by overriding only the non-zero `root_config` fields
+  (`max_iter`, `brent_tol_abs`); leave `grid` at its default
+  (`GridAccuracyParams{}`). Then `IVSolver::solve(query)`.
 - Error mapping: `ValidationError` → `MANGO_ERR_VALIDATION`; IV
   `ArbitrageViolation`/`BracketingFailed`/`MaxIterationsExceeded` →
   `MANGO_ERR_ARBITRAGE`/`MANGO_ERR_BRACKETING`/`MANGO_ERR_NO_CONVERGENCE`;
@@ -347,10 +352,9 @@ Responsibilities of the safe layer:
   `AmericanOptionResult`'s lazy, `mutable` spline/operator caches, so a single
   handle is not safe for concurrent use. `Drop` calls
   `mango_american_result_free`.
-- `solve_iv` first rejects any query whose `spec.discrete_dividends` is non-empty
-  with `ErrorKind::Validation` (FDM IV cannot honour them). It then builds
-  `MangoIvConfig` from the `Option` fields (None => 0 => library default) and
-  copies `MangoIvSuccess` into `IvSuccess`.
+- `solve_iv` marshals `spec.discrete_dividends` across the boundary (the FDM
+  IVSolver honours them), builds `MangoIvConfig` from the `Option` fields
+  (None => 0 => library default), and copies `MangoIvSuccess` into `IvSuccess`.
 - Map `MangoError` → `Error` (code → `ErrorKind`, synthesized message →
   `String`).
 
@@ -404,9 +408,10 @@ codes/numbers, not messages) and may be truncated.
   - Yield-curve input path (`Rate::Curve`) prices/solves without error and
     differs from the matching flat-rate case as expected; an invalid curve
     (missing `t=0` point / non-increasing tenors) → `Validation`.
-  - Discrete-dividend **pricing** path prices without error and moves the value
-    in the expected direction vs. the no-dividend case. A `solve_iv` query with
-    non-empty discrete dividends → `Validation` (not silently ignored).
+  - Discrete-dividend path works for **both** pricing and IV: pricing moves the
+    value in the expected direction vs. the no-dividend case, and `solve_iv`
+    **round-trips** a discrete-dividend price back to the original σ (the C++
+    side already has this regression test in `iv_solver_test.cc`).
   - `value_at(spot)` at off-spot points returns `Ok(finite)`; Greeks
     (`delta`/`gamma`/`theta`) are finite with expected signs (put delta < 0,
     gamma > 0).
@@ -433,8 +438,8 @@ codes/numbers, not messages) and may be truncated.
 ## Future Extensions (not v1)
 
 - Batch IV (`solve_batch`) with an array-in/array-out C function.
-- Price-table precomputation + interpolated IV solver bindings (would also
-  unlock discrete-dividend IV).
+- Price-table precomputation + interpolated IV solver bindings (faster,
+  table-based IV; discrete-dividend IV is already covered in v1 via FDM).
 - Standalone Cargo build (`build.rs` + `cc`) for `cargo add` consumers.
 - Explicit grid specs / snapshots for advanced users.
 
@@ -444,8 +449,12 @@ A pre-implementation Codex review (read-only, against the real C++ sources)
 surfaced mismatches between the first draft and the actual API. All findings
 were folded in:
 
-- **IV discrete dividends** — `IVQuery` has no such field; v1 IV rejects
-  discrete-dividend queries instead of silently ignoring them.
+- **IV discrete dividends** — the review correctly found the FDM `IVSolver`
+  ignored discrete dividends (`IVQuery` had no field). Rather than reject them,
+  we extended the FDM IVSolver to honor them (commit `8030bbe3`), since the
+  pricer underneath already supports discrete dividends and the IV grid
+  machinery was already wired for ex-dividend times. v1 IV therefore has the
+  same discrete-dividend fidelity as pricing.
 - **IV config** — `IVSolverConfig` has no `target_price_error`; exposed
   `root_config.max_iter` and `root_config.brent_tol_abs` instead.
 - **Pricing errors** — shim calls `AmericanOptionSolver::create()`/`solve()`
