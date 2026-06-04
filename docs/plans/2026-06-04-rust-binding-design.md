@@ -26,8 +26,14 @@ C++), not a port.
 1. Price American options from Rust: `value`, `value_at(spot)`, `delta`,
    `gamma`, `theta`.
 2. Solve FDM implied volatility from Rust, with optional solver config.
-3. Full input fidelity: constant rate **or** yield curve; continuous **and**
-   discrete dividends.
+3. Input fidelity matching each underlying C++ API:
+   - **Pricing**: constant rate **or** yield curve; continuous **and** discrete
+     dividends (`PricingParams` supports all of these).
+   - **IV**: constant rate **or** yield curve; continuous dividend yield.
+     Discrete dividends are **not** supported — `IVQuery : OptionSpec` has no
+     discrete-dividend field and `IVSolver::objective_function` prices with none
+     (see `src/option/iv_solver.cpp`). The Rust IV API therefore rejects queries
+     carrying discrete dividends rather than silently ignoring them.
 4. Idiomatic Rust surface: callers write zero `unsafe`; errors are `Result`.
 5. Build and test in-tree via Bazel `rules_rust`; leave existing C++ targets
    untouched.
@@ -35,6 +41,8 @@ C++), not a port.
 ## Non-Goals (v1)
 
 - Batch solving (`solve_batch`), price tables, interpolated IV solver.
+- Discrete-dividend implied volatility (unsupported by the FDM IV API; needs the
+  interpolated solver, which is itself out of scope).
 - Explicit custom PDE grids (`PDEGridSpec` variant), snapshots, custom initial
   conditions. Pricing uses the auto-grid convenience path
   (`solve_american_option`).
@@ -122,8 +130,14 @@ the body is wrapped in `try { ... } catch (...) { -> MANGO_ERR_SOLVER }`.
 
 ### Input types (flat POD + pointer/length arrays)
 
+All enums and counts use fixed-width types (`int32_t`, `uint64_t`) so the ABI is
+stable regardless of platform enum/`size_t` width, and every field offset is
+pinned by `static_assert(offsetof(...))` (see ABI guard below).
+
 ```c
-typedef enum { MANGO_CALL = 0, MANGO_PUT = 1 } MangoOptionType;
+typedef int32_t MangoOptionType;  // 0 = call, 1 = put
+#define MANGO_CALL 0
+#define MANGO_PUT  1
 
 typedef struct { double calendar_time; double amount; } MangoDividend;
 typedef struct { double tenor; double log_discount; } MangoTenorPoint;
@@ -140,29 +154,43 @@ typedef struct {
   const MangoTenorPoint* tenor_points;
   size_t n_tenor_points;
   const MangoDividend* dividends;   // discrete schedule (may be null/0)
-  size_t n_dividends;
+  uint64_t n_dividends;
   MangoOptionType option_type;
 } MangoPricingParams;
 
+// IV has no discrete-dividend field: the FDM IV API does not support them.
 typedef struct {
   double spot;
   double strike;
   double maturity;
-  double dividend_yield;
+  double dividend_yield;            // continuous yield only
   double market_price;
   double rate_const;
   const MangoTenorPoint* tenor_points;
-  size_t n_tenor_points;
-  const MangoDividend* dividends;
-  size_t n_dividends;
+  uint64_t n_tenor_points;
   MangoOptionType option_type;
 } MangoIvQuery;
 ```
 
-The exact field order/padding is the ABI contract; mirrored by `static_assert`
-in the header and by `assert!(size_of/align_of ...)` in `-sys`.
+(`n_tenor_points` is also `uint64_t` in `MangoPricingParams`.) The exact field
+order/padding is the ABI contract; pinned by per-field `static_assert(offsetof
+…))` in the header and mirrored by per-field offset asserts in `-sys` (see ABI
+guard).
 
 ### Pricing — opaque handle (preserves `value_at`/Greeks without re-solving)
+
+The C++ accessors are **not** `noexcept` — `value`/`delta`/`gamma`/`theta`/
+`value_at` trigger lazy cubic-spline / `CenteredDifference` construction and
+allocate (`gamma` allocates vectors; see `american_option_result.cpp`). Letting
+any of them throw across the C ABI is undefined behaviour. Two consequences:
+
+- `mango_price_american` **eagerly computes** `value`, `delta`, `gamma`, `theta`
+  (the at-spot Greeks) inside its `try/catch` and stores them in the handle as
+  plain doubles. The corresponding accessors are then pure, `noexcept` getters.
+  If any eager computation throws, the whole price call fails with a mapped
+  error — no half-built handle escapes.
+- `value_at(spot)` (arbitrary spot) still drives the lazy spline, so it stays
+  **fallible**: a status-returning function wrapped in `try/catch`.
 
 ```c
 typedef struct MangoAmericanResult MangoAmericanResult; // opaque
@@ -171,17 +199,22 @@ MangoStatus mango_price_american(const MangoPricingParams* params,
                                  MangoAmericanResult** out_result,
                                  MangoError* out_err);
 
+// noexcept getters of values precomputed at solve time:
 double mango_american_value(const MangoAmericanResult*);
-double mango_american_value_at(const MangoAmericanResult*, double spot);
 double mango_american_delta(const MangoAmericanResult*);
 double mango_american_gamma(const MangoAmericanResult*);
 double mango_american_theta(const MangoAmericanResult*);
-void   mango_american_result_free(MangoAmericanResult*);
+
+// fallible (lazy spline): writes *out on MANGO_OK.
+MangoStatus mango_american_value_at(const MangoAmericanResult*, double spot,
+                                    double* out, MangoError* out_err);
+
+void mango_american_result_free(MangoAmericanResult*);
 ```
 
 `mango_price_american` heap-allocates a struct owning the move-only
-`AmericanOptionResult`; accessors delegate to its const methods;
-`..._free` deletes it.
+`AmericanOptionResult` plus the four precomputed at-spot quantities; `..._free`
+deletes it. Every shim body is wrapped in `try/catch (...) -> MANGO_ERR_SOLVER`.
 
 ### IV — POD result
 
@@ -194,11 +227,12 @@ typedef struct {
   int    has_vega;
 } MangoIvSuccess;
 
-// All-zero means "use library defaults".
+// Maps onto IVSolverConfig.root_config (RootFindingConfig). All-zero means
+// "use library defaults". IVSolverConfig has NO target_price_error field;
+// Brent uses root_config.max_iter and root_config.brent_tol_abs.
 typedef struct {
-  double target_price_error; // 0 => default
-  int    max_iter;           // 0 => default
-  double tolerance;          // 0 => default
+  int32_t max_iter;     // 0 => default; negative rejected as validation error
+  double  brent_tol_abs;// 0 => default
 } MangoIvConfig;
 
 MangoStatus mango_solve_iv(const MangoIvQuery* query,
@@ -209,27 +243,46 @@ MangoStatus mango_solve_iv(const MangoIvQuery* query,
 
 ### Shim implementation notes
 
+- **Input validation at the boundary** (before touching C++): reject null array
+  pointers with non-zero counts, non-finite doubles, and — for yield curves —
+  enforce what `YieldCurve::from_points` requires (a `tenor=0, log_discount=0`
+  point present, strictly increasing tenors). `validate_option_spec` does **not**
+  re-validate a curve after construction, so the shim must, mapping any
+  `from_points` failure to `MANGO_ERR_VALIDATION`. Reject negative
+  `MangoIvConfig.max_iter` before converting to `size_t`.
 - Rebuild `RateSpec`: `n_tenor_points == 0` → `double rate_const`; else
-  construct a `YieldCurve` from the `(tenor, log_discount)` points.
-- Rebuild discrete dividends into `std::vector<Dividend>`.
+  construct a `YieldCurve` from the validated `(tenor, log_discount)` points.
+- Rebuild discrete dividends into `std::vector<Dividend>` (pricing only).
 - Map `OptionType` ↔ `MangoOptionType`.
-- Pricing calls `solve_american_option(params)` (auto grid).
-- IV builds `IVSolverConfig` from `MangoIvConfig` (only overriding fields that
-  are non-zero), then `IVSolver::solve(query)`.
+- **Pricing path** (to preserve validation errors): call
+  `AmericanOptionSolver::create(params)` directly — **not** the
+  `solve_american_option` convenience wrapper, which collapses create-time
+  `ValidationError` into `SolverError::InvalidConfiguration` (see
+  `american_option.cpp`). Map the `create()` `ValidationError`, then call
+  `solve()` and map its `SolverError`. Auto grid (default) is used.
+- **IV path**: build `IVSolverConfig` by overriding only the non-zero
+  `root_config` fields (`max_iter`, `brent_tol_abs`); leave `grid` at its
+  default (`GridAccuracyParams{}`). Then `IVSolver::solve(query)`.
 - Error mapping: `ValidationError` → `MANGO_ERR_VALIDATION`; IV
   `ArbitrageViolation`/`BracketingFailed`/`MaxIterationsExceeded` →
   `MANGO_ERR_ARBITRAGE`/`MANGO_ERR_BRACKETING`/`MANGO_ERR_NO_CONVERGENCE`;
-  `SolverError` and any caught exception → `MANGO_ERR_SOLVER`. The `message`
-  carries the C++ diagnostic text (and, for IV failures, iterations / last_vol
-  when available).
+  `SolverError` and any caught exception → `MANGO_ERR_SOLVER`. The C++ error
+  types are mostly enum code + numeric fields, not strings, so the shim
+  **synthesizes** a human-readable `message` (error code name plus available
+  diagnostics such as IV iterations / `last_vol`); it is best-effort and
+  truncated to fit the 256-byte buffer.
 
 ## Component: `-sys` crate (`mango-option-sys`)
 
-- `#[repr(C)]` mirrors of every struct/enum above, plus `extern "C"` blocks
-  declaring all functions. No safe API, no logic.
-- `tests/layout.rs`: `const _: () = assert!(size_of::<MangoPricingParams>() == N)`
-  and matching `align_of` for each struct, where `N` matches a `static_assert`
-  in `mango_c_api.h`. Drift on either side breaks the build.
+- `#[repr(C)]` mirrors of every struct above (enums/counts as fixed-width
+  `i32`/`u64`), plus `extern "C"` blocks declaring all functions. No safe API,
+  no logic.
+- `tests/layout.rs`: per-struct `size_of`/`align_of` **and per-field
+  `offset_of!`** assertions (e.g. `assert_eq!(offset_of!(MangoPricingParams,
+  rate_const), 40)`), with the same offsets pinned by `static_assert(offsetof(
+  MangoPricingParams, rate_const) == 40)` in `mango_c_api.h`. Size/align alone
+  miss same-size field reorderings; offsets catch them. Drift on either side
+  breaks the build.
 
 ## Component: safe crate (`mango-option`)
 
@@ -253,20 +306,19 @@ pub struct PricingParams { pub spec: OptionSpec, pub volatility: f64 }
 
 pub struct PriceResult { /* owns *mut MangoAmericanResult; Drop frees */ }
 impl PriceResult {
-    pub fn value(&self) -> f64;
-    pub fn value_at(&self, spot: f64) -> f64;
-    pub fn delta(&self) -> f64;
-    pub fn gamma(&self) -> f64;
-    pub fn theta(&self) -> f64;
+    pub fn value(&self) -> f64;                       // precomputed getter
+    pub fn delta(&self) -> f64;                       // precomputed getter
+    pub fn gamma(&self) -> f64;                       // precomputed getter
+    pub fn theta(&self) -> f64;                       // precomputed getter
+    pub fn value_at(&self, spot: f64) -> Result<f64, Error>; // lazy spline -> fallible
 }
 pub fn price_american(params: &PricingParams) -> Result<PriceResult, Error>;
 
 pub struct IvQuery { pub spec: OptionSpec, pub market_price: f64 }
 #[derive(Default)]
 pub struct IvConfig {
-    pub target_price_error: Option<f64>,
-    pub max_iter: Option<u32>,
-    pub tolerance: Option<f64>,
+    pub max_iter: Option<u32>,       // -> root_config.max_iter
+    pub brent_tol_abs: Option<f64>,  // -> root_config.brent_tol_abs
 }
 pub struct IvSuccess {
     pub implied_vol: f64,
@@ -289,12 +341,18 @@ Responsibilities of the safe layer:
   source `Vec`s stay owned by a local binding for the duration of the FFI call
   (no dangling pointers).
 - `price_american` calls the shim, checks `MangoStatus`, and on success wraps
-  the opaque pointer in `PriceResult`. `PriceResult` holds a raw pointer
-  (therefore `!Send + !Sync` automatically — matching the C++ result's
-  not-concurrently-usable contract) and frees it in `Drop`.
-- `solve_iv` builds `MangoIvConfig` from the `Option` fields (None => 0 =>
-  library default) and copies `MangoIvSuccess` into `IvSuccess`.
-- Map `MangoError` → `Error` (code → `ErrorKind`, message → `String`).
+  the opaque pointer in `PriceResult`. `PriceResult` holds a raw pointer, so it
+  is `!Send + !Sync` automatically — which is also *semantically* correct: even
+  though the precomputed getters are pure, `value_at` drives the
+  `AmericanOptionResult`'s lazy, `mutable` spline/operator caches, so a single
+  handle is not safe for concurrent use. `Drop` calls
+  `mango_american_result_free`.
+- `solve_iv` first rejects any query whose `spec.discrete_dividends` is non-empty
+  with `ErrorKind::Validation` (FDM IV cannot honour them). It then builds
+  `MangoIvConfig` from the `Option` fields (None => 0 => library default) and
+  copies `MangoIvSuccess` into `IvSuccess`.
+- Map `MangoError` → `Error` (code → `ErrorKind`, synthesized message →
+  `String`).
 
 ## Build (rules_rust)
 
@@ -304,9 +362,12 @@ Responsibilities of the safe layer:
 - `src/ffi/BUILD.bazel`: `cc_library(name = "mango_c_api", srcs/hdrs, deps =
   [//src/option:american_option, //src/option:iv_solver, ...])`, same copts as
   the existing library.
-- `crates/mango-option-sys/BUILD.bazel`: `rust_library` with the `cc_library`
-  `:mango_c_api` in `deps` (rules_rust links cc deps directly), plus a
-  `rust_test` for `layout.rs`.
+- `crates/mango-option-sys/BUILD.bazel`: `rust_library` that links the
+  `cc_library` `:mango_c_api`. In current `rules_rust`, native (`cc_library`)
+  dependencies of a `rust_library` belong in **`link_deps`** (or `cc_deps`,
+  depending on the pinned version) — *not* in `deps`, which is for Rust crates.
+  The plan resolves the exact attribute against the pinned `rules_rust`
+  version's docs. Plus a `rust_test` for `layout.rs`.
 - `crates/mango-option/BUILD.bazel`: `rust_library` depending on
   `:mango_option_sys`, plus `rust_test` targets for the integration tests.
 - All targets build/test under `bazel build //...` / `bazel test //...`;
@@ -322,24 +383,33 @@ Responsibilities of the safe layer:
 | IV `BracketingFailed`                     | `MANGO_ERR_BRACKETING`     | `Bracketing`   |
 | `SolverError` / caught C++ exception      | `MANGO_ERR_SOLVER`         | `Solver`       |
 
-No C++ exception or `std::expected` ever crosses the boundary; the diagnostic
-string is preserved in `Error::message`.
+For pricing, the `Validation` vs `Solver` split only works because the shim
+calls `AmericanOptionSolver::create()`/`solve()` directly rather than the
+convenience wrapper (see shim notes). No C++ exception or `std::expected` ever
+crosses the boundary; every accessor and solve is wrapped in `try/catch`. The
+`Error::message` is a best-effort synthesized string (the C++ error types carry
+codes/numbers, not messages) and may be truncated.
 
 ## Testing
 
-- **ABI layout guard** (`-sys`, `tests/layout.rs`): `size_of`/`align_of`
-  assertions for every `repr(C)` struct, matched by `static_assert` in
-  `mango_c_api.h`. Bidirectional: drift on either side fails the build.
+- **ABI layout guard** (`-sys`, `tests/layout.rs`): per-struct
+  `size_of`/`align_of` **and per-field `offset_of!`** assertions, mirrored by
+  `static_assert(sizeof/alignof/offsetof …)` in `mango_c_api.h`. Bidirectional:
+  drift (including same-size field reorderings) on either side fails the build.
 - **Integration** (`mango-option`, against existing C++ reference values):
-  - ATM American put value matches the figure asserted in the existing C++
-    `american_option_test` (cross-checked, not invented).
+  - ATM American put value within the **same loose tolerance the existing C++
+    test uses** (`tests/american_option_test.cc` asserts ≈ `6.35 ± 0.5`, not a
+    tight golden value); do not invent a tighter number.
   - **Round-trip**: price at σ → `solve_iv` recovers σ within tolerance.
   - Yield-curve input path (`Rate::Curve`) prices/solves without error and
-    differs from the matching flat-rate case as expected.
-  - Discrete-dividend input path prices without error and lowers a call /
-    raises a put vs. the no-dividend case (sanity direction).
-  - `value_at(spot)` at off-spot points and Greeks (`delta`/`gamma`/`theta`)
-    return finite values with expected signs (put delta < 0, gamma > 0).
+    differs from the matching flat-rate case as expected; an invalid curve
+    (missing `t=0` point / non-increasing tenors) → `Validation`.
+  - Discrete-dividend **pricing** path prices without error and moves the value
+    in the expected direction vs. the no-dividend case. A `solve_iv` query with
+    non-empty discrete dividends → `Validation` (not silently ignored).
+  - `value_at(spot)` at off-spot points returns `Ok(finite)`; Greeks
+    (`delta`/`gamma`/`theta`) are finite with expected signs (put delta < 0,
+    gamma > 0).
   - Error cases: negative spot → `Validation`; arbitrage-violating market price
     → `Arbitrage`.
 - **Regression tests**: per CLAUDE.md, every bug found during review/execution
@@ -347,18 +417,47 @@ string is preserved in `Error::message`.
 
 ## Risks / Mitigations
 
-- **ABI drift between header and `-sys`** → bidirectional static/const
-  assertions fail the build.
+- **ABI drift between header and `-sys`** → bidirectional `offsetof`/`offset_of!`
+  + size/align assertions fail the build (catches field reorderings too).
 - **Dangling pointers from temporary `Vec`s** → safe layer binds the `Vec`s to
   named locals spanning the FFI call; covered by the array-input tests under
   ASan-enabled `bazel test`.
-- **C++ exception escaping** → shim-wide `try/catch` → `MANGO_ERR_SOLVER`.
+- **C++ exception escaping** → every shim body (solve *and* every fallible
+  accessor) wrapped in `try/catch` → mapped status; at-spot Greeks precomputed
+  so their accessors are `noexcept` getters.
+- **Throwing accessors crossing FFI** → at-spot value/Greeks computed eagerly
+  inside `mango_price_american`; only `value_at` stays fallible.
 - **`rules_rust` toolchain bootstrap in CI** → pin versions; verify
   `bazel test //crates/...` plus the untouched C++ suite both pass before PR.
 
 ## Future Extensions (not v1)
 
 - Batch IV (`solve_batch`) with an array-in/array-out C function.
-- Price-table precomputation + interpolated IV solver bindings.
+- Price-table precomputation + interpolated IV solver bindings (would also
+  unlock discrete-dividend IV).
 - Standalone Cargo build (`build.rs` + `cc`) for `cargo add` consumers.
 - Explicit grid specs / snapshots for advanced users.
+
+## Design Review Resolution (2026-06-04, Codex)
+
+A pre-implementation Codex review (read-only, against the real C++ sources)
+surfaced mismatches between the first draft and the actual API. All findings
+were folded in:
+
+- **IV discrete dividends** — `IVQuery` has no such field; v1 IV rejects
+  discrete-dividend queries instead of silently ignoring them.
+- **IV config** — `IVSolverConfig` has no `target_price_error`; exposed
+  `root_config.max_iter` and `root_config.brent_tol_abs` instead.
+- **Pricing errors** — shim calls `AmericanOptionSolver::create()`/`solve()`
+  (not the convenience wrapper, which loses `ValidationError`).
+- **Throwing accessors** — at-spot value/Greeks precomputed eagerly (noexcept
+  getters); `value_at` made fallible; all bodies `try/catch`-wrapped.
+- **rules_rust linkage** — native `cc_library` goes in `link_deps`, not `deps`.
+- **ABI guard** — added per-field `offsetof`/`offset_of!` checks (size/align
+  alone miss reorderings); fixed-width enum/count types.
+- **Yield-curve validation** — shim validates curve arrays at the boundary
+  (`t=0` point, increasing tenors) and maps failures to `Validation`.
+- **Reference values** — integration tests reuse the existing loose ATM
+  tolerance (`6.35 ± 0.5`) rather than an invented golden value.
+- **Minor** — message strings are synthesized/truncatable; `!Send/!Sync`
+  justified by the lazy mutable caches; negative `max_iter` rejected.
