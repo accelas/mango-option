@@ -1697,3 +1697,14 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "ffi_c_api_test",
+    srcs = ["ffi_c_api_test.cc"],
+    copts = ["-Wall", "-Wextra", "-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/ffi:mango_c_api",
+        "@googletest//:gtest_main",
+    ],
+)

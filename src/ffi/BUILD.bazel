@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "mango_c_api",
+    srcs = ["mango_c_api.cpp"],
+    hdrs = ["mango_c_api.h"],
+    strip_include_prefix = "/src/ffi",
+    include_prefix = "mango/ffi",
+    copts = ["-Wall", "-Wextra", "-O3", "-fopenmp", "-DHAVE_SYSTEMTAP_SDT"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:iv_solver",
+        "//src/option:option_spec",
+        "//src/option:yield_curve",
+    ],
+    visibility = ["//visibility:public"],
+)
