@@ -237,6 +237,19 @@ MangoStatus mango_solve_iv(const MangoIvQuery* query,
       return MANGO_ERR_VALIDATION;
     }
 
+    // Pre-validate scalar rate/dividend so non-finite inputs surface as a
+    // validation error. The C++ IV path maps InvalidRate/InvalidDividend to
+    // ArbitrageViolation; without this the Rust API would report
+    // ErrorKind::Arbitrage for invalid params, unlike the pricing path.
+    if (!std::isfinite(query->dividend_yield)) {
+      set_err(out_err, MANGO_ERR_VALIDATION, "dividend_yield must be finite");
+      return MANGO_ERR_VALIDATION;
+    }
+    if (query->n_tenor_points == 0 && !std::isfinite(query->rate_const)) {
+      set_err(out_err, MANGO_ERR_VALIDATION, "rate must be finite");
+      return MANGO_ERR_VALIDATION;
+    }
+
     mango::IVSolverConfig cfg;
     if (config) {
       if (config->max_iter > 0) {

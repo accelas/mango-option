@@ -96,4 +96,17 @@ TEST(MangoCApi, InvalidOptionTypeIsValidationError) {
   EXPECT_STREQ(err.message, "invalid option_type");
 }
 
+TEST(MangoCApi, NonFiniteIvRateIsValidationError) {
+  MangoIvQuery q{};
+  q.spot = 100.0; q.strike = 100.0; q.maturity = 1.0;
+  q.dividend_yield = 0.0; q.market_price = 5.0;
+  q.rate_const = std::nan("");  // non-finite scalar rate
+  q.option_type = MANGO_PUT;
+  MangoIvSuccess out{};
+  MangoError err{};
+  // Must be Validation, not Arbitrage (the C++ IV path would otherwise map
+  // InvalidRate -> ArbitrageViolation).
+  EXPECT_EQ(mango_solve_iv(&q, nullptr, &out, &err), MANGO_ERR_VALIDATION);
+}
+
 }  // namespace
