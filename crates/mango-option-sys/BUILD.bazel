@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "mango_option_sys",
+    srcs = ["src/lib.rs"],
+    edition = "2021",
+    deps = ["//src/ffi:mango_c_api"],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "layout_test",
+    srcs = ["tests/layout.rs"],
+    edition = "2021",
+    deps = [":mango_option_sys"],
+)
