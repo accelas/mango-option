@@ -216,10 +216,19 @@ std::expected<void, ValidationError> validate_option_spec(const OptionSpec& spec
 struct IVQuery : OptionSpec {
     double market_price = 0.0;    ///< Observed market price to match
 
+    /// Discrete dividend schedule: (calendar_time, amount) pairs.
+    /// Honored by the FDM IVSolver, which prices each candidate volatility with
+    /// these dividends (mandatory grid times are placed at each ex-dividend
+    /// instant). Defaults to empty (continuous-yield-only behavior).
+    std::vector<Dividend> discrete_dividends;
+
     IVQuery() = default;
 
-    IVQuery(const OptionSpec& spec, double market_price_)
-        : OptionSpec(spec), market_price(market_price_) {}
+    IVQuery(const OptionSpec& spec, double market_price_,
+            std::vector<Dividend> discrete_dividends_ = {})
+        : OptionSpec(spec)
+        , market_price(market_price_)
+        , discrete_dividends(std::move(discrete_dividends_)) {}
 };
 
 /**

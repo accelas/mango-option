@@ -459,6 +459,7 @@ cc_test(
     name = "iv_solver_test",
     srcs = ["iv_solver_test.cc"],
     deps = [
+        "//src/option:american_option",
         "//src/option:iv_solver",
         "@googletest//:gtest_main",
     ],

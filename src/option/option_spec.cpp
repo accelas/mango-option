@@ -86,6 +86,31 @@ std::expected<void, ValidationError> validate_iv_query(const IVQuery& query) {
             query.market_price));
     }
 
+    // Validate discrete dividends (mirrors validate_pricing_params): each
+    // ex-dividend instant must fall within (0, maturity] and the amount be
+    // non-negative and finite. The FDM IVSolver honors these dividends.
+    for (size_t i = 0; i < query.discrete_dividends.size(); ++i) {
+        const auto& div = query.discrete_dividends[i];
+        if (div.calendar_time < 0.0 || div.calendar_time > query.maturity) {
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidDividend,
+                div.calendar_time,
+                i));
+        }
+        if (div.amount < 0.0) {
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidDividend,
+                div.amount,
+                i));
+        }
+        if (!std::isfinite(div.calendar_time) || !std::isfinite(div.amount)) {
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidDividend,
+                div.calendar_time,
+                i));
+        }
+    }
+
     return {};
 }
 
