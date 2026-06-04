@@ -245,12 +245,69 @@ def test_typed_exceptions_for_validation_and_persistence():
             assert hasattr(e, "code")
 
 
+def test_fdm_iv_solver_honors_discrete_dividends():
+    # Regression: the FDM IVSolver must honor discrete dividends set on the
+    # query. Before IVQuery exposed discrete_dividends in the binding, Python
+    # FDM IV solves ran with an empty schedule and reproduced the C++ bug.
+    divs = [mo.Dividend(0.5, 2.0)]
+
+    p = mo.PricingParams()
+    p.spot = 100.0
+    p.strike = 100.0
+    p.maturity = 1.0
+    p.rate = 0.05
+    p.dividend_yield = 0.0
+    p.volatility = 0.25
+    p.option_type = mo.OptionType.PUT
+    p.discrete_dividends = divs
+
+    market = mo.american_option_price(p).value_at(100.0)
+    assert_finite_number(market)
+
+    q = mo.IVQuery()
+    q.spot = 100.0
+    q.strike = 100.0
+    q.maturity = 1.0
+    q.rate = 0.05
+    q.dividend_yield = 0.0
+    q.option_type = mo.OptionType.PUT
+    q.market_price = market
+    q.discrete_dividends = divs
+
+    # The property round-trips what we set.
+    assert len(q.discrete_dividends) == 1
+    assert q.discrete_dividends[0].calendar_time == 0.5
+    assert q.discrete_dividends[0].amount == 2.0
+    # Tuple form is also accepted (matching PricingParams.discrete_dividends).
+    q.discrete_dividends = [(0.5, 2.0)]
+    assert len(q.discrete_dividends) == 1
+
+    success, result, error = mo.IVSolver(mo.IVSolverConfig()).solve(q)
+    assert success, error
+    assert abs(result.implied_vol - 0.25) < 0.01
+
+    # Sanity: dropping the dividend yields a materially different IV, proving
+    # the schedule is actually used.
+    q_no_div = mo.IVQuery()
+    q_no_div.spot = 100.0
+    q_no_div.strike = 100.0
+    q_no_div.maturity = 1.0
+    q_no_div.rate = 0.05
+    q_no_div.dividend_yield = 0.0
+    q_no_div.option_type = mo.OptionType.PUT
+    q_no_div.market_price = market
+    ok2, res2, err2 = mo.IVSolver(mo.IVSolverConfig()).solve(q_no_div)
+    assert ok2, err2
+    assert abs(res2.implied_vol - 0.25) > 0.02
+
+
 def main():
     tests = [
         test_rate_spec_conversions,
         test_sequence_conversions_for_vectors_and_axes,
         test_optional_and_backend_variant_conversions,
         test_dividend_conversions,
+        test_fdm_iv_solver_honors_discrete_dividends,
         test_bspline_4d_price_table_workflow_and_persistence_paths,
         test_price_table_validation_and_iv_error_parity,
         test_legacy_interpolated_iv_solver_factory_still_works,
