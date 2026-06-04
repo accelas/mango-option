@@ -2,7 +2,9 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include "mango/option/iv_solver.hpp"
+#include "mango/option/american_option.hpp"
 #include <cmath>
+#include <vector>
 
 using namespace mango;
 
@@ -247,4 +249,61 @@ TEST_F(IVSolverTest, GridAccuracyReducesError) {
     EXPECT_LT(result_default->implied_vol, 0.35);
     EXPECT_GT(result_finer->implied_vol, 0.15);
     EXPECT_LT(result_finer->implied_vol, 0.35);
+}
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: FDM IVSolver must honor discrete dividends carried by the query.
+// Bug: IVQuery had no discrete_dividends field, so IVSolver::objective_function
+// built PricingParams with an always-empty dividend schedule. The discrete
+// dividends were silently ignored, so IV solved against a no-dividend price.
+TEST_F(IVSolverTest, DiscreteDividendIVRoundTrip) {
+    const double sigma_true = 0.25;
+    std::vector<Dividend> divs = {Dividend{.calendar_time = 0.5, .amount = 2.0}};
+
+    OptionSpec spec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                    .rate = 0.05, .option_type = OptionType::PUT};
+
+    // Reference price from the FDM pricer WITH the discrete dividend.
+    PricingParams pp(spec, sigma_true, divs);
+    auto priced = solve_american_option(pp);
+    ASSERT_TRUE(priced.has_value());
+    const double market = priced->value_at(spec.spot);
+
+    // IV query carrying the same discrete dividend must recover sigma_true.
+    IVQuery div_query(spec, market);
+    div_query.discrete_dividends = divs;
+
+    IVSolver solver(config);
+    auto result = solver.solve(div_query);
+    ASSERT_TRUE(result.has_value())
+        << "Error code: " << static_cast<int>(result.error().code);
+    EXPECT_NEAR(result->implied_vol, sigma_true, 0.01);
+
+    // Sanity: solving the SAME market price without the dividend yields a
+    // materially different IV — proving the schedule is actually used, not
+    // ignored. The dividend lowers the forward, raising a put's value, so at a
+    // fixed market price the no-dividend fit must imply a different vol.
+    IVQuery no_div_query(spec, market);
+    auto no_div = solver.solve(no_div_query);
+    ASSERT_TRUE(no_div.has_value());
+    EXPECT_GT(std::abs(no_div->implied_vol - sigma_true), 0.02)
+        << "no-dividend IV=" << no_div->implied_vol
+        << " should differ from " << sigma_true;
+}
+
+// Regression: invalid discrete-dividend schedules in an IV query must be
+// rejected by validation, mirroring validate_pricing_params.
+TEST_F(IVSolverTest, DiscreteDividendIVInvalidScheduleRejected) {
+    OptionSpec spec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                    .rate = 0.05, .option_type = OptionType::PUT};
+    IVQuery bad_query(spec, 10.0);
+    // Dividend after maturity is invalid.
+    bad_query.discrete_dividends = {Dividend{.calendar_time = 2.0, .amount = 1.0}};
+
+    IVSolver solver(config);
+    auto result = solver.solve(bad_query);
+    ASSERT_FALSE(result.has_value());
 }

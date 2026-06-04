@@ -55,6 +55,7 @@ double IVSolver::objective_function(const IVQuery& query, double volatility) con
     option_params.rate = query.rate;
     option_params.dividend_yield = query.dividend_yield;
     option_params.option_type = query.option_type;
+    option_params.discrete_dividends = query.discrete_dividends;
 
     // Resolve grid from config_.grid (GridAccuracyParams or PDEGridConfig)
     GridSpec<double> grid_spec = GridSpec<double>::uniform(0.0, 1.0, 10).value();  // Will be replaced

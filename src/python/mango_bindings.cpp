@@ -398,6 +398,15 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("dividend_yield", &mango::IVQuery::dividend_yield)
         .def_readwrite("option_type", &mango::IVQuery::option_type)
         .def_readwrite("market_price", &mango::IVQuery::market_price)
+        .def_property("discrete_dividends",
+            [](const mango::IVQuery& self) {
+                return dividends_to_python(self.discrete_dividends);
+            },
+            [](mango::IVQuery& self, const py::object& obj) {
+                self.discrete_dividends = python_to_dividends(obj);
+            },
+            "Discrete dividend schedule (list of Dividend or (time, amount) tuples). "
+            "Honored by the FDM IVSolver.")
         .def("__repr__", [](const mango::IVQuery& q) {
             return "<IVQuery spot=" + std::to_string(q.spot) +
                    " strike=" + std::to_string(q.strike) +
