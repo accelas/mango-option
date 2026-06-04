@@ -17,13 +17,16 @@
 #     input declarations) provides __cpu_indicator_init and __cpu_model needed
 #     by [[gnu::target_clones]] multi-versioned functions
 #
-# All paths are stable on Debian/Ubuntu x86-64 with GCC 14 + glibc 2.41.
+# GCC's own library paths (libstdc++.a, libgcc.a) are discovered at build time
+# via `gcc -print-file-name=...` so they are not pinned to a GCC version. The
+# libm.so.6 / libgcc_s.so.1 linkopts below use the Debian/Ubuntu x86-64 multiarch
+# location, which is not GCC-version-specific.
 
 genrule(
     name = "copy_libstdcpp",
     srcs = [],
     outs = ["libstdc++.a"],
-    cmd = "cp /usr/lib/gcc/x86_64-linux-gnu/14/libstdc++.a $@",
+    cmd = "cp \"$$(gcc -print-file-name=libstdc++.a)\" $@",
     visibility = ["//visibility:public"],
 )
 
@@ -42,7 +45,7 @@ genrule(
     name = "extract_cpuinfo",
     srcs = [],
     outs = ["cpuinfo.o"],
-    cmd = "ar x /usr/lib/gcc/x86_64-linux-gnu/14/libgcc.a cpuinfo.o --output=$(RULEDIR)",
+    cmd = "ar x \"$$(gcc -print-file-name=libgcc.a)\" cpuinfo.o --output=$(RULEDIR)",
     visibility = ["//visibility:public"],
 )
 
