@@ -45,7 +45,7 @@ pub fn solve_iv(query: &IvQuery, config: &IvConfig) -> Result<IvSuccess, Error> 
     };
     let cfg = sys::MangoIvConfig {
         brent_tol_abs: config.brent_tol_abs.unwrap_or(0.0),
-        max_iter: config.max_iter.map(|m| m as i32).unwrap_or(0),
+        max_iter: config.max_iter.map(|m| i32::try_from(m).unwrap_or(i32::MAX)).unwrap_or(0),
     };
     let mut out = sys::MangoIvSuccess {
         implied_vol: 0.0,

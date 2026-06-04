@@ -17,9 +17,7 @@ pub struct PriceResult {
 
 impl core::fmt::Debug for PriceResult {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("PriceResult")
-            .field("value", &self.value())
-            .finish()
+        write!(f, "PriceResult({:p})", self.handle)
     }
 }
 
