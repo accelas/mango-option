@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "mango_option",
+    srcs = [
+        "src/error.rs",
+        "src/iv.rs",
+        "src/lib.rs",
+        "src/pricing.rs",
+        "src/types.rs",
+    ],
+    edition = "2021",
+    deps = ["//crates/mango-option-sys:mango_option_sys"],
+    visibility = ["//visibility:public"],
+)
+
+# The integration test links C++ archives that reference libm and GCC runtime
+# symbols. rules_rust's GNU ld invocation triggers an --as-needed + --gc-sections
+# interaction that prevents libm/libgcc from being included when they're needed.
+# See //src/ffi:BUILD.bazel for the detailed fix; the deps here are the result.
+rust_test(
+    name = "integration_test",
+    srcs = ["tests/integration.rs"],
+    edition = "2021",
+    deps = [
+        ":mango_option",
+        "//src/ffi:libgcc_cpuinfo",
+        "//src/ffi:libstdcpp_static",
+        "//src/ffi:mango_c_api",
+    ],
+)
