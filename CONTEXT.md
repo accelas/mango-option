@@ -1,12 +1,16 @@
 # Mango Option
 
-Mango Option is a pricing and implied-volatility library whose public surface is split between a native C++ API and a Python API for the same option workflows.
+Mango Option is a pricing and implied-volatility library whose public surface spans a native C++ API, a parity-oriented Python API, and a focused Rust binding over the same option-pricing core.
 
 ## Language
 
 **Python API parity**:
 Every supported C++ capability is reachable from Python through an idiomatic Python surface, even when the Python shape does not mirror C++ templates or helper types one-to-one.
 _Avoid_: Binding parity, wrapper parity, pybind coverage
+
+**Rust binding (core)**:
+A safe Rust surface (the `mango-option` crate over `mango-option-sys` and an `extern "C"` shim) exposing American option pricing with Greeks and FDM implied volatility, with full constant-rate/yield-curve and continuous/discrete-dividend fidelity. Unlike the Python API, it is a deliberately focused subset rather than full parity: price tables, interpolated IV, and batch solving are out of scope.
+_Avoid_: Rust parity, full Rust API, GPU rewrite
 
 **C++ capability**:
 A documented, tested, or example-backed option-pricing, implied-volatility, interpolation, grid-control, or serialization workflow that the C++ API supports for library users.
