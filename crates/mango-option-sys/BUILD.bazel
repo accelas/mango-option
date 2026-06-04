@@ -5,7 +5,11 @@ rust_library(
     name = "mango_option_sys",
     srcs = ["src/lib.rs"],
     edition = "2021",
-    deps = ["//src/ffi:mango_c_api"],
+    deps = [
+        "//src/ffi:mango_c_api",
+        "//src/ffi:libgcc_cpuinfo",
+        "//src/ffi:libstdcpp_static",
+    ],
     visibility = ["//visibility:public"],
 )
 

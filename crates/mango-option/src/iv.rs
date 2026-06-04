@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-use crate::error::Error;
+use crate::error::{Error, ErrorKind};
 use crate::pricing::{blank_error, div_ptr_or_null, dividend_array, ptr_or_null, tenor_array};
 use crate::types::{OptionSpec, Rate};
 use mango_option_sys as sys;
@@ -24,6 +24,10 @@ pub struct IvSuccess {
 }
 
 pub fn solve_iv(query: &IvQuery, config: &IvConfig) -> Result<IvSuccess, Error> {
+    if matches!(&query.spec.rate, Rate::Curve(v) if v.is_empty()) {
+        return Err(Error { kind: ErrorKind::Validation,
+                           message: "yield curve has no tenor points".to_string() });
+    }
     let tenors = tenor_array(&query.spec.rate);
     let divs = dividend_array(&query.spec.discrete_dividends);
     let rate_const = match query.spec.rate {

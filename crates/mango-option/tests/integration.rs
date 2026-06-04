@@ -93,3 +93,11 @@ fn arbitrage_violating_price_is_arbitrage_error() {
     .unwrap_err();
     assert_eq!(e.kind, ErrorKind::Arbitrage);
 }
+
+#[test]
+fn empty_yield_curve_is_validation_error() {
+    let mut spec = put_spec();
+    spec.rate = Rate::Curve(vec![]);
+    let e = price_american(&PricingParams { spec, volatility: 0.20 }).unwrap_err();
+    assert_eq!(e.kind, ErrorKind::Validation);
+}

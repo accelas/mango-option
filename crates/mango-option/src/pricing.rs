@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-use crate::error::Error;
+use crate::error::{Error, ErrorKind};
 use crate::types::{Dividend, OptionSpec, Rate, TenorPoint};
 use mango_option_sys as sys;
 
@@ -51,6 +51,10 @@ impl Drop for PriceResult {
 }
 
 pub fn price_american(params: &PricingParams) -> Result<PriceResult, Error> {
+    if matches!(&params.spec.rate, Rate::Curve(v) if v.is_empty()) {
+        return Err(Error { kind: ErrorKind::Validation,
+                           message: "yield curve has no tenor points".to_string() });
+    }
     // Keep arrays alive for the duration of the call.
     let tenors = tenor_array(&params.spec.rate);
     let divs = dividend_array(&params.spec.discrete_dividends);

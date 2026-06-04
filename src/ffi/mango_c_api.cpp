@@ -18,11 +18,13 @@
 
 namespace {
 
-void set_err(MangoError* err, MangoStatus code, const std::string& msg) {
+void set_err(MangoError* err, MangoStatus code, const char* msg) {
   if (!err) return;
   err->code = code;
-  std::size_t n = msg.size() < 255 ? msg.size() : 255;
-  std::memcpy(err->message, msg.data(), n);
+  if (!msg) { err->message[0] = '\0'; return; }
+  std::size_t n = std::strlen(msg);
+  if (n > 255) n = 255;
+  std::memcpy(err->message, msg, n);
   err->message[n] = '\0';
 }
 
@@ -51,7 +53,8 @@ bool build_rate(double rate_const, const MangoTenorPoint* pts, uint64_t n,
   }
   auto curve = mango::YieldCurve::from_points(std::move(points));
   if (!curve) {
-    set_err(err, MANGO_ERR_VALIDATION, "invalid yield curve: " + curve.error());
+    std::string msg = "invalid yield curve: " + curve.error();
+    set_err(err, MANGO_ERR_VALIDATION, msg.c_str());
     return false;
   }
   out = curve.value();
@@ -153,14 +156,15 @@ MangoStatus mango_price_american(const MangoPricingParams* params,
 
     auto solver = mango::AmericanOptionSolver::create(pp);
     if (!solver) {
-      set_err(out_err, MANGO_ERR_VALIDATION,
-              format_validation_error(solver.error()));
+      std::string msg = format_validation_error(solver.error());
+      set_err(out_err, MANGO_ERR_VALIDATION, msg.c_str());
       return MANGO_ERR_VALIDATION;
     }
     auto solved = solver->solve();
     if (!solved) {
       auto code = map_solver_error(solved.error());
-      set_err(out_err, code, format_solver_error(solved.error()));
+      std::string msg = format_solver_error(solved.error());
+      set_err(out_err, code, msg.c_str());
       return code;
     }
     auto& res = solved.value();
@@ -242,11 +246,21 @@ MangoStatus mango_solve_iv(const MangoIvQuery* query,
         cfg.root_config.brent_tol_abs = config->brent_tol_abs;
       }
     }
+    for (uint64_t i = 0; i < query->n_dividends; ++i) {
+      double ct = query->dividends[i].calendar_time;
+      double amt = query->dividends[i].amount;
+      if (!std::isfinite(ct) || ct < 0.0 || ct > query->maturity ||
+          !std::isfinite(amt) || amt < 0.0) {
+        set_err(out_err, MANGO_ERR_VALIDATION, "invalid discrete dividend");
+        return MANGO_ERR_VALIDATION;
+      }
+    }
     mango::IVSolver solver(cfg);
     auto result = solver.solve(q);
     if (!result) {
       auto code = map_iv_error(result.error());
-      set_err(out_err, code, format_iv_error(result.error()));
+      std::string msg = format_iv_error(result.error());
+      set_err(out_err, code, msg.c_str());
       return code;
     }
     const auto& s = result.value();
