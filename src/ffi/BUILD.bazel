@@ -5,7 +5,7 @@ cc_library(
     hdrs = ["mango_c_api.h"],
     strip_include_prefix = "/src/ffi",
     include_prefix = "mango/ffi",
-    copts = ["-Wall", "-Wextra", "-O3", "-fopenmp", "-DHAVE_SYSTEMTAP_SDT"],
+    copts = ["-Wall", "-Wextra", "-Werror", "-O3", "-fopenmp", "-DHAVE_SYSTEMTAP_SDT"],
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option:american_option",

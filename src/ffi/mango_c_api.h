@@ -99,6 +99,10 @@ static_assert(offsetof(MangoPricingParams, n_dividends) == 72, "n_dividends off"
 static_assert(offsetof(MangoPricingParams, option_type) == 80, "option_type off");
 static_assert(sizeof(MangoIvQuery) == 88, "MangoIvQuery size");
 static_assert(offsetof(MangoIvQuery, market_price) == 32, "market_price off");
+static_assert(offsetof(MangoIvQuery, tenor_points) == 48, "iv tenor_points off");
+static_assert(offsetof(MangoIvQuery, n_tenor_points) == 56, "iv n_tenor_points off");
+static_assert(offsetof(MangoIvQuery, dividends) == 64, "iv dividends off");
+static_assert(offsetof(MangoIvQuery, n_dividends) == 72, "iv n_dividends off");
 static_assert(offsetof(MangoIvQuery, option_type) == 80, "iv option_type off");
 static_assert(sizeof(MangoDividend) == 16, "MangoDividend size");
 static_assert(sizeof(MangoTenorPoint) == 16, "MangoTenorPoint size");
@@ -116,6 +120,10 @@ _Static_assert(offsetof(MangoPricingParams, n_dividends) == 72, "n_dividends off
 _Static_assert(offsetof(MangoPricingParams, option_type) == 80, "option_type off");
 _Static_assert(sizeof(MangoIvQuery) == 88, "MangoIvQuery size");
 _Static_assert(offsetof(MangoIvQuery, market_price) == 32, "market_price off");
+_Static_assert(offsetof(MangoIvQuery, tenor_points) == 48, "iv tenor_points off");
+_Static_assert(offsetof(MangoIvQuery, n_tenor_points) == 56, "iv n_tenor_points off");
+_Static_assert(offsetof(MangoIvQuery, dividends) == 64, "iv dividends off");
+_Static_assert(offsetof(MangoIvQuery, n_dividends) == 72, "iv n_dividends off");
 _Static_assert(offsetof(MangoIvQuery, option_type) == 80, "iv option_type off");
 _Static_assert(sizeof(MangoDividend) == 16, "MangoDividend size");
 _Static_assert(sizeof(MangoTenorPoint) == 16, "MangoTenorPoint size");

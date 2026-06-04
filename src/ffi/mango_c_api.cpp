@@ -5,11 +5,14 @@
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/yield_curve.hpp"
+#include "mango/support/error_types.hpp"
 
+#include <cmath>
 #include <cstring>
 #include <exception>
 #include <new>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -23,8 +26,13 @@ void set_err(MangoError* err, MangoStatus code, const std::string& msg) {
   err->message[n] = '\0';
 }
 
-mango::OptionType to_cpp_type(MangoOptionType t) {
-  return t == MANGO_PUT ? mango::OptionType::PUT : mango::OptionType::CALL;
+// Validate and convert MangoOptionType. Returns false and fills err when invalid.
+bool validate_option_type(MangoOptionType t, MangoError* err,
+                          mango::OptionType& out) {
+  if (t == MANGO_CALL) { out = mango::OptionType::CALL; return true; }
+  if (t == MANGO_PUT)  { out = mango::OptionType::PUT;  return true; }
+  set_err(err, MANGO_ERR_VALIDATION, "invalid option_type");
+  return false;
 }
 
 // Build a RateSpec from (rate_const) or (tenor_points,n). Returns false +
@@ -64,7 +72,35 @@ bool build_dividends(const MangoDividend* divs, uint64_t n,
   return true;
 }
 
-MangoStatus map_solver_error(const mango::SolverError&) { return MANGO_ERR_SOLVER; }
+MangoStatus map_solver_error(const mango::SolverError& e) {
+  if (e.code == mango::SolverErrorCode::ConvergenceFailure)
+    return MANGO_ERR_NO_CONVERGENCE;
+  return MANGO_ERR_SOLVER;
+}
+
+std::string format_solver_error(const mango::SolverError& e) {
+  std::ostringstream m;
+  m << e;  // SolverError has operator<<
+  return m.str();
+}
+
+std::string format_validation_error(const mango::ValidationError& e) {
+  std::ostringstream m;
+  m << e;  // ValidationError has operator<<
+  return m.str();
+}
+
+std::string format_iv_error(const mango::IVError& e) {
+  std::ostringstream m;
+  m << "IVError{code=" << static_cast<int>(e.code)
+    << ", iterations=" << e.iterations
+    << ", final_error=" << e.final_error;
+  if (e.last_vol.has_value()) {
+    m << ", last_vol=" << *e.last_vol;
+  }
+  m << "}";
+  return m.str();
+}
 
 MangoStatus map_iv_error(const mango::IVError& e) {
   switch (e.code) {
@@ -104,7 +140,8 @@ MangoStatus mango_price_american(const MangoPricingParams* params,
     pp.spot = params->spot; pp.strike = params->strike;
     pp.maturity = params->maturity; pp.dividend_yield = params->dividend_yield;
     pp.volatility = params->volatility;
-    pp.option_type = to_cpp_type(params->option_type);
+    if (!validate_option_type(params->option_type, out_err, pp.option_type))
+      return MANGO_ERR_VALIDATION;
     if (!build_rate(params->rate_const, params->tenor_points,
                     params->n_tenor_points, pp.rate, out_err)) {
       return MANGO_ERR_VALIDATION;
@@ -116,13 +153,15 @@ MangoStatus mango_price_american(const MangoPricingParams* params,
 
     auto solver = mango::AmericanOptionSolver::create(pp);
     if (!solver) {
-      set_err(out_err, MANGO_ERR_VALIDATION, "validation failed");
+      set_err(out_err, MANGO_ERR_VALIDATION,
+              format_validation_error(solver.error()));
       return MANGO_ERR_VALIDATION;
     }
     auto solved = solver->solve();
     if (!solved) {
-      set_err(out_err, map_solver_error(solved.error()), "solve failed");
-      return map_solver_error(solved.error());
+      auto code = map_solver_error(solved.error());
+      set_err(out_err, code, format_solver_error(solved.error()));
+      return code;
     }
     auto& res = solved.value();
     // Eagerly compute the at-spot quantities so the getters are noexcept.
@@ -141,10 +180,10 @@ MangoStatus mango_price_american(const MangoPricingParams* params,
   }
 }
 
-double mango_american_value(const MangoAmericanResult* r) { return r->value; }
-double mango_american_delta(const MangoAmericanResult* r) { return r->delta; }
-double mango_american_gamma(const MangoAmericanResult* r) { return r->gamma; }
-double mango_american_theta(const MangoAmericanResult* r) { return r->theta; }
+double mango_american_value(const MangoAmericanResult* r) { return r ? r->value : std::nan(""); }
+double mango_american_delta(const MangoAmericanResult* r) { return r ? r->delta : std::nan(""); }
+double mango_american_gamma(const MangoAmericanResult* r) { return r ? r->gamma : std::nan(""); }
+double mango_american_theta(const MangoAmericanResult* r) { return r ? r->theta : std::nan(""); }
 
 MangoStatus mango_american_value_at(const MangoAmericanResult* r, double spot,
                                     double* out, MangoError* out_err) {
@@ -182,7 +221,8 @@ MangoStatus mango_solve_iv(const MangoIvQuery* query,
     mango::OptionSpec spec;
     spec.spot = query->spot; spec.strike = query->strike;
     spec.maturity = query->maturity; spec.dividend_yield = query->dividend_yield;
-    spec.option_type = to_cpp_type(query->option_type);
+    if (!validate_option_type(query->option_type, out_err, spec.option_type))
+      return MANGO_ERR_VALIDATION;
     if (!build_rate(query->rate_const, query->tenor_points,
                     query->n_tenor_points, spec.rate, out_err)) {
       return MANGO_ERR_VALIDATION;
@@ -205,8 +245,9 @@ MangoStatus mango_solve_iv(const MangoIvQuery* query,
     mango::IVSolver solver(cfg);
     auto result = solver.solve(q);
     if (!result) {
-      set_err(out_err, map_iv_error(result.error()), "iv solve failed");
-      return map_iv_error(result.error());
+      auto code = map_iv_error(result.error());
+      set_err(out_err, code, format_iv_error(result.error()));
+      return code;
     }
     const auto& s = result.value();
     out_success->implied_vol = s.implied_vol;

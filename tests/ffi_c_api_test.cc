@@ -86,4 +86,14 @@ TEST(MangoCApi, DiscreteDividendRoundTripIv) {
   EXPECT_NEAR(out.implied_vol, 0.25, 0.01);
 }
 
+TEST(MangoCApi, InvalidOptionTypeIsValidationError) {
+  MangoPricingParams p = make_put_params();
+  p.option_type = 7;  // invalid: only 0 (CALL) and 1 (PUT) are valid
+  MangoAmericanResult* r = nullptr;
+  MangoError err{};
+  EXPECT_EQ(mango_price_american(&p, &r, &err), MANGO_ERR_VALIDATION);
+  EXPECT_EQ(r, nullptr);
+  EXPECT_STREQ(err.message, "invalid option_type");
+}
+
 }  // namespace
