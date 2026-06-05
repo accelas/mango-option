@@ -202,6 +202,30 @@ fn interp_solve_non_finite_rate_is_validation_error() {
     assert_eq!(err.kind, mango_option::ErrorKind::Validation);
 }
 
+// Regression: an invalid-input query in a batch must fail only its own slot,
+// not abort the whole batch.
+// Bug: a per-query build failure (e.g. non-finite rate) returned a top-level
+// MANGO_ERR_VALIDATION, so the Rust wrapper marked every slot failed. Fix:
+// per-slot build failures in mango_interp_iv_solve_batch + Rust solve_batch.
+#[test]
+fn batch_isolates_invalid_input() {
+    let solver = InterpIvSolver::new(&base_config()).unwrap();
+    let (good_spec, sigma) = put_spec(0.25);
+    let pp = PricingParams { spec: good_spec.clone(), volatility: sigma };
+    let good_price = price_american(&pp).unwrap().value();
+    let good = IvQuery { spec: good_spec, market_price: good_price };
+    let bad_spec = OptionSpec {
+        spot: 100.0, strike: 100.0, maturity: 1.0, dividend_yield: 0.0,
+        rate: Rate::Const(f64::NAN), discrete_dividends: vec![], option_type: OptionType::Put,
+    };
+    let bad = IvQuery { spec: bad_spec, market_price: 5.0 };
+    let batch = solver.solve_batch(&[good, bad]);
+    assert_eq!(batch.failed, 1);
+    assert!(batch.results[0].is_ok(), "valid query should still solve");
+    assert_eq!(batch.results[1].as_ref().unwrap_err().kind,
+               mango_option::ErrorKind::Validation);
+}
+
 // Regression: option-type mismatch against the surface must map to Validation.
 // Bug: map_iv_error lacked arms for the interpolated solver's validation codes
 // (OptionTypeMismatch/InvalidGridConfig/DividendYieldMismatch), so they fell

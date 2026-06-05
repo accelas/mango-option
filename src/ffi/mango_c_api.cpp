@@ -172,6 +172,12 @@ bool build_iv_query(const MangoIvQuery* q, mango::IVQuery& out, MangoError* err)
   if (!validate_option_type(q->option_type, err, spec.option_type)) return false;
   if (!build_rate(q->rate_const, q->tenor_points, q->n_tenor_points, spec.rate, err))
     return false;
+  out = mango::IVQuery(spec, q->market_price);
+  // build_dividends null-checks (dividends == null && n_dividends > 0); run it
+  // before the finite-check loop below so that loop never dereferences a null
+  // dividend pointer.
+  if (!build_dividends(q->dividends, q->n_dividends, out.discrete_dividends, err))
+    return false;
   // Pre-validate non-finite rate/dividend inputs so they surface as a
   // validation error. The IV path otherwise maps invalid rate/dividend to
   // ArbitrageViolation, which would mislead Rust callers (mirrors the FDM
@@ -193,9 +199,6 @@ bool build_iv_query(const MangoIvQuery* q, mango::IVQuery& out, MangoError* err)
       return false;
     }
   }
-  out = mango::IVQuery(spec, q->market_price);
-  if (!build_dividends(q->dividends, q->n_dividends, out.discrete_dividends, err))
-    return false;
   return true;
 }
 
@@ -527,16 +530,27 @@ MangoStatus mango_interp_iv_solve_batch(const MangoInterpIvSolver* s,
     return MANGO_ERR_VALIDATION;
   }
   try {
+    // First pass: build/validate each query. A per-query build failure is
+    // recorded in that query's slot as a validation error; the remaining
+    // queries still solve (per-slot failure contract, not whole-batch abort).
     std::vector<mango::IVQuery> qs;
+    std::vector<uint64_t> valid_idx;  // original index for each entry in qs
     qs.reserve(n);
+    valid_idx.reserve(n);
     for (uint64_t i = 0; i < n; ++i) {
       mango::IVQuery query;
-      if (!build_iv_query(&queries[i], query, err)) return MANGO_ERR_VALIDATION;
-      qs.push_back(std::move(query));
+      if (build_iv_query(&queries[i], query, nullptr)) {
+        qs.push_back(std::move(query));
+        valid_idx.push_back(i);
+      } else {
+        out_slots[i].status = MANGO_ERR_VALIDATION;
+        out_slots[i].success = MangoIvSuccess{};
+      }
     }
     auto batch = s->solver.solve_batch(qs);  // noexcept
-    for (uint64_t i = 0; i < n; ++i) {
-      const auto& r = batch.results[i];
+    for (size_t k = 0; k < valid_idx.size(); ++k) {
+      uint64_t i = valid_idx[k];
+      const auto& r = batch.results[k];
       if (r.has_value()) {
         out_slots[i].status = MANGO_OK;
         fill_iv_success(&out_slots[i].success, r.value());
@@ -545,7 +559,12 @@ MangoStatus mango_interp_iv_solve_batch(const MangoInterpIvSolver* s,
         out_slots[i].success = MangoIvSuccess{};
       }
     }
-    if (out_failed_count) *out_failed_count = batch.failed_count;
+    if (out_failed_count) {
+      uint64_t failed = 0;
+      for (uint64_t i = 0; i < n; ++i)
+        if (out_slots[i].status != MANGO_OK) ++failed;
+      *out_failed_count = failed;
+    }
     return MANGO_OK;
   } catch (const std::exception& ex) {
     set_err(err, MANGO_ERR_SOLVER, ex.what());

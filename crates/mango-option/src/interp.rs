@@ -178,23 +178,24 @@ impl InterpIvSolver {
     }
 
     pub fn solve_batch(&self, queries: &[IvQuery]) -> BatchResult {
-        // Build C queries; keep their backing arrays alive until the call returns.
+        // Per-query failures are isolated to their slot (a bad query does not
+        // fail the whole batch). Rust-side conversion errors (e.g. an empty
+        // yield curve, which would otherwise silently become rate 0 at the C
+        // boundary) are recorded per-slot here; C-side build/solve failures are
+        // recorded per-slot by the shim.
+        let mut results: Vec<Option<Result<IvSuccess, Error>>> =
+            (0..queries.len()).map(|_| None).collect();
         let mut c_queries = Vec::with_capacity(queries.len());
         let mut keepalive = Vec::with_capacity(queries.len());
-        for q in queries {
+        let mut valid_idx = Vec::with_capacity(queries.len()); // original index per c_query
+        for (i, q) in queries.iter().enumerate() {
             match iv_query_to_c(q) {
                 Ok((c, keep)) => {
                     c_queries.push(c);
                     keepalive.push(keep);
+                    valid_idx.push(i);
                 }
-                Err(e) => {
-                    // A structurally-invalid query fails the whole batch up front,
-                    // mirroring the shim's per-query build validation.
-                    return BatchResult {
-                        results: queries.iter().map(|_| Err(e.clone())).collect(),
-                        failed: queries.len(),
-                    };
-                }
+                Err(e) => results[i] = Some(Err(e)),
             }
         }
         let n = c_queries.len() as u64;
@@ -216,24 +217,27 @@ impl InterpIvSolver {
         // keepalive must outlive the FFI call above.
         let _ = &keepalive;
         if status != sys::MANGO_OK {
+            // Whole-call failure (e.g. null handle): mark every still-pending
+            // (successfully-converted) slot with the error.
             let e = Error::from_c(status, &err);
-            return BatchResult {
-                results: queries.iter().map(|_| Err(e.clone())).collect(),
-                failed: queries.len(),
-            };
-        }
-        let results = slots
-            .iter()
-            .map(|s| {
-                if s.status == sys::MANGO_OK {
+            for &i in &valid_idx {
+                results[i] = Some(Err(e.clone()));
+            }
+        } else {
+            for (k, &i) in valid_idx.iter().enumerate() {
+                let s = &slots[k];
+                results[i] = Some(if s.status == sys::MANGO_OK {
                     Ok(iv_success_from_c(&s.success))
                 } else {
                     Err(Error { kind: ErrorKind::from_status(s.status),
                                 message: batch_error_message(s.status) })
-                }
-            })
-            .collect();
-        BatchResult { results, failed: failed as usize }
+                });
+            }
+        }
+        let results: Vec<Result<IvSuccess, Error>> =
+            results.into_iter().map(|r| r.expect("every slot resolved")).collect();
+        let failed = results.iter().filter(|r| r.is_err()).count();
+        BatchResult { results, failed }
     }
 }
 
