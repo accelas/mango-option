@@ -77,6 +77,20 @@ bool build_dividends(const MangoDividend* divs, uint64_t n,
   return true;
 }
 
+// Build a C++ PricingParams from the C struct (rate + dividends + option type).
+bool build_pricing_params(const MangoPricingParams* p, mango::PricingParams& out,
+                          MangoError* err) {
+  out.spot = p->spot; out.strike = p->strike;
+  out.maturity = p->maturity; out.dividend_yield = p->dividend_yield;
+  out.volatility = p->volatility;
+  if (!validate_option_type(p->option_type, err, out.option_type)) return false;
+  if (!build_rate(p->rate_const, p->tenor_points, p->n_tenor_points, out.rate, err))
+    return false;
+  if (!build_dividends(p->dividends, p->n_dividends, out.discrete_dividends, err))
+    return false;
+  return true;
+}
+
 MangoStatus map_solver_error(const mango::SolverError& e) {
   if (e.code == mango::SolverErrorCode::ConvergenceFailure)
     return MANGO_ERR_NO_CONVERGENCE;
@@ -134,11 +148,11 @@ std::vector<double> to_vec(const double* p, uint64_t n) {
   return std::vector<double>(p, p + n);
 }
 
-[[maybe_unused]] MangoStatus map_greek_error(mango::GreekError e) {
+MangoStatus map_greek_error(mango::GreekError e) {
   return e == mango::GreekError::OutOfDomain ? MANGO_ERR_VALIDATION
                                              : MANGO_ERR_SOLVER;
 }
-[[maybe_unused]] const char* greek_error_msg(mango::GreekError e) {
+const char* greek_error_msg(mango::GreekError e) {
   return e == mango::GreekError::OutOfDomain
              ? "greek query point outside surface domain"
              : "greek numerical computation failed";
@@ -220,6 +234,36 @@ struct MangoAmericanResult {
 
 struct MangoInterpIvSolver { mango::AnyInterpIVSolver solver; };
 struct MangoPriceTable { mango::AnyPriceTable table; };
+
+namespace {
+// Shared body for the four fallible Greeks. `fn` returns a
+// std::expected<double, GreekError> from the wrapped AnyPriceTable.
+template <typename Fn>
+MangoStatus greek_call(const MangoPriceTable* t, const MangoPricingParams* p,
+                       double* out, MangoError* err, Fn&& fn) {
+  if (!t || !p || !out) {
+    set_err(err, MANGO_ERR_VALIDATION, "null table, params, or out");
+    return MANGO_ERR_VALIDATION;
+  }
+  try {
+    mango::PricingParams pp;
+    if (!build_pricing_params(p, pp, err)) return MANGO_ERR_VALIDATION;
+    auto r = fn(t->table, pp);
+    if (!r) {
+      set_err(err, map_greek_error(r.error()), greek_error_msg(r.error()));
+      return map_greek_error(r.error());
+    }
+    *out = r.value();
+    return MANGO_OK;
+  } catch (const std::exception& ex) {
+    set_err(err, MANGO_ERR_SOLVER, ex.what());
+    return MANGO_ERR_SOLVER;
+  } catch (...) {
+    set_err(err, MANGO_ERR_SOLVER, "unknown error");
+    return MANGO_ERR_SOLVER;
+  }
+}
+}  // namespace
 
 extern "C" {
 
@@ -477,5 +521,155 @@ MangoStatus mango_interp_iv_solve_batch(const MangoInterpIvSolver* s,
 }
 
 void mango_interp_iv_solver_free(MangoInterpIvSolver* s) { delete s; }
+
+MangoStatus mango_make_price_table(const MangoIvFactoryConfig* cfg,
+                                   MangoPriceTable** out, MangoError* err) {
+  if (!cfg || !out) {
+    set_err(err, MANGO_ERR_VALIDATION, "null cfg or out");
+    return MANGO_ERR_VALIDATION;
+  }
+  *out = nullptr;
+  try {
+    mango::IVSolverFactoryConfig fc;
+    if (!build_factory_config(cfg, fc, err)) return MANGO_ERR_VALIDATION;
+    auto result = mango::make_price_table(fc);
+    if (!result) {
+      std::string msg = format_validation_error(result.error());
+      set_err(err, MANGO_ERR_VALIDATION, msg.c_str());
+      return MANGO_ERR_VALIDATION;
+    }
+    *out = new MangoPriceTable{std::move(result.value())};
+    return MANGO_OK;
+  } catch (const std::exception& ex) {
+    set_err(err, MANGO_ERR_SOLVER, ex.what());
+    return MANGO_ERR_SOLVER;
+  } catch (...) {
+    set_err(err, MANGO_ERR_SOLVER, "unknown error");
+    return MANGO_ERR_SOLVER;
+  }
+}
+
+MangoStatus mango_price_table_validate(const MangoPriceTable* t,
+                                       const MangoPricingParams* p,
+                                       MangoError* err) {
+  if (!t || !p) {
+    set_err(err, MANGO_ERR_VALIDATION, "null table or params");
+    return MANGO_ERR_VALIDATION;
+  }
+  try {
+    mango::PricingParams pp;
+    if (!build_pricing_params(p, pp, err)) return MANGO_ERR_VALIDATION;
+    auto v = t->table.validate_pricing_params(pp);
+    if (!v) {
+      std::string msg = format_validation_error(v.error());
+      set_err(err, MANGO_ERR_VALIDATION, msg.c_str());
+      return MANGO_ERR_VALIDATION;
+    }
+    return MANGO_OK;
+  } catch (const std::exception& ex) {
+    set_err(err, MANGO_ERR_SOLVER, ex.what());
+    return MANGO_ERR_SOLVER;
+  } catch (...) {
+    set_err(err, MANGO_ERR_SOLVER, "unknown error");
+    return MANGO_ERR_SOLVER;
+  }
+}
+
+// price/vega: infallible f64; nan on null/build failure (extrapolates in domain).
+double mango_price_table_price(const MangoPriceTable* t, const MangoPricingParams* p) {
+  if (!t || !p) return std::nan("");
+  try {
+    mango::PricingParams pp;
+    if (!build_pricing_params(p, pp, nullptr)) return std::nan("");
+    return t->table.price(pp);
+  } catch (...) { return std::nan(""); }
+}
+
+double mango_price_table_vega(const MangoPriceTable* t, const MangoPricingParams* p) {
+  if (!t || !p) return std::nan("");
+  try {
+    mango::PricingParams pp;
+    if (!build_pricing_params(p, pp, nullptr)) return std::nan("");
+    return t->table.vega(pp);
+  } catch (...) { return std::nan(""); }
+}
+
+MangoStatus mango_price_table_delta(const MangoPriceTable* t, const MangoPricingParams* p,
+                                    double* out, MangoError* err) {
+  return greek_call(t, p, out, err,
+                    [](const mango::AnyPriceTable& tb, const mango::PricingParams& pp) {
+                      return tb.delta(pp);
+                    });
+}
+
+MangoStatus mango_price_table_gamma(const MangoPriceTable* t, const MangoPricingParams* p,
+                                    double* out, MangoError* err) {
+  return greek_call(t, p, out, err,
+                    [](const mango::AnyPriceTable& tb, const mango::PricingParams& pp) {
+                      return tb.gamma(pp);
+                    });
+}
+
+MangoStatus mango_price_table_theta(const MangoPriceTable* t, const MangoPricingParams* p,
+                                    double* out, MangoError* err) {
+  return greek_call(t, p, out, err,
+                    [](const mango::AnyPriceTable& tb, const mango::PricingParams& pp) {
+                      return tb.theta(pp);
+                    });
+}
+
+MangoStatus mango_price_table_rho(const MangoPriceTable* t, const MangoPricingParams* p,
+                                  double* out, MangoError* err) {
+  return greek_call(t, p, out, err,
+                    [](const mango::AnyPriceTable& tb, const mango::PricingParams& pp) {
+                      return tb.rho(pp);
+                    });
+}
+
+MangoOptionType mango_price_table_option_type(const MangoPriceTable* t) {
+  if (!t) return MANGO_PUT;  // arbitrary default on null; callers null-check handles
+  return t->table.option_type() == mango::OptionType::CALL ? MANGO_CALL : MANGO_PUT;
+}
+
+double mango_price_table_dividend_yield(const MangoPriceTable* t) {
+  return t ? t->table.dividend_yield() : std::nan("");
+}
+
+MangoStatus mango_price_table_make_iv_solver(const MangoPriceTable* t,
+                                             const MangoInterpSolverConfig* cfg,
+                                             MangoInterpIvSolver** out,
+                                             MangoError* err) {
+  if (!t || !out) {
+    set_err(err, MANGO_ERR_VALIDATION, "null table or out");
+    return MANGO_ERR_VALIDATION;
+  }
+  *out = nullptr;
+  try {
+    mango::InterpolatedIVSolverConfig sc;  // defaults
+    if (cfg) {
+      sc.max_iter = static_cast<std::size_t>(cfg->max_iter);
+      sc.tolerance = cfg->tolerance;
+      sc.sigma_min = cfg->sigma_min;
+      sc.sigma_max = cfg->sigma_max;
+      sc.vega_threshold = cfg->vega_threshold;
+    }
+    auto result = t->table.make_iv_solver(sc);
+    if (!result) {
+      std::string msg = format_validation_error(result.error());
+      set_err(err, MANGO_ERR_VALIDATION, msg.c_str());
+      return MANGO_ERR_VALIDATION;
+    }
+    *out = new MangoInterpIvSolver{std::move(result.value())};
+    return MANGO_OK;
+  } catch (const std::exception& ex) {
+    set_err(err, MANGO_ERR_SOLVER, ex.what());
+    return MANGO_ERR_SOLVER;
+  } catch (...) {
+    set_err(err, MANGO_ERR_SOLVER, "unknown error");
+    return MANGO_ERR_SOLVER;
+  }
+}
+
+void mango_price_table_free(MangoPriceTable* t) { delete t; }
 
 }  // extern "C"
