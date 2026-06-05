@@ -168,3 +168,52 @@ fn price_table_derives_iv_solver() {
     let r = solver.solve(&IvQuery { spec, market_price: price }).expect("solve");
     assert!((r.implied_vol - sigma).abs() < 1e-2);
 }
+
+// ===========================================================================
+// Regression tests for bugs found during pre-merge (Codex) review
+// ===========================================================================
+
+// Regression: Greeks must reject out-of-domain queries, not extrapolate to Ok.
+// Bug: greek_call computed the Greek directly; the B-spline evaluator clamps/
+// extrapolates and returned Ok(value) for params outside the surface domain.
+// Fix: validate_pricing_params first in greek_call.
+#[test]
+fn greek_out_of_domain_is_validation_error() {
+    let table = PriceTable::new(&base_config()).unwrap();
+    let (spec, _) = put_spec(0.25);
+    // Volatility far outside the grid (max 0.40) -> out of domain.
+    let oob = PricingParams { spec, volatility: 5.0 };
+    let err = table.delta(&oob).unwrap_err();
+    assert_eq!(err.kind, mango_option::ErrorKind::Validation);
+}
+
+// Regression: a non-finite flat rate in an interpolated IV query must be a
+// validation error, not arbitrage/solver.
+// Bug: build_iv_query did no finite-input pre-validation, so the IV path mapped
+// invalid rate to ArbitrageViolation. Fix: pre-validate in build_iv_query.
+#[test]
+fn interp_solve_non_finite_rate_is_validation_error() {
+    let solver = InterpIvSolver::new(&base_config()).unwrap();
+    let spec = OptionSpec {
+        spot: 100.0, strike: 100.0, maturity: 1.0, dividend_yield: 0.0,
+        rate: Rate::Const(f64::NAN), discrete_dividends: vec![], option_type: OptionType::Put,
+    };
+    let err = solver.solve(&IvQuery { spec, market_price: 5.0 }).unwrap_err();
+    assert_eq!(err.kind, mango_option::ErrorKind::Validation);
+}
+
+// Regression: option-type mismatch against the surface must map to Validation.
+// Bug: map_iv_error lacked arms for the interpolated solver's validation codes
+// (OptionTypeMismatch/InvalidGridConfig/DividendYieldMismatch), so they fell
+// through to MANGO_ERR_SOLVER. Fix: add those arms to map_iv_error.
+#[test]
+fn interp_solve_option_type_mismatch_is_validation_error() {
+    // base_config builds a PUT surface; query with a CALL.
+    let solver = InterpIvSolver::new(&base_config()).unwrap();
+    let spec = OptionSpec {
+        spot: 100.0, strike: 100.0, maturity: 1.0, dividend_yield: 0.0,
+        rate: Rate::Const(0.03), discrete_dividends: vec![], option_type: OptionType::Call,
+    };
+    let err = solver.solve(&IvQuery { spec, market_price: 5.0 }).unwrap_err();
+    assert_eq!(err.kind, mango_option::ErrorKind::Validation);
+}

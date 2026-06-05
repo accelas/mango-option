@@ -129,7 +129,13 @@ MangoStatus map_iv_error(const mango::IVError& e) {
     case mango::IVErrorCode::NegativeSpot:
     case mango::IVErrorCode::NegativeStrike:
     case mango::IVErrorCode::NegativeMaturity:
-    case mango::IVErrorCode::NegativeMarketPrice: return MANGO_ERR_VALIDATION;
+    case mango::IVErrorCode::NegativeMarketPrice:
+    // Validation-category codes produced by the interpolated solver. Without
+    // these explicit arms they fall through to MANGO_ERR_SOLVER, so Rust
+    // callers see ErrorKind::Solver for what are really bad-input errors.
+    case mango::IVErrorCode::InvalidGridConfig:
+    case mango::IVErrorCode::OptionTypeMismatch:
+    case mango::IVErrorCode::DividendYieldMismatch: return MANGO_ERR_VALIDATION;
     default: return MANGO_ERR_SOLVER;
   }
 }
@@ -166,6 +172,27 @@ bool build_iv_query(const MangoIvQuery* q, mango::IVQuery& out, MangoError* err)
   if (!validate_option_type(q->option_type, err, spec.option_type)) return false;
   if (!build_rate(q->rate_const, q->tenor_points, q->n_tenor_points, spec.rate, err))
     return false;
+  // Pre-validate non-finite rate/dividend inputs so they surface as a
+  // validation error. The IV path otherwise maps invalid rate/dividend to
+  // ArbitrageViolation, which would mislead Rust callers (mirrors the FDM
+  // pre-validation in mango_solve_iv).
+  if (!std::isfinite(q->dividend_yield)) {
+    set_err(err, MANGO_ERR_VALIDATION, "dividend_yield must be finite");
+    return false;
+  }
+  if (q->n_tenor_points == 0 && !std::isfinite(q->rate_const)) {
+    set_err(err, MANGO_ERR_VALIDATION, "rate must be finite");
+    return false;
+  }
+  for (uint64_t i = 0; i < q->n_dividends; ++i) {
+    double ct = q->dividends[i].calendar_time;
+    double amt = q->dividends[i].amount;
+    if (!std::isfinite(ct) || ct < 0.0 || ct > q->maturity ||
+        !std::isfinite(amt) || amt < 0.0) {
+      set_err(err, MANGO_ERR_VALIDATION, "invalid discrete dividend");
+      return false;
+    }
+  }
   out = mango::IVQuery(spec, q->market_price);
   if (!build_dividends(q->dividends, q->n_dividends, out.discrete_dividends, err))
     return false;
@@ -248,6 +275,15 @@ MangoStatus greek_call(const MangoPriceTable* t, const MangoPricingParams* p,
   try {
     mango::PricingParams pp;
     if (!build_pricing_params(p, pp, err)) return MANGO_ERR_VALIDATION;
+    // Greeks are documented as fallible (unlike the intentionally-extrapolating
+    // price/vega). The B-spline evaluator clamps/extrapolates and can return a
+    // value for out-of-domain inputs without surfacing GreekError::OutOfDomain,
+    // so validate bounds first to honor that contract.
+    if (auto v = t->table.validate_pricing_params(pp); !v) {
+      std::string msg = format_validation_error(v.error());
+      set_err(err, MANGO_ERR_VALIDATION, msg.c_str());
+      return MANGO_ERR_VALIDATION;
+    }
     auto r = fn(t->table, pp);
     if (!r) {
       set_err(err, map_greek_error(r.error()), greek_error_msg(r.error()));
