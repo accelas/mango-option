@@ -2,8 +2,10 @@
 #include "mango/ffi/mango_c_api.h"
 
 #include "mango/option/american_option.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/option_spec.hpp"
+#include "mango/option/price_table_factory.hpp"
 #include "mango/option/yield_curve.hpp"
 #include "mango/support/error_types.hpp"
 
@@ -127,6 +129,85 @@ void fill_iv_success(MangoIvSuccess* out, const mango::IVSuccess& s) {
   out->used_rate_approximation = s.used_rate_approximation ? 1 : 0;
 }
 
+std::vector<double> to_vec(const double* p, uint64_t n) {
+  if (n == 0 || p == nullptr) return {};
+  return std::vector<double>(p, p + n);
+}
+
+[[maybe_unused]] MangoStatus map_greek_error(mango::GreekError e) {
+  return e == mango::GreekError::OutOfDomain ? MANGO_ERR_VALIDATION
+                                             : MANGO_ERR_SOLVER;
+}
+[[maybe_unused]] const char* greek_error_msg(mango::GreekError e) {
+  return e == mango::GreekError::OutOfDomain
+             ? "greek query point outside surface domain"
+             : "greek numerical computation failed";
+}
+
+// Build a C++ IVQuery from the C struct (rate + dividends + option type).
+bool build_iv_query(const MangoIvQuery* q, mango::IVQuery& out, MangoError* err) {
+  mango::OptionSpec spec;
+  spec.spot = q->spot; spec.strike = q->strike;
+  spec.maturity = q->maturity; spec.dividend_yield = q->dividend_yield;
+  if (!validate_option_type(q->option_type, err, spec.option_type)) return false;
+  if (!build_rate(q->rate_const, q->tenor_points, q->n_tenor_points, spec.rate, err))
+    return false;
+  out = mango::IVQuery(spec, q->market_price);
+  if (!build_dividends(q->dividends, q->n_dividends, out.discrete_dividends, err))
+    return false;
+  return true;
+}
+
+// Translate the flat factory config into the C++ IVSolverFactoryConfig.
+bool build_factory_config(const MangoIvFactoryConfig* c,
+                          mango::IVSolverFactoryConfig& out, MangoError* err) {
+  if (!validate_option_type(c->option_type, err, out.option_type)) return false;
+  if (!std::isfinite(c->spot)) {
+    set_err(err, MANGO_ERR_VALIDATION, "spot must be finite"); return false;
+  }
+  if (!std::isfinite(c->dividend_yield)) {
+    set_err(err, MANGO_ERR_VALIDATION, "dividend_yield must be finite"); return false;
+  }
+  out.spot = c->spot;
+  out.dividend_yield = c->dividend_yield;
+  out.grid.moneyness = to_vec(c->moneyness, c->n_moneyness);
+  out.grid.vol = to_vec(c->vol, c->n_vol);
+  out.grid.rate = to_vec(c->rate, c->n_rate);
+  out.backend = mango::BSplineBackend{to_vec(c->maturity_grid, c->n_maturity)};
+  out.solver_config.max_iter = static_cast<std::size_t>(c->solver_config.max_iter);
+  out.solver_config.tolerance = c->solver_config.tolerance;
+  out.solver_config.sigma_min = c->solver_config.sigma_min;
+  out.solver_config.sigma_max = c->solver_config.sigma_max;
+  out.solver_config.vega_threshold = c->solver_config.vega_threshold;
+  if (c->adaptive) {
+    mango::AdaptiveGridParams a;
+    a.target_iv_error = c->adaptive->target_iv_error;
+    a.max_iter = static_cast<std::size_t>(c->adaptive->max_iter);
+    a.max_points_per_dim = static_cast<std::size_t>(c->adaptive->max_points_per_dim);
+    a.min_moneyness_points = static_cast<std::size_t>(c->adaptive->min_moneyness_points);
+    a.validation_samples = static_cast<std::size_t>(c->adaptive->validation_samples);
+    a.refinement_factor = c->adaptive->refinement_factor;
+    a.lhs_seed = c->adaptive->lhs_seed;
+    a.vega_floor = c->adaptive->vega_floor;
+    a.max_failure_rate = c->adaptive->max_failure_rate;
+    out.adaptive = a;
+  }
+  if (c->discrete_dividends) {
+    const auto* d = c->discrete_dividends;
+    mango::DiscreteDividendConfig dd;
+    dd.maturity = d->maturity;
+    if (!build_dividends(d->dividends, d->n_dividends, dd.discrete_dividends, err))
+      return false;
+    dd.kref_config.K_refs = to_vec(d->kref_config.K_refs, d->kref_config.n_K_refs);
+    dd.kref_config.K_ref_count =
+        (d->kref_config.n_K_refs == 0 && d->kref_config.K_ref_count <= 0)
+            ? 11 : d->kref_config.K_ref_count;
+    dd.kref_config.K_ref_span = d->kref_config.K_ref_span;
+    out.discrete_dividends = dd;
+  }
+  return true;
+}
+
 }  // namespace
 
 struct MangoAmericanResult {
@@ -136,6 +217,9 @@ struct MangoAmericanResult {
   double gamma;
   double theta;
 };
+
+struct MangoInterpIvSolver { mango::AnyInterpIVSolver solver; };
+struct MangoPriceTable { mango::AnyPriceTable table; };
 
 extern "C" {
 
@@ -296,5 +380,102 @@ MangoStatus mango_solve_iv(const MangoIvQuery* query,
     return MANGO_ERR_SOLVER;
   }
 }
+
+MangoStatus mango_make_interp_iv_solver(const MangoIvFactoryConfig* cfg,
+                                        MangoInterpIvSolver** out,
+                                        MangoError* err) {
+  if (!cfg || !out) {
+    set_err(err, MANGO_ERR_VALIDATION, "null cfg or out");
+    return MANGO_ERR_VALIDATION;
+  }
+  *out = nullptr;
+  try {
+    mango::IVSolverFactoryConfig fc;
+    if (!build_factory_config(cfg, fc, err)) return MANGO_ERR_VALIDATION;
+    auto result = mango::make_interpolated_iv_solver(fc);
+    if (!result) {
+      std::string msg = format_validation_error(result.error());
+      set_err(err, MANGO_ERR_VALIDATION, msg.c_str());
+      return MANGO_ERR_VALIDATION;
+    }
+    *out = new MangoInterpIvSolver{std::move(result.value())};
+    return MANGO_OK;
+  } catch (const std::exception& ex) {
+    set_err(err, MANGO_ERR_SOLVER, ex.what());
+    return MANGO_ERR_SOLVER;
+  } catch (...) {
+    set_err(err, MANGO_ERR_SOLVER, "unknown error");
+    return MANGO_ERR_SOLVER;
+  }
+}
+
+MangoStatus mango_interp_iv_solve(const MangoInterpIvSolver* s,
+                                  const MangoIvQuery* q,
+                                  MangoIvSuccess* out, MangoError* err) {
+  if (!s || !q || !out) {
+    set_err(err, MANGO_ERR_VALIDATION, "null solver, query, or out");
+    return MANGO_ERR_VALIDATION;
+  }
+  try {
+    mango::IVQuery query;
+    if (!build_iv_query(q, query, err)) return MANGO_ERR_VALIDATION;
+    auto result = s->solver.solve(query);
+    if (!result) {
+      auto code = map_iv_error(result.error());
+      std::string msg = format_iv_error(result.error());
+      set_err(err, code, msg.c_str());
+      return code;
+    }
+    fill_iv_success(out, result.value());
+    return MANGO_OK;
+  } catch (const std::exception& ex) {
+    set_err(err, MANGO_ERR_SOLVER, ex.what());
+    return MANGO_ERR_SOLVER;
+  } catch (...) {
+    set_err(err, MANGO_ERR_SOLVER, "unknown error");
+    return MANGO_ERR_SOLVER;
+  }
+}
+
+MangoStatus mango_interp_iv_solve_batch(const MangoInterpIvSolver* s,
+                                        const MangoIvQuery* queries, uint64_t n,
+                                        MangoIvBatchSlot* out_slots,
+                                        uint64_t* out_failed_count,
+                                        MangoError* err) {
+  if (!s || (!queries && n > 0) || (!out_slots && n > 0)) {
+    set_err(err, MANGO_ERR_VALIDATION, "null solver, queries, or out_slots");
+    return MANGO_ERR_VALIDATION;
+  }
+  try {
+    std::vector<mango::IVQuery> qs;
+    qs.reserve(n);
+    for (uint64_t i = 0; i < n; ++i) {
+      mango::IVQuery query;
+      if (!build_iv_query(&queries[i], query, err)) return MANGO_ERR_VALIDATION;
+      qs.push_back(std::move(query));
+    }
+    auto batch = s->solver.solve_batch(qs);  // noexcept
+    for (uint64_t i = 0; i < n; ++i) {
+      const auto& r = batch.results[i];
+      if (r.has_value()) {
+        out_slots[i].status = MANGO_OK;
+        fill_iv_success(&out_slots[i].success, r.value());
+      } else {
+        out_slots[i].status = map_iv_error(r.error());
+        out_slots[i].success = MangoIvSuccess{};
+      }
+    }
+    if (out_failed_count) *out_failed_count = batch.failed_count;
+    return MANGO_OK;
+  } catch (const std::exception& ex) {
+    set_err(err, MANGO_ERR_SOLVER, ex.what());
+    return MANGO_ERR_SOLVER;
+  } catch (...) {
+    set_err(err, MANGO_ERR_SOLVER, "unknown error");
+    return MANGO_ERR_SOLVER;
+  }
+}
+
+void mango_interp_iv_solver_free(MangoInterpIvSolver* s) { delete s; }
 
 }  // extern "C"
