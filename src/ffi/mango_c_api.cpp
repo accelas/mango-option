@@ -118,6 +118,15 @@ MangoStatus map_iv_error(const mango::IVError& e) {
   }
 }
 
+void fill_iv_success(MangoIvSuccess* out, const mango::IVSuccess& s) {
+  out->implied_vol = s.implied_vol;
+  out->iterations = static_cast<uint64_t>(s.iterations);
+  out->final_error = s.final_error;
+  out->vega = s.vega.value_or(0.0);
+  out->has_vega = s.vega.has_value() ? 1 : 0;
+  out->used_rate_approximation = s.used_rate_approximation ? 1 : 0;
+}
+
 }  // namespace
 
 struct MangoAmericanResult {
@@ -277,11 +286,7 @@ MangoStatus mango_solve_iv(const MangoIvQuery* query,
       return code;
     }
     const auto& s = result.value();
-    out_success->implied_vol = s.implied_vol;
-    out_success->iterations = static_cast<uint64_t>(s.iterations);
-    out_success->final_error = s.final_error;
-    out_success->vega = s.vega.value_or(0.0);
-    out_success->has_vega = s.vega.has_value() ? 1 : 0;
+    fill_iv_success(out_success, s);
     return MANGO_OK;
   } catch (const std::exception& ex) {
     set_err(out_err, MANGO_ERR_SOLVER, ex.what());

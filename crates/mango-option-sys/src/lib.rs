@@ -72,6 +72,7 @@ pub struct MangoIvSuccess {
     pub final_error: f64,
     pub vega: f64,
     pub has_vega: i32,
+    pub used_rate_approximation: i32,
 }
 
 #[repr(C)]

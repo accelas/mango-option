@@ -63,6 +63,7 @@ typedef struct {
   double final_error;
   double vega;
   int32_t has_vega;
+  int32_t used_rate_approximation;
 } MangoIvSuccess;
 
 typedef struct { double brent_tol_abs; int32_t max_iter; } MangoIvConfig;  // 0 => default
@@ -110,6 +111,7 @@ static_assert(sizeof(MangoError) == 260, "MangoError size");
 static_assert(offsetof(MangoError, message) == 4, "message off");
 static_assert(sizeof(MangoIvSuccess) == 40, "MangoIvSuccess size");
 static_assert(offsetof(MangoIvSuccess, has_vega) == 32, "has_vega off");
+static_assert(offsetof(MangoIvSuccess, used_rate_approximation) == 36, "used_rate_approximation off");
 static_assert(sizeof(MangoIvConfig) == 16, "MangoIvConfig size");
 static_assert(offsetof(MangoIvConfig, max_iter) == 8, "max_iter off");
 #else
@@ -131,6 +133,7 @@ _Static_assert(sizeof(MangoError) == 260, "MangoError size");
 _Static_assert(offsetof(MangoError, message) == 4, "message off");
 _Static_assert(sizeof(MangoIvSuccess) == 40, "MangoIvSuccess size");
 _Static_assert(offsetof(MangoIvSuccess, has_vega) == 32, "has_vega off");
+_Static_assert(offsetof(MangoIvSuccess, used_rate_approximation) == 36, "used_rate_approximation off");
 _Static_assert(sizeof(MangoIvConfig) == 16, "MangoIvConfig size");
 _Static_assert(offsetof(MangoIvConfig, max_iter) == 8, "max_iter off");
 #endif

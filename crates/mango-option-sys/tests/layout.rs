@@ -31,6 +31,7 @@ fn small_struct_layouts() {
     assert_eq!(offset_of!(MangoError, message), 4);
     assert_eq!(size_of::<MangoIvSuccess>(), 40);
     assert_eq!(offset_of!(MangoIvSuccess, has_vega), 32);
+    assert_eq!(offset_of!(MangoIvSuccess, used_rate_approximation), 36);
     assert_eq!(size_of::<MangoIvConfig>(), 16);
     assert_eq!(offset_of!(MangoIvConfig, max_iter), 8);
 }
