@@ -58,12 +58,15 @@ type-erased pimpl handles, move-only results) **plus** a large nested config
   `price(spot,strike,tau,sigma,rate)`). Rust uses the type-erased
   `AnyPriceTable` (which queries via `PricingParams`), matching the Python
   surface.
-- **Bounds accessors and pre-query bounds validation.** The type-erased
-  `AnyPriceTable` does not expose grid bounds; `price()`/`vega()` mirror the raw
-  C++ signature (return `f64`, no validation — out-of-domain queries
-  extrapolate). The extrapolation caveat is documented. (The Python layer adds a
-  bounds check using internals not on the type-erased handle; we do not
-  replicate it.)
+- **Bounds *accessors*** (`m_min`/`tau_min`/…). The type-erased `AnyPriceTable`
+  does not expose them. `price()`/`vega()` mirror the raw C++ signature (return
+  `f64`, no implicit validation — out-of-domain queries extrapolate); the
+  extrapolation caveat is documented. **Explicit bounds *validation* IS
+  exposed**, however: `AnyPriceTable::validate_pricing_params` exists
+  (`price_table_factory.hpp:30`), so the binding surfaces it as an opt-in
+  `PriceTable::validate(&params) -> Result<()>` rather than silently making
+  `price`/`vega` fallible. Callers who want the Python layer's safety call
+  `validate()` first.
 - **Surface serialization** (Parquet load/save) and `surface_type()` string
   accessor.
 - Publishing to crates.io. v2 ships in-tree via Bazel, like v1.
@@ -86,18 +89,35 @@ optionals (`adaptive`, `discrete_dividends`).
 
 Reused unchanged from v1: `MangoStatus`/`MANGO_ERR_*`, `MangoOptionType`,
 `MangoError`, `MangoDividend`, `MangoTenorPoint`, `MangoPricingParams`,
-`MangoIvQuery`, `MangoIvSuccess`.
+`MangoIvQuery`.
+
+**One shared-struct change**: `MangoIvSuccess` gains a trailing
+`int32_t used_rate_approximation` field. The interpolated solver sets
+`IVSuccess::used_rate_approximation` when a yield-curve query is collapsed to a
+flat rate (`iv_result.hpp:25`, `interpolated_iv_solver.hpp:536`) — dropping it
+would lose fidelity exactly on the path v2 adds. It slots into the existing tail
+padding (`has_vega` is `int32_t` at offset 32; the new field goes at offset 36),
+so **`sizeof(MangoIvSuccess)` stays 40 and no other v1 offset moves**. This
+touches v1's struct, its `static_assert`s, the `-sys` mirror, the v1 layout
+test, the safe `IvSuccess` (gains `pub used_rate_approximation: bool`), and the
+v1 `mango_solve_iv` mapping (sets the new field). It is an additive,
+non-reordering change.
 
 New POD config types (all sizes/offsets pinned by `static_assert`):
 
 ```c
-// InterpolatedIVSolverConfig (Newton config)
+// InterpolatedIVSolverConfig (Newton config). Fields applied VERBATIM (no
+// zero-means-default magic): vega_threshold == 0 is a *legal* value meaning
+// "disable the vega pre-check" (interpolated_iv_solver.hpp:55), so zero cannot
+// be overloaded as "unset". Raw C callers must fill every field; the safe Rust
+// layer always does, because InterpSolverConfig::default() carries the real
+// C++ defaults below.
 typedef struct {
-  uint64_t max_iter;        // size_t; 0 => library default (50)
-  double tolerance;         // 0 => default (1e-6)
-  double sigma_min;         // 0 => default (0.01)
-  double sigma_max;         // 0 => default (3.0)
-  double vega_threshold;    // 0 => default (1e-4)
+  uint64_t max_iter;        // 50
+  double tolerance;         // 1e-6
+  double sigma_min;         // 0.01
+  double sigma_max;         // 3.0
+  double vega_threshold;    // 1e-4 (0 disables the check)
 } MangoInterpSolverConfig;
 
 // AdaptiveGridParams (all 9 fields; passed only when non-null)
@@ -117,7 +137,7 @@ typedef struct {
 typedef struct {
   const double* K_refs;     // may be null when n_K_refs == 0 (auto mode)
   uint64_t      n_K_refs;
-  int32_t       K_ref_count;
+  int32_t       K_ref_count; // used iff K_refs empty; must be >= 1 (auto: 11)
   double        K_ref_span;
 } MangoMultiKRef;
 
@@ -171,6 +191,8 @@ void mango_interp_iv_solver_free(MangoInterpIvSolver* s);
 // Price table (type-erased AnyPriceTable)
 MangoStatus mango_make_price_table(const MangoIvFactoryConfig* cfg,
                                    MangoPriceTable** out, MangoError* err);
+MangoStatus mango_price_table_validate(const MangoPriceTable* t, const MangoPricingParams* p,
+                                       MangoError* err);  // bounds check (opt-in)
 double mango_price_table_price(const MangoPriceTable* t, const MangoPricingParams* p);
 double mango_price_table_vega (const MangoPriceTable* t, const MangoPricingParams* p);
 MangoStatus mango_price_table_delta(const MangoPriceTable* t, const MangoPricingParams* p,
@@ -194,11 +216,18 @@ void mango_price_table_free(MangoPriceTable* t);
 - **Config translation.** The shim reads the flat `MangoIvFactoryConfig` into a
   C++ `IVSolverFactoryConfig`: copies the three grid vectors and `maturity_grid`
   into `IVGrid` / `BSplineBackend{maturity_grid}`; sets `backend` to the
-  B-spline arm; applies `solver_config` (treating an all-zero
-  `MangoInterpSolverConfig` field as "use default" per-field — a zero
-  `tolerance`/`sigma_*`/`vega_threshold`/`max_iter` is never a valid user value);
+  B-spline arm; applies `solver_config` **verbatim** (no zero-means-default);
   sets `adaptive`/`discrete_dividends` only when the corresponding pointer is
-  non-null. `K_refs == null` (n=0) maps to auto K_ref selection.
+  non-null. `K_refs == null` (n=0) maps to auto K_ref selection; in that case a
+  `K_ref_count <= 0` is bumped to the C++ default (11) so a zero-initialized
+  `MangoMultiKRef` doesn't trip the factory's `K_ref_count >= 1` check
+  (`price_table_factory.cpp:149`).
+- **`maturity_grid` is not unconditionally required.** The discrete-dividend
+  B-spline path branches before consuming `BSplineBackend` and uses
+  `DiscreteDividendConfig::maturity` instead (`price_table_factory.cpp:228,332`).
+  The shim does **not** pre-reject an empty `maturity_grid`; it lets the C++
+  factory return `ValidationError` when the grid is actually needed (continuous
+  path) and absent.
 - **Pre-validation in the shim** (before calling into C++, matching v1's IV
   pre-validation): reject non-finite `spot`/`dividend_yield`; reject
   `option_type` not in {0,1}; reject any non-finite dividend amount/time in a
@@ -286,7 +315,8 @@ pub struct FactoryConfig {
     pub adaptive: Option<AdaptiveGridParams>,
     pub discrete_dividends: Option<DiscreteDividendConfig>,
 }
-// No blanket Default: maturity_grid has no sensible default; callers set it.
+// No blanket Default: maturity_grid (continuous path) / discrete_dividends
+// (segmented path) carry the surface maturity and callers must choose one.
 
 pub struct BatchResult {
     pub results: Vec<Result<IvSuccess, Error>>,
@@ -306,6 +336,8 @@ unsafe impl Sync for InterpIvSolver {}
 pub struct PriceTable { /* owns *mut sys::MangoPriceTable; Drop frees */ }
 impl PriceTable {
     pub fn new(cfg: &FactoryConfig) -> Result<Self, Error>;
+    /// Opt-in bounds check (out-of-domain => Err). price/vega do NOT call this.
+    pub fn validate(&self, params: &PricingParams) -> Result<(), Error>;
     pub fn price(&self, params: &PricingParams) -> f64;   // extrapolates out of domain
     pub fn vega(&self, params: &PricingParams) -> f64;
     pub fn delta(&self, params: &PricingParams) -> Result<f64, Error>;
@@ -333,12 +365,17 @@ per-kind message).
 1. **Batch loses per-query message detail** (category only). Single `solve()`
    keeps full fidelity. Documented in the rustdoc for `solve_batch`.
 2. **`price()`/`vega()` do not bounds-validate** and extrapolate out of domain;
-   documented on both methods.
-3. **`InterpSolverConfig` zero-means-default** at the C boundary: a literal
-   user value of `0.0` for `tolerance`/`sigma_*`/`vega_threshold` or `0` for
-   `max_iter` is indistinguishable from "unset" and yields the library default.
-   These are never meaningful user values, so the safe API's `Default` supplies
-   the real defaults and this is invisible to callers who start from `Default`.
+   documented on both methods. Callers wanting the Python layer's safety call
+   `PriceTable::validate(&params)` first.
+3. **No zero-means-default at the C boundary.** `MangoInterpSolverConfig` is
+   applied verbatim (a zero `vega_threshold` legitimately *disables* the vega
+   pre-check). The safe `InterpSolverConfig::default()` carries the real C++
+   defaults, so Rust callers starting from `Default` get correct behavior; raw C
+   callers must fill every field.
+4. **Interpolated IV may approximate a yield-curve rate.** The interpolated
+   solver collapses a `YieldCurve` query to a flat rate and flags it via
+   `used_rate_approximation` (now carried through `MangoIvSuccess` →
+   `IvSuccess::used_rate_approximation`). Surfaced, not hidden.
 
 ## Testing
 
@@ -355,7 +392,9 @@ for every field of every new struct, plus `size_of` equality with the C
    value tracks input.
 2. **Price table queries.** Build a `PriceTable`, query `price`/`vega` and all
    four Greeks via `PricingParams`; assert finite, signs sane (PUT delta < 0),
-   and `price` ≈ FDM price within interpolation tolerance.
+   and `price` ≈ FDM price within interpolation tolerance. Also assert
+   `validate(&in_domain_params)` is `Ok` and `validate(&out_of_domain_params)`
+   (e.g. σ far outside the grid) is `Err(ErrorKind::Validation)`.
 3. **`PriceTable::iv_solver`.** Derive a solver from a built table and solve;
    assert it matches a solver built directly from the same config.
 4. **Batch solve with a deliberate failure.** A batch of queries where one has
@@ -367,8 +406,11 @@ for every field of every new struct, plus `size_of` equality with the C
 6. **Discrete-dividend build.** Build with `discrete_dividends = Some(...)` (one
    dividend) and explicit `K_refs`; solve and recover a σ. Mirrors the v1 FDM
    discrete-dividend round-trip.
-7. **Validation errors.** Empty `maturity_grid` and a non-finite `spot` each
-   return `Err(ErrorKind::Validation)` from `new`.
+7. **Validation errors.** On the *continuous* path (no `discrete_dividends`),
+   an empty `maturity_grid` returns `Err(ErrorKind::Validation)` from `new` (the
+   C++ factory rejects it). A non-finite `spot` also returns
+   `Err(ErrorKind::Validation)`. (Do **not** assert empty `maturity_grid` fails
+   on the discrete path — it legitimately uses `DiscreteDividendConfig::maturity`.)
 8. **`Send + Sync` smoke test.** Move a solver into two threads (`std::thread`)
    and solve concurrently; assert both succeed (exercises the immutability
    guarantee).
@@ -381,12 +423,17 @@ so no new C++ targets are needed.
 
 ## File-by-file change list
 
-- `src/ffi/mango_c_api.h` — new POD structs, opaque handles, 13 fn decls,
-  `static_assert` ABI guards.
-- `src/ffi/mango_c_api.cpp` — config translation, pre-validation, 13 fn impls,
-  error mapping (reusing v1 helpers).
-- `crates/mango-option-sys/src/lib.rs` — `repr(C)` mirrors + `extern "C"` decls.
-- `crates/mango-option-sys/tests/layout.rs` — `offset_of!`/`size_of` asserts.
+- `src/ffi/mango_c_api.h` — new POD structs, opaque handles, 16 new fn decls,
+  `static_assert` ABI guards; **+`int32_t used_rate_approximation` appended to
+  `MangoIvSuccess`** (offset 36, sizeof stays 40; add an offset assert).
+- `src/ffi/mango_c_api.cpp` — config translation, pre-validation, 16 fn impls,
+  error mapping (reusing v1 helpers); set `used_rate_approximation` in the
+  existing `mango_solve_iv` mapping too.
+- `crates/mango-option-sys/src/lib.rs` — `repr(C)` mirrors + `extern "C"` decls;
+  add the new `MangoIvSuccess` field.
+- `crates/mango-option-sys/tests/layout.rs` — `offset_of!`/`size_of` asserts for
+  new structs + the new `MangoIvSuccess` field.
+- `crates/mango-option/src/iv.rs` — surface `IvSuccess::used_rate_approximation`.
 - `crates/mango-option/src/interp.rs` — `FactoryConfig` family + `InterpIvSolver`.
 - `crates/mango-option/src/table.rs` — `PriceTable`.
 - `crates/mango-option/src/lib.rs` — module decls + re-exports.
