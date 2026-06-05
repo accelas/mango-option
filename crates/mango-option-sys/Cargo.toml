@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "mango-option-sys"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Raw FFI bindings to the mango-option C ABI"
+
+[lib]
+name = "mango_option_sys"
+path = "src/lib.rs"

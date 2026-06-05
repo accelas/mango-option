@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "mango-option"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Safe Rust bindings for the mango-option American option pricer"
+
+[lib]
+name = "mango_option"
+path = "src/lib.rs"
+
+[dependencies]
+mango-option-sys = { path = "../mango-option-sys" }

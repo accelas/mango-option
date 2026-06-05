@@ -395,6 +395,8 @@ sudo ./tools/mango-trace monitor ./my_program --preset=debug
 | Run all tests | `bazel test //...` |
 | Run single test | `bazel test //tests:pde_solver_test` |
 | Build Python bindings | `bazel build //src/python:mango_option` |
+| Build Rust binding | `bazel build //crates/mango-option:mango_option` |
+| Test Rust binding | `bazel test //crates/mango-option:integration_test` |
 | Trace execution | `sudo ./tools/mango-trace monitor ./program` |
 | Create PR | `gh pr create --title "..." --body "..."` |
 

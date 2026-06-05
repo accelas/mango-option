@@ -6,6 +6,12 @@ build --color=yes
 test --color=yes
 test --test_output=errors
 
+# Expose /usr/bin:/bin to all sandboxed actions so gcc/collect2 can locate `ld`.
+# Required for rules_rust: the Rust bootstrap script runs with exec env - (empty
+# environment) and collect2 needs PATH to find the system linker.
+build --action_env=PATH=/usr/bin:/bin
+build --host_action_env=PATH=/usr/bin:/bin
+
 # Treat warnings as errors (project code only, not external deps)
 build --per_file_copt=^//src/,^//tests/,^//benchmarks/@-Werror
 build --host_copt=-Wno-error
