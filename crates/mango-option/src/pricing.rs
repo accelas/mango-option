@@ -51,11 +51,33 @@ impl Drop for PriceResult {
 }
 
 pub fn price_american(params: &PricingParams) -> Result<PriceResult, Error> {
+    let (c, _keep) = pricing_params_to_c(params)?;
+    let mut handle: *mut sys::MangoAmericanResult = core::ptr::null_mut();
+    let mut err = blank_error();
+    let status = unsafe { sys::mango_price_american(&c, &mut handle, &mut err) };
+    // keepalive must outlive the FFI call above.
+    let _ = &_keep;
+    if status == sys::MANGO_OK {
+        Ok(PriceResult { handle })
+    } else {
+        Err(Error::from_c(status, &err))
+    }
+}
+
+// Backing arrays that must outlive an FFI call referencing the pointers in the
+// returned `MangoPricingParams` (mirrors `IvQueryKeepalive` in interp.rs).
+pub(crate) struct PricingKeepalive {
+    _tenors: Vec<sys::MangoTenorPoint>,
+    _divs: Vec<sys::MangoDividend>,
+}
+
+pub(crate) fn pricing_params_to_c(
+    params: &PricingParams,
+) -> Result<(sys::MangoPricingParams, PricingKeepalive), Error> {
     if matches!(&params.spec.rate, Rate::Curve(v) if v.is_empty()) {
         return Err(Error { kind: ErrorKind::Validation,
                            message: "yield curve has no tenor points".to_string() });
     }
-    // Keep arrays alive for the duration of the call.
     let tenors = tenor_array(&params.spec.rate);
     let divs = dividend_array(&params.spec.discrete_dividends);
     let rate_const = match params.spec.rate {
@@ -75,14 +97,7 @@ pub fn price_american(params: &PricingParams) -> Result<PriceResult, Error> {
         n_dividends: divs.len() as u64,
         option_type: params.spec.option_type.to_c(),
     };
-    let mut handle: *mut sys::MangoAmericanResult = core::ptr::null_mut();
-    let mut err = blank_error();
-    let status = unsafe { sys::mango_price_american(&c, &mut handle, &mut err) };
-    if status == sys::MANGO_OK {
-        Ok(PriceResult { handle })
-    } else {
-        Err(Error::from_c(status, &err))
-    }
+    Ok((c, PricingKeepalive { _tenors: tenors, _divs: divs }))
 }
 
 // --- shared marshalling helpers (also used by iv.rs) ---

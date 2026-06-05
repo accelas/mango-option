@@ -127,3 +127,44 @@ fn solver_is_send_sync() {
     }).collect();
     for h in handles { assert!(h.join().unwrap().is_ok()); }
 }
+
+use mango_option::{PriceTable, PricingParams};
+
+#[test]
+fn price_table_queries() {
+    let table = PriceTable::new(&base_config()).expect("build table");
+    let spec = OptionSpec {
+        spot: 100.0, strike: 100.0, maturity: 1.0, dividend_yield: 0.0,
+        rate: Rate::Const(0.03), discrete_dividends: vec![], option_type: OptionType::Put,
+    };
+    let pp = PricingParams { spec: spec.clone(), volatility: 0.25 };
+    let price = table.price(&pp);
+    assert!(price.is_finite() && price > 0.0);
+    assert!(table.vega(&pp).is_finite());
+    let delta = table.delta(&pp).expect("delta");
+    assert!(delta < 0.0, "put delta should be negative: {}", delta);
+    assert!(table.gamma(&pp).is_ok());
+    assert!(table.theta(&pp).is_ok());
+    assert!(table.rho(&pp).is_ok());
+    assert_eq!(table.option_type(), OptionType::Put);
+
+    // Reference FDM price for sanity (interpolation tolerance is loose).
+    let fdm = price_american(&pp).unwrap().value();
+    assert!((price - fdm).abs() < 0.5, "interp {} vs fdm {}", price, fdm);
+
+    // Opt-in validation.
+    assert!(table.validate(&pp).is_ok());
+    let oob = PricingParams { spec, volatility: 5.0 }; // far outside vol grid
+    assert!(table.validate(&oob).is_err());
+}
+
+#[test]
+fn price_table_derives_iv_solver() {
+    let table = PriceTable::new(&base_config()).unwrap();
+    let solver = table.iv_solver(None).expect("derive solver");
+    let (spec, sigma) = put_spec(0.25);
+    let pp = PricingParams { spec: spec.clone(), volatility: sigma };
+    let price = price_american(&pp).unwrap().value();
+    let r = solver.solve(&IvQuery { spec, market_price: price }).expect("solve");
+    assert!((r.implied_vol - sigma).abs() < 1e-2);
+}

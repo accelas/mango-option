@@ -9,6 +9,7 @@ rust_library(
         "src/iv.rs",
         "src/lib.rs",
         "src/pricing.rs",
+        "src/table.rs",
         "src/types.rs",
     ],
     edition = "2021",
