@@ -8,8 +8,8 @@ Mango Option is a pricing and implied-volatility library whose public surface sp
 Every supported C++ capability is reachable from Python through an idiomatic Python surface, even when the Python shape does not mirror C++ templates or helper types one-to-one.
 _Avoid_: Binding parity, wrapper parity, pybind coverage
 
-**Rust binding (core)**:
-A safe Rust surface (the `mango-option` crate over `mango-option-sys` and an `extern "C"` shim) exposing American option pricing with Greeks and FDM implied volatility, with full constant-rate/yield-curve and continuous/discrete-dividend fidelity. Unlike the Python API, it is a deliberately focused subset rather than full parity: price tables, interpolated IV, and batch solving are out of scope.
+**Rust binding**:
+A safe Rust surface (the `mango-option` crate over `mango-option-sys` and an `extern "C"` shim) exposing both the FDM path (American option pricing with Greeks, FDM implied volatility) and the interpolation path (a reusable B-spline price table and the fast interpolated IV solver, with adaptive-grid and discrete-dividend config and batch solving), all with full constant-rate/yield-curve and continuous/discrete-dividend fidelity. Unlike the Python API, it is a deliberately focused subset rather than full parity: only the B-spline backend is bound (Chebyshev/Dimensionless are out of scope), and lower-level surface construction and serialization are not exposed.
 _Avoid_: Rust parity, full Rust API, GPU rewrite
 
 **C++ capability**:

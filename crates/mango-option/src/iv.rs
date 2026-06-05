@@ -21,6 +21,7 @@ pub struct IvSuccess {
     pub iterations: usize,
     pub final_error: f64,
     pub vega: Option<f64>,
+    pub used_rate_approximation: bool,
 }
 
 pub fn solve_iv(query: &IvQuery, config: &IvConfig) -> Result<IvSuccess, Error> {
@@ -57,6 +58,7 @@ pub fn solve_iv(query: &IvQuery, config: &IvConfig) -> Result<IvSuccess, Error> 
         final_error: 0.0,
         vega: 0.0,
         has_vega: 0,
+        used_rate_approximation: 0,
     };
     let mut err = blank_error();
     let status = unsafe { sys::mango_solve_iv(&c, &cfg, &mut out, &mut err) };
@@ -66,6 +68,7 @@ pub fn solve_iv(query: &IvQuery, config: &IvConfig) -> Result<IvSuccess, Error> 
             iterations: out.iterations as usize,
             final_error: out.final_error,
             vega: if out.has_vega != 0 { Some(out.vega) } else { None },
+            used_rate_approximation: out.used_rate_approximation != 0,
         })
     } else {
         Err(Error::from_c(status, &err))

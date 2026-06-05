@@ -76,8 +76,10 @@ cc_library(
     ],
     deps = [
         "//src/option:american_option",
+        "//src/option:interpolated_iv_solver",
         "//src/option:iv_solver",
         "//src/option:option_spec",
+        "//src/option:price_table_factory",
         "//src/option:yield_curve",
     ],
     visibility = ["//visibility:public"],
