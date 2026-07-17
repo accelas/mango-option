@@ -926,6 +926,7 @@ private:
         if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
             // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
             jac.diag()[n_ - 1] = 1.0;
+            jac.lower()[n_ - 2] = 0.0;
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             size_t i = n_ - 1;
@@ -934,6 +935,11 @@ private:
             double dLi_dui = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
             jac.diag()[i] = 1.0 - coeff_dt * dLi_dui;
             workspace_.u_stage()[i] = u[i];
+            // apply_spatial_operator zeroes Lu at the boundaries, so the
+            // FD coupling dLi/du[i-1] evaluates to exactly 0. Write it
+            // explicitly: lower[n-2] is not covered by the interior
+            // assembly loop and must never be left uninitialized.
+            jac.lower()[n_ - 2] = 0.0;
         }
     }
 

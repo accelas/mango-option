@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <memory>
+#include <thread>
 #include <vector>
 
 namespace mango {
@@ -328,6 +329,55 @@ TEST(AmericanOptionTest, SolveAutoFromPrimaryHeader) {
     auto result = solve_american_option(params);
     ASSERT_TRUE(result.has_value());
     EXPECT_NEAR(result->value_at(100.0), 6.35, 0.5);
+}
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: Solver results must not depend on prior solves on the same
+// thread (issue #433).
+// Bug: build_jacobian_boundaries never wrote jacobian.lower()[n-2] for a
+// right Dirichlet BC, so the Thomas solve consumed stale bytes left in the
+// reused thread-local workspace arena by a previous solve with a different
+// grid size. A fresh thread's arena is zero-initialized (masking the bug),
+// so the same solve gave different prices depending on thread history.
+TEST(AmericanOptionTest, PriceIndependentOfThreadWorkspaceHistory) {
+    // A CALL on a narrow grid makes the bug visible: the right Dirichlet
+    // value g = e^x - e^{-r tau} is O(1) there (for a put it is ~0, so the
+    // stale sub-diagonal multiplies near-zero values and the error hides),
+    // and psi(x_max) = e^0.6 - 1 < 0.95 keeps deep-ITM locking from
+    // rewriting the rows adjacent to the boundary.
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.0,
+                   .option_type = OptionType::CALL},
+        0.20);
+
+    auto solve_price = [&params](size_t n_space) {
+        PDEGridConfig grid{GridSpec<double>::uniform(-0.6, 0.6, n_space).value(), 200};
+        auto solver = AmericanOptionSolver::create(params, PDEGridSpec{grid});
+        EXPECT_TRUE(solver.has_value());
+        auto result = solver->solve();
+        EXPECT_TRUE(result.has_value());
+        return result->value_at(params.spot);
+    };
+
+    // Reference price from a fresh thread: zero-initialized TLS arena.
+    double clean_price = 0.0;
+    std::thread([&] { clean_price = solve_price(201); }).join();
+
+    // Same solve on another fresh thread, after a different-sized solve
+    // dirtied that thread's arena.
+    double dirty_price = 0.0;
+    std::thread([&] {
+        (void)solve_price(301);
+        dirty_price = solve_price(201);
+    }).join();
+
+    EXPECT_EQ(clean_price, dirty_price)
+        << "identical solve returned a different price depending on "
+           "thread-local workspace history (stale jacobian.lower()[n-2])";
 }
 
 }  // namespace
