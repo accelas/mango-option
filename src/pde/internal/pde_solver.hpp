@@ -637,28 +637,44 @@ private:
 
         const double psi_max = *std::max_element(psi.begin(), psi.end());
         if (psi_max > 0.0) {
-            // L(ψ): newton_u_old is free here — it is only used by the
-            // Newton path (solve_implicit_stage), never by this projected
-            // path. Boundary entries of L(ψ) are zeroed by
-            // apply_spatial_operator; the loop below is interior-only.
-            auto lpsi = workspace_.newton_u_old();
-            apply_spatial_operator(t, psi, lpsi);
-
             const double deep_itm_threshold = deep_itm_fraction * psi_max;
-            for (size_t i = 1; i < n_ - 1; ++i) {
-                bool deep_itm = (psi[i] > deep_itm_threshold);
-                bool at_obstacle = (u[i] - psi[i] < exercise_tolerance);
-                bool payoff_subsolution = (lpsi[i] < 0.0);
 
-                if (deep_itm && at_obstacle && payoff_subsolution) {
-                    // Convert row i to Dirichlet constraint: u[i] = ψ[i]
-                    // Jacobian row: [0, 1, 0] (identity row)
-                    // RHS: ψ[i] (intrinsic value)
-                    auto jac = workspace_.jacobian();
-                    jac.lower()[i-1] = 0.0;   // Zero lower diagonal
-                    jac.diag()[i] = 1.0;      // Set diagonal to 1
-                    jac.upper()[i] = 0.0;     // Zero upper diagonal
-                    rhs_with_bc[i] = psi[i];  // RHS = intrinsic value
+            // Cheap pre-scan: find the first node satisfying conditions 1+2.
+            // Only if one exists do we pay for the L(ψ) operator sweep
+            // (condition 3). ATM-centered grids — the common case in price
+            // table builds — have no deep candidates, so they skip it.
+            size_t first_candidate = n_ - 1;
+            for (size_t i = 1; i < n_ - 1; ++i) {
+                if (psi[i] > deep_itm_threshold &&
+                    u[i] - psi[i] < exercise_tolerance) {
+                    first_candidate = i;
+                    break;
+                }
+            }
+
+            if (first_candidate < n_ - 1) {
+                // L(ψ): newton_u_old is free here — it is only used by the
+                // Newton path (solve_implicit_stage), never by this projected
+                // path. Boundary entries of L(ψ) are zeroed by
+                // apply_spatial_operator; the loop below is interior-only.
+                auto lpsi = workspace_.newton_u_old();
+                apply_spatial_operator(t, psi, lpsi);
+
+                for (size_t i = first_candidate; i < n_ - 1; ++i) {
+                    bool deep_itm = (psi[i] > deep_itm_threshold);
+                    bool at_obstacle = (u[i] - psi[i] < exercise_tolerance);
+                    bool payoff_subsolution = (lpsi[i] < 0.0);
+
+                    if (deep_itm && at_obstacle && payoff_subsolution) {
+                        // Convert row i to Dirichlet constraint: u[i] = ψ[i]
+                        // Jacobian row: [0, 1, 0] (identity row)
+                        // RHS: ψ[i] (intrinsic value)
+                        auto jac = workspace_.jacobian();
+                        jac.lower()[i-1] = 0.0;   // Zero lower diagonal
+                        jac.diag()[i] = 1.0;      // Set diagonal to 1
+                        jac.upper()[i] = 0.0;     // Zero upper diagonal
+                        rhs_with_bc[i] = psi[i];  // RHS = intrinsic value
+                    }
                 }
             }
         }
