@@ -610,44 +610,56 @@ private:
         // This ELIMINATES the tridiagonal coupling for those nodes, preventing diffusion
         // from affecting them. The equation becomes simply: u[i] = ψ[i].
         //
-        // **Threshold Selection:**
-        // - Lock only if ψ > 0.95 (95% of strike in normalized units)
-        // - For American puts: ψ = max(1 - exp(x), 0), so:
-        //     ψ > 0.95  ⟺  1 - exp(x) > 0.95  ⟺  exp(x) < 0.05  ⟺  x < -3.0
-        // - This is ~3 log-moneyness units deep ITM, well separated from ATM (x=0)
-        // - ATM/near-ATM nodes (where time value exists) remain free to solve via LCP
-        //
-        // **Why 0.95 and not 0.99 or 1.0?**
-        // - 0.99 would only lock the extreme boundary (x → -∞)
-        // - 0.95 captures the entire region where exercise is definitively optimal
-        // - Empirically verified: S=0.25, K=100 has ψ ≈ 0.9975 at spot, needs locking
+        // **Lock criterion** (all three must hold):
+        // 1. Deep in payoff, relative to the obstacle's own scale:
+        //      ψ[i] > 0.95·max(ψ). The payoff scale differs by option type —
+        //    puts are bounded (ψ ≤ 1, so 0.95·ψ_max ≈ x < -3) while calls are
+        //    unbounded (ψ = eˣ - 1). An absolute threshold of 0.95 locked
+        //    calls from S > 1.95K, clamping continuation-valued nodes to
+        //    intrinsic and pricing below intrinsic (issue #432).
+        // 2. On obstacle: u[i] - ψ[i] < 1e-8 (solution already at intrinsic).
+        //    Prevents locking nodes that legitimately carry time value.
+        // 3. Exercise is actually optimal there: L(ψ)[i] < 0, i.e. the payoff
+        //    is a strict subsolution — holding it loses value, so the LCP
+        //    solution is u = ψ. For Black-Scholes this is qS < rK (puts) /
+        //    qS > rK (calls). Without this check the lock ratchets: u = ψ
+        //    makes condition 2 true forever, even where the true solution
+        //    lifts off the obstacle (e.g. r=0 puts, no-dividend calls).
+        // Conditions 1+3 are re-evaluated every stage, so a lock releases as
+        // soon as it stops being justified.
         //
         // **Implementation:** Convert Jacobian row to identity:
         //   Before: [a_lower[i], a_diag[i], a_upper[i]] · [u[i-1], u[i], u[i+1]]ᵀ = rhs[i]
         //   After:  [0, 1, 0] · [u[i-1], u[i], u[i+1]]ᵀ = ψ[i]
         //   Result: u[i] = ψ[i] (Dirichlet constraint)
-        constexpr double deep_itm_threshold = 0.95;  // Lock if ψ > 95% of strike
+        constexpr double deep_itm_fraction = 0.95;   // Lock if ψ > 95% of max(ψ)
         constexpr double exercise_tolerance = 1e-8;  // Tolerance for "on obstacle"
 
-        for (size_t i = 1; i < n_ - 1; ++i) {
-            // Check both conditions:
-            // 1. Deep ITM: ψ[i] > 0.95 (far from ATM where time value matters)
-            // 2. On obstacle: u[i] - ψ[i] < 1e-8 (solution already at intrinsic)
-            //
-            // The second condition prevents locking nodes that legitimately have
-            // time value > 0 (e.g., at earlier times before convergence to payoff).
-            bool deep_itm = (psi[i] > deep_itm_threshold);
-            bool at_obstacle = (u[i] - psi[i] < exercise_tolerance);
+        const double psi_max = *std::max_element(psi.begin(), psi.end());
+        if (psi_max > 0.0) {
+            // L(ψ): newton_u_old is free here — it is only used by the
+            // Newton path (solve_implicit_stage), never by this projected
+            // path. Boundary entries of L(ψ) are zeroed by
+            // apply_spatial_operator; the loop below is interior-only.
+            auto lpsi = workspace_.newton_u_old();
+            apply_spatial_operator(t, psi, lpsi);
 
-            if (deep_itm && at_obstacle) {
-                // Convert row i to Dirichlet constraint: u[i] = ψ[i]
-                // Jacobian row: [0, 1, 0] (identity row)
-                // RHS: ψ[i] (intrinsic value)
-                auto jac = workspace_.jacobian();
-                if (i > 0) jac.lower()[i-1] = 0.0;  // Zero lower diagonal
-                jac.diag()[i] = 1.0;                 // Set diagonal to 1
-                if (i < n_ - 1) jac.upper()[i] = 0.0; // Zero upper diagonal
-                rhs_with_bc[i] = psi[i];                 // RHS = intrinsic value
+            const double deep_itm_threshold = deep_itm_fraction * psi_max;
+            for (size_t i = 1; i < n_ - 1; ++i) {
+                bool deep_itm = (psi[i] > deep_itm_threshold);
+                bool at_obstacle = (u[i] - psi[i] < exercise_tolerance);
+                bool payoff_subsolution = (lpsi[i] < 0.0);
+
+                if (deep_itm && at_obstacle && payoff_subsolution) {
+                    // Convert row i to Dirichlet constraint: u[i] = ψ[i]
+                    // Jacobian row: [0, 1, 0] (identity row)
+                    // RHS: ψ[i] (intrinsic value)
+                    auto jac = workspace_.jacobian();
+                    jac.lower()[i-1] = 0.0;   // Zero lower diagonal
+                    jac.diag()[i] = 1.0;      // Set diagonal to 1
+                    jac.upper()[i] = 0.0;     // Zero upper diagonal
+                    rhs_with_bc[i] = psi[i];  // RHS = intrinsic value
+                }
             }
         }
 

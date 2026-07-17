@@ -252,9 +252,11 @@ For M-matrices, the off-diagonal elements are non-positive, so increasing $u_{i+
 
 One practical detail: for nodes deep in-the-money where $\psi$ is close to the maximum intrinsic value, numerical diffusion can erroneously lift the solution above intrinsic. We prevent this by converting deep ITM nodes to Dirichlet constraints:
 
-$$\text{if } \psi_i > 0.95 \cdot \psi_\max \text{ and } u_i \approx \psi_i\text{: lock } u_i = \psi_i$$
+$$\text{if } \psi_i > 0.95 \cdot \psi_\max \text{ and } u_i \approx \psi_i \text{ and } L(\psi)_i < 0 \text{: lock } u_i = \psi_i$$
 
-This ensures, for example, that a deep ITM put with intrinsic value 99.75 prices at 99.75 rather than being lifted to 115.97 by diffusion.
+The third condition checks that the payoff is a strict subsolution at the node — holding it loses value, so exercise is genuinely optimal and the LCP solution is $u = \psi$ there. For Black-Scholes this reduces to $qS < rK$ for puts and $qS > rK$ for calls. Without it, the lock would clamp nodes whose true solution lifts off the obstacle (a zero-rate deep-ITM put, or a no-dividend call, both of which must price at the European value). All three conditions are re-evaluated every stage, so a lock releases as soon as it stops being justified.
+
+This ensures, for example, that a deep ITM put with intrinsic value 99.75 prices at 99.75 rather than being lifted to 115.97 by diffusion, while a no-dividend American call at $S = 2K$ retains its full continuation value.
 
 ### The Early Exercise Boundary
 

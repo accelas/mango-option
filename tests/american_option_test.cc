@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/european_option.hpp"
 
 #include <gtest/gtest.h>
 #include <cmath>
@@ -378,6 +379,55 @@ TEST(AmericanOptionTest, PriceIndependentOfThreadWorkspaceHistory) {
     EXPECT_EQ(clean_price, dirty_price)
         << "identical solve returned a different price depending on "
            "thread-local workspace history (stale jacobian.lower()[n-2])";
+}
+
+// Regression: no-dividend American call must equal the European price and
+// never fall below intrinsic (issue #432).
+// Bug: the deep-ITM lock used an absolute threshold psi > 0.95, derived for
+// the bounded put payoff (psi <= 1  =>  x < -3). The call payoff e^x - 1 is
+// unbounded and crosses 0.95 at S > 1.95K, so moderately ITM calls had
+// continuation-valued nodes permanently ratcheted to intrinsic — the price
+// came out below intrinsic (arbitrage violation).
+TEST(AmericanOptionTest, NoDividendCallEqualsEuropean) {
+    for (double spot : {150.0, 200.0, 300.0}) {
+        PricingParams params(
+            OptionSpec{.spot = spot, .strike = 100.0, .maturity = 1.0,
+                       .rate = 0.05, .dividend_yield = 0.0,
+                       .option_type = OptionType::CALL},
+            0.20);
+
+        auto result = solve_american_option(params);
+        ASSERT_TRUE(result.has_value()) << "spot=" << spot;
+
+        const double american = result->value_at(spot);
+        const double european = EuropeanOptionResult(params).value();
+        const double intrinsic = spot - params.strike;
+
+        EXPECT_GE(american, intrinsic - 1e-6) << "spot=" << spot;
+        EXPECT_NEAR(american, european, 0.05) << "spot=" << spot;
+    }
+}
+
+// Regression: with r=0 early exercise of a put is never optimal, so the
+// American put equals the European put — even deep ITM (issue #432).
+// Bug: the deep-ITM lock clamped every node with psi > 0.95 to intrinsic
+// regardless of whether holding the payoff loses value (L(psi) <= 0), so a
+// zero-rate deep-ITM put lost its continuation value.
+TEST(AmericanOptionTest, ZeroRateDeepITMPutEqualsEuropean) {
+    PricingParams params(
+        OptionSpec{.spot = 4.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.0, .dividend_yield = 0.04,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    auto result = solve_american_option(params);
+    ASSERT_TRUE(result.has_value());
+
+    const double american = result->value_at(params.spot);
+    const double european = EuropeanOptionResult(params).value();
+
+    EXPECT_GE(american, european - 0.05);
+    EXPECT_NEAR(american, european, 0.05);
 }
 
 }  // namespace
