@@ -179,8 +179,14 @@ separate end-to-end checks but are not sufficient evidence for this defect.
 ### Regression verification
 
 Run the focused EEP and price-table test targets, followed by the repository's
-interpolation-IV safety benchmark. The benchmark must remain within its
-established accuracy thresholds.
+interpolation-IV safety benchmark.
+
+The benchmark is a diagnostic: it reports error tables and always exits
+successfully, so its exit status is not an acceptance gate. Capture comparable
+before-and-after output and inspect the overall and TV/K-filtered RMS metrics
+for every affected backend path. Any deterioration beyond the benchmark's
+reported `0.1` basis-point precision must be investigated and either corrected
+or explicitly explained before the change is accepted.
 
 ## Acceptance Criteria
 
@@ -192,8 +198,8 @@ established accuracy thresholds.
 - A regression test demonstrably detects the former approximately `$0.00693`
   positive-EEP bias.
 - Existing focused EEP and price-table tests pass.
-- The interpolation-IV safety benchmark remains within its established
-  thresholds.
+- Before-and-after interpolation-IV safety output is recorded, with no
+  unexplained deterioration beyond its reported `0.1` basis-point precision.
 - No serialization or public API changes are introduced.
 
 ## Alternatives Considered
