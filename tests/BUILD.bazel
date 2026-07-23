@@ -1239,6 +1239,17 @@ cc_test(
 )
 
 cc_test(
+    name = "eep_decomposer_test",
+    size = "small",
+    srcs = ["eep_decomposer_test.cc"],
+    deps = [
+        "//src/option/table:eep_decomposer",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "eep_integration_test",
     size = "medium",
     srcs = ["eep_integration_test.cc"],
