@@ -88,9 +88,14 @@ public:
     ///        unverified. Pass an explicit schedule to opt into validation
     ///        — including an empty vector to assert "built with no
     ///        discrete dividends", which then rejects any non-empty query
-    ///        schedule with DiscreteDividendMismatch. The factory paths
-    ///        (make_interpolated_iv_solver, AnyPriceTable::make_iv_solver)
-    ///        pass provenance explicitly and are unaffected by this default.
+    ///        schedule with DiscreteDividendMismatch. A supplied schedule
+    ///        is canonicalized with the builder rules (sorted, same-date
+    ///        entries merged, entries at/after the surface's tau_max or
+    ///        with non-positive time/amount dropped) before storage, so
+    ///        callers need not pre-sort or pre-merge it themselves. The
+    ///        factory paths (make_interpolated_iv_solver,
+    ///        AnyPriceTable::make_iv_solver) pass provenance explicitly
+    ///        and are unaffected by this default.
     /// @return IV solver or ValidationError
     static std::expected<InterpolatedIVSolver, ValidationError> create(
         Surface surface,
@@ -370,6 +375,17 @@ InterpolatedIVSolver<Surface>::create(
 
     auto option_type = surface.option_type();
     auto dividend_yield = surface.dividend_yield();
+
+    // Canonicalize an explicitly supplied schedule before storing it.
+    // This is the single authoritative choke point: every construction
+    // path (direct create() calls and both factory paths) funnels
+    // through here, so validate_query can always assume build_dividends_
+    // is sorted and same-date-merged. The factory-side canonicalization
+    // in price_table_factory.cpp is now redundant defense-in-depth
+    // (filter_and_merge_dividends is idempotent) and is left as-is.
+    if (build_dividends.has_value()) {
+        build_dividends = filter_and_merge_dividends(*build_dividends, tau_range.second);
+    }
 
     return InterpolatedIVSolver(
         std::move(surface),
