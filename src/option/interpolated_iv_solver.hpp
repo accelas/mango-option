@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "mango/option/dividend_utils.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/iv_result.hpp"
 #include "mango/option/table/price_table.hpp"
@@ -34,10 +35,10 @@
 #include <expected>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <optional>
-#include <tuple>
 
 namespace mango {
 
@@ -410,13 +411,21 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
     // schedule is always valid: for segmented surfaces the build-time
     // schedule is authoritative. A non-empty schedule must match the
     // build schedule restricted to the query's life, when it is known.
+    //
+    // Both sides are canonicalized with the same rules the table builders
+    // apply via filter_and_merge_dividends: same-date entries are merged,
+    // and non-positive-time/non-positive-amount entries are dropped. On the
+    // build side, entries at or after the surface maturity are also dropped
+    // (that's what the builders actually priced), which is why
+    // build_dividends_ is stored pre-canonicalized. The query side is
+    // deliberately NOT window-filtered against query.maturity here: a query
+    // claiming a dividend beyond its own maturity window must still surface
+    // as an extra entry and be rejected (see PrefixWindowSemantics test).
     if (!query.discrete_dividends.empty() && build_dividends_.has_value()) {
         constexpr double kTimeTol = 1e-6;    // years (~30 seconds)
         constexpr double kAmountTol = 1e-6;  // dollars
-        auto by_time = [](const Dividend& a, const Dividend& b) {
-            return std::tie(a.calendar_time, a.amount) <
-                   std::tie(b.calendar_time, b.amount);
-        };
+        // build_dividends_ is already canonicalized (sorted, merged) by the
+        // factory, so only the window filter is needed here.
         std::vector<Dividend> expected;
         expected.reserve(build_dividends_->size());
         for (const auto& d : *build_dividends_) {
@@ -424,9 +433,8 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
                 expected.push_back(d);
             }
         }
-        std::sort(expected.begin(), expected.end(), by_time);
-        std::vector<Dividend> actual = query.discrete_dividends;
-        std::sort(actual.begin(), actual.end(), by_time);
+        std::vector<Dividend> actual = filter_and_merge_dividends(
+            query.discrete_dividends, std::numeric_limits<double>::infinity());
         if (expected.size() != actual.size()) {
             return ValidationError{
                 ValidationErrorCode::DiscreteDividendMismatch,

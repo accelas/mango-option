@@ -280,6 +280,37 @@ TEST_F(DiscreteDividendIVIntegrationTest, MatchingQueryScheduleAccepted) {
     EXPECT_NEAR(iv_result->implied_vol, 0.20, 0.02);
 }
 
+// Regression: same-date query dividends must be coalesced before comparison
+// (PR #449 pre-merge review, P2) — a query splitting one build-time
+// dividend into two same-date entries that sum to the build amount must
+// still validate, since the builders would price them identically.
+TEST_F(DiscreteDividendIVIntegrationTest, SameDateQuerySplitAccepted) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8,
+            .rate = 0.05, .option_type = OptionType::PUT},
+        0.20, {{.calendar_time = 0.5, .amount = 2.0}});
+    auto price_result = solve_american_option(params);
+    ASSERT_TRUE(price_result.has_value());
+
+    IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 0.8;
+    query.rate = RateSpec{0.05};
+    query.option_type = OptionType::PUT;
+    query.market_price = price_result->value();
+    // Split into two same-date entries that sum to the build amount.
+    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 1.0},
+                                 {.calendar_time = 0.5, .amount = 1.0}};
+
+    auto iv_result = solver_->solve(query);
+    ASSERT_TRUE(iv_result.has_value())
+        << "same-date split summing to the build amount must be accepted; "
+           "error code: "
+        << (iv_result.has_value() ? 0 : static_cast<int>(iv_result.error().code));
+    EXPECT_NEAR(iv_result->implied_vol, 0.20, 0.02);
+}
+
 // Regression: mismatched dividend amount must be rejected loudly (#440 item 1)
 TEST_F(DiscreteDividendIVIntegrationTest, MismatchedAmountRejected) {
     IVQuery query;

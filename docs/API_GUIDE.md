@@ -586,7 +586,12 @@ schedule to match — this guarantee holds for solvers built via
 defaults to "unknown provenance" and skips this check. One exception:
 segmented tables loaded from Parquet have no persisted build schedule, so
 their non-empty query schedules are accepted unverified — the caller is
-responsible for consistency in that case.
+responsible for consistency in that case. Both the build-time and
+query-time schedules are canonicalized with the same rules the table
+builders use (`filter_and_merge_dividends`): same-date entries are merged,
+and non-positive-time/non-positive-amount entries are ignored — and, on the
+build side only, entries at or after the surface maturity are dropped,
+since that's what the builders actually priced — before the comparison.
 
 ### Standard (Continuous Dividend) with Manual Grid
 

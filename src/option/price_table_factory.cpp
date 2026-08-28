@@ -5,6 +5,7 @@
 #include "mango/math/bspline/bspline_basis.hpp"
 #include "mango/math/bspline/bspline_nd_separable.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
+#include "mango/option/dividend_utils.hpp"
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
@@ -343,7 +344,10 @@ build_bspline_table(const IVSolverFactoryConfig& config,
             return std::unexpected(table.error());
         }
         return make_any_price_table(
-            std::move(*table), config.discrete_dividends->discrete_dividends);
+            std::move(*table),
+            filter_and_merge_dividends(
+                config.discrete_dividends->discrete_dividends,
+                config.discrete_dividends->maturity));
     }
 
     auto table = build_bspline_continuous_table(config, backend);
@@ -422,7 +426,10 @@ build_chebyshev_table(const IVSolverFactoryConfig& config,
             return std::unexpected(table.error());
         }
         return make_any_price_table(
-            std::move(*table), config.discrete_dividends->discrete_dividends);
+            std::move(*table),
+            filter_and_merge_dividends(
+                config.discrete_dividends->discrete_dividends,
+                config.discrete_dividends->maturity));
     }
 
     auto table = build_chebyshev_continuous_table(config, backend);
@@ -912,7 +919,9 @@ make_interpolated_iv_solver(const IVSolverFactoryConfig& config) {
     }
     std::vector<Dividend> build_dividends;
     if (config.discrete_dividends.has_value()) {
-        build_dividends = config.discrete_dividends->discrete_dividends;
+        build_dividends = filter_and_merge_dividends(
+            config.discrete_dividends->discrete_dividends,
+            config.discrete_dividends->maturity);
     }
     return table->make_iv_solver(config.solver_config,
                                  std::move(build_dividends));
