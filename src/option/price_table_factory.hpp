@@ -38,9 +38,12 @@ public:
     [[nodiscard]] std::expected<double, GreekError> rho(const PricingParams& params) const;
 
     /// @param build_dividends Discrete schedule for validate_query.
-    ///        nullopt = infer from table type: segmented (MultiKRef)
+    ///        nullopt = use the table's stored build-time schedule when
+    ///        known (set by make_price_table for freshly built tables),
+    ///        otherwise infer from table type: segmented (MultiKRef)
     ///        tables get "unknown" (checks skipped — schedules are not
-    ///        persisted to Parquet), all others get known-empty.
+    ///        persisted to Parquet, so tables loaded via load_price_table
+    ///        lack this provenance), all others get known-empty.
     [[nodiscard]] std::expected<AnyInterpIVSolver, ValidationError>
     make_iv_solver(const InterpolatedIVSolverConfig& config = {},
                    std::optional<std::vector<Dividend>> build_dividends =

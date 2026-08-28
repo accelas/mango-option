@@ -45,18 +45,25 @@ using PriceTableVariant = std::variant<
 
 struct AnyPriceTable::Impl {
     PriceTableVariant table;
+    // Discrete dividend schedule the table was built with, when known.
+    // nullopt = unknown provenance (e.g. deserialized from Parquet, which
+    // does not persist the schedule); known (possibly empty) otherwise.
+    std::optional<std::vector<Dividend>> build_dividends;
 
     template <typename T>
-    explicit Impl(T t)
-        : table(std::make_shared<const T>(std::move(t))) {}
+    explicit Impl(T t, std::optional<std::vector<Dividend>> divs = std::nullopt)
+        : table(std::make_shared<const T>(std::move(t))),
+          build_dividends(std::move(divs)) {}
 };
 
 namespace {
 
 template <typename Table>
-AnyPriceTable make_any_price_table(Table table) {
-    return AnyPriceTable(
-        std::make_unique<AnyPriceTable::Impl>(std::move(table)));
+AnyPriceTable make_any_price_table(
+    Table table,
+    std::optional<std::vector<Dividend>> build_dividends = std::nullopt) {
+    return AnyPriceTable(std::make_unique<AnyPriceTable::Impl>(
+        std::move(table), std::move(build_dividends)));
 }
 
 template <typename Table>
@@ -335,14 +342,15 @@ build_bspline_table(const IVSolverFactoryConfig& config,
         if (!table.has_value()) {
             return std::unexpected(table.error());
         }
-        return make_any_price_table(std::move(*table));
+        return make_any_price_table(
+            std::move(*table), config.discrete_dividends->discrete_dividends);
     }
 
     auto table = build_bspline_continuous_table(config, backend);
     if (!table.has_value()) {
         return std::unexpected(table.error());
     }
-    return make_any_price_table(std::move(*table));
+    return make_any_price_table(std::move(*table), std::vector<Dividend>{});
 }
 
 std::expected<ChebyshevMultiKRefSurface, ValidationError>
@@ -413,14 +421,15 @@ build_chebyshev_table(const IVSolverFactoryConfig& config,
         if (!table.has_value()) {
             return std::unexpected(table.error());
         }
-        return make_any_price_table(std::move(*table));
+        return make_any_price_table(
+            std::move(*table), config.discrete_dividends->discrete_dividends);
     }
 
     auto table = build_chebyshev_continuous_table(config, backend);
     if (!table.has_value()) {
         return std::unexpected(table.error());
     }
-    return make_any_price_table(std::move(*table));
+    return make_any_price_table(std::move(*table), std::vector<Dividend>{});
 }
 
 struct DimlessDomain {
@@ -636,14 +645,14 @@ build_dimensionless_table(const IVSolverFactoryConfig& config,
         if (!table.has_value()) {
             return std::unexpected(table.error());
         }
-        return make_any_price_table(std::move(*table));
+        return make_any_price_table(std::move(*table), std::vector<Dividend>{});
     }
 
     auto table = build_dimensionless_bspline_table(config, backend);
     if (!table.has_value()) {
         return std::unexpected(table.error());
     }
-    return make_any_price_table(std::move(*table));
+    return make_any_price_table(std::move(*table), std::vector<Dividend>{});
 }
 
 ParquetCompression to_parquet_compression(PriceTableCompression compression) {
@@ -796,7 +805,15 @@ AnyPriceTable::make_iv_solver(
         using Table = std::remove_cv_t<
             typename std::decay_t<decltype(table_ptr)>::element_type>;
         using SharedSurface = detail::SharedPriceTableSurface<Table>;
+        // Precedence: explicit caller param > stored build-time schedule
+        // (set by make_price_table for freshly built tables) > type
+        // inference fallback (continuous -> known-empty, segmented ->
+        // unknown; used for Parquet-loaded segmented tables, which do not
+        // persist their schedule).
         std::optional<std::vector<Dividend>> divs = std::move(build_dividends);
+        if (!divs.has_value() && impl_->build_dividends.has_value()) {
+            divs = impl_->build_dividends;
+        }
         if (!divs.has_value() &&
             !std::is_same_v<Table, BSplineMultiKRefSurface> &&
             !std::is_same_v<Table, ChebyshevMultiKRefSurface>) {

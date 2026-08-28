@@ -63,6 +63,22 @@ IVSolverFactoryConfig bspline_4d_config() {
     return config;
 }
 
+IVSolverFactoryConfig segmented_bspline_config() {
+    IVSolverFactoryConfig config;
+    config.option_type = OptionType::PUT;
+    config.spot = 100.0;
+    config.grid.moneyness = {0.8, 0.9, 1.0, 1.1, 1.2};
+    config.grid.vol = {0.10, 0.20, 0.30, 0.40};
+    config.grid.rate = {0.02, 0.04, 0.06, 0.08};
+    config.backend = BSplineBackend{};
+    config.discrete_dividends = DiscreteDividendConfig{
+        .maturity = 1.0,
+        .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
+        .kref_config = MultiKRefConfig{.K_refs = {80.0, 100.0, 120.0}},
+    };
+    return config;
+}
+
 PricingParams off_grid_pricing_params() {
     PricingParams p;
     p.spot = 100.0;
@@ -200,6 +216,45 @@ TEST(PriceTableFactoryTest, InterpolatedIVSolverConvenienceStillWorks) {
     auto iv = solver_result->solve(query);
     ASSERT_TRUE(iv.has_value()) << "solver.solve failed";
     EXPECT_NEAR(iv->implied_vol, params.volatility, 0.08);
+}
+
+// Regression: freshly built segmented tables lost their schedule on the
+// two-step path (make_price_table + make_iv_solver), silently skipping
+// query-schedule validation (#440 item 1, pre-merge review finding)
+// Bug: make_iv_solver's type inference treated every MultiKRef table as
+//      "unknown schedule"; the stored build schedule now takes precedence.
+TEST(PriceTableFactoryTest, SegmentedTablePreservesBuildScheduleForValidation) {
+    auto table_result = make_price_table(segmented_bspline_config());
+    ASSERT_TRUE(table_result.has_value()) << "make_price_table failed";
+    auto table = std::move(*table_result);
+    EXPECT_EQ(table.surface_type(), surface_types::kBSpline4DSegmented);
+
+    auto solver = table.make_iv_solver();
+    ASSERT_TRUE(solver.has_value()) << "make_iv_solver failed";
+
+    IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 0.8;
+    query.rate = 0.06;
+    query.dividend_yield = 0.0;
+    query.option_type = OptionType::PUT;
+    query.market_price = 5.0;
+
+    // Mismatched schedule must be rejected.
+    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 3.0}};
+    auto mismatch = solver->solve(query);
+    ASSERT_FALSE(mismatch.has_value())
+        << "expected mismatched schedule to be rejected";
+    EXPECT_EQ(mismatch.error().code, IVErrorCode::DiscreteDividendMismatch);
+
+    // Matching schedule must not be rejected for a schedule mismatch (other
+    // numerical failures, if any, are not what this regression test guards).
+    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}};
+    auto matching = solver->solve(query);
+    if (!matching.has_value()) {
+        EXPECT_NE(matching.error().code, IVErrorCode::DiscreteDividendMismatch);
+    }
 }
 
 }  // namespace
