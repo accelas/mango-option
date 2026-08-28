@@ -135,7 +135,8 @@ MangoStatus map_iv_error(const mango::IVError& e) {
     // callers see ErrorKind::Solver for what are really bad-input errors.
     case mango::IVErrorCode::InvalidGridConfig:
     case mango::IVErrorCode::OptionTypeMismatch:
-    case mango::IVErrorCode::DividendYieldMismatch: return MANGO_ERR_VALIDATION;
+    case mango::IVErrorCode::DividendYieldMismatch:
+    case mango::IVErrorCode::DiscreteDividendMismatch: return MANGO_ERR_VALIDATION;
     default: return MANGO_ERR_SOLVER;
   }
 }
