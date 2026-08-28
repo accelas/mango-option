@@ -81,17 +81,20 @@ public:
     /// @param surface Pre-built price surface
     /// @param config Solver configuration
     /// @param build_dividends Discrete dividend schedule the surface was
-    ///        built with. Defaults to known-empty (correct for continuous
-    ///        surfaces — the documented direct-create path). Pass the real
-    ///        schedule for segmented surfaces, or std::nullopt for
-    ///        "unknown" (e.g. deserialized tables; schedule checks are
-    ///        then skipped).
+    ///        built with. Defaults to std::nullopt ("unknown provenance"):
+    ///        the generic template cannot know whether a given Surface is
+    ///        dividend-aware, so a non-empty query schedule is accepted
+    ///        unverified. Pass an explicit schedule to opt into validation
+    ///        — including an empty vector to assert "built with no
+    ///        discrete dividends", which then rejects any non-empty query
+    ///        schedule with DiscreteDividendMismatch. The factory paths
+    ///        (make_interpolated_iv_solver, AnyPriceTable::make_iv_solver)
+    ///        pass provenance explicitly and are unaffected by this default.
     /// @return IV solver or ValidationError
     static std::expected<InterpolatedIVSolver, ValidationError> create(
         Surface surface,
         const InterpolatedIVSolverConfig& config = {},
-        std::optional<std::vector<Dividend>> build_dividends =
-            std::vector<Dividend>{});
+        std::optional<std::vector<Dividend>> build_dividends = std::nullopt);
 
     /// Solve for implied volatility (single query)
     ///

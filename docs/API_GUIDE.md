@@ -579,9 +579,14 @@ the build-time schedule restricted to dividends within the query's maturity
 window, and a mismatch is rejected with `IVErrorCode::DiscreteDividendMismatch`.
 In particular, a non-empty query schedule against a continuous
 (dividend-free) surface is always rejected, since there is no build-time
-schedule to match. One exception: segmented tables loaded from Parquet have
-no persisted build schedule, so their non-empty query schedules are accepted
-unverified — the caller is responsible for consistency in that case.
+schedule to match — this guarantee holds for solvers built via
+`make_interpolated_iv_solver` / `AnyPriceTable::make_iv_solver`, which record
+"no build-time dividends" explicitly; a solver created directly via
+`InterpolatedIVSolver::create` without a `build_dividends` argument instead
+defaults to "unknown provenance" and skips this check. One exception:
+segmented tables loaded from Parquet have no persisted build schedule, so
+their non-empty query schedules are accepted unverified — the caller is
+responsible for consistency in that case.
 
 ### Standard (Continuous Dividend) with Manual Grid
 
