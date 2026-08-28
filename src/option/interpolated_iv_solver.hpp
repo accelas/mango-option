@@ -37,6 +37,7 @@
 #include <memory>
 #include <vector>
 #include <optional>
+#include <tuple>
 
 namespace mango {
 
@@ -410,7 +411,8 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
         constexpr double kTimeTol = 1e-6;    // years (~30 seconds)
         constexpr double kAmountTol = 1e-6;  // dollars
         auto by_time = [](const Dividend& a, const Dividend& b) {
-            return a.calendar_time < b.calendar_time;
+            return std::tie(a.calendar_time, a.amount) <
+                   std::tie(b.calendar_time, b.amount);
         };
         std::vector<Dividend> expected;
         expected.reserve(build_dividends_->size());
@@ -428,12 +430,16 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
                 static_cast<double>(actual.size()), expected.size()};
         }
         for (size_t i = 0; i < actual.size(); ++i) {
-            if (std::abs(actual[i].calendar_time -
-                         expected[i].calendar_time) > kTimeTol ||
-                std::abs(actual[i].amount - expected[i].amount) > kAmountTol) {
+            bool time_mismatch = std::abs(actual[i].calendar_time -
+                                           expected[i].calendar_time) > kTimeTol;
+            bool amount_mismatch = std::abs(actual[i].amount -
+                                             expected[i].amount) > kAmountTol;
+            if (time_mismatch || amount_mismatch) {
+                double reported = time_mismatch ? actual[i].calendar_time
+                                                 : actual[i].amount;
                 return ValidationError{
                     ValidationErrorCode::DiscreteDividendMismatch,
-                    actual[i].amount, i};
+                    reported, i};
             }
         }
     }

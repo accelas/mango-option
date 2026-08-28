@@ -571,6 +571,18 @@ The factory dispatches on two orthogonal variants:
 
 With optional `adaptive` for automatic grid density tuning to a target IV accuracy.
 
+**Query-time dividend schedule validation.** `IVQuery::discrete_dividends` is
+optional at query time: leaving it empty against a segmented surface is
+valid, since the surface's build-time schedule is authoritative and is what
+actually prices the query. If you do pass a schedule, it is checked against
+the build-time schedule restricted to dividends within the query's maturity
+window, and a mismatch is rejected with `IVErrorCode::DiscreteDividendMismatch`.
+In particular, a non-empty query schedule against a continuous
+(dividend-free) surface is always rejected, since there is no build-time
+schedule to match. One exception: segmented tables loaded from Parquet have
+no persisted build schedule, so their non-empty query schedules are accepted
+unverified — the caller is responsible for consistency in that case.
+
 ### Standard (Continuous Dividend) with Manual Grid
 
 ```cpp
