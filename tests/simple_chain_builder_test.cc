@@ -56,3 +56,22 @@ TEST(ChainBuilderTest, AddOptions) {
     EXPECT_EQ(chain.expiries[0].options[0].type, OptionType::CALL);
     EXPECT_DOUBLE_EQ(chain.expiries[0].options[0].strike.to_double(), 580.0);
 }
+
+// Regression: ChainBuilder had no way to attach a discrete dividend
+// schedule (#448) — the vector alternative of DividendSpec was
+// unreachable through the builder API.
+TEST(ChainBuilderTest, DiscreteDividendSchedule) {
+    auto chain = ChainBuilder<YFinanceSource>{}
+        .symbol("XYZ")
+        .spot(100.0)
+        .discrete_dividends({
+            {.ex_date = Timestamp{"2026-04-01"}, .amount = Price{1.50}},
+        })
+        .build();
+    ASSERT_TRUE(chain.dividends.has_value());
+    const auto* divs =
+        std::get_if<std::vector<Dividend>>(&*chain.dividends);
+    ASSERT_NE(divs, nullptr);
+    ASSERT_EQ(divs->size(), 1u);
+    EXPECT_DOUBLE_EQ((*divs)[0].amount.to_double(), 1.50);
+}

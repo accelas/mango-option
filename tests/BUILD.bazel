@@ -1038,10 +1038,16 @@ cc_test(
 
 cc_test(
     name = "simple_vol_surface_test",
+    size = "medium",
     srcs = ["simple_vol_surface_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
     deps = [
         "//src/simple:vol_surface",
         "//src/simple:chain_builder",
+        "//src/option:american_option",
+        "//src/option:interpolated_iv_solver",
+        "//src/option:price_table_factory",
         "@googletest//:gtest_main",
     ],
 )
@@ -1308,6 +1314,9 @@ cc_test(
         "//src/option:interpolated_iv_solver",
         "//src/option:price_table_factory",
         "//src/option:american_option",
+        "//src/option/table/bspline:bspline_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/bspline:bspline_tensor_accessor",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

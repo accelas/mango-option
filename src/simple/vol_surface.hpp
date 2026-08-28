@@ -87,6 +87,18 @@ enum class PriceSource {
     Last
 };
 
+/// Convert a discrete dividend schedule to solver units
+///
+/// Maps each dividend's ex_date to years from val_time and keeps only
+/// dividends payable during the option's life: 0 < t <= tau_max.
+/// Dividends whose ex_date fails to parse are dropped (compute_tau
+/// returns 0.0 for unparseable timestamps, removed by the t > 0 filter).
+/// The result is sorted by calendar time.
+[[nodiscard]] std::vector<mango::Dividend> convert_discrete_dividends(
+    const std::vector<Dividend>& dividends,
+    const Timestamp& val_time,
+    double tau_max);
+
 /// Compute volatility surface from option chain
 ///
 /// @param chain Option chain with quotes

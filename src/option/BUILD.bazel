@@ -148,6 +148,7 @@ cc_library(
     srcs = ["interpolated_iv_solver.cpp"],
     hdrs = ["interpolated_iv_solver.hpp"],
     deps = [
+        ":dividend_utils",
         ":iv_result",
         ":option_spec",
         "//src/option/table:adaptive_grid_types",
@@ -180,6 +181,7 @@ cc_library(
     hdrs = ["price_table_factory.hpp"],
     deps = [
         ":american_option",
+        ":dividend_utils",
         ":interpolated_iv_solver_core",
         ":iv_result",
         ":option_grid",

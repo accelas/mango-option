@@ -2,6 +2,9 @@
 #include <gtest/gtest.h>
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/american_option.hpp"
+#include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include <cmath>
 #include <iostream>
 #include <optional>
@@ -348,6 +351,114 @@ TEST(IVSolverFactoryComparison, AccuracyManualVsAdaptive) {
 
     EXPECT_LT(manual_max_err, 0.05);
     EXPECT_LT(adaptive_max_err, 0.05);
+}
+
+// Regression: a continuous surface must loudly reject a query carrying a
+// discrete dividend schedule (#448 / #440 item 1)
+// Bug: the schedule was silently ignored and the query priced dividend-free.
+TEST(IVSolverFactoryDividendValidation, ContinuousSurfaceRejectsDiscreteQuery) {
+    mango::IVSolverFactoryConfig config{
+        .option_type = mango::OptionType::PUT,
+        .spot = 100.0,
+        .grid = mango::IVGrid{
+            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .vol = {0.10, 0.20, 0.30, 0.40},
+            .rate = {0.02, 0.04, 0.06, 0.08},
+        },
+        .backend = mango::BSplineBackend{
+            .maturity_grid = {0.25, 0.5, 0.75, 1.0},
+        },
+    };
+    auto solver = mango::make_interpolated_iv_solver(config);
+    ASSERT_TRUE(solver.has_value());
+
+    mango::IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 0.8;
+    query.rate = mango::RateSpec{0.04};
+    query.option_type = mango::OptionType::PUT;
+    query.market_price = 6.0;
+    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 1.5}};
+
+    auto result = solver->solve(query);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::IVErrorCode::DiscreteDividendMismatch);
+
+    // Same query without the schedule still solves (sanity that the
+    // rejection is schedule-driven, not incidental).
+    query.discrete_dividends.clear();
+    auto ok = solver->solve(query);
+    EXPECT_TRUE(ok.has_value());
+}
+
+// Cheap continuous BSpline surface for exercising InterpolatedIVSolver::create()
+// directly (bypassing the factory, which already canonicalizes schedules).
+BSplinePriceTable make_direct_create_wrapper() {
+    constexpr double K_ref = 100.0;
+    std::vector<double> m_grid = {std::log(0.8), std::log(0.9), std::log(1.0), std::log(1.1), std::log(1.2)};
+    std::vector<double> tau_grid = {0.25, 0.5, 1.0, 2.0};
+    std::vector<double> vol_grid = {0.10, 0.20, 0.30, 0.40};
+    std::vector<double> rate_grid = {0.02, 0.04, 0.06, 0.08};
+
+    auto result = PriceTableBuilder::from_vectors(
+        m_grid, tau_grid, vol_grid, rate_grid, K_ref,
+        GridAccuracyParams{}, OptionType::PUT, 0.0);
+    EXPECT_TRUE(result.has_value()) << "Failed to build price table";
+    auto [builder, axes] = std::move(result.value());
+    auto table = builder.build(axes,
+        [&](PriceTensor& tensor, const PriceTableAxes& a) {
+            BSplineTensorAccessor accessor(tensor, a, K_ref);
+            eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
+        });
+    EXPECT_TRUE(table.has_value()) << "Failed to build EEP table";
+    auto wrapper = make_bspline_surface(table->spline, K_ref, 0.0, OptionType::PUT);
+    EXPECT_TRUE(wrapper.has_value());
+    return std::move(*wrapper);
+}
+
+// Regression: an explicitly supplied build schedule was stored without
+// canonicalization; an unsorted-but-correct schedule caused spurious
+// DiscreteDividendMismatch rejections (PR #449 pre-merge review, round 3)
+// Bug: validate_query assumes the stored schedule is sorted and merged;
+//      create() now canonicalizes explicit schedules at the choke point.
+TEST(IVSolverFactoryDividendValidation, DirectCreateCanonicalizesUnsortedSchedule) {
+    // Deliberately unsorted (0.5 before 0.25) — create() must canonicalize
+    // this before storing it in build_dividends_.
+    std::vector<Dividend> unsorted_build_schedule = {
+        {.calendar_time = 0.5, .amount = 2.0},
+        {.calendar_time = 0.25, .amount = 1.0},
+    };
+
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(
+        make_direct_create_wrapper(), InterpolatedIVSolverConfig{}, unsorted_build_schedule);
+    ASSERT_TRUE(solver_result.has_value());
+    auto& solver = solver_result.value();
+
+    IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 1.0;  // comfortably above 0.5, within [0.25, 2.0]
+    query.rate = RateSpec{0.04};
+    query.option_type = OptionType::PUT;
+    query.market_price = 6.0;
+    // Sorted equivalent of the unsorted build schedule.
+    query.discrete_dividends = {
+        {.calendar_time = 0.25, .amount = 1.0},
+        {.calendar_time = 0.5, .amount = 2.0},
+    };
+
+    auto result = solver.solve(query);
+    if (!result.has_value()) {
+        EXPECT_NE(result.error().code, IVErrorCode::DiscreteDividendMismatch)
+            << "Unsorted-but-equivalent build schedule should not trigger a mismatch";
+    }
+
+    // A query missing an entry from the build schedule must still be rejected.
+    query.discrete_dividends = {{.calendar_time = 0.25, .amount = 1.0}};
+    auto missing = solver.solve(query);
+    ASSERT_FALSE(missing.has_value());
+    EXPECT_EQ(missing.error().code, IVErrorCode::DiscreteDividendMismatch);
 }
 
 }  // namespace

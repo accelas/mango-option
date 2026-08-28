@@ -1,8 +1,30 @@
 // SPDX-License-Identifier: MIT
 #include "mango/simple/vol_surface.hpp"
+#include <algorithm>
 #include <cmath>
 
 namespace mango::simple {
+
+std::vector<mango::Dividend> convert_discrete_dividends(
+    const std::vector<Dividend>& dividends,
+    const Timestamp& val_time,
+    double tau_max)
+{
+    std::vector<mango::Dividend> out;
+    out.reserve(dividends.size());
+    for (const auto& div : dividends) {
+        double t = compute_tau(val_time, div.ex_date);
+        if (t > 0.0 && t <= tau_max) {
+            out.push_back({.calendar_time = t,
+                           .amount = div.amount.to_double()});
+        }
+    }
+    std::sort(out.begin(), out.end(),
+              [](const mango::Dividend& a, const mango::Dividend& b) {
+                  return a.calendar_time < b.calendar_time;
+              });
+    return out;
+}
 
 std::optional<double> VolatilitySurface::iv_at(double strike, double tau) const {
     // Simple linear interpolation - could be enhanced with B-spline
@@ -80,12 +102,16 @@ std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
         rate = mango::get_zero_rate(*ctx.rate, 1.0);  // Approximate
     }
 
-    // Get dividend yield
+    // Get dividends: continuous yield (indices) or discrete schedule
+    // (single stocks). The two are mutually exclusive in DividendSpec.
     double div_yield = 0.0;
+    const std::vector<Dividend>* discrete = nullptr;
     auto div_spec = ctx.dividends.value_or(
         chain.dividends.value_or(DividendSpec{0.0}));
-    if (std::holds_alternative<double>(div_spec)) {
-        div_yield = std::get<double>(div_spec);
+    if (const double* yield = std::get_if<double>(&div_spec)) {
+        div_yield = *yield;
+    } else {
+        discrete = &std::get<std::vector<Dividend>>(div_spec);
     }
 
     double spot = chain.spot->to_double();
@@ -98,6 +124,13 @@ std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
         smile.spot = *chain.spot;
 
         if (smile.tau <= 0) continue;  // Skip expired options
+
+        // Dividends payable during this expiry's life, in solver units.
+        std::vector<mango::Dividend> slice_dividends;
+        if (discrete != nullptr) {
+            slice_dividends =
+                convert_discrete_dividends(*discrete, val_time, smile.tau);
+        }
 
         // Process all options
         for (const auto& leg : slice.options) {
@@ -122,6 +155,7 @@ std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
             query.maturity = smile.tau;
             query.rate = rate;
             query.dividend_yield = div_yield;
+            query.discrete_dividends = slice_dividends;
             query.option_type = leg.type;
             query.market_price = market_price;
 

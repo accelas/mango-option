@@ -47,6 +47,11 @@ public:
         return *this;
     }
 
+    ChainBuilder& discrete_dividends(std::vector<Dividend> dividends) {
+        chain_.dividends = std::move(dividends);
+        return *this;
+    }
+
     template<typename T, typename RawOpt>
     ChainBuilder& add_call(T&& expiry, const RawOpt& opt) {
         auto ts = Conv::to_timestamp(std::forward<T>(expiry));

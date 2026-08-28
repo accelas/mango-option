@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "mango/option/dividend_utils.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/iv_result.hpp"
 #include "mango/option/table/price_table.hpp"
@@ -34,6 +35,7 @@
 #include <expected>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <optional>
@@ -79,10 +81,26 @@ public:
     ///
     /// @param surface Pre-built price surface
     /// @param config Solver configuration
+    /// @param build_dividends Discrete dividend schedule the surface was
+    ///        built with. Defaults to std::nullopt ("unknown provenance"):
+    ///        the generic template cannot know whether a given Surface is
+    ///        dividend-aware, so a non-empty query schedule is accepted
+    ///        unverified. Pass an explicit schedule to opt into validation
+    ///        — including an empty vector to assert "built with no
+    ///        discrete dividends", which then rejects any non-empty query
+    ///        schedule with DiscreteDividendMismatch. A supplied schedule
+    ///        is canonicalized with the builder rules (sorted, same-date
+    ///        entries merged, entries at/after the surface's tau_max or
+    ///        with non-positive time/amount dropped) before storage, so
+    ///        callers need not pre-sort or pre-merge it themselves. The
+    ///        factory paths (make_interpolated_iv_solver,
+    ///        AnyPriceTable::make_iv_solver) pass provenance explicitly
+    ///        and are unaffected by this default.
     /// @return IV solver or ValidationError
     static std::expected<InterpolatedIVSolver, ValidationError> create(
         Surface surface,
-        const InterpolatedIVSolverConfig& config = {});
+        const InterpolatedIVSolverConfig& config = {},
+        std::optional<std::vector<Dividend>> build_dividends = std::nullopt);
 
     /// Solve for implied volatility (single query)
     ///
@@ -110,6 +128,7 @@ private:
         std::pair<double, double> r_range,
         OptionType option_type,
         double dividend_yield,
+        std::optional<std::vector<Dividend>> build_dividends,
         const InterpolatedIVSolverConfig& config)
         : surface_(std::move(surface))
         , m_range_(m_range)
@@ -119,6 +138,7 @@ private:
         , config_(config)
         , option_type_(option_type)
         , dividend_yield_(dividend_yield)
+        , build_dividends_(std::move(build_dividends))
     {}
 
     Surface surface_;
@@ -126,6 +146,9 @@ private:
     InterpolatedIVSolverConfig config_;
     OptionType option_type_;
     double dividend_yield_;
+    /// Discrete schedule the surface was built with. nullopt = unknown
+    /// (deserialized segmented tables) — schedule validation is skipped.
+    std::optional<std::vector<Dividend>> build_dividends_;
 
     /// Evaluate option price using surface interpolation with strike scaling
     double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const;
@@ -333,7 +356,8 @@ template <typename Surface>
 std::expected<InterpolatedIVSolver<Surface>, ValidationError>
 InterpolatedIVSolver<Surface>::create(
     Surface surface,
-    const InterpolatedIVSolverConfig& config)
+    const InterpolatedIVSolverConfig& config,
+    std::optional<std::vector<Dividend>> build_dividends)
 {
     // Use concept accessors for bounds extraction
     auto m_range = std::make_pair(surface.m_min(), surface.m_max());
@@ -352,6 +376,17 @@ InterpolatedIVSolver<Surface>::create(
     auto option_type = surface.option_type();
     auto dividend_yield = surface.dividend_yield();
 
+    // Canonicalize an explicitly supplied schedule before storing it.
+    // This is the single authoritative choke point: every construction
+    // path (direct create() calls and both factory paths) funnels
+    // through here, so validate_query can always assume build_dividends_
+    // is sorted and same-date-merged. The factory-side canonicalization
+    // in price_table_factory.cpp is now redundant defense-in-depth
+    // (filter_and_merge_dividends is idempotent) and is left as-is.
+    if (build_dividends.has_value()) {
+        build_dividends = filter_and_merge_dividends(*build_dividends, tau_range.second);
+    }
+
     return InterpolatedIVSolver(
         std::move(surface),
         m_range,
@@ -360,6 +395,7 @@ InterpolatedIVSolver<Surface>::create(
         r_range,
         option_type,
         dividend_yield,
+        std::move(build_dividends),
         config);
 }
 
@@ -385,6 +421,54 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
     if (std::abs(query.dividend_yield - dividend_yield_) > 1e-10) {
         return ValidationError{ValidationErrorCode::DividendYieldMismatch,
             query.dividend_yield, 0};
+    }
+
+    // Discrete dividend schedule check (#440 item 1). An empty query
+    // schedule is always valid: for segmented surfaces the build-time
+    // schedule is authoritative. A non-empty schedule must match the
+    // build schedule restricted to the query's life, when it is known.
+    //
+    // Both sides are canonicalized with the same rules the table builders
+    // apply via filter_and_merge_dividends: same-date entries are merged,
+    // and non-positive-time/non-positive-amount entries are dropped. On the
+    // build side, entries at or after the surface maturity are also dropped
+    // (that's what the builders actually priced), which is why
+    // build_dividends_ is stored pre-canonicalized. The query side is
+    // deliberately NOT window-filtered against query.maturity here: a query
+    // claiming a dividend beyond its own maturity window must still surface
+    // as an extra entry and be rejected (see PrefixWindowSemantics test).
+    if (!query.discrete_dividends.empty() && build_dividends_.has_value()) {
+        constexpr double kTimeTol = 1e-6;    // years (~30 seconds)
+        constexpr double kAmountTol = 1e-6;  // dollars
+        // build_dividends_ is already canonicalized (sorted, merged) by the
+        // factory, so only the window filter is needed here.
+        std::vector<Dividend> expected;
+        expected.reserve(build_dividends_->size());
+        for (const auto& d : *build_dividends_) {
+            if (d.calendar_time <= query.maturity + kTimeTol) {
+                expected.push_back(d);
+            }
+        }
+        std::vector<Dividend> actual = filter_and_merge_dividends(
+            query.discrete_dividends, std::numeric_limits<double>::infinity());
+        if (expected.size() != actual.size()) {
+            return ValidationError{
+                ValidationErrorCode::DiscreteDividendMismatch,
+                static_cast<double>(actual.size()), expected.size()};
+        }
+        for (size_t i = 0; i < actual.size(); ++i) {
+            bool time_mismatch = std::abs(actual[i].calendar_time -
+                                           expected[i].calendar_time) > kTimeTol;
+            bool amount_mismatch = std::abs(actual[i].amount -
+                                             expected[i].amount) > kAmountTol;
+            if (time_mismatch || amount_mismatch) {
+                double reported = time_mismatch ? actual[i].calendar_time
+                                                 : actual[i].amount;
+                return ValidationError{
+                    ValidationErrorCode::DiscreteDividendMismatch,
+                    reported, i};
+            }
+        }
     }
 
     // Use common validation for option spec, market price, and arbitrage checks
