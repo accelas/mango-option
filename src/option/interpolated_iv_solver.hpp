@@ -79,10 +79,18 @@ public:
     ///
     /// @param surface Pre-built price surface
     /// @param config Solver configuration
+    /// @param build_dividends Discrete dividend schedule the surface was
+    ///        built with. Defaults to known-empty (correct for continuous
+    ///        surfaces — the documented direct-create path). Pass the real
+    ///        schedule for segmented surfaces, or std::nullopt for
+    ///        "unknown" (e.g. deserialized tables; schedule checks are
+    ///        then skipped).
     /// @return IV solver or ValidationError
     static std::expected<InterpolatedIVSolver, ValidationError> create(
         Surface surface,
-        const InterpolatedIVSolverConfig& config = {});
+        const InterpolatedIVSolverConfig& config = {},
+        std::optional<std::vector<Dividend>> build_dividends =
+            std::vector<Dividend>{});
 
     /// Solve for implied volatility (single query)
     ///
@@ -110,6 +118,7 @@ private:
         std::pair<double, double> r_range,
         OptionType option_type,
         double dividend_yield,
+        std::optional<std::vector<Dividend>> build_dividends,
         const InterpolatedIVSolverConfig& config)
         : surface_(std::move(surface))
         , m_range_(m_range)
@@ -119,6 +128,7 @@ private:
         , config_(config)
         , option_type_(option_type)
         , dividend_yield_(dividend_yield)
+        , build_dividends_(std::move(build_dividends))
     {}
 
     Surface surface_;
@@ -126,6 +136,9 @@ private:
     InterpolatedIVSolverConfig config_;
     OptionType option_type_;
     double dividend_yield_;
+    /// Discrete schedule the surface was built with. nullopt = unknown
+    /// (deserialized segmented tables) — schedule validation is skipped.
+    std::optional<std::vector<Dividend>> build_dividends_;
 
     /// Evaluate option price using surface interpolation with strike scaling
     double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const;
@@ -333,7 +346,8 @@ template <typename Surface>
 std::expected<InterpolatedIVSolver<Surface>, ValidationError>
 InterpolatedIVSolver<Surface>::create(
     Surface surface,
-    const InterpolatedIVSolverConfig& config)
+    const InterpolatedIVSolverConfig& config,
+    std::optional<std::vector<Dividend>> build_dividends)
 {
     // Use concept accessors for bounds extraction
     auto m_range = std::make_pair(surface.m_min(), surface.m_max());
@@ -360,6 +374,7 @@ InterpolatedIVSolver<Surface>::create(
         r_range,
         option_type,
         dividend_yield,
+        std::move(build_dividends),
         config);
 }
 
@@ -385,6 +400,42 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
     if (std::abs(query.dividend_yield - dividend_yield_) > 1e-10) {
         return ValidationError{ValidationErrorCode::DividendYieldMismatch,
             query.dividend_yield, 0};
+    }
+
+    // Discrete dividend schedule check (#440 item 1). An empty query
+    // schedule is always valid: for segmented surfaces the build-time
+    // schedule is authoritative. A non-empty schedule must match the
+    // build schedule restricted to the query's life, when it is known.
+    if (!query.discrete_dividends.empty() && build_dividends_.has_value()) {
+        constexpr double kTimeTol = 1e-6;    // years (~30 seconds)
+        constexpr double kAmountTol = 1e-6;  // dollars
+        auto by_time = [](const Dividend& a, const Dividend& b) {
+            return a.calendar_time < b.calendar_time;
+        };
+        std::vector<Dividend> expected;
+        expected.reserve(build_dividends_->size());
+        for (const auto& d : *build_dividends_) {
+            if (d.calendar_time <= query.maturity + kTimeTol) {
+                expected.push_back(d);
+            }
+        }
+        std::sort(expected.begin(), expected.end(), by_time);
+        std::vector<Dividend> actual = query.discrete_dividends;
+        std::sort(actual.begin(), actual.end(), by_time);
+        if (expected.size() != actual.size()) {
+            return ValidationError{
+                ValidationErrorCode::DiscreteDividendMismatch,
+                static_cast<double>(actual.size()), expected.size()};
+        }
+        for (size_t i = 0; i < actual.size(); ++i) {
+            if (std::abs(actual[i].calendar_time -
+                         expected[i].calendar_time) > kTimeTol ||
+                std::abs(actual[i].amount - expected[i].amount) > kAmountTol) {
+                return ValidationError{
+                    ValidationErrorCode::DiscreteDividendMismatch,
+                    actual[i].amount, i};
+            }
+        }
     }
 
     // Use common validation for option spec, market price, and arbitrage checks

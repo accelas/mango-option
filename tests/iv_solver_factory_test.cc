@@ -350,4 +350,43 @@ TEST(IVSolverFactoryComparison, AccuracyManualVsAdaptive) {
     EXPECT_LT(adaptive_max_err, 0.05);
 }
 
+// Regression: a continuous surface must loudly reject a query carrying a
+// discrete dividend schedule (#448 / #440 item 1)
+// Bug: the schedule was silently ignored and the query priced dividend-free.
+TEST(IVSolverFactoryDividendValidation, ContinuousSurfaceRejectsDiscreteQuery) {
+    mango::IVSolverFactoryConfig config{
+        .option_type = mango::OptionType::PUT,
+        .spot = 100.0,
+        .grid = mango::IVGrid{
+            .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+            .vol = {0.10, 0.20, 0.30, 0.40},
+            .rate = {0.02, 0.04, 0.06, 0.08},
+        },
+        .backend = mango::BSplineBackend{
+            .maturity_grid = {0.25, 0.5, 0.75, 1.0},
+        },
+    };
+    auto solver = mango::make_interpolated_iv_solver(config);
+    ASSERT_TRUE(solver.has_value());
+
+    mango::IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 0.8;
+    query.rate = mango::RateSpec{0.04};
+    query.option_type = mango::OptionType::PUT;
+    query.market_price = 6.0;
+    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 1.5}};
+
+    auto result = solver->solve(query);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::IVErrorCode::DiscreteDividendMismatch);
+
+    // Same query without the schedule still solves (sanity that the
+    // rejection is schedule-driven, not incidental).
+    query.discrete_dividends.clear();
+    auto ok = solver->solve(query);
+    EXPECT_TRUE(ok.has_value());
+}
+
 }  // namespace

@@ -789,14 +789,21 @@ AnyPriceTable::rho(const PricingParams& params) const {
 
 std::expected<AnyInterpIVSolver, ValidationError>
 AnyPriceTable::make_iv_solver(
-    const InterpolatedIVSolverConfig& config) const {
+    const InterpolatedIVSolverConfig& config,
+    std::optional<std::vector<Dividend>> build_dividends) const {
     return std::visit([&](const auto& table_ptr)
         -> std::expected<AnyInterpIVSolver, ValidationError> {
         using Table = std::remove_cv_t<
             typename std::decay_t<decltype(table_ptr)>::element_type>;
         using SharedSurface = detail::SharedPriceTableSurface<Table>;
+        std::optional<std::vector<Dividend>> divs = std::move(build_dividends);
+        if (!divs.has_value() &&
+            !std::is_same_v<Table, BSplineMultiKRefSurface> &&
+            !std::is_same_v<Table, ChebyshevMultiKRefSurface>) {
+            divs = std::vector<Dividend>{};  // continuous: known-empty
+        }
         auto solver = InterpolatedIVSolver<SharedSurface>::create(
-            SharedSurface(table_ptr), config);
+            SharedSurface(table_ptr), config, std::move(divs));
         if (!solver.has_value()) {
             return std::unexpected(solver.error());
         }
@@ -886,7 +893,12 @@ make_interpolated_iv_solver(const IVSolverFactoryConfig& config) {
     if (!table.has_value()) {
         return std::unexpected(table.error());
     }
-    return table->make_iv_solver(config.solver_config);
+    std::vector<Dividend> build_dividends;
+    if (config.discrete_dividends.has_value()) {
+        build_dividends = config.discrete_dividends->discrete_dividends;
+    }
+    return table->make_iv_solver(config.solver_config,
+                                 std::move(build_dividends));
 }
 
 }  // namespace mango

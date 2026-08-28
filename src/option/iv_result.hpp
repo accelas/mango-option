@@ -81,6 +81,9 @@ inline IVError validation_error_to_iv_error(const ValidationError& ve) {
         case ValidationErrorCode::DividendYieldMismatch:
             code = IVErrorCode::DividendYieldMismatch;
             break;
+        case ValidationErrorCode::DiscreteDividendMismatch:
+            code = IVErrorCode::DiscreteDividendMismatch;
+            break;
         case ValidationErrorCode::InvalidRate:
         case ValidationErrorCode::InvalidDividend:
         case ValidationErrorCode::InvalidVolatility:

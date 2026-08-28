@@ -41,7 +41,8 @@ enum class ValidationErrorCode {
     UnsortedGrid,
     ZeroWidthGrid,
     OptionTypeMismatch,
-    DividendYieldMismatch
+    DividendYieldMismatch,
+    DiscreteDividendMismatch
 };
 
 /// Detailed validation error for parameter validation failures
@@ -123,6 +124,7 @@ enum class IVErrorCode {
     InvalidGridConfig,
     OptionTypeMismatch,
     DividendYieldMismatch,
+    DiscreteDividendMismatch,
 
     // Convergence errors
     MaxIterationsExceeded,
@@ -291,6 +293,9 @@ inline IVError convert_to_iv_error(const ValidationError& err) {
         case ValidationErrorCode::DividendYieldMismatch:
             code = IVErrorCode::DividendYieldMismatch;
             break;
+        case ValidationErrorCode::DiscreteDividendMismatch:
+            code = IVErrorCode::DiscreteDividendMismatch;
+            break;
     }
     return IVError{
         .code = code,
@@ -366,6 +371,7 @@ inline PriceTableError convert_to_price_table_error(const ValidationError& err) 
             break;
         case ValidationErrorCode::OptionTypeMismatch:
         case ValidationErrorCode::DividendYieldMismatch:
+        case ValidationErrorCode::DiscreteDividendMismatch:
             code = PriceTableErrorCode::InvalidConfig;
             break;
     }
