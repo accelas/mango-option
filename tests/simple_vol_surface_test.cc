@@ -54,3 +54,52 @@ TEST(VolSmileTest, SmilePointStructure) {
     EXPECT_DOUBLE_EQ(pt.strike.to_double(), 580.0);
     EXPECT_TRUE(pt.iv_mid.has_value());
 }
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: compute_vol_surface dropped discrete dividend schedules (#448)
+// Bug: only the double alternative of DividendSpec was read; the
+//      vector<Dividend> alternative left div_yield = 0 and never populated
+//      IVQuery::discrete_dividends. These tests pin the conversion helper.
+TEST(DividendConversionTest, ConvertsExDatesToSortedYearOffsets) {
+    Timestamp val{"2026-01-01T00:00:00"};
+    std::vector<Dividend> divs = {
+        {.ex_date = Timestamp{"2026-07-02T00:00:00"}, .amount = Price{1.50}},
+        {.ex_date = Timestamp{"2026-04-02T00:00:00"}, .amount = Price{1.25}},
+    };
+    auto out = convert_discrete_dividends(divs, val, 1.0);
+    ASSERT_EQ(out.size(), 2u);
+    // Sorted by calendar time even though the input was not.
+    EXPECT_NEAR(out[0].calendar_time, 91.0 / 365.0, 0.01);
+    EXPECT_DOUBLE_EQ(out[0].amount, 1.25);
+    EXPECT_NEAR(out[1].calendar_time, 182.0 / 365.0, 0.01);
+    EXPECT_DOUBLE_EQ(out[1].amount, 1.50);
+}
+
+TEST(DividendConversionTest, DropsPastAndPostExpiryDividends) {
+    Timestamp val{"2026-01-01T00:00:00"};
+    std::vector<Dividend> divs = {
+        // Already gone ex before valuation: excluded.
+        {.ex_date = Timestamp{"2025-12-15T00:00:00"}, .amount = Price{1.00}},
+        // Inside the window: kept.
+        {.ex_date = Timestamp{"2026-03-01T00:00:00"}, .amount = Price{1.50}},
+        // After expiry (tau_max = 0.5): excluded.
+        {.ex_date = Timestamp{"2027-06-01T00:00:00"}, .amount = Price{2.00}},
+    };
+    auto out = convert_discrete_dividends(divs, val, 0.5);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_DOUBLE_EQ(out[0].amount, 1.50);
+    EXPECT_GT(out[0].calendar_time, 0.0);
+    EXPECT_LE(out[0].calendar_time, 0.5);
+}
+
+TEST(DividendConversionTest, UnparseableExDateIsDropped) {
+    Timestamp val{"2026-01-01T00:00:00"};
+    std::vector<Dividend> divs = {
+        {.ex_date = Timestamp{"not-a-date"}, .amount = Price{1.00}},
+    };
+    auto out = convert_discrete_dividends(divs, val, 1.0);
+    EXPECT_TRUE(out.empty());
+}

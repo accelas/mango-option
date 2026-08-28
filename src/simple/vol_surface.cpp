@@ -1,8 +1,30 @@
 // SPDX-License-Identifier: MIT
 #include "mango/simple/vol_surface.hpp"
+#include <algorithm>
 #include <cmath>
 
 namespace mango::simple {
+
+std::vector<mango::Dividend> convert_discrete_dividends(
+    const std::vector<Dividend>& dividends,
+    const Timestamp& val_time,
+    double tau_max)
+{
+    std::vector<mango::Dividend> out;
+    out.reserve(dividends.size());
+    for (const auto& div : dividends) {
+        double t = compute_tau(val_time, div.ex_date);
+        if (t > 0.0 && t <= tau_max) {
+            out.push_back({.calendar_time = t,
+                           .amount = div.amount.to_double()});
+        }
+    }
+    std::sort(out.begin(), out.end(),
+              [](const mango::Dividend& a, const mango::Dividend& b) {
+                  return a.calendar_time < b.calendar_time;
+              });
+    return out;
+}
 
 std::optional<double> VolatilitySurface::iv_at(double strike, double tau) const {
     // Simple linear interpolation - could be enhanced with B-spline
