@@ -677,9 +677,7 @@ mango::IVSolverFactoryConfig config{
         .rate = {0.02, 0.03, 0.05, 0.07},
     },
     .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
-    .backend = mango::BSplineBackend{
-        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
-    },
+    .backend = mango::ChebyshevBackend{},
     .discrete_dividends = mango::DiscreteDividendConfig{
         .maturity = 1.0,
         .discrete_dividends = {
@@ -693,17 +691,35 @@ mango::IVSolverFactoryConfig config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
+**Use `ChebyshevBackend` for adaptive discrete-dividend surfaces.** The
+B-spline segmented adaptive path currently refuses realistic dividend
+configs — this one included — with `NoViableSurface` under complete
+measurement. Its multi-K_ref segmented fit degrades badly at low volatility on
+the tau segments following a dividend: on the config above it measures
+15,500 bps against the 2,000 bps viability bound, with the worst points at
+σ ≤ 0.13 and τ ∈ (0.64, 0.94), and because denser grids make the fit *worse*
+rather than better the builder's bumped-grid retry cannot rescue it. Pending
+the MultiKRefSplit blend and segmented-fit follow-ups, Chebyshev is the
+supported backend for this shape; it measures 549 bps on the same config.
+Both facts are pinned:
+`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig` for the
+Chebyshev config, and
+`IVSolverFactorySegmented.DocumentedConfigOnBSplineBackendRefuses` for the
+B-spline refusal.
+
 **The moneyness grid and the K_refs must agree.** The assembled surface routes
 a query to the K_refs bracketing its strike and blends their prices linearly
 in strike, so the K_refs must both *span* and *resolve* the strike range the
 moneyness grid implies. Here `S/K ∈ [0.92, 1.08]` means strikes in
-`[92.6, 108.7]`, served by K_refs at 2.5% spacing across `[90, 110]`; that
-surface measures 770 bps of IV error against a 2,000 bps viability bound.
-Pairing the same K_refs with the default ±30% moneyness grid puts most
-queried strikes outside the K_ref span, where the blend clamps to a single
-K_ref: measured 827,756 bps, and the build fails with `NoViableSurface`
-rather than returning it. This config is pinned by
-`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig`.
+`[92.6, 108.7]`, served by K_refs at 2.5% spacing across `[90, 110]`. Pairing
+the same K_refs with the default ±30% moneyness grid puts most queried
+strikes outside the K_ref span, where the blend clamps to a single K_ref, and
+the build fails with `NoViableSurface` rather than returning it.
+
+Note that `BSplineBackend::maturity_grid` is **ignored** whenever
+`discrete_dividends` is set, on both the manual and the adaptive segmented
+paths: tau comes from the dividend dates and `DiscreteDividendConfig::maturity`,
+not from the backend's knots.
 
 ### Querying the Solver
 

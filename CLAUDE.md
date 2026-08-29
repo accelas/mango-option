@@ -231,6 +231,11 @@ strikes in `[92.6, 108.7]`, served by K_refs at 2.5% spacing across
 mismatch, so on this manual path config coherence is the caller's job: an
 incoherent pairing builds a surface and prices off it instead of refusing.
 
+Note that `BSplineBackend::maturity_grid` is **ignored** whenever
+`discrete_dividends` is set: the segmented path derives its tau grid from the
+dividend dates and `DiscreteDividendConfig::maturity`, not from the backend's
+knots.
+
 **Pattern 4: Discrete Dividend IV with Adaptive Grid**
 
 With explicit `K_refs`, the moneyness grid and the K_refs must agree: the
@@ -253,9 +258,7 @@ mango::IVSolverFactoryConfig config{
         .rate = {0.02, 0.03, 0.05, 0.07},
     },
     .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
-    .backend = mango::BSplineBackend{
-        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
-    },
+    .backend = mango::ChebyshevBackend{},
     .discrete_dividends = mango::DiscreteDividendConfig{
         .maturity = 1.0,
         .discrete_dividends = {
@@ -268,9 +271,20 @@ mango::IVSolverFactoryConfig config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
+**Use `ChebyshevBackend` for adaptive discrete-dividend surfaces.** The
+B-spline segmented adaptive path currently refuses realistic dividend configs
+— including this one — with `NoViableSurface` under complete measurement: its
+multi-K_ref fit degrades badly at low vol on the tau segments after a
+dividend, and denser grids make it worse rather than better. Pending the
+MultiKRefSplit blend and segmented-fit follow-ups, Chebyshev is the supported
+backend here; it measures 549 bps against the 2,000 bps viability bound on
+the config above.
+
 Omit `kref_config` to let the builder pick log-spaced K_refs around the spot.
 This exact config is pinned by
-`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig`.
+`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig`, and the
+B-spline refusal by
+`IVSolverFactorySegmented.DocumentedConfigOnBSplineBackendRefuses`.
 
 **Pattern 5: Probe-Based FDM IV Solver (Simple API)**
 ```cpp

@@ -232,29 +232,12 @@ TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
     EXPECT_LT(result->implied_vol, 3.0);
 }
 
-// The adaptive + discrete-dividend configuration published in CLAUDE.md
-// (Pattern 4) and docs/API_GUIDE.md ("Discrete Dividends with Adaptive
-// Grid"), pinned so the documentation cannot silently rot into a
-// configuration the viability gate refuses.
-//
-// Everything a reader would copy is verbatim: the moneyness/vol/rate grid,
-// the dividend schedule, the maturity grid and the K_refs.  Only
-// `AdaptiveGridParams` is relaxed, for test runtime.
-//
-// The pairing is the fragile part.  The assembled surface blends
-// K_ref-struck prices linearly in strike, so the K_refs must span *and
-// resolve* the strike range the moneyness grid implies: S/K in [0.92, 1.08]
-// means strikes in [92.6, 108.7], served here by K_refs at 2.5 % spacing
-// across [90, 110].  The pre-#434 pairing -- moneyness 0.7-1.3 with K_refs
-// {80, 100, 120} -- measures 8,278 (827,756 bps) and is refused.
-//
-// Measured on this config: 0.077 (770 bps) at the parameters below and
-// 0.074 at max_iter = 4, against the 0.20 viability bound.  The final error
-// is *not* monotone in the iteration budget -- the aggregated uniform grids
-// change discontinuously -- so the config was checked at both budgets rather
-// than argued from the looser one.
-TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
-    IVSolverFactoryConfig config{
+/// The adaptive discrete-dividend configuration published in CLAUDE.md
+/// (Pattern 4) and docs/API_GUIDE.md ("Discrete Dividends with Adaptive
+/// Grid").  Shared by the two tests below so the pinning and the
+/// documented-limitation companion cannot drift apart.
+IVSolverFactoryConfig documented_adaptive_dividend_config() {
+    return IVSolverFactoryConfig{
         .option_type = OptionType::PUT,
         .spot = 100.0,
         .dividend_yield = 0.01,
@@ -263,14 +246,10 @@ TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
             .vol = {0.10, 0.15, 0.20, 0.30},
             .rate = {0.02, 0.03, 0.05, 0.07},
         },
-        .adaptive = AdaptiveGridParams{
-            .target_iv_error = 0.005,  // documented: 0.001; relaxed for speed
-            .max_iter = 2,             // documented: default 8
-            .validation_samples = 16,  // documented: default 64
-        },
-        .backend = BSplineBackend{
-            .maturity_grid = {0.1, 0.25, 0.5, 1.0},
-        },
+        // Verbatim from the docs: the default max_iter (8) and
+        // validation_samples (64), not a relaxed pair.
+        .adaptive = AdaptiveGridParams{.target_iv_error = 0.001},
+        .backend = ChebyshevBackend{},
         .discrete_dividends = DiscreteDividendConfig{
             .maturity = 1.0,
             .discrete_dividends = {
@@ -280,11 +259,47 @@ TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
                                        102.5, 105.0, 107.5, 110.0}},
         },
     };
+}
+
+// The documented adaptive discrete-dividend config, pinned so the
+// documentation cannot silently rot into a configuration the viability gate
+// refuses.  Everything a reader would copy is verbatim -- including
+// `AdaptiveGridParams`, which is *not* relaxed here: the whole point of the
+// pin is that the published parameters are the ones that were measured.
+//
+// The pairing of moneyness grid and K_refs is the fragile part.  The
+// assembled surface blends K_ref-struck prices linearly in strike, so the
+// K_refs must span *and resolve* the strike range the moneyness grid implies:
+// S/K in [0.92, 1.08] means strikes in [92.6, 108.7], served here by K_refs
+// at 2.5 % spacing across [90, 110].
+//
+// Measured on this config: **0.0549 (549 bps) max, 0.0145 avg, 64 of 64
+// holdout points measured**, against the 0.20 viability bound -- roughly 3.6x
+// of margin.  `target_met` is false (549 bps does not reach the 10 bps
+// target), which is honest and expected: viability, not the target, is what
+// gates the build.  Runtime ~57 s.
+TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
+    auto config = documented_adaptive_dividend_config();
 
     auto solver = make_interpolated_iv_solver(config);
     ASSERT_TRUE(solver.has_value())
         << "the documented adaptive discrete-dividend config must build a "
-           "viable surface";
+           "viable surface: code "
+        << static_cast<int>(solver.error().code);
+
+    auto diag = solver->build_diagnostics();
+    ASSERT_TRUE(diag.has_value()) << "an adaptive build must report diagnostics";
+    EXPECT_GT(diag->holdout_points_measured, 0u)
+        << "a surface measured nowhere certifies nothing";
+    EXPECT_LE(diag->achieved_max_error, 0.20)
+        << "measured " << diag->achieved_max_error * 1e4 << " bps against the "
+           "0.20 viability bound";
+    // Generous headroom over the measured 0.0549 -- this pins the config
+    // against silent degradation, not against ordinary numerical drift.
+    EXPECT_LE(diag->achieved_max_error, 0.10)
+        << "the documented config measured 549 bps when it was written; "
+           "measuring " << diag->achieved_max_error * 1e4
+        << " bps means it has degraded materially";
 
     OptionSpec spec{
         .spot = 100.0, .strike = 95.0, .maturity = 0.5,
@@ -303,6 +318,38 @@ TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
         << static_cast<int>(result.error().code);
     EXPECT_GT(result->implied_vol, 0.0);
     EXPECT_LT(result->implied_vol, 3.0);
+}
+
+// The documented limitation, pinned: the *same* config on `BSplineBackend`
+// does not build.  This is why the documentation recommends `ChebyshevBackend`
+// for adaptive discrete-dividend surfaces.
+//
+// The segmented multi-K_ref B-spline fit degrades badly at low vol on the
+// tau segments after a dividend.  At the documented parameters the assembled
+// surface measures **1.550 (15,500 bps) max** and the bumped-grid retry
+// measures 4.079, against the 0.20 bound.  The worst points cluster at
+// sigma <= 0.127 and tau in (0.64, 0.94) -- one returns exactly 0.0 for a put
+// worth $7.62, another returns 44.47 for one worth $7.91.  Denser grids make
+// it worse, not better, so the D9 retry cannot rescue it.
+//
+// This was always true; it was not always visible.  Before the reference
+// solves filtered their dividend schedule by the sampled maturity, every
+// sample below the last dividend date lost its reference, and the surviving
+// long-tau tail happened to miss the pathology at the relaxed parameters the
+// old version of this test used.
+//
+// Tracked as the MultiKRefSplit blend / segmented-fit follow-ups.  When one
+// of them lands this test will start failing, which is the intended signal:
+// re-measure, and if the B-spline path is viable again, promote it back into
+// the documentation.
+TEST(IVSolverFactorySegmented, DocumentedConfigOnBSplineBackendRefuses) {
+    auto config = documented_adaptive_dividend_config();
+    config.backend = BSplineBackend{.maturity_grid = {0.1, 0.25, 0.5, 1.0}};
+
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_FALSE(solver.has_value())
+        << "a surface measuring 15,500 bps must not be returned";
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::NoViableSurface);
 }
 
 // ---------------------------------------------------------------------------
