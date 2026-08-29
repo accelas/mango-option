@@ -1737,6 +1737,81 @@ TEST(ChebyshevStateHooks, RetryAfterBacktrackMatchesFreshRefinement) {
     EXPECT_TRUE(retry_grids == fresh_grids);
 }
 
+// Regression: the continuous Chebyshev path must return the surface that was
+// built from the grids the loop actually picked.
+// Bug risk: the caller used to rebuild unconditionally after run_refinement;
+// it now consumes the loop's captured surface, so a drift between the picked
+// candidate and the `last_surface` side channel would ship silently.  The node
+// counts baked into the interpolant are the observable that pins it -- the
+// axis *bounds* cannot, since the CC extension freezes them at seed time and
+// every refinement level spans the same interval.
+TEST(AdaptiveGridBuilderTest, ContinuousChebyshevSurfaceMatchesPickedGrids) {
+    OptionGrid chain{
+        .ticker = "TEST",
+        .spot = 100.0,
+        .strikes = {90.0, 100.0, 110.0},
+        .maturities = {0.25, 1.0},
+        .implied_vols = {0.20, 0.30},
+        .rates = {0.03, 0.05},
+        .dividend_yield = 0.0,
+    };
+    AdaptiveGridParams params{
+        .target_iv_error = 3e-4,    // below the seed grid's error: forces one
+                                    // refinement, so the hooks and the
+                                    // pick-vs-last-build path are exercised
+        .max_iter = 2,              // one refinement step exercises the hooks
+        .validation_samples = 8,
+    };
+
+    auto result = build_adaptive_chebyshev(params, chain, OptionType::PUT);
+    ASSERT_TRUE(result.has_value()) << "build_adaptive_chebyshev failed";
+    ASSERT_NE(result->surface, nullptr);
+    ASSERT_FALSE(result->iterations.empty());
+
+    // The last recorded build is always a successful one (a failed trial is
+    // followed by the loop's final rebuild), and it is the build whose grids
+    // the loop returned.
+    // The seed grid cannot meet this target, so a refinement trial always
+    // runs; without one the invariant under test would be trivial.
+    ASSERT_GE(result->iterations.size(), 2u) << "no refinement was attempted";
+    bool refined_an_axis = false;
+    for (const auto& it : result->iterations) {
+        if (it.refined_dim >= 0) refined_an_axis = true;
+    }
+    EXPECT_TRUE(refined_an_axis);
+
+    const auto& last = result->iterations.back();
+    ASSERT_FALSE(last.build_failed);
+
+    const auto& interp = result->surface->inner().interpolant();
+    EXPECT_EQ(interp.num_pts(), last.grid_sizes)
+        << "returned surface was built from grids other than the picked ones";
+
+    // Node span and published bounds agree on every axis.
+    const auto& dom = interp.domain();
+    EXPECT_DOUBLE_EQ(result->surface->m_min(), dom.lo[0]);
+    EXPECT_DOUBLE_EQ(result->surface->m_max(), dom.hi[0]);
+    EXPECT_DOUBLE_EQ(result->surface->tau_min(), dom.lo[1]);
+    EXPECT_DOUBLE_EQ(result->surface->tau_max(), dom.hi[1]);
+    EXPECT_DOUBLE_EQ(result->surface->sigma_min(), dom.lo[2]);
+    EXPECT_DOUBLE_EQ(result->surface->sigma_max(), dom.hi[2]);
+    EXPECT_DOUBLE_EQ(result->surface->rate_min(), dom.lo[3]);
+    EXPECT_DOUBLE_EQ(result->surface->rate_max(), dom.hi[3]);
+
+    // Every CC level is nested (2^l + 1 nodes), so a refined axis stays so.
+    for (size_t d = 0; d < 4; ++d) {
+        size_t n = interp.num_pts()[d];
+        EXPECT_GE(n, 3u) << "axis " << d;
+        EXPECT_EQ((n - 1) & (n - 2), 0u)
+            << "axis " << d << " has " << n << " nodes, not 2^l + 1";
+    }
+
+    // And it prices.
+    double px = result->surface->price(100.0, 100.0, 0.5, 0.25, 0.04);
+    EXPECT_TRUE(std::isfinite(px));
+    EXPECT_GT(px, 0.0);
+}
+
 // The segmented refiner carries the same contract, with per-segment tau nodes.
 TEST(SegmentedChebyshevRefineFn, HonorsRequestedAxisAndCap) {
     auto state = make_cheb_state();

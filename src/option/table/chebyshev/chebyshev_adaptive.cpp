@@ -709,6 +709,11 @@ build_adaptive_chebyshev(
     // built is the one whose grids it returns (it rebuilds when the retained
     // candidate is not the last build), so the `last_surface` side channel
     // already holds the typed ChebyshevRawSurface for `grids` (spec D9).
+    //
+    // The guard below asserts that loop invariant rather than a build failure:
+    // run_refinement cannot succeed without having built the grids it returns,
+    // so a null side channel would mean the invariant broke.  Reporting it
+    // beats handing the caller a null surface.
     if (!last_surface) {
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::SurfaceBuildFailed});

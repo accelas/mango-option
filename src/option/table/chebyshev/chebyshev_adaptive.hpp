@@ -55,17 +55,23 @@ struct ChebyshevRefinementState {
 /// selection and must be able to measure the axis it picked.
 /// `focus_intervals` is ignored -- CC nodes sit at fixed nested positions and
 /// cannot be steered by physical intervals.
+///
+/// `state` is captured by reference: it must outlive the returned callable.
 [[nodiscard]] RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state);
 
 /// RefineFn for segmented Chebyshev CC-level refinement.
 /// Same contract as `make_chebyshev_refine_fn`; tau refinement generates
 /// per-segment CC nodes instead of nodes over a single range.
+///
+/// `state` is captured by reference: it must outlive the returned callable.
 [[nodiscard]] RefineFn make_segmented_chebyshev_refine_fn(
     ChebyshevRefinementState& state);
 
 /// Snapshot/restore hooks over `state` for the loop's backtracking reset
 /// (spec D6).  The snapshot is a full copy, so restoring reinstates the level
 /// counters (and the segmentation metadata) exactly.
+///
+/// `state` is captured by reference: it must outlive the returned hooks.
 [[nodiscard]] RefineStateHooks make_chebyshev_state_hooks(
     ChebyshevRefinementState& state);
 
