@@ -597,9 +597,83 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     // 1. Select probe values (up to 3: front, back, nearest ATM)
     auto probes = select_probes(K_refs_, config_.spot);
 
-    // 2. Run adaptive refinement per probe
+    // The strike range the user can actually query (m = ln(spot/K)).
+    const double user_k_lo = config_.spot * std::exp(-sample_domain_.m_max);
+    const double user_k_hi = config_.spot * std::exp(-sample_domain_.m_min);
+
+    // The strike band a probe serves in the assembled surface.  The assembly
+    // routes each query to the K_ref nearest its strike, so a probe is only
+    // ever asked about strikes between the geometric midpoints to its
+    // neighbours (K_refs are log-spaced); the outermost bands run out to the
+    // user's own strike range, and a single K_ref serves all of it.
+    const auto strike_band = [this, user_k_lo, user_k_hi](double k) {
+        const size_t n = K_refs_.size();
+        const size_t idx = static_cast<size_t>(
+            std::ranges::lower_bound(K_refs_, k) - K_refs_.begin());
+        double lo = (idx == 0)
+            ? user_k_lo : std::sqrt(K_refs_[idx - 1] * K_refs_[idx]);
+        double hi = (idx + 1 >= n)
+            ? user_k_hi : std::sqrt(K_refs_[idx] * K_refs_[idx + 1]);
+        return std::pair{std::max(lo, user_k_lo), std::min(hi, user_k_hi)};
+    };
+
+    InitialGrids initial_grids;
+    initial_grids.moneyness = initial_grid_.moneyness;
+    initial_grids.vol = initial_grid_.vol;
+    initial_grids.rate = initial_grid_.rate;
+
+    // 2. Run adaptive refinement per probe, measured over its own band
     std::vector<RefinementResult> probe_results;
     for (double probe_ref : probes) {
+        // Measurement domain for this probe: the user's tau/vol/rate ranges,
+        // moneyness restricted to the band this probe serves.
+        SurfaceBounds probe_sample = sample_domain_;
+        bool band_usable = false;
+        if (auto [k_lo, k_hi] = strike_band(probe_ref);
+            k_lo > 0.0 && k_hi > k_lo) {
+            probe_sample.m_min = std::log(config_.spot / k_hi);
+            probe_sample.m_max = std::log(config_.spot / k_lo);
+            // A band too thin for the loop's non-degeneracy check is widened
+            // about its midpoint, never past the user's own range.
+            constexpr double kMinBandWidth = 1e-3;
+            if (probe_sample.m_max - probe_sample.m_min < kMinBandWidth) {
+                const double mid =
+                    0.5 * (probe_sample.m_min + probe_sample.m_max);
+                probe_sample.m_min = std::max(sample_domain_.m_min,
+                                              mid - 0.5 * kMinBandWidth);
+                probe_sample.m_max = std::min(sample_domain_.m_max,
+                                              mid + 0.5 * kMinBandWidth);
+            }
+            band_usable = probe_sample.m_max > probe_sample.m_min;
+        }
+
+        if (!band_usable) {
+            // Nothing measurable: this probe serves no strike the user can
+            // query.  It still contributes its seed sizes to the aggregate.
+            RefinementContext seed_ctx{
+                .spot = config_.spot,
+                .dividend_yield = config_.dividend_yield,
+                .option_type = config_.option_type,
+                .bounds = fit_domain,
+                .sample_bounds = sample_domain_,
+            };
+            auto seeded = seed_refinement_grids(params, seed_ctx,
+                                                initial_grids);
+            RefinementResult skipped;
+            skipped.tau_points = static_cast<int>(seeded.tau.size());
+            IterationStats stats;
+            stats.refined_dim = -3;  // marker: probe skipped, empty band
+            stats.grid_sizes = {seeded.moneyness.size(), seeded.tau.size(),
+                                seeded.vol.size(), seeded.rate.size()};
+            skipped.iterations.push_back(stats);
+            skipped.moneyness = std::move(seeded.moneyness);
+            skipped.tau = std::move(seeded.tau);
+            skipped.vol = std::move(seeded.vol);
+            skipped.rate = std::move(seeded.rate);
+            probe_results.push_back(std::move(skipped));
+            continue;
+        }
+
         BuildFn build_fn = [this, probe_ref](
             std::span<const double> m_grid,
             std::span<const double> tau_grid,
@@ -667,18 +741,15 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         };
         auto score_fn = make_iv_score_fn(params, config_.option_type);
 
+        // Grids still span the whole fit domain; only the *measurement* is
+        // band-scoped (spec D2: measure where the surface is used).
         RefinementContext ctx{
             .spot = config_.spot,
             .dividend_yield = config_.dividend_yield,
             .option_type = config_.option_type,
             .bounds = fit_domain,
-            .sample_bounds = sample_domain_,
+            .sample_bounds = probe_sample,
         };
-
-        InitialGrids initial_grids;
-        initial_grids.moneyness = initial_grid_.moneyness;
-        initial_grids.vol = initial_grid_.vol;
-        initial_grids.rate = initial_grid_.rate;
 
         auto refine_fn = make_bspline_refine_fn(params);
         // No state hooks: the B-spline refiner's whole state is the grids.
@@ -686,56 +757,12 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
                                     refine_fn, ctx,
                                     prepare_refs_fn, score_fn, initial_grids,
                                     RefineStateHooks{});
-        if (!sizes) {
-            // PROVISIONAL (see task-6 report, awaiting a decision): a probe
-            // that cannot certify *itself* contributes no sizing signal
-            // rather than failing the build.  This is not the measurement
-            // artifact it once was -- with the scaled references above the
-            // probe scores its own interpolation error and nothing else --
-            // but on dividend-heavy configs that error is genuinely huge:
-            // the //tests BuildSegmentedLargeDividend config ($20 of
-            // absolute dividends on a $100 spot, K_refs 70/100/130) measures
-            // 583,897 bps on its worst probe, and 38,465 bps even with the
-            // sampled moneyness narrowed to S/K in [0.9, 1.1].  A probe is a
-            // *sizing* device, never a returned surface, and the assembly
-            // never asks a K_ref surface about the strikes another K_ref
-            // serves; safety belongs on the assembled surface, which gets
-            // its own mandatory validation and viability gate (spec D9,
-            // task 8).  Genuine build errors still propagate.
-            if (sizes.error().code != PriceTableErrorCode::NoViableSurface &&
-                sizes.error().code != PriceTableErrorCode::ValidationFailed) {
-                return std::unexpected(sizes.error());
-            }
-        } else {
-            probe_results.push_back(std::move(*sizes));
-        }
+        if (!sizes) return std::unexpected(sizes.error());
+        probe_results.push_back(std::move(*sizes));
     }
 
     // 3. Aggregate max grid sizes and convergence stats across probes
     auto gsz = aggregate_max_sizes(probe_results);
-    if (probe_results.empty()) {
-        // No probe could certify: fall back to the grids the loop would have
-        // started from (the user's own knots, padded to the minimum density)
-        // -- the same sizes a max_iter == 1 build would produce.
-        RefinementContext seed_ctx{
-            .spot = config_.spot,
-            .dividend_yield = config_.dividend_yield,
-            .option_type = config_.option_type,
-            .bounds = fit_domain,
-            .sample_bounds = sample_domain_,
-        };
-        InitialGrids seed_initial;
-        seed_initial.moneyness = initial_grid_.moneyness;
-        seed_initial.vol = initial_grid_.vol;
-        seed_initial.rate = initial_grid_.rate;
-        auto seeded = seed_refinement_grids(params, seed_ctx, seed_initial);
-        gsz = MaxGridSizes{
-            .moneyness = seeded.moneyness.size(),
-            .vol = seeded.vol.size(),
-            .rate = seeded.rate.size(),
-            .tau_points = static_cast<int>(seeded.tau.size()),
-        };
-    }
 
     // Worst-case convergence stats across probes
     std::vector<IterationStats> all_iterations;

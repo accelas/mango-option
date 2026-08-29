@@ -78,6 +78,16 @@ struct SegmentedAdaptiveConfig {
 };
 
 /// Per-iteration diagnostics
+///
+/// `refined_dim` is a dimension index (0 = moneyness, 1 = tau, 2 = sigma,
+/// 3 = rate) or one of three sentinels:
+///   * `-1` — no dimension was refined for this entry (the seed build).
+///   * `-2` — not an iteration at all: the retention final rebuild of the
+///     returned candidate (spec D5/D7).  Excluded from `total_iterations`
+///     and never charged to `max_iter`.
+///   * `-3` — not a build at all: a segmented-builder probe whose served
+///     strike band lies outside the user's strike range, so its refinement
+///     loop was skipped and only its seed grid sizes were contributed.
 struct IterationStats {
     size_t iteration = 0;                    ///< Iteration number (0-indexed)
     std::array<size_t, 4> grid_sizes = {};   ///< [m, tau, sigma, r] sizes
@@ -85,7 +95,7 @@ struct IterationStats {
     size_t pde_solves_validation = 0;        ///< Fresh solves for validation
     double max_error = 0.0;                  ///< Max IV error observed
     double avg_error = 0.0;                  ///< Mean IV error
-    int refined_dim = -1;                    ///< Which dim was refined (-1 if none)
+    int refined_dim = -1;                    ///< Refined dim, or -1/-2/-3 (above)
     double elapsed_seconds = 0.0;            ///< Wall-clock time for this iteration
     bool build_failed = false;               ///< Refinement trial build failed (D5)
 };
@@ -104,7 +114,9 @@ struct BuildDiagnostics {
     size_t monotonicity_violations = 0;
     size_t monotonicity_points_invalid = 0;
     double worst_vega_slope = 0.0;
-    std::vector<IterationStats> iterations;  // final rebuild: refined_dim = -2
+    /// Per-iteration forensics; see IterationStats for the refined_dim
+    /// sentinels (-2 final rebuild, -3 skipped probe).
+    std::vector<IterationStats> iterations;
 };
 
 }  // namespace mango

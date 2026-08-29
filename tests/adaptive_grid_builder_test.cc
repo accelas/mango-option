@@ -391,6 +391,13 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
 }
 
 // Large discrete dividend (total_div/K_ref > 0.2, stresses moneyness expansion)
+//
+// $20 of *absolute* dividends against a $100 spot does not produce a usable
+// surface: the assembled multi-K_ref surface measures 58.4 IV error (583,897
+// bps) on plain user-domain validation, and the worst probe measures 0.97
+// (9,740 bps) against the 0.20 viability bound.  Returning that surface
+// silently was the pre-#434 behavior and is the defect this branch exists to
+// fix -- refusal is the contract (spec D5).
 TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -412,11 +419,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
     std::vector<double> r_domain = {0.01, 0.03, 0.05, 0.10};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_TRUE(result.has_value()) << "code " << static_cast<int>(result.error().code);
-
-    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
-    EXPECT_GT(price, 0.0);
-    EXPECT_TRUE(std::isfinite(price));
+    ASSERT_FALSE(result.has_value())
+        << "an unusable surface must not be returned";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
 }
 
 // No dividends (single segment, degenerates to simple case)
@@ -445,6 +450,83 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
     double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
+}
+
+// ===========================================================================
+// Probe measurement bands (spec D2/D9)
+//
+// The assembled multi-K_ref surface routes each query to the K_ref nearest
+// its strike, so each probe is measured only over the strike band it serves:
+// the geometric midpoints to its neighbours, clipped to the user's own
+// strike range.  These two tests pin the band's degenerate cases.
+// ===========================================================================
+
+// A band thinner than the loop's non-degeneracy tolerance is widened about
+// its midpoint rather than being handed to run_refinement as m_max == m_min
+// (which would fail the build with InvalidConfig).  K_refs one basis point
+// apart give the middle probe a band ~1e-4 wide in log-moneyness.
+TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    params.min_moneyness_points = 10;
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {99.99, 100.0, 100.01}},
+    };
+
+    auto m = to_log_m({0.9, 0.95, 1.0, 1.05, 1.1});
+    std::vector<double> v = {0.15, 0.20, 0.30, 0.40};
+    std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
+
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
+    ASSERT_TRUE(result.has_value())
+        << "a degenerate band must be widened, not rejected: code "
+        << static_cast<int>(result.error().code);
+    EXPECT_TRUE(std::isfinite(
+        result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05)));
+}
+
+// A probe whose served band lies entirely outside the user's strike range is
+// skipped: no refinement loop, its seed sizes still feed the aggregate, and
+// the skip is recorded with the refined_dim = -3 sentinel.  K_ref = 50 with
+// user strikes in [90, 110] serves nothing (its band ends at sqrt(50*100)).
+TEST(AdaptiveGridBuilderTest, BuildSegmentedEmptyProbeBandSkipped) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    params.min_moneyness_points = 10;
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {50.0, 100.0}},
+    };
+
+    auto m = to_log_m({0.91, 0.95, 1.0, 1.05, 1.11});
+    std::vector<double> v = {0.15, 0.20, 0.30, 0.40};
+    std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
+
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
+    ASSERT_TRUE(result.has_value())
+        << "a probe serving no queryable strike must be skipped, not fatal: "
+        << "code " << static_cast<int>(result.error().code);
+
+    size_t skipped = 0;
+    for (const auto& it : result->iterations) {
+        if (it.refined_dim == -3) ++skipped;
+    }
+    EXPECT_EQ(skipped, 1u) << "the K_ref = 50 probe should be recorded skipped";
 }
 
 // ===========================================================================
@@ -594,6 +676,12 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
 }
 
 // Coverage: Very short maturity — tau domain compressed, max_tau clamped
+//
+// A 0.05-year maturity with a discrete dividend has vega near zero, so any
+// price error divides into an enormous IV error: the assembled surface
+// measures 229 (2.29 million bps) on user-domain validation and the worst
+// probe 3,847.  Returning it silently was the pre-#434 behavior; the build
+// now refuses (spec D5).
 TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -613,13 +701,19 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    ASSERT_TRUE(result.has_value()) << "code " << static_cast<int>(result.error().code);
+    // The tau domain is still built and clamped to the maturity -- the
+    // refusal below comes from the accuracy gate, not from a domain error.
+    auto bounds = expand_segmented_domain(
+        {m, v, r}, seg_config.maturity, seg_config.dividend_yield,
+        seg_config.discrete_dividends, 90.0);
+    ASSERT_TRUE(bounds.has_value());
+    EXPECT_LE(bounds->tau_max, seg_config.maturity);
+    EXPECT_GT(bounds->tau_min, 0.0);
 
-    // Query at a tau within the short maturity
-    double price = result->surface.price(100.0, 100.0, 0.03, 0.20, 0.05);
-    EXPECT_GT(price, 0.0);
-    EXPECT_TRUE(std::isfinite(price));
+    auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
+    ASSERT_FALSE(result.has_value())
+        << "an unusable surface must not be returned";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
 }
 
 // ===========================================================================
@@ -627,6 +721,13 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
 // ===========================================================================
 
 // Coverage: Large expansion clamps moneyness to 0.01
+//
+// The clamp itself is asserted directly (no build needed).  The adaptive
+// build over the same config cannot be measured at all: $50 of absolute
+// dividends puts the K_ref = 50 probe's own references at a ~$72 spot
+// against $50 of dividends, and those FD solves fail, so fewer than the
+// minimum valid holdout points survive (spec D4) -- ValidationFailed even
+// with the viability gate disabled.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -650,9 +751,19 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.50};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
+    // The moneyness floor prevents a negative/zero domain: expansion = 1.0
+    // against a lowest moneyness of 0.5 clamps to 0.01 rather than -0.5.
+    auto bounds = expand_segmented_domain(
+        {m, v, r}, seg_config.maturity, seg_config.dividend_yield,
+        seg_config.discrete_dividends, 50.0);
+    ASSERT_TRUE(bounds.has_value());
+    EXPECT_NEAR(bounds->m_min, std::log(0.01), 1e-12);
+    EXPECT_GT(bounds->m_max, bounds->m_min);
+
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    // Should succeed — moneyness floor prevents negative/zero domain
-    ASSERT_TRUE(result.has_value()) << "code " << static_cast<int>(result.error().code);
+    ASSERT_FALSE(result.has_value())
+        << "a holdout that cannot be solved must not certify a surface";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::ValidationFailed);
 }
 
 // Coverage: Negative K_ref in explicit list (K_ref_min <= 0 guard)
