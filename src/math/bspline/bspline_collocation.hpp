@@ -75,7 +75,7 @@ struct BSplineCollocationConfig {
 template<std::floating_point T, size_t Bandwidth = 4>
 class BSplineCollocation1D {
 public:
-    /// Bandwidth for B-splines (degree + 1, default 4 for cubic)
+    /// Bandwidth for B-splines (reserved; only 4 = cubic is supported)
     static constexpr size_t BANDWIDTH = Bandwidth;
 
     // Reserved parameter: only cubic (Bandwidth == 4) is supported —

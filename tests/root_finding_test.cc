@@ -220,9 +220,11 @@ TEST(RootFindingTest, BrentTolXControlsXAccuracyIndependently) {
     auto r_tight = mango::brent_find_root(f, 0.0, 2.0, tight_x);
     ASSERT_TRUE(r_tight.has_value());
 
-    // With tight x-tolerance the root is at least as accurate, and the
-    // stopping cannot have come from the (now-tight) bracket-width test
-    // at a worse x-error than the loose run allowed.
-    EXPECT_LE(std::abs(r_tight->root - root), std::abs(r_loose->root - root) + 1e-12);
+    // Demonstrates that the two knobs are independent: the loose run
+    // (brent_tol_x falling back to the shared brent_tol_abs = 1e-2) stops
+    // on the coarse bracket-width test at x-error ~1.4e-4, while setting
+    // brent_tol_x = 1e-12 forces the bracket to shrink far past that,
+    // landing x-error well under 1e-6.
+    EXPECT_GT(std::abs(r_loose->root - root), 1e-5);
     EXPECT_LT(std::abs(r_tight->root - root), 1e-6);
 }

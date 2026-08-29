@@ -197,7 +197,6 @@ cc_library(
         ":iv_result",
         ":option_grid",
         ":option_spec",
-        ":price_table_error_mapping",
         "//src/math/bspline:bspline_nd_separable",
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/option/table:adaptive_grid_types",
@@ -223,6 +222,7 @@ cc_library(
         "//src/option/table/serialization:to_data",
         "//src/support:error_types",
     ],
+    implementation_deps = [":price_table_error_mapping"],
     copts = [
         "-Wall",
         "-Wextra",
