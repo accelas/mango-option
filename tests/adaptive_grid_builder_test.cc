@@ -1562,5 +1562,214 @@ TEST(ExpandSegmentedDomainTest, LargeDividendClamps) {
     EXPECT_GE(result->m_min, std::log(0.01) - 0.1);
 }
 
+// ===========================================================================
+// Chebyshev refiner contract (spec D6): exact axis, level cap, state rollback
+// ===========================================================================
+
+namespace {
+
+/// Deliberately anisotropic levels: moneyness sits 4 levels above rate, so the
+/// removed balance rule ("refuse a dimension more than 2 levels ahead of the
+/// minimum, fall back to the lowest") would have redirected a moneyness
+/// request to the rate axis.
+detail::ChebyshevRefinementState make_cheb_state() {
+    return detail::ChebyshevRefinementState{
+        .m_level = 5, .tau_level = 3, .sigma_level = 2, .rate_level = 1,
+        .max_level = 7,
+        .m_lo = -0.5, .m_hi = 0.5,
+        .tau_lo = 0.05, .tau_hi = 1.5,
+        .sigma_lo = 0.10, .sigma_hi = 0.50,
+        .rate_lo = 0.0, .rate_hi = 0.08,
+    };
+}
+
+/// The four working grids the refiner mutates, seeded at the state's levels.
+struct ChebGrids {
+    std::vector<double> moneyness, tau, vol, rate;
+
+    static ChebGrids seed(const detail::ChebyshevRefinementState& s) {
+        return ChebGrids{
+            .moneyness = cc_level_nodes(s.m_level, s.m_lo, s.m_hi),
+            .tau = cc_level_nodes(s.tau_level, s.tau_lo, s.tau_hi),
+            .vol = cc_level_nodes(s.sigma_level, s.sigma_lo, s.sigma_hi),
+            .rate = cc_level_nodes(s.rate_level, s.rate_lo, s.rate_hi),
+        };
+    }
+
+    RefineOutcome refine(const RefineFn& fn, size_t dim) {
+        return fn(dim, {}, moneyness, tau, vol, rate);
+    }
+
+    std::array<size_t, 4> sizes() const {
+        return {moneyness.size(), tau.size(), vol.size(), rate.size()};
+    }
+
+    bool operator==(const ChebGrids&) const = default;
+};
+
+std::array<size_t, 4> levels_of(const detail::ChebyshevRefinementState& s) {
+    return {s.m_level, s.tau_level, s.sigma_level, s.rate_level};
+}
+
+}  // namespace
+
+// Regression: the refiner must advance EXACTLY the requested axis (spec D6).
+// Bug: a balance rule redirected any request for a dimension more than 2
+// levels above the minimum to the lowest-level dimension, so the coordinate
+// descent walk could never actually test the axis it picked.
+TEST(ChebyshevRefineFn, HonorsRequestedAxisDespiteLevelSpread) {
+    auto state = make_cheb_state();
+    auto refine = detail::make_chebyshev_refine_fn(state);
+    auto grids = ChebGrids::seed(state);
+
+    // Moneyness is 4 levels above the minimum: the old rule redirected here.
+    auto outcome = grids.refine(refine, 0);
+
+    EXPECT_TRUE(outcome.changed);
+    EXPECT_EQ(outcome.changed_dim, 0);
+    EXPECT_EQ(levels_of(state), (std::array<size_t, 4>{6, 3, 2, 1}));
+    EXPECT_EQ(grids.sizes(), (std::array<size_t, 4>{65, 9, 5, 3}));
+}
+
+// Every axis, however far ahead, advances on request.
+TEST(ChebyshevRefineFn, HonorsEveryRequestedAxis) {
+    for (size_t dim = 0; dim < 4; ++dim) {
+        auto state = make_cheb_state();
+        auto refine = detail::make_chebyshev_refine_fn(state);
+        auto grids = ChebGrids::seed(state);
+        auto before = levels_of(state);
+
+        auto outcome = grids.refine(refine, dim);
+
+        ASSERT_TRUE(outcome.changed) << "dim " << dim;
+        EXPECT_EQ(outcome.changed_dim, static_cast<int>(dim));
+        auto after = levels_of(state);
+        for (size_t d = 0; d < 4; ++d) {
+            EXPECT_EQ(after[d], before[d] + (d == dim ? 1u : 0u))
+                << "dim " << dim << " moved level " << d;
+        }
+    }
+}
+
+// An axis at its level cap reports changed=false instead of redirecting.
+TEST(ChebyshevRefineFn, AxisAtCapReportsNoChange) {
+    auto state = make_cheb_state();
+    state.m_level = state.max_level;
+    auto refine = detail::make_chebyshev_refine_fn(state);
+    auto grids = ChebGrids::seed(state);
+    auto before = grids;
+
+    auto outcome = grids.refine(refine, 0);
+
+    EXPECT_FALSE(outcome.changed);
+    EXPECT_EQ(outcome.changed_dim, -1);
+    EXPECT_EQ(levels_of(state), (std::array<size_t, 4>{7, 3, 2, 1}))
+        << "no other axis may be bumped in place of the capped one";
+    EXPECT_TRUE(grids == before);
+}
+
+// Snapshot/restore must round-trip the level counters exactly, so a rejected
+// trial can be re-run from the same base and land on the same grids.
+TEST(ChebyshevStateHooks, RestoreMakesRefinementRepeatable) {
+    auto state = make_cheb_state();
+    auto refine = detail::make_chebyshev_refine_fn(state);
+    auto hooks = detail::make_chebyshev_state_hooks(state);
+    ASSERT_TRUE(hooks.snapshot != nullptr);
+    ASSERT_TRUE(hooks.restore != nullptr);
+
+    auto base_grids = ChebGrids::seed(state);
+    auto snap = hooks.snapshot();
+
+    auto first = base_grids;
+    ASSERT_TRUE(first.refine(refine, 0).changed);
+    auto first_levels = levels_of(state);
+
+    hooks.restore(snap);
+    EXPECT_EQ(levels_of(state), (std::array<size_t, 4>{5, 3, 2, 1}));
+
+    auto second = base_grids;
+    ASSERT_TRUE(second.refine(refine, 0).changed);
+
+    EXPECT_EQ(levels_of(state), first_levels);
+    EXPECT_TRUE(second == first);
+}
+
+// Spec-pinned scenario (D6): axis 0 rejected, axis 1 accepted (walk restart),
+// axis 0 retried.  The retry must start from the accepted state, so it lands
+// exactly where a fresh single refinement of axis 0 from that state lands --
+// no double advance from the rejected trial.
+TEST(ChebyshevStateHooks, RetryAfterBacktrackMatchesFreshRefinement) {
+    auto state = make_cheb_state();
+    auto refine = detail::make_chebyshev_refine_fn(state);
+    auto hooks = detail::make_chebyshev_state_hooks(state);
+
+    auto base_grids = ChebGrids::seed(state);
+    auto base_snap = hooks.snapshot();
+
+    // Trial 1: axis 0 -- rejected (no holdout improvement).
+    auto trial = base_grids;
+    ASSERT_TRUE(trial.refine(refine, 0).changed);
+
+    // Backtrack to the exploration base, then trial 2: axis 1 -- accepted.
+    hooks.restore(base_snap);
+    auto accepted = base_grids;
+    ASSERT_TRUE(accepted.refine(refine, 1).changed);
+    auto accepted_levels = levels_of(state);
+    auto accepted_snap = hooks.snapshot();
+
+    // Walk restarts; axis 0 is retried from the accepted base.
+    hooks.restore(accepted_snap);
+    auto retry = accepted;
+    ASSERT_TRUE(retry.refine(refine, 0).changed);
+    auto retry_levels = levels_of(state);
+    auto retry_grids = retry;
+
+    // Reference: a fresh single refinement of axis 0 from the accepted state.
+    detail::ChebyshevRefinementState fresh_state = make_cheb_state();
+    auto fresh_refine = detail::make_chebyshev_refine_fn(fresh_state);
+    auto fresh_grids = ChebGrids::seed(fresh_state);
+    ASSERT_TRUE(fresh_grids.refine(fresh_refine, 1).changed);
+    ASSERT_EQ(levels_of(fresh_state), accepted_levels);
+    ASSERT_TRUE(fresh_grids.refine(fresh_refine, 0).changed);
+
+    EXPECT_EQ(retry_levels, levels_of(fresh_state));
+    EXPECT_EQ(retry_levels, (std::array<size_t, 4>{6, 4, 2, 1}));
+    EXPECT_TRUE(retry_grids == fresh_grids);
+}
+
+// The segmented refiner carries the same contract, with per-segment tau nodes.
+TEST(SegmentedChebyshevRefineFn, HonorsRequestedAxisAndCap) {
+    auto state = make_cheb_state();
+    state.seg_boundaries = {0.05, 0.5, 0.55, 1.5};
+    state.seg_is_gap = {false, true, false};
+    auto refine = detail::make_segmented_chebyshev_refine_fn(state);
+    auto grids = ChebGrids::seed(state);
+    grids.tau = detail::generate_segmented_tau_nodes(
+        state.tau_level, state.seg_boundaries, state.seg_is_gap);
+
+    // Moneyness sits far above the minimum level: no redirection.
+    auto outcome = grids.refine(refine, 0);
+    EXPECT_TRUE(outcome.changed);
+    EXPECT_EQ(outcome.changed_dim, 0);
+    EXPECT_EQ(levels_of(state), (std::array<size_t, 4>{6, 3, 2, 1}));
+
+    // Tau refinement regenerates per-segment nodes (gaps skipped).
+    size_t tau_before = grids.tau.size();
+    outcome = grids.refine(refine, 1);
+    EXPECT_TRUE(outcome.changed);
+    EXPECT_EQ(outcome.changed_dim, 1);
+    EXPECT_GT(grids.tau.size(), tau_before);
+    EXPECT_GE(grids.tau.front(), state.seg_boundaries.front() - 1e-12);
+    EXPECT_LE(grids.tau.back(), state.seg_boundaries.back() + 1e-12);
+
+    // Cap: rate at max_level reports no change rather than redirecting.
+    state.rate_level = state.max_level;
+    auto before = grids;
+    outcome = grids.refine(refine, 3);
+    EXPECT_FALSE(outcome.changed);
+    EXPECT_EQ(outcome.changed_dim, -1);
+    EXPECT_TRUE(grids == before);
+}
+
 }  // namespace
 }  // namespace mango

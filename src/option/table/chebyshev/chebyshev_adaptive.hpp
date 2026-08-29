@@ -17,6 +17,60 @@
 
 namespace mango {
 
+namespace detail {
+
+/// State for Chebyshev CC-level refinement.
+///
+/// All 4 dimensions use Clenshaw-Curtis levels for nested node placement;
+/// node count at level l = 2^l + 1.  The refiners mutate nothing outside this
+/// struct and the four working grid vectors, so a copy of it is the complete
+/// backend refinement state for the loop's snapshot/restore hooks (spec D6).
+///
+/// Exposed for testing the refiner/hook contract without a full table build.
+struct ChebyshevRefinementState {
+    size_t m_level = 5;       ///< CC level for moneyness (initial: 33 nodes)
+    size_t tau_level = 3;     ///< CC level for tau (initial: 9 nodes)
+    size_t sigma_level = 2;   ///< CC level for sigma (initial: 5 nodes)
+    size_t rate_level = 1;    ///< CC level for rate (initial: 3 nodes)
+    size_t max_level = 7;     ///< ceiling per dimension (2^7+1 = 129 nodes)
+    // Frozen extended domain bounds
+    double m_lo = 0.0, m_hi = 0.0, tau_lo = 0.0, tau_hi = 0.0;
+    double sigma_lo = 0.0, sigma_hi = 0.0, rate_lo = 0.0, rate_hi = 0.0;
+    std::vector<double> seg_boundaries;  ///< empty = vanilla (no segmentation)
+    std::vector<bool> seg_is_gap;        ///< true for synthetic dividend gaps
+};
+
+/// Generate per-segment CC-level tau nodes, sorted and deduplicated.
+/// Gap segments are skipped.
+[[nodiscard]] std::vector<double> generate_segmented_tau_nodes(
+    size_t tau_level,
+    const std::vector<double>& seg_bounds,
+    const std::vector<bool>& seg_is_gap);
+
+/// RefineFn for Chebyshev CC-level refinement (spec D6).
+///
+/// Advances EXACTLY the requested axis by one CC level, or reports
+/// `changed = false` when that axis is already at `state.max_level`.  No
+/// redirection to another axis: the coordinate-descent walk owns axis
+/// selection and must be able to measure the axis it picked.
+/// `focus_intervals` is ignored -- CC nodes sit at fixed nested positions and
+/// cannot be steered by physical intervals.
+[[nodiscard]] RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state);
+
+/// RefineFn for segmented Chebyshev CC-level refinement.
+/// Same contract as `make_chebyshev_refine_fn`; tau refinement generates
+/// per-segment CC nodes instead of nodes over a single range.
+[[nodiscard]] RefineFn make_segmented_chebyshev_refine_fn(
+    ChebyshevRefinementState& state);
+
+/// Snapshot/restore hooks over `state` for the loop's backtracking reset
+/// (spec D6).  The snapshot is a full copy, so restoring reinstates the level
+/// counters (and the segmentation metadata) exactly.
+[[nodiscard]] RefineStateHooks make_chebyshev_state_hooks(
+    ChebyshevRefinementState& state);
+
+}  // namespace detail
+
 /// Tau-segmented Chebyshev surface (one leaf per inter-dividend interval)
 using ChebyshevTauSegmented = SplitSurface<ChebyshevSegmentedLeaf, TauSegmentSplit>;
 

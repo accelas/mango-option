@@ -35,21 +35,7 @@ struct ChebyshevBuildConfig {
     double dividend_yield = 0.0;
 };
 
-/// State for Chebyshev CC-level refinement.
-/// All 4 dimensions use Clenshaw-Curtis levels for nested node placement.
-/// Node count at level l = 2^l + 1.
-struct ChebyshevRefinementState {
-    size_t m_level = 5;       // CC level for moneyness (initial: 33 nodes)
-    size_t tau_level = 3;     // CC level for tau (initial: 9 nodes)
-    size_t sigma_level = 2;   // CC level for sigma (initial: 5 nodes)
-    size_t rate_level = 1;    // CC level for rate (initial: 3 nodes)
-    size_t max_level = 7;     // ceiling per dimension (2^7+1 = 129 nodes)
-    // Frozen extended domain bounds
-    double m_lo, m_hi, tau_lo, tau_hi;
-    double sigma_lo, sigma_hi, rate_lo, rate_hi;
-    std::vector<double> seg_boundaries;  // empty = vanilla (no segmentation)
-    std::vector<bool> seg_is_gap;        // true for synthetic dividend gap segments
-};
+using detail::ChebyshevRefinementState;
 
 /// Config for segmented Chebyshev build (discrete dividends, no EEP)
 struct SegmentedChebyshevBuildConfig {
@@ -61,9 +47,11 @@ struct SegmentedChebyshevBuildConfig {
     std::vector<bool> seg_is_gap;  ///< true for synthetic dividend gap segments
 };
 
-/// Generate per-segment CC-level tau nodes, sorted and deduplicated.
-/// Gap segments are skipped.
-static std::vector<double> generate_segmented_tau_nodes(
+}  // anonymous namespace
+
+namespace detail {
+
+std::vector<double> generate_segmented_tau_nodes(
     size_t tau_level,
     const std::vector<double>& seg_bounds,
     const std::vector<bool>& seg_is_gap)
@@ -80,6 +68,102 @@ static std::vector<double> generate_segmented_tau_nodes(
         tau_nodes.end());
     return tau_nodes;
 }
+
+RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state) {
+    return [&state](size_t requested_dim,
+                    std::span<const std::pair<double, double>> /*focus*/,
+                    std::vector<double>& moneyness,
+                    std::vector<double>& tau,
+                    std::vector<double>& vol,
+                    std::vector<double>& rate) -> RefineOutcome
+    {
+        if (requested_dim >= 4) {
+            return RefineOutcome{.changed = false, .changed_dim = -1};
+        }
+        const std::array<size_t*, 4> levels = {
+            &state.m_level, &state.tau_level,
+            &state.sigma_level, &state.rate_level
+        };
+        if (*levels[requested_dim] >= state.max_level) {
+            return RefineOutcome{.changed = false, .changed_dim = -1};
+        }
+
+        const std::array<std::vector<double>*, 4> grids = {
+            &moneyness, &tau, &vol, &rate
+        };
+        const std::array<double, 4> lo = {
+            state.m_lo, state.tau_lo, state.sigma_lo, state.rate_lo
+        };
+        const std::array<double, 4> hi = {
+            state.m_hi, state.tau_hi, state.sigma_hi, state.rate_hi
+        };
+
+        ++(*levels[requested_dim]);
+        *grids[requested_dim] = cc_level_nodes(
+            *levels[requested_dim], lo[requested_dim], hi[requested_dim]);
+        return RefineOutcome{.changed = true,
+                             .changed_dim = static_cast<int>(requested_dim)};
+    };
+}
+
+RefineFn make_segmented_chebyshev_refine_fn(ChebyshevRefinementState& state) {
+    return [&state](size_t requested_dim,
+                    std::span<const std::pair<double, double>> /*focus*/,
+                    std::vector<double>& moneyness,
+                    std::vector<double>& tau,
+                    std::vector<double>& vol,
+                    std::vector<double>& rate) -> RefineOutcome
+    {
+        if (requested_dim >= 4) {
+            return RefineOutcome{.changed = false, .changed_dim = -1};
+        }
+        const std::array<size_t*, 4> levels = {
+            &state.m_level, &state.tau_level,
+            &state.sigma_level, &state.rate_level
+        };
+        if (*levels[requested_dim] >= state.max_level) {
+            return RefineOutcome{.changed = false, .changed_dim = -1};
+        }
+
+        ++(*levels[requested_dim]);
+        switch (requested_dim) {
+        case 0:
+            moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
+            break;
+        case 1:
+            tau = generate_segmented_tau_nodes(
+                state.tau_level, state.seg_boundaries, state.seg_is_gap);
+            break;
+        case 2:
+            vol = cc_level_nodes(state.sigma_level,
+                                 state.sigma_lo, state.sigma_hi);
+            break;
+        default:
+            rate = cc_level_nodes(state.rate_level,
+                                  state.rate_lo, state.rate_hi);
+            break;
+        }
+        return RefineOutcome{.changed = true,
+                             .changed_dim = static_cast<int>(requested_dim)};
+    };
+}
+
+RefineStateHooks make_chebyshev_state_hooks(ChebyshevRefinementState& state) {
+    return RefineStateHooks{
+        .snapshot = [&state]() -> std::shared_ptr<const void> {
+            return std::make_shared<const ChebyshevRefinementState>(state);
+        },
+        .restore = [&state](const std::shared_ptr<const void>& snap) {
+            if (!snap) return;
+            state = *std::static_pointer_cast<const ChebyshevRefinementState>(
+                snap);
+        },
+    };
+}
+
+}  // namespace detail
+
+namespace {
 
 /// Batch-solve PDE for missing (sigma, rate) pairs, storing results in cache.
 /// Returns the number of successful new PDE solves.
@@ -384,12 +468,11 @@ static BuildFn make_chebyshev_build_fn(
 /// tau coordinates per segment.
 static BuildFn make_segmented_chebyshev_build_fn(
     ChebyshevPDECache& cache,
-    const SegmentedChebyshevBuildConfig& config,
-    const ChebyshevRefinementState& state)
+    const SegmentedChebyshevBuildConfig& config)
 {
     auto last_tau_size = std::make_shared<size_t>(0);
 
-    return [&cache, &config, &state, last_tau_size](
+    return [&cache, &config, last_tau_size](
         std::span<const double> m_nodes,
         std::span<const double> tau_nodes,
         std::span<const double> sigma_nodes,
@@ -478,128 +561,6 @@ static BuildFn make_segmented_chebyshev_build_fn(
     };
 }
 
-/// Create a RefineFn for Chebyshev CC-level refinement.
-/// All 4 dimensions use nested CC levels (2^l+1 nodes at level l).
-///
-/// Balanced strategy: use the requested dimension as primary signal, but
-/// prevent runaway anisotropy by refusing to bump a dimension that is
-/// already >2 levels ahead of the minimum.  Falls back to bumping the
-/// dimension with the lowest current level (redirection; removed in a
-/// later task).  focus_intervals is ignored -- CC nodes are placed at
-/// fixed nested positions, not steered by physical intervals.
-static RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state) {
-    return [&state](size_t requested_dim,
-                    std::span<const std::pair<double, double>> /*focus_intervals*/,
-                    std::vector<double>& moneyness,
-                    std::vector<double>& tau,
-                    std::vector<double>& vol,
-                    std::vector<double>& rate) -> RefineOutcome
-    {
-        std::array<size_t*, 4> levels = {
-            &state.m_level, &state.tau_level,
-            &state.sigma_level, &state.rate_level
-        };
-        std::array<std::vector<double>*, 4> grids = {
-            &moneyness, &tau, &vol, &rate
-        };
-        std::array<double, 4> lo = {
-            state.m_lo, state.tau_lo, state.sigma_lo, state.rate_lo
-        };
-        std::array<double, 4> hi = {
-            state.m_hi, state.tau_hi, state.sigma_hi, state.rate_hi
-        };
-
-        // Find minimum CC level across all dimensions
-        size_t min_level = state.max_level;
-        for (size_t d = 0; d < 4; ++d) {
-            min_level = std::min(min_level, *levels[d]);
-        }
-
-        // Try requested_dim first if it isn't too far ahead
-        constexpr size_t kMaxSpread = 2;
-        size_t dim = requested_dim;
-        if (*levels[dim] >= state.max_level ||
-            *levels[dim] > min_level + kMaxSpread) {
-            // Fall back: find lowest-level dimension that can be bumped
-            dim = 4;  // sentinel
-            size_t lowest = state.max_level;
-            for (size_t d = 0; d < 4; ++d) {
-                if (*levels[d] < state.max_level && *levels[d] < lowest) {
-                    lowest = *levels[d];
-                    dim = d;
-                }
-            }
-            if (dim == 4) return RefineOutcome{.changed = false, .changed_dim = -1};  // All maxed out
-        }
-
-        (*levels[dim])++;
-        *grids[dim] = cc_level_nodes(*levels[dim], lo[dim], hi[dim]);
-        return RefineOutcome{.changed = true, .changed_dim = static_cast<int>(dim)};
-    };
-}
-
-/// Create a RefineFn for segmented Chebyshev CC-level refinement.
-/// Tau refinement generates per-segment CC-level nodes instead of a single
-/// range.  Uses the same balanced strategy as the vanilla refine function.
-/// focus_intervals is ignored (see make_chebyshev_refine_fn).
-static RefineFn make_segmented_chebyshev_refine_fn(
-    ChebyshevRefinementState& state)
-{
-    return [&state](size_t requested_dim,
-                    std::span<const std::pair<double, double>> /*focus_intervals*/,
-                    std::vector<double>& moneyness,
-                    std::vector<double>& tau,
-                    std::vector<double>& vol,
-                    std::vector<double>& rate) -> RefineOutcome
-    {
-        std::array<size_t*, 4> levels = {
-            &state.m_level, &state.tau_level,
-            &state.sigma_level, &state.rate_level
-        };
-
-        // Find minimum CC level
-        size_t min_level = state.max_level;
-        for (size_t d = 0; d < 4; ++d) {
-            min_level = std::min(min_level, *levels[d]);
-        }
-
-        // Balanced dimension selection (same as vanilla)
-        constexpr size_t kMaxSpread = 2;
-        size_t dim = requested_dim;
-        if (*levels[dim] >= state.max_level ||
-            *levels[dim] > min_level + kMaxSpread) {
-            dim = 4;
-            size_t lowest = state.max_level;
-            for (size_t d = 0; d < 4; ++d) {
-                if (*levels[d] < state.max_level && *levels[d] < lowest) {
-                    lowest = *levels[d];
-                    dim = d;
-                }
-            }
-            if (dim == 4) return RefineOutcome{.changed = false, .changed_dim = -1};
-        }
-
-        (*levels[dim])++;
-
-        switch (dim) {
-        case 0:
-            moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
-            break;
-        case 1:
-            tau = generate_segmented_tau_nodes(
-                state.tau_level, state.seg_boundaries, state.seg_is_gap);
-            break;
-        case 2:
-            vol = cc_level_nodes(state.sigma_level, state.sigma_lo, state.sigma_hi);
-            break;
-        case 3:
-            rate = cc_level_nodes(state.rate_level, state.rate_lo, state.rate_hi);
-            break;
-        }
-        return RefineOutcome{.changed = true, .changed_dim = static_cast<int>(dim)};
-    };
-}
-
 }  // anonymous namespace
 
 // ============================================================================
@@ -650,8 +611,11 @@ build_adaptive_chebyshev(
 {
     // Chebyshev builds its own fit domain from the CC-level extension below,
     // so the B-spline headroom baked into `bounds` is discarded here (spec
-    // D3: no double headroom).  Only `sample_bounds` is consumed.
-    auto domain = extract_chain_domain(chain, chain.strikes.size());
+    // D3: no double headroom).  Only `sample_bounds` is consumed, which the
+    // knot-count argument does not affect -- it is passed per the documented
+    // contract (expected seeded moneyness density) rather than as a strike
+    // count, so the value stays correct if `bounds` is ever consumed here.
+    auto domain = extract_chain_domain(chain, params.min_moneyness_points);
     if (!domain.has_value()) {
         return std::unexpected(domain.error());
     }
@@ -713,7 +677,8 @@ build_adaptive_chebyshev(
 
     std::shared_ptr<ChebyshevRawSurface> last_surface;
     auto build_fn = make_chebyshev_build_fn(pde_cache, build_cfg, last_surface);
-    auto refine_fn = make_chebyshev_refine_fn(state);
+    auto refine_fn = detail::make_chebyshev_refine_fn(state);
+    auto state_hooks = detail::make_chebyshev_state_hooks(state);
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
 
     auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
@@ -727,24 +692,26 @@ build_adaptive_chebyshev(
     initial.rate = cc_level_nodes(state.rate_level, state.rate_lo, state.rate_hi);
     initial.exact = true;  // Preserve CC node placement
 
-    // TODO(#434, task 8/9): supply snapshot/restore hooks for the CC level
-    // counters held in `state` (spec D6) so the backtracking walk can roll
-    // them back with the grids.
+    // The hooks roll the CC level counters back with the grids whenever the
+    // backtracking walk resets to the exploration base (spec D6); without
+    // them a rejected trial would leave its level bump behind and the next
+    // refinement of that axis would skip a level.
     auto grid_result = run_refinement(
         params, build_fn, refine_fn, ctx,
-        prepare_refs_fn, score_fn, initial, RefineStateHooks{});
+        prepare_refs_fn, score_fn, initial, state_hooks);
     if (!grid_result.has_value()) {
         return std::unexpected(grid_result.error());
     }
 
     auto& grids = grid_result.value();
 
-    // Build final Chebyshev surface from the converged grids.
-    // The side-channel last_surface captures the typed ChebyshevRawSurface.
-    auto final_handle = build_fn(grids.moneyness, grids.tau,
-                                 grids.vol, grids.rate);
-    if (!final_handle.has_value()) {
-        return std::unexpected(final_handle.error());
+    // No extra build here: run_refinement guarantees the last surface it
+    // built is the one whose grids it returns (it rebuilds when the retained
+    // candidate is not the last build), so the `last_surface` side channel
+    // already holds the typed ChebyshevRawSurface for `grids` (spec D9).
+    if (!last_surface) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::SurfaceBuildFailed});
     }
 
     ChebyshevAdaptiveResult result;
@@ -808,7 +775,8 @@ ChebyshevSegmentedBuilder::create(
 
 std::vector<double>
 ChebyshevSegmentedBuilder::generate_tau_nodes(size_t tau_level) const {
-    return generate_segmented_tau_nodes(tau_level, seg_bounds_, seg_is_gap_);
+    return detail::generate_segmented_tau_nodes(
+        tau_level, seg_bounds_, seg_is_gap_);
 }
 
 ChebyshevSegmentedBuilder::ExtendedBounds
@@ -922,8 +890,9 @@ ChebyshevSegmentedBuilder::build_adaptive(
         .seg_is_gap = seg_is_gap_,
     };
 
-    auto build_fn = make_segmented_chebyshev_build_fn(pde_cache, build_cfg, state);
-    auto refine_fn = make_segmented_chebyshev_refine_fn(state);
+    auto build_fn = make_segmented_chebyshev_build_fn(pde_cache, build_cfg);
+    auto refine_fn = detail::make_segmented_chebyshev_refine_fn(state);
+    auto state_hooks = detail::make_chebyshev_state_hooks(state);
     auto validate_fn = make_validate_fn(
         config_.dividend_yield, config_.option_type, config_.discrete_dividends);
     auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
@@ -957,12 +926,11 @@ ChebyshevSegmentedBuilder::build_adaptive(
         .sample_bounds = sample_domain_,
     };
 
-    // TODO(#434, task 8/9): supply snapshot/restore hooks for the CC level
-    // counters held in `state` (spec D6) so the backtracking walk can roll
-    // them back with the grids.
+    // Level counters roll back with the grids on every backtracking reset
+    // (spec D6); see build_adaptive_chebyshev for the rationale.
     auto grid_result = run_refinement(
         params, build_fn, refine_fn, ctx,
-        prepare_refs_fn, score_fn, initial, RefineStateHooks{});
+        prepare_refs_fn, score_fn, initial, state_hooks);
     if (!grid_result) return std::unexpected(grid_result.error());
     auto& grids = *grid_result;
 
