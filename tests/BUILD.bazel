@@ -1119,6 +1119,7 @@ cc_test(
         "//src/option/table:tau_segment_split",
         "//src/option/table/bspline:bspline_adaptive",
         "//src/option/table/bspline:bspline_pde_cache",
+        "//src/option/table/bspline:bspline_segmented_builder",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option/table/chebyshev:chebyshev_surface",

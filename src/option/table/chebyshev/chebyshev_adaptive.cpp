@@ -648,12 +648,16 @@ build_adaptive_chebyshev(
     const AdaptiveGridParams& params,
     const OptionGrid& chain, OptionType type)
 {
-    auto domain = extract_chain_domain(chain);
+    // Chebyshev builds its own fit domain from the CC-level extension below,
+    // so the B-spline headroom baked into `bounds` is discarded here (spec
+    // D3: no double headroom).  Only `sample_bounds` is consumed.
+    auto domain = extract_chain_domain(chain, chain.strikes.size());
     if (!domain.has_value()) {
         return std::unexpected(domain.error());
     }
     auto ctx = std::move(*domain);
     ctx.option_type = type;
+    ctx.bounds = ctx.sample_bounds;
 
     // Initial CC levels for each dimension
     constexpr size_t kInitMLevel = 5;      // 33 nodes
@@ -689,11 +693,16 @@ build_adaptive_chebyshev(
         .rate_hi = ctx.bounds.rate_max + hr,
     };
 
-    // Keep ctx bounds at the original chain domain (NOT the extended
-    // Chebyshev domain).  ctx bounds control validation LHS sampling and
-    // error-bin normalization -- both should target the market-relevant
-    // region.  The CGL/CC grid nodes extend beyond ctx via state.*_lo/hi,
-    // and initial.exact=true prevents seed_grid() from clipping them.
+    // Fit bounds = the domain the nodes actually supplied to the builder
+    // span (spec D2).  Validation LHS sampling and error-bin normalization
+    // read ctx.sample_bounds instead, so they stay on the market-relevant
+    // region; initial.exact=true prevents seed_grid() from clipping nodes.
+    ctx.bounds = SurfaceBounds{
+        .m_min = state.m_lo, .m_max = state.m_hi,
+        .tau_min = state.tau_lo, .tau_max = state.tau_hi,
+        .sigma_min = state.sigma_lo, .sigma_max = state.sigma_hi,
+        .rate_min = state.rate_lo, .rate_max = state.rate_hi,
+    };
 
     ChebyshevPDECache pde_cache;
     ChebyshevBuildConfig build_cfg{
@@ -917,11 +926,19 @@ ChebyshevSegmentedBuilder::build_adaptive(
     initial.rate = cc_level_nodes(state.rate_level, state.rate_lo, state.rate_hi);
     initial.exact = true;
 
+    // domain_ carries no support headroom (spec D3); the fit domain is the
+    // CC-extended node span, the sample domain is the user's own range.
     RefinementContext ctx{
         .spot = config_.spot,
         .dividend_yield = config_.dividend_yield,
         .option_type = config_.option_type,
-        .bounds = domain_,
+        .bounds = {
+            .m_min = state.m_lo, .m_max = state.m_hi,
+            .tau_min = state.tau_lo, .tau_max = state.tau_hi,
+            .sigma_min = state.sigma_lo, .sigma_max = state.sigma_hi,
+            .rate_min = state.rate_lo, .rate_max = state.rate_hi,
+        },
+        .sample_bounds = domain_,
     };
 
     auto grid_result = run_refinement(

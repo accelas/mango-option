@@ -60,8 +60,11 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
 
 /// Builder for segmented B-spline surfaces (discrete dividends, multi-K_ref).
 ///
-/// Performs shared setup (K_ref resolution, domain expansion, headroom)
-/// once in create(), then builds via adaptive refinement.
+/// Performs shared setup (K_ref resolution, domain expansion) once in
+/// create(), then builds via adaptive refinement.  Support headroom is *not*
+/// baked in at create() time: the headroom scale depends on
+/// `AdaptiveGridParams::min_moneyness_points` (spec D3), so `build_adaptive()`
+/// derives the fit domain from the sample domain.
 class BSplineSegmentedBuilder {
 public:
     /// Create builder, performing shared setup.
@@ -69,14 +72,16 @@ public:
     create(const SegmentedAdaptiveConfig& config, const IVGrid& domain);
 
     /// Build with adaptive grid refinement.
+    /// Non-const: computes the fit domain (sample domain + D3 headroom) from
+    /// `params` before running the refinement loop.
     [[nodiscard]] std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
-    build_adaptive(const AdaptiveGridParams& params) const;
+    build_adaptive(const AdaptiveGridParams& params);
 
 private:
     BSplineSegmentedBuilder(
         SegmentedAdaptiveConfig config,
         std::vector<double> K_refs,
-        SurfaceBounds domain,
+        SurfaceBounds sample_domain,
         IVGrid initial_grid);
 
     /// Assemble multi-K_ref surface from per-K_ref segmented surfaces.
@@ -85,7 +90,8 @@ private:
 
     SegmentedAdaptiveConfig config_;
     std::vector<double> K_refs_;
-    SurfaceBounds domain_;
+    SurfaceBounds sample_domain_;  ///< user-facing measurement domain (D2)
+    SurfaceBounds fit_domain_;     ///< sample domain + D3 support headroom
     IVGrid initial_grid_;
 };
 

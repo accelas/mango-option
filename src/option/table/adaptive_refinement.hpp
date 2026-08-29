@@ -33,12 +33,23 @@ struct SurfaceHandle {
     size_t pde_solves = 0;
 };
 
-/// Domain bounds for the refinement loop
+/// Domain bounds for the refinement loop (spec D2).
+///
+/// Two domains are carried separately:
+///  - `bounds` is the **fit** domain: the span the grids/nodes handed to the
+///    builder cover, including any backend-specific support extension.
+///  - `sample_bounds` is the **measurement** domain the user actually asked
+///    for (their moneyness/tau/vol/rate ranges, after the minimum-spread
+///    widening in `expand_domain_bounds`, which is a usability floor rather
+///    than headroom).  Every validation sample and every error-bin
+///    normalization uses this domain, so accuracy is never measured in the
+///    unqueryable support band.
 struct RefinementContext {
     double spot;
     double dividend_yield;
     OptionType option_type;
-    SurfaceBounds bounds;
+    SurfaceBounds bounds;         ///< fit domain (support incl. headroom)
+    SurfaceBounds sample_bounds;  ///< user-facing measurement domain
 };
 
 /// Result of grid sizing from the refinement loop
@@ -324,9 +335,20 @@ expand_segmented_domain(const IVGrid& domain,
                         const std::vector<Dividend>& discrete_dividends,
                         double min_K_ref);
 
-/// Extract domain bounds from OptionGrid, expand, and add headroom.
+/// Extract domain bounds from OptionGrid (spec D2/D3).
+///
+/// Produces both the sample domain (user ranges + minimum-spread widening)
+/// and the B-spline fit domain (sample domain + `spline_support_headroom` on
+/// moneyness only).  `expected_m_knots` is the *expected seeded moneyness
+/// density* -- `max(user_moneyness_knots, params.min_moneyness_points)` --
+/// not the user strike count; passing the strike count makes the headroom an
+/// order of magnitude too wide.
+///
+/// Chebyshev callers must ignore `bounds` and build their own fit domain
+/// from `sample_bounds` via the CC-level extension (spec D3: no double
+/// headroom).
 std::expected<RefinementContext, PriceTableError>
-extract_chain_domain(const OptionGrid& chain);
+extract_chain_domain(const OptionGrid& chain, size_t expected_m_knots);
 
 /// Build InitialGrids from OptionGrid (log-moneyness from strikes).
 InitialGrids extract_initial_grids(const OptionGrid& chain);

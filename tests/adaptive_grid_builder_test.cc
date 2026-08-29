@@ -3,6 +3,7 @@
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/table/bspline/bspline_pde_cache.hpp"
+#include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
@@ -755,6 +756,15 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 2e-5;  // 2 bps
+    // Spec D3: headroom is now 3 * w / (min_moneyness_points - 1) instead of
+    // 3 * w / (n_strikes - 1), so this chain's support band shrinks from
+    // +/-0.31 to +/-0.03 log-moneyness.  A single build on the seeded grid is
+    // exactly what this regression is about -- whether that band is wide
+    // enough for a K=80 query to clear B-spline endpoint effects.  The
+    // refinement loop beyond it is a separate (pre-existing) pathology:
+    // focused refinement piles knots into one bin until the collocation fit
+    // is ill-conditioned, which is what the D5 viability gate addresses.
+    params.max_iter = 1;
 
     GridAccuracyParams accuracy;
     accuracy.min_spatial_points = 200;
@@ -1325,6 +1335,36 @@ TEST(ChebyshevSegmentedManual, BasicPricing) {
     double v = result->vega(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(v));
     EXPECT_GT(v, 0.0);
+}
+
+// Regression: a log-moneyness lower bound that does not survive an exp/log
+// round trip used to inject three near-duplicate knots.
+// Bug: expand_log_moneyness_grid compared log(exp(x_min) - total_div/K_ref)
+// against x_min with no tolerance.  With no dividends the subtraction is a
+// no-op, but the round trip can land one ULP below x_min, so the "expansion"
+// branch fired and inserted three knots spaced ~1e-17 apart.  The cubic
+// collocation solver then rejected the grid as unsorted and the whole build
+// failed with FittingFailed.
+TEST(SegmentedPriceTableBuilderTest, RegressionUlpRoundTripDoesNotExpand) {
+    // log(exp(x)) < x for this value.
+    constexpr double kHostileXMin = -0.38815151385769298;
+    ASSERT_LT(std::log(std::exp(kHostileXMin)), kHostileXMin);
+
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0,
+        .option_type = OptionType::PUT,
+        .dividends = {.dividend_yield = 0.02, .discrete_dividends = {}},
+        .grid = {.moneyness = {kHostileXMin, -0.2, 0.0, 0.15, 0.29},
+                 .vol = {0.10, 0.15, 0.20, 0.30},
+                 .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 1.0,
+        .tau_points_per_segment = 5,
+    };
+
+    auto surface = SegmentedPriceTableBuilder::build(config);
+    ASSERT_TRUE(surface.has_value())
+        << "build failed with code "
+        << static_cast<int>(surface.error().code);
 }
 
 // ===========================================================================

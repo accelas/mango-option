@@ -440,12 +440,14 @@ evaluate_samples(
         sum_error += iv_error;
         valid_samples++;
 
-        // Normalize position for error bins
+        // Normalize position for error bins over the SAMPLE domain (spec
+        // D2) -- bins must line up with the domain the samples came from.
+        const auto& sb = ctx.sample_bounds;
         std::array<double, 4> norm_pos = {{
-            (m - ctx.bounds.m_min) / (ctx.bounds.m_max - ctx.bounds.m_min),
-            (tau - ctx.bounds.tau_min) / (ctx.bounds.tau_max - ctx.bounds.tau_min),
-            (sigma - ctx.bounds.sigma_min) / (ctx.bounds.sigma_max - ctx.bounds.sigma_min),
-            (rate - ctx.bounds.rate_min) / (ctx.bounds.rate_max - ctx.bounds.rate_min)
+            (m - sb.m_min) / (sb.m_max - sb.m_min),
+            (tau - sb.tau_min) / (sb.tau_max - sb.tau_min),
+            (sigma - sb.sigma_min) / (sb.sigma_max - sb.sigma_min),
+            (rate - sb.rate_min) / (sb.rate_max - sb.rate_min)
         }};
         error_bins.record_error(norm_pos, iv_error, target_iv_error);
     }
@@ -490,6 +492,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         });
     }
 
+    // Grids are seeded over and span the FIT domain ...
     const double min_moneyness = ctx.bounds.m_min;
     const double max_moneyness = ctx.bounds.m_max;
     const double min_tau = ctx.bounds.tau_min;
@@ -498,6 +501,15 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     const double max_vol = ctx.bounds.sigma_max;
     const double min_rate = ctx.bounds.rate_min;
     const double max_rate = ctx.bounds.rate_max;
+
+    // ... while all measurement (validation sampling, bin normalization,
+    // focus intervals) happens over the user-facing SAMPLE domain (spec D2).
+    const std::array<std::pair<double, double>, 4> sample_axis_bounds = {{
+        {ctx.sample_bounds.m_min, ctx.sample_bounds.m_max},
+        {ctx.sample_bounds.tau_min, ctx.sample_bounds.tau_max},
+        {ctx.sample_bounds.sigma_min, ctx.sample_bounds.sigma_max},
+        {ctx.sample_bounds.rate_min, ctx.sample_bounds.rate_max}
+    }};
 
     std::vector<double> moneyness_grid, maturity_grid, vol_grid, rate_grid;
 
@@ -559,15 +571,9 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 
         stats.pde_solves_table = handle.pde_solves;
 
-        // b. GENERATE VALIDATION SAMPLE
-        std::array<std::pair<double, double>, 4> bounds = {{
-            {min_moneyness, max_moneyness},
-            {min_tau, max_tau},
-            {min_vol, max_vol},
-            {min_rate, max_rate}
-        }};
+        // b. GENERATE VALIDATION SAMPLE (from the sample domain, spec D2)
         auto samples = generate_validation_samples(
-            params, iteration, bounds, focus_bins, focus_active);
+            params, iteration, sample_axis_bounds, focus_bins, focus_active);
 
         // c. VALIDATE AGAINST FRESH FD SOLVES
         auto eval_result = evaluate_samples(
@@ -605,14 +611,10 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 
         // Convert the chosen axis's problematic bins into physical focus
         // intervals for the refiner (spec D2 bin->interval conversion).
-        // Task 5 flips this to sample_bounds.
-        std::pair<double, double> axis_bounds;
-        switch (worst_dim) {
-            case 0: axis_bounds = {min_moneyness, max_moneyness}; break;
-            case 1: axis_bounds = {min_tau, max_tau}; break;
-            case 2: axis_bounds = {min_vol, max_vol}; break;
-            default: axis_bounds = {min_rate, max_rate}; break;
-        }
+        // Bins are normalized over the sample domain, so the inverse map
+        // must use the same domain.
+        const auto& axis_bounds =
+            sample_axis_bounds[std::min(worst_dim, size_t{3})];
         auto problematic_bins = error_bins.problematic_bins(worst_dim);
         std::vector<std::pair<double, double>> focus_intervals;
         focus_intervals.reserve(problematic_bins.size());
@@ -735,7 +737,7 @@ expand_segmented_domain(const IVGrid& domain,
 }
 
 std::expected<RefinementContext, PriceTableError>
-extract_chain_domain(const OptionGrid& chain) {
+extract_chain_domain(const OptionGrid& chain, size_t expected_m_knots) {
     if (chain.strikes.empty() || chain.maturities.empty() ||
         chain.implied_vols.empty() || chain.rates.empty()) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
@@ -753,29 +755,39 @@ extract_chain_domain(const OptionGrid& chain) {
     auto [min_vol, max_vol] = std::minmax_element(chain.implied_vols.begin(), chain.implied_vols.end());
     auto [min_rate, max_rate] = std::minmax_element(chain.rates.begin(), chain.rates.end());
 
-    expand_domain_bounds(min_m, max_m, 0.10);
-    double h = spline_support_headroom(max_m - min_m, chain.strikes.size());
-    min_m -= h;
-    max_m += h;
-
     double lo_tau = *min_tau, hi_tau = *max_tau;
     double lo_vol = *min_vol, hi_vol = *max_vol;
     double lo_rate = *min_rate, hi_rate = *max_rate;
 
+    // The minimum-spread widening is part of the SAMPLE domain: it is a
+    // usability floor on degenerate user ranges, not interpolation headroom.
+    expand_domain_bounds(min_m, max_m, 0.10);
     expand_domain_bounds(lo_tau, hi_tau, 0.5, kMinPositive);
     expand_domain_bounds(lo_vol, hi_vol, 0.10, kMinPositive);
     expand_domain_bounds(lo_rate, hi_rate, 0.04);
+
+    SurfaceBounds sample{
+        .m_min = min_m, .m_max = max_m,
+        .tau_min = lo_tau, .tau_max = hi_tau,
+        .sigma_min = lo_vol, .sigma_max = hi_vol,
+        .rate_min = lo_rate, .rate_max = hi_rate,
+    };
+
+    // Fit domain = sample domain + B-spline support headroom on moneyness
+    // only (spec D3).  The headroom scale is set by the *expected seeded*
+    // moneyness density, not by the user's strike count.
+    SurfaceBounds fit = sample;
+    double h = spline_support_headroom(sample.m_max - sample.m_min,
+                                       expected_m_knots);
+    fit.m_min -= h;
+    fit.m_max += h;
 
     return RefinementContext{
         .spot = chain.spot,
         .dividend_yield = chain.dividend_yield,
         .option_type = {},  // caller sets this
-        .bounds = {
-            .m_min = min_m, .m_max = max_m,
-            .tau_min = lo_tau, .tau_max = hi_tau,
-            .sigma_min = lo_vol, .sigma_max = hi_vol,
-            .rate_min = lo_rate, .rate_max = hi_rate,
-        },
+        .bounds = fit,
+        .sample_bounds = sample,
     };
 }
 
