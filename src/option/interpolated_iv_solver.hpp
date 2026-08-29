@@ -220,6 +220,11 @@ public:
     /// Solve for implied volatility (batch with OpenMP)
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
+    /// Diagnostics from adaptive grid refinement (spec D7), propagated from
+    /// the `AnyPriceTable` this solver was built from.  `nullopt` when the
+    /// table was built manually or loaded from Parquet.
+    [[nodiscard]] std::optional<BuildDiagnostics> build_diagnostics() const;
+
     // Pimpl: move-only, defined in .cpp
     struct Impl;
     explicit AnyInterpIVSolver(std::unique_ptr<Impl> impl);
@@ -286,29 +291,41 @@ using SharedPriceTableSolver =
     InterpolatedIVSolver<detail::SharedPriceTableSurface<Surface>>;
 
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    InterpolatedIVSolver<BSplinePriceTable> solver);
+    InterpolatedIVSolver<BSplinePriceTable> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    InterpolatedIVSolver<BSplineMultiKRefSurface> solver);
+    InterpolatedIVSolver<BSplineMultiKRefSurface> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    InterpolatedIVSolver<ChebyshevSurface> solver);
+    InterpolatedIVSolver<ChebyshevSurface> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    InterpolatedIVSolver<ChebyshevMultiKRefSurface> solver);
+    InterpolatedIVSolver<ChebyshevMultiKRefSurface> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    InterpolatedIVSolver<BSpline3DPriceTable> solver);
+    InterpolatedIVSolver<BSpline3DPriceTable> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    InterpolatedIVSolver<Chebyshev3DPriceTable> solver);
+    InterpolatedIVSolver<Chebyshev3DPriceTable> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    SharedPriceTableSolver<BSplinePriceTable> solver);
+    SharedPriceTableSolver<BSplinePriceTable> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    SharedPriceTableSolver<BSplineMultiKRefSurface> solver);
+    SharedPriceTableSolver<BSplineMultiKRefSurface> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    SharedPriceTableSolver<ChebyshevSurface> solver);
+    SharedPriceTableSolver<ChebyshevSurface> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    SharedPriceTableSolver<ChebyshevMultiKRefSurface> solver);
+    SharedPriceTableSolver<ChebyshevMultiKRefSurface> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    SharedPriceTableSolver<BSpline3DPriceTable> solver);
+    SharedPriceTableSolver<BSpline3DPriceTable> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 [[nodiscard]] AnyInterpIVSolver make_any_interpolated_solver(
-    SharedPriceTableSolver<Chebyshev3DPriceTable> solver);
+    SharedPriceTableSolver<Chebyshev3DPriceTable> solver,
+    std::optional<BuildDiagnostics> diagnostics = std::nullopt);
 
 /// Factory function: build price surface and IV solver from config
 ///

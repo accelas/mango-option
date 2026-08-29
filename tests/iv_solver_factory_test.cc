@@ -439,4 +439,27 @@ TEST(IVSolverFactoryComparison, AccuracyManualVsAdaptive) {
     EXPECT_LT(adaptive_max_err, 0.05);
 }
 
+// ---------------------------------------------------------------------------
+// Build diagnostics surfaced through the convenience factory (spec D7)
+// ---------------------------------------------------------------------------
+
+TEST(IVSolverFactoryBuildDiagnostics, ManualPathHasNoDiagnostics) {
+    auto solver = build_solver(make_base_config());
+    EXPECT_FALSE(solver.build_diagnostics().has_value());
+}
+
+TEST(IVSolverFactoryBuildDiagnostics, AdaptivePathExposesDiagnostics) {
+    auto config = make_base_config();
+    config.adaptive = AdaptiveGridParams{
+        .target_iv_error = 0.002,
+        .max_iter = 3,
+        .validation_samples = 16,
+    };
+    auto solver = build_solver(config);
+
+    auto diag = solver.build_diagnostics();
+    ASSERT_TRUE(diag.has_value());
+    EXPECT_GE(diag->total_iterations, 1u);
+}
+
 }  // namespace

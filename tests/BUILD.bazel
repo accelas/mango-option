@@ -182,7 +182,9 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
+        "//src/option:option_grid",
         "//src/option:price_table_factory",
+        "//src/option/table:adaptive_refinement",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

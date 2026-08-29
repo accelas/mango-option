@@ -726,6 +726,8 @@ build_adaptive_chebyshev(
     result.achieved_avg_error = grids.achieved_avg_error;
     result.target_met = grids.target_met;
     result.total_pde_solves = pde_cache.total_pde_solves();
+    result.diagnostics = std::move(grids.diagnostics);
+    result.sample_bounds = ctx.sample_bounds;
 
     return result;
 }
@@ -811,7 +813,8 @@ ChebyshevSegmentedBuilder::build_all_krefs(
     std::span<const double> m_nodes,
     std::span<const double> tau_nodes,
     std::span<const double> sigma_nodes,
-    std::span<const double> rate_nodes) const
+    std::span<const double> rate_nodes,
+    const SurfaceBounds& bounds) const
 {
     std::vector<ChebyshevTauSegmented> kref_surfaces;
     size_t total_pde_solves = 0;
@@ -831,7 +834,7 @@ ChebyshevSegmentedBuilder::build_all_krefs(
 
     return AssembleResult{
         .surface = ChebyshevMultiKRefSurface(
-            std::move(inner), domain_,
+            std::move(inner), bounds,
             config_.option_type, config_.dividend_yield),
         .pde_solves = total_pde_solves,
     };
@@ -852,7 +855,7 @@ ChebyshevSegmentedBuilder::build(std::array<size_t, 4> cc_levels) const
     }
 
     auto assembled = build_all_krefs(
-        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes, domain_);
     if (!assembled) return std::unexpected(assembled.error());
     return std::move(assembled->surface);
 }
@@ -939,9 +942,11 @@ ChebyshevSegmentedBuilder::build_adaptive(
     if (!grid_result) return std::unexpected(grid_result.error());
     auto& grids = *grid_result;
 
-    // Assemble final surface from converged grids
+    // Assemble final surface from converged grids.  Published bounds =
+    // the user-facing sample domain (spec D2), not the CC-extended node
+    // domain the grids actually span.
     auto surface = build_all_krefs(
-        grids.moneyness, grids.tau, grids.vol, grids.rate);
+        grids.moneyness, grids.tau, grids.vol, grids.rate, sample_domain_);
     if (!surface) return std::unexpected(surface.error());
 
     // Mandatory final validation of the assembled surface (spec D9).
@@ -999,6 +1004,7 @@ ChebyshevSegmentedBuilder::build_adaptive(
         .total_pde_solves = pde_cache.total_pde_solves() + surface->pde_solves
                           + validation->ref_attempts * 3,
         .diagnostics = std::move(diagnostics),
+        .sample_bounds = sample_domain_,
     };
 }
 

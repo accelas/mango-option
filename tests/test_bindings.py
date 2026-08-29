@@ -190,6 +190,49 @@ def test_bspline_4d_price_table_workflow_and_persistence_paths():
         assert_finite_number(loaded.price(p))
 
 
+def test_build_diagnostics_property():
+    # Manual (non-adaptive) build: no diagnostics.
+    manual_table = mo.make_price_table(make_price_table_config())
+    assert manual_table.build_diagnostics is None
+    manual_solver = manual_table.make_iv_solver()
+    assert manual_solver.build_diagnostics is None
+
+    # Adaptive build: diagnostics dict with the documented keys.
+    config = make_price_table_config()
+    adaptive = mo.AdaptiveGridParams()
+    adaptive.target_iv_error = 0.002
+    adaptive.max_iter = 3
+    adaptive.validation_samples = 16
+    config.adaptive = adaptive
+
+    table = mo.make_price_table(config)
+    diag = table.build_diagnostics
+    assert diag is not None
+    expected_keys = {
+        "target_met", "achieved_max_error", "achieved_avg_error",
+        "picked_iteration", "total_iterations", "final_rebuild",
+        "build_failure_fallback", "holdout_points", "holdout_points_invalid",
+        "monotonicity_violations", "monotonicity_points_invalid",
+        "worst_vega_slope", "n_iterations",
+    }
+    assert expected_keys <= diag.keys()
+    assert diag["total_iterations"] >= 1
+
+    # make_iv_solver() propagates the same diagnostics.
+    solver = table.make_iv_solver()
+    solver_diag = solver.build_diagnostics
+    assert solver_diag is not None
+    assert solver_diag["total_iterations"] == diag["total_iterations"]
+    assert solver_diag["target_met"] == diag["target_met"]
+
+    # Parquet round-trip drops diagnostics (never serialized).
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "adaptive_surface.parquet"
+        table.save(path)
+        loaded = mo.PriceTable.load(path)
+        assert loaded.build_diagnostics is None
+
+
 def test_price_table_validation_and_iv_error_parity():
     table = mo.make_price_table(make_price_table_config())
     p = make_bspline_4d_off_grid_params()

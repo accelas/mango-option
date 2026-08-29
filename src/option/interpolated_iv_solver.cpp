@@ -55,8 +55,13 @@ struct AnyInterpIVSolver::Impl {
 
     SolverVariant solver;
 
+    /// Diagnostics from adaptive grid refinement (spec D7), propagated from
+    /// the `AnyPriceTable` this solver was built from.
+    std::optional<BuildDiagnostics> diagnostics;
+
     template <typename T>
-    explicit Impl(T s) : solver(std::move(s)) {}
+    explicit Impl(T s, std::optional<BuildDiagnostics> diag = std::nullopt)
+        : solver(std::move(s)), diagnostics(std::move(diag)) {}
 };
 
 AnyInterpIVSolver::AnyInterpIVSolver(std::unique_ptr<Impl> impl)
@@ -80,21 +85,27 @@ AnyInterpIVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
     }, impl_->solver);
 }
 
+std::optional<BuildDiagnostics> AnyInterpIVSolver::build_diagnostics() const {
+    return impl_->diagnostics;
+}
+
 namespace {
 
 template <typename Surface>
 AnyInterpIVSolver make_any_solver(
-    InterpolatedIVSolver<Surface> solver) {
-    return AnyInterpIVSolver(
-        std::make_unique<AnyInterpIVSolver::Impl>(std::move(solver)));
+    InterpolatedIVSolver<Surface> solver,
+    std::optional<BuildDiagnostics> diagnostics) {
+    return AnyInterpIVSolver(std::make_unique<AnyInterpIVSolver::Impl>(
+        std::move(solver), std::move(diagnostics)));
 }
 
 }  // namespace
 
 #define MANGO_DEFINE_ANY_INTERP_OVERLOAD(Surface) \
     AnyInterpIVSolver make_any_interpolated_solver( \
-        InterpolatedIVSolver<Surface> solver) { \
-        return make_any_solver(std::move(solver)); \
+        InterpolatedIVSolver<Surface> solver, \
+        std::optional<BuildDiagnostics> diagnostics) { \
+        return make_any_solver(std::move(solver), std::move(diagnostics)); \
     }
 
 MANGO_DEFINE_ANY_INTERP_OVERLOAD(BSplinePriceTable)

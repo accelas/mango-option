@@ -24,6 +24,13 @@ struct BSplineAdaptiveResult {
     double achieved_avg_error = 0.0;
     bool target_met = false;
     size_t total_pde_solves = 0;
+
+    /// Build diagnostics (spec D7) and the user-facing measurement domain
+    /// (spec D2).  Callers publishing this surface must use `sample_bounds`
+    /// as the queryable bounds, not the spline's own knot span (which
+    /// includes B-spline support headroom).
+    BuildDiagnostics diagnostics;
+    SurfaceBounds sample_bounds{};
 };
 
 /// Result of adaptive segmented B-spline surface construction
@@ -51,6 +58,11 @@ struct BSplineSegmentedAdaptiveResult {
     /// assembles a surface none of them built, so there is no single picked
     /// iteration to name.
     BuildDiagnostics diagnostics;
+
+    /// User-facing measurement domain (spec D2).  Callers publishing this
+    /// surface must use this as the queryable bounds, not the aggregated
+    /// grids' own span (which includes fit-domain support headroom).
+    SurfaceBounds sample_bounds{};
 };
 
 /// Create a RefineFn that does B-spline midpoint insertion, targeted at the

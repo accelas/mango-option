@@ -46,18 +46,33 @@ using PriceTableVariant = std::variant<
 struct AnyPriceTable::Impl {
     PriceTableVariant table;
 
+    /// Adaptive-build diagnostics (spec D7).  `nullopt` for manual builds
+    /// and Parquet loads; never visited by `to_data()`/serialization.
+    std::optional<BuildDiagnostics> diagnostics;
+
     template <typename T>
-    explicit Impl(T t)
-        : table(std::make_shared<const T>(std::move(t))) {}
+    explicit Impl(T t, std::optional<BuildDiagnostics> diag = std::nullopt)
+        : table(std::make_shared<const T>(std::move(t)))
+        , diagnostics(std::move(diag)) {}
 };
 
 namespace {
 
 template <typename Table>
-AnyPriceTable make_any_price_table(Table table) {
-    return AnyPriceTable(
-        std::make_unique<AnyPriceTable::Impl>(std::move(table)));
+AnyPriceTable make_any_price_table(
+    Table table, std::optional<BuildDiagnostics> diagnostics = std::nullopt) {
+    return AnyPriceTable(std::make_unique<AnyPriceTable::Impl>(
+        std::move(table), std::move(diagnostics)));
 }
+
+/// A built table plus its adaptive-build diagnostics, when any (spec D7).
+/// Internal carrier so the `build_*_table` helpers can hand diagnostics up
+/// to the `AnyPriceTable::Impl` that ultimately owns them.
+template <typename Table>
+struct BuiltTable {
+    Table table;
+    std::optional<BuildDiagnostics> diagnostics;
+};
 
 template <typename Table>
 constexpr const char* surface_type_for_table() {
@@ -191,23 +206,28 @@ std::expected<BSplineMultiKRefInner, PriceTableError> build_multi_kref_manual(
 
 BSplineMultiKRefSurface wrap_multi_kref_surface(
     BSplineMultiKRefInner surface,
-    const GridBounds& b,
-    double maturity,
+    const SurfaceBounds& bounds,
     OptionType option_type,
     double dividend_yield)
 {
-    SurfaceBounds bounds{
+    return BSplineMultiKRefSurface(
+        std::move(surface), bounds, option_type, dividend_yield);
+}
+
+/// Bounds for the manually-gridded segmented surface: the user's own grid
+/// range, tau spanning [0, maturity].  Adaptive builds instead publish the
+/// builder's `sample_bounds` directly (spec D2) -- see the adaptive branch
+/// of `build_bspline_segmented_table`.
+SurfaceBounds manual_segmented_bounds(const GridBounds& b, double maturity) {
+    return SurfaceBounds{
         .m_min = b.m_min, .m_max = b.m_max,
         .tau_min = 0.0, .tau_max = maturity,
         .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
         .rate_min = b.rate_min, .rate_max = b.rate_max,
     };
-
-    return BSplineMultiKRefSurface(
-        std::move(surface), bounds, option_type, dividend_yield);
 }
 
-std::expected<BSplineMultiKRefSurface, ValidationError>
+std::expected<BuiltTable<BSplineMultiKRefSurface>, ValidationError>
 build_bspline_segmented_table(const IVSolverFactoryConfig& config,
                               const DiscreteDividendConfig& divs) {
     auto log_m = to_log_moneyness(config.grid.moneyness);
@@ -236,9 +256,14 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
             return std::unexpected(to_validation_error(result.error()));
         }
 
-        return wrap_multi_kref_surface(
-            std::move(result->surface), b, divs.maturity,
-            config.option_type, config.dividend_yield);
+        // Published bounds = the sample domain the builder actually
+        // measured (spec D2), not the user's raw grid range.
+        return BuiltTable<BSplineMultiKRefSurface>{
+            .table = wrap_multi_kref_surface(
+                std::move(result->surface), result->sample_bounds,
+                config.option_type, config.dividend_yield),
+            .diagnostics = std::move(result->diagnostics),
+        };
     }
 
     DividendSpec dividends{
@@ -253,12 +278,15 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
         return std::unexpected(to_validation_error(surface.error()));
     }
 
-    return wrap_multi_kref_surface(
-        std::move(*surface), b, divs.maturity,
-        config.option_type, config.dividend_yield);
+    return BuiltTable<BSplineMultiKRefSurface>{
+        .table = wrap_multi_kref_surface(
+            std::move(*surface), manual_segmented_bounds(b, divs.maturity),
+            config.option_type, config.dividend_yield),
+        .diagnostics = std::nullopt,
+    };
 }
 
-std::expected<BSplinePriceTable, ValidationError>
+std::expected<BuiltTable<BSplinePriceTable>, ValidationError>
 build_bspline_continuous_table(const IVSolverFactoryConfig& config,
                                const BSplineBackend& backend) {
     if (config.adaptive.has_value()) {
@@ -281,14 +309,19 @@ build_bspline_continuous_table(const IVSolverFactoryConfig& config,
             return std::unexpected(to_validation_error(result.error()));
         }
 
+        // Published bounds = the sample domain (spec D2), not the spline's
+        // own knot span, which includes B-spline support headroom.
         auto table = make_bspline_surface(
             std::move(result->spline), chain.spot, chain.dividend_yield,
-            config.option_type);
+            config.option_type, result->sample_bounds);
         if (!table.has_value()) {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::InvalidGridSize, 0.0});
         }
-        return std::move(*table);
+        return BuiltTable<BSplinePriceTable>{
+            .table = std::move(*table),
+            .diagnostics = std::move(result->diagnostics),
+        };
     }
 
     auto log_m = to_log_moneyness(config.grid.moneyness);
@@ -323,29 +356,34 @@ build_bspline_continuous_table(const IVSolverFactoryConfig& config,
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
-    return std::move(*table);
+    return BuiltTable<BSplinePriceTable>{
+        .table = std::move(*table),
+        .diagnostics = std::nullopt,
+    };
 }
 
 std::expected<AnyPriceTable, ValidationError>
 build_bspline_table(const IVSolverFactoryConfig& config,
                     const BSplineBackend& backend) {
     if (config.discrete_dividends.has_value()) {
-        auto table = build_bspline_segmented_table(
+        auto built = build_bspline_segmented_table(
             config, *config.discrete_dividends);
-        if (!table.has_value()) {
-            return std::unexpected(table.error());
+        if (!built.has_value()) {
+            return std::unexpected(built.error());
         }
-        return make_any_price_table(std::move(*table));
+        return make_any_price_table(
+            std::move(built->table), std::move(built->diagnostics));
     }
 
-    auto table = build_bspline_continuous_table(config, backend);
-    if (!table.has_value()) {
-        return std::unexpected(table.error());
+    auto built = build_bspline_continuous_table(config, backend);
+    if (!built.has_value()) {
+        return std::unexpected(built.error());
     }
-    return make_any_price_table(std::move(*table));
+    return make_any_price_table(
+        std::move(built->table), std::move(built->diagnostics));
 }
 
-std::expected<ChebyshevMultiKRefSurface, ValidationError>
+std::expected<BuiltTable<ChebyshevMultiKRefSurface>, ValidationError>
 build_chebyshev_segmented_table(const IVSolverFactoryConfig& config,
                                 const DiscreteDividendConfig& divs) {
     auto log_m = to_log_moneyness(config.grid.moneyness);
@@ -370,14 +408,23 @@ build_chebyshev_segmented_table(const IVSolverFactoryConfig& config,
         if (!result.has_value()) {
             return std::unexpected(to_validation_error(result.error()));
         }
-        return std::move(result->surface);
+        // The surface already carries the sample-domain bounds (spec D2):
+        // ChebyshevSegmentedBuilder::build_adaptive publishes sample_bounds
+        // directly rather than the CC-extended node domain.
+        return BuiltTable<ChebyshevMultiKRefSurface>{
+            .table = std::move(result->surface),
+            .diagnostics = std::move(result->diagnostics),
+        };
     }
 
     auto surface = build_chebyshev_segmented_manual(seg_config, log_grid);
     if (!surface.has_value()) {
         return std::unexpected(to_validation_error(surface.error()));
     }
-    return std::move(*surface);
+    return BuiltTable<ChebyshevMultiKRefSurface>{
+        .table = std::move(*surface),
+        .diagnostics = std::nullopt,
+    };
 }
 
 std::expected<ChebyshevSurface, ValidationError>
@@ -408,12 +455,13 @@ std::expected<AnyPriceTable, ValidationError>
 build_chebyshev_table(const IVSolverFactoryConfig& config,
                       const ChebyshevBackend& backend) {
     if (config.discrete_dividends.has_value()) {
-        auto table = build_chebyshev_segmented_table(
+        auto built = build_chebyshev_segmented_table(
             config, *config.discrete_dividends);
-        if (!table.has_value()) {
-            return std::unexpected(table.error());
+        if (!built.has_value()) {
+            return std::unexpected(built.error());
         }
-        return make_any_price_table(std::move(*table));
+        return make_any_price_table(
+            std::move(built->table), std::move(built->diagnostics));
     }
 
     auto table = build_chebyshev_continuous_table(config, backend);
@@ -800,8 +848,13 @@ AnyPriceTable::make_iv_solver(
         if (!solver.has_value()) {
             return std::unexpected(solver.error());
         }
-        return make_any_interpolated_solver(std::move(*solver));
+        return make_any_interpolated_solver(
+            std::move(*solver), impl_->diagnostics);
     }, impl_->table);
+}
+
+std::optional<BuildDiagnostics> AnyPriceTable::build_diagnostics() const {
+    return impl_->diagnostics;
 }
 
 std::expected<IVSuccess, IVError>

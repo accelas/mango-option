@@ -264,6 +264,32 @@ void validate_price_table_params_or_raise(const mango::AnyPriceTable& table,
     }
 }
 
+/// Convert adaptive-build diagnostics (spec D7) to a Python dict, or None
+/// when the table/solver wasn't built adaptively (manual build, Parquet
+/// load).
+py::object build_diagnostics_to_pyobject(
+    const std::optional<mango::BuildDiagnostics>& diagnostics) {
+    if (!diagnostics.has_value()) {
+        return py::none();
+    }
+    const auto& d = *diagnostics;
+    py::dict result;
+    result["target_met"] = d.target_met;
+    result["achieved_max_error"] = d.achieved_max_error;
+    result["achieved_avg_error"] = d.achieved_avg_error;
+    result["picked_iteration"] = d.picked_iteration;
+    result["total_iterations"] = d.total_iterations;
+    result["final_rebuild"] = d.final_rebuild;
+    result["build_failure_fallback"] = d.build_failure_fallback;
+    result["holdout_points"] = d.holdout_points;
+    result["holdout_points_invalid"] = d.holdout_points_invalid;
+    result["monotonicity_violations"] = d.monotonicity_violations;
+    result["monotonicity_points_invalid"] = d.monotonicity_points_invalid;
+    result["worst_vega_slope"] = d.worst_vega_slope;
+    result["n_iterations"] = d.iterations.size();
+    return result;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(mango_option, m) {
@@ -999,6 +1025,21 @@ PYBIND11_MODULE(mango_option, m) {
         .def_property_readonly("surface_type", &mango::AnyPriceTable::surface_type)
         .def_property_readonly("option_type", &mango::AnyPriceTable::option_type)
         .def_property_readonly("dividend_yield", &mango::AnyPriceTable::dividend_yield)
+        .def_property_readonly("build_diagnostics",
+            [](const mango::AnyPriceTable& table) {
+                return build_diagnostics_to_pyobject(table.build_diagnostics());
+            },
+            R"pbdoc(
+                Adaptive grid-refinement diagnostics, or None.
+
+                None for manually-gridded tables and tables loaded from
+                Parquet.  Otherwise a dict with keys: target_met,
+                achieved_max_error, achieved_avg_error, picked_iteration,
+                total_iterations, final_rebuild, build_failure_fallback,
+                holdout_points, holdout_points_invalid,
+                monotonicity_violations, monotonicity_points_invalid,
+                worst_vega_slope, n_iterations.
+            )pbdoc")
         .def("price",
             [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {
                 validate_price_table_params_or_raise(table, params);
@@ -1082,6 +1123,15 @@ PYBIND11_MODULE(mango_option, m) {
 
     // AnyInterpIVSolver (exposed as InterpolatedIVSolver for Python)
     py::class_<mango::AnyInterpIVSolver>(m, "InterpolatedIVSolver")
+        .def_property_readonly("build_diagnostics",
+            [](const mango::AnyInterpIVSolver& solver) {
+                return build_diagnostics_to_pyobject(solver.build_diagnostics());
+            },
+            R"pbdoc(
+                Adaptive grid-refinement diagnostics, or None.
+
+                See PriceTable.build_diagnostics for the dict shape.
+            )pbdoc")
         .def("solve",
             [](const mango::AnyInterpIVSolver& solver, const mango::IVQuery& query) {
                 auto result = solver.solve(query);

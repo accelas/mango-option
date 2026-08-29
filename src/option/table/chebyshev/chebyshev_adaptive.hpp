@@ -94,6 +94,13 @@ struct ChebyshevAdaptiveResult {
     double achieved_avg_error = 0.0;
     bool target_met = false;
     size_t total_pde_solves = 0;
+
+    /// Build diagnostics (spec D7) and the user-facing measurement domain
+    /// (spec D2).  Not consumed by the factory today (the continuous
+    /// Chebyshev factory path always uses the fixed builder), exposed for
+    /// direct callers of `build_adaptive_chebyshev`.
+    BuildDiagnostics diagnostics;
+    SurfaceBounds sample_bounds{};
 };
 
 /// Build Chebyshev surface with adaptive CC-level refinement.
@@ -145,6 +152,11 @@ struct ChebyshevSegmentedAdaptiveResult {
     /// sizing-loop iterations appended for forensics.  `picked_iteration`
     /// names the sizing loop's pick, not a build of the assembled surface.
     BuildDiagnostics diagnostics;
+
+    /// User-facing measurement domain (spec D2).  Callers publishing this
+    /// surface must use this as the queryable bounds, not the node domain
+    /// (which includes CC-level support headroom).
+    SurfaceBounds sample_bounds{};
 };
 
 /// Builder for segmented Chebyshev surfaces (discrete dividends, multi-K_ref).
@@ -180,11 +192,15 @@ private:
         std::vector<bool> seg_is_gap);
 
     /// Build all K_ref surfaces (includes per-K_ref PDE solves) and compose.
+    /// `bounds` is the published `SurfaceBounds` for the assembled surface:
+    /// `build()` passes the node/support domain, `build_adaptive()` passes
+    /// the user-facing sample domain (spec D2).
     [[nodiscard]] std::expected<AssembleResult, PriceTableError>
     build_all_krefs(std::span<const double> m_nodes,
                     std::span<const double> tau_nodes,
                     std::span<const double> sigma_nodes,
-                    std::span<const double> rate_nodes) const;
+                    std::span<const double> rate_nodes,
+                    const SurfaceBounds& bounds) const;
 
     [[nodiscard]] std::vector<double> generate_tau_nodes(size_t tau_level) const;
 

@@ -508,6 +508,8 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
     result.achieved_max_error = grids.achieved_max_error;
     result.achieved_avg_error = grids.achieved_avg_error;
     result.target_met = grids.target_met;
+    result.diagnostics = std::move(grids.diagnostics);
+    result.sample_bounds = ctx.sample_bounds;
     result.total_pde_solves = 0;
     for (auto& it : result.iterations) {
         // Standard path uses FD American vega: 1 base solve + 2 vega bump solves = 3x
@@ -918,6 +920,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         .total_pde_solves = total_pde,
         .used_retry = use_retry,
         .diagnostics = std::move(diagnostics),
+        .sample_bounds = sample_domain_,
     };
 }
 
