@@ -972,12 +972,72 @@ git commit -m "Stop collapsing price table build failures"
 
 ---
 
-### Task 11: Root-finding tolerance docs lie (docs only)
+### Task 11: Root-finding tolerance units — docs fix + optional brent_tol_x
 
 **Files:**
-- Modify: `src/math/root_finding.hpp:20-33`.
+- Modify: `src/math/root_finding.hpp` — `RootFindingConfig` (~:20-33) and `find_root_brent` (~:175-250).
+- Test: `tests/root_finding_test.cc`.
 
-- [ ] **Step 1: Implement** — replace the two comments:
+**Interfaces:**
+- Produces: `RootFindingConfig::brent_tol_x` (`std::optional<double>`, declared AFTER `brent_tol_abs` so every existing designated initializer stays valid); unset ⇒ bit-for-bit current behavior.
+
+- [ ] **Step 1: Write the tests** (append to `tests/root_finding_test.cc`)
+
+```cpp
+// ===========================================================================
+// Regression tests for bugs found during code review (issue #441)
+// ===========================================================================
+
+// Regression: unset brent_tol_x must reproduce current behavior exactly
+// Bug: brent_tol_abs served both |f| and x-distance comparisons; the new
+//      optional x-tolerance must not change any existing caller's result.
+TEST(RootFindingTest, BrentTolXUnsetMatchesLegacyBehavior) {
+    auto f = [](double x) { return x * x - 2.0; };
+    mango::RootFindingConfig legacy{.max_iter = 100, .brent_tol_abs = 1e-6};
+    mango::RootFindingConfig with_field{.max_iter = 100, .brent_tol_abs = 1e-6};
+    // brent_tol_x left unset in both
+    auto r1 = mango::find_root_brent(f, 0.0, 2.0, legacy);
+    auto r2 = mango::find_root_brent(f, 0.0, 2.0, with_field);
+    ASSERT_TRUE(r1.has_value());
+    ASSERT_TRUE(r2.has_value());
+    EXPECT_DOUBLE_EQ(r1->root, r2->root);
+    EXPECT_EQ(r1->iterations, r2->iterations);
+}
+
+// Regression: one knob for |f| and x-distance is scale-dependent
+// Bug: with a steep objective (f-values huge relative to x), a loose
+//      brent_tol_abs stops on the |b-a| test at poor x-accuracy; there was
+//      no way to tighten x-accuracy without also tightening the |f| test.
+TEST(RootFindingTest, BrentTolXControlsXAccuracyIndependently) {
+    // Steep function: root at sqrt(2), |f'| ~ 2e6 near the root
+    auto f = [](double x) { return 1e6 * (x * x - 2.0); };
+    const double root = std::sqrt(2.0);
+
+    mango::RootFindingConfig loose{.max_iter = 200, .brent_tol_abs = 1e-2};
+    auto r_loose = mango::find_root_brent(f, 0.0, 2.0, loose);
+    ASSERT_TRUE(r_loose.has_value());
+
+    mango::RootFindingConfig tight_x{.max_iter = 200, .brent_tol_abs = 1e-2};
+    tight_x.brent_tol_x = 1e-12;
+    auto r_tight = mango::find_root_brent(f, 0.0, 2.0, tight_x);
+    ASSERT_TRUE(r_tight.has_value());
+
+    // With tight x-tolerance the root is at least as accurate, and the
+    // stopping cannot have come from the (now-tight) bracket-width test
+    // at a worse x-error than the loose run allowed.
+    EXPECT_LE(std::abs(r_tight->root - root), std::abs(r_loose->root - root) + 1e-12);
+    EXPECT_LT(std::abs(r_tight->root - root), 1e-6);
+}
+```
+
+(`find_root_brent`'s exact name/signature: check the header — adjust the calls to the real API, including how results expose `root`/`iterations`.)
+
+- [ ] **Step 2: Run to verify state**
+
+Run: `bazel test //tests:root_finding_test --test_output=all`
+Expected: first test fails to COMPILE (`brent_tol_x` doesn't exist) — that is the red step.
+
+- [ ] **Step 3: Implement.** In `RootFindingConfig`:
 
 ```cpp
     /// Absolute residual convergence tolerance: Newton stops when
@@ -987,28 +1047,38 @@ git commit -m "Stop collapsing price table build failures"
 ```
 
 ```cpp
-    /// Absolute tolerance for Brent's method, applied in THREE roles with
-    /// mixed units: (1) residual stopping test |f(b)| < tol, (2) bracket
-    /// width stopping test |b - a| < tol, and (3) the
-    /// interpolation-vs-bisection safeguard comparisons.  Because f-values
-    /// and x-distances share this one knob, rescaling the objective changes
-    /// effective root-location accuracy — set it consciously for your
-    /// units.
+    /// Absolute tolerance on f-values for Brent's method: the endpoint
+    /// root checks and the |f(b)| stopping test.  Also the fallback for
+    /// x-distance comparisons when brent_tol_x is unset (historical
+    /// behavior: one knob served both units).
     double brent_tol_abs = 1e-6;
+
+    /// Optional absolute tolerance on x-distances for Brent's method:
+    /// the |b - a| bracket-width stopping test and the
+    /// interpolation-vs-bisection safeguard comparisons (|b - c|, |c - d|).
+    /// Unset: falls back to brent_tol_abs, preserving legacy behavior.
+    /// MUST be declared after brent_tol_abs (designated-initializer order).
+    std::optional<double> brent_tol_x = std::nullopt;
 ```
 
-(Verify role (3)'s claim against the actual safeguard conditions around `:210-250` and adjust wording only if the code disagrees.)
+(Add `#include <optional>` if missing.) In `find_root_brent`, near the top:
 
-- [ ] **Step 2: Verify build**
+```cpp
+    const double tol_x = config.brent_tol_x.value_or(config.brent_tol_abs);
+```
 
-Run: `bazel build //src/math/...`
-Expected: builds clean (comments only).
+then replace `config.brent_tol_abs` with `tol_x` in exactly three places: the `std::abs(b - a) < …` stopping test, condition4 (`std::abs(b - c) < …`), and condition5 (`std::abs(c - d) < …`). The endpoint checks and `std::abs(fb) < …` tests keep `config.brent_tol_abs`.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Run to verify pass**
+
+Run: `bazel test //tests:root_finding_test //tests:brent_cpp_test //tests:iv_solver_test --test_output=all`
+Expected: all PASS (unset field ⇒ unchanged behavior everywhere).
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/math/root_finding.hpp
-git commit -m "Document root-finding tolerances as absolute"
+git add src/math/root_finding.hpp tests/root_finding_test.cc
+git commit -m "Split Brent x-tolerance from residual tolerance"
 ```
 
 ---

@@ -45,8 +45,12 @@ Brainstorm Q&A (2026-08-29), each settled with the user:
    failures, so a surface-specific name would be a new lie.
 5. **Item 8, root-finding tolerances** — options: (a) docs-only fix; (b) also
    split Brent's x-tolerance into a new field; (c) implement relative
-   tolerance as documented. **Chosen: (a) docs-only.** Zero behavior change;
-   all in-repo callers were tuned against the actual (absolute) semantics.
+   tolerance as documented. **Initially chosen: (a) docs-only.** *Revised at
+   the plan go/no-go:* the user accepted the design reviewer's twice-made
+   case and switched to **(b)** — add `std::optional<double> brent_tol_x`
+   used for bracket-width and safeguard comparisons with
+   `value_or(brent_tol_abs)` fallback, so existing callers stay bit-for-bit
+   identical; `tolerance`'s doc fix (absolute, not relative) is unchanged.
 6. **Item 3 sub-choice** (resolved from code evidence, not asked): **both**
    types get **re-pointing user-defined copy ops**. *Adjusted in design
    review round 2:* the original plan deleted `BSplineND`'s copies on the
@@ -56,16 +60,13 @@ Brainstorm Q&A (2026-08-29), each settled with the user:
    it as a value, so deletion would be a public API break beyond this batch's
    charter. `NonUniformSpacing` additionally sits in a `std::variant` inside
    the value-type `Grid` (grid.hpp:635), so it must stay copyable.
-7. **Item 8 reviewer disagreement (recorded, not folded):** design review
-   rounds 2 and 3 both argued for an optional `brent_tol_x` field
-   (`value_or(brent_tol_abs)` fallback) on the grounds that docs alone leave
-   the scale-dependent unit mixing in place — rescaling the objective changes
-   effective root-location accuracy. The user explicitly rejected exactly
-   that option in the brainstorm in favor of docs-only; the mixing becomes a
-   documented sharp edge, not a correctness bug, and no in-repo caller needs
-   separate tolerances today. Decision stands (re-confirm at the plan
-   checkpoint — the reviewer's variant is additive and behavior-preserving,
-   so flipping later is cheap); revisit if a caller needs it.
+7. **Item 8 reviewer disagreement (resolved):** design review rounds 2 and 3
+   argued for an optional `brent_tol_x` field (`value_or(brent_tol_abs)`
+   fallback) on the grounds that docs alone leave the scale-dependent unit
+   mixing in place — rescaling the objective changes effective root-location
+   accuracy. Initially held to the brainstorm's docs-only choice and
+   recorded as a disagreement; at the plan go/no-go the user accepted the
+   reviewer's variant. See decision 5.
 
 ## Fixes
 
@@ -278,13 +279,25 @@ convergence tolerance," but Newton uses it as an absolute residual bound
 (`std::abs(fx) < config.tolerance`). `brent_tol_abs` (`:31`) is applied both
 to f-values (`std::abs(fb) < brent_tol_abs`) and to x-interval widths.
 
-**Fix (docs only, zero behavior change):** re-document `tolerance` as
-Newton's absolute residual tolerance |f(x)|; re-document `brent_tol_abs` as
-an absolute tolerance with three roles — residual stopping test, bracket-width
-stopping test, and the interpolation-vs-bisection safeguard decisions — noting
-the unit mixing so callers set it consciously. No API or behavior change.
+**Fix:** two parts, both behavior-preserving for existing callers:
 
-**Test:** none (documentation change).
+- Re-document `tolerance` as Newton's absolute residual tolerance |f(x)|
+  (it was documented as relative).
+- Add `std::optional<double> brent_tol_x` to `RootFindingConfig`, declared
+  *after* `brent_tol_abs` (designated-initializer order compatibility). In
+  `find_root_brent`, `const double tol_x =
+  config.brent_tol_x.value_or(config.brent_tol_abs);` is used for the
+  x-distance comparisons — the `|b − a|` stopping test and safeguard
+  conditions 4 (`|b − c| < tol`) and 5 (`|c − d| < tol`) — while
+  `brent_tol_abs` keeps the f-value roles (endpoint root checks and the
+  `|f(b)|` stopping test). Unset (the default), behavior is bit-for-bit
+  identical. Document both fields' units.
+
+**Test:** a fallback-compatibility test (unset `brent_tol_x` reproduces the
+current root/iteration count on a known problem) and a scale-sensitivity
+regression showing a tight `brent_tol_x` with a loose `brent_tol_abs` on a
+rescaled objective locates the root to x-accuracy that the single shared
+knob could not.
 
 ### 9. `BSplineCollocation1D` Bandwidth parameter is a stack-overflow trap
 
@@ -363,8 +376,8 @@ residual > 0`.
 ## Test strategy
 
 Each behavior change carries a regression test in the CLAUDE.md format
-(`// Regression:` / `// Bug:` comment, named test). Items 8 (docs) and 9
-(compile-time assert) have no runtime test; item 10's runtime assertion is
+(`// Regression:` / `// Bug:` comment, named test). Item 9
+(compile-time assert) has no runtime test; item 10's runtime assertion is
 acknowledged ineffective under LP64 CI (see item 10). Existing suites
 touched: `time_domain_test`, `tests/internal/pde_solver_test.cc` (its
 `TestPDESolver` fixture fits the reuse and convergence tests),
@@ -375,8 +388,8 @@ workspace/collocation and factory tests. Full gate: `bazel test //...`,
 ## Out of scope
 
 - Item 4 (Neumann Jacobian boundary rows) — new issue filed at PR time.
-- Relative-tolerance semantics or a separate Brent x-tolerance (rejected in
-  brainstorm; revisit only if a caller needs it).
+- Relative-tolerance semantics for `tolerance` (rejected in brainstorm;
+  revisit only if a caller needs it).
 - Per-code error taxonomy beyond `PriceTableBuildFailed` (rejected in
   brainstorm).
 - Any change to 1D `CubicSpline::eval` extrapolation.
