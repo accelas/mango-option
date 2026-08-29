@@ -235,20 +235,28 @@ comment naming the bug.
 
 0. **Bit-identity golden (written FIRST, against the unmodified code):**
    a new test fits a small fixed nonuniform 3D grid via
-   `BSplineNDSeparable` and a 1D grid via `fit()`, and pins a sampling of
-   the resulting coefficients with exact (`EXPECT_EQ` on doubles /
-   bit-pattern) golden values hardcoded from a run of the *current*
-   implementation. Committed green before any #435 refactor commit; the
-   refactor must keep it green, which proves the bit-for-bit claim
-   against a true pre-change baseline.
+   `BSplineNDSeparable` and a 1D grid via `fit()`, and pins **every**
+   resulting coefficient, compared as bit patterns
+   (`std::bit_cast<uint64_t>` — exact even for signed zero) against
+   golden values hardcoded from a run of the *current* implementation.
+   Committed green before any #435 refactor commit; the refactor must
+   keep it green, which proves the bit-for-bit claim against a true
+   pre-change baseline. (Round 2: a sampling would let untested
+   coefficients drift; `EXPECT_EQ` on doubles misses −0.0 vs +0.0.)
 1. **#436 regression** (`tests/american_option_test.cc`): compute expected
    values (`value_at`/`delta`/`gamma`/`theta`) from a *separate* result
    solved with identical params, then construct a **fresh** result and
-   race the accessors' *first* calls from ~8 threads behind a
-   `std::barrier`; assert exact equality with the expected values. On the
-   old code the first calls concurrently run the lazy builds — the actual
-   race (TSan-visible; occasionally torn under load); warming the caches
-   first would make the threaded phase read-only and prove nothing.
+   race the accessors' *first* calls from ~8 threads; assert exact
+   equality with the expected values. The two lazy resources are
+   independent (`ensure_spline` vs `ensure_operator`), so each gets its
+   own synchronized first-call phase: a reusable `std::barrier` is
+   re-armed immediately before the spline phase (`value_at` as every
+   thread's first call) and again before the operator phase — run on a
+   *second* fresh result with `gamma()` as every thread's first call, so
+   the operator race isn't serialized by threads arriving late from the
+   spline phase. On the old code each phase concurrently runs its lazy
+   build — the actual race; warming the caches first would make the
+   threaded phase read-only and prove nothing.
 2. **#435 equivalence** (`tests/bspline_collocation_test.cc` or the
    workspace test file): `factorize()` + `solve_factored()` must reproduce
    `fit()` coefficients bit-for-bit on a nonuniform grid; error paths
