@@ -2,7 +2,11 @@
 
 **Issue:** #434 (expanded scope per issue comment of 2026-07-23)
 
-**Status:** Draft (design review round 3)
+**Status:** Approved — design review converged after round 3 (rounds 1–2
+fixed structural blockers; round 3's findings were descendant refinements of
+the established principles — *exploration must be able to continue toward
+viability*, *viability must cover every evaluation made of a candidate*, and
+*D8 semantics must never overclaim* — folded below without design change)
 
 **Date:** 2026-08-29
 
@@ -208,8 +212,15 @@ For the benchmark configs this shrinks moneyness headroom from ±0.31 to
 
 **Parameter validation** (applies to every adaptive entry point):
 `target_iv_error > 0` and finite; `vega_floor > 0` and finite;
-`refinement_factor > 1`; `max_iter >= 1`; `validation_samples >= 8`;
-violations ⇒ `PriceTableErrorCode::InvalidConfig`.
+`refinement_factor > 1` and finite; `max_iter >= 1`;
+`validation_samples >= 8`; violations ⇒
+`PriceTableErrorCode::InvalidConfig`.
+
+**Fit-bounds construction is per-backend** (no double headroom):
+`extract_chain_domain(chain, expected_m_knots)` builds B-spline fit bounds;
+the Chebyshev builders construct their own fit bounds from `sample_bounds`
+via their CC-level extension and must not additionally apply the B-spline
+headroom.
 
 ### D4. Fixed holdout with cached references
 
@@ -240,8 +251,10 @@ using ScoreErrorFn = std::function<double(
 
 `make_fd_vega_error_fn` is replaced by `make_fd_vega_refs_fn`
 (a `PrepareRefsFn`) plus `make_iv_score_fn` (a `ScoreErrorFn` carrying the
-TV/K filter, vega floor, and cap — the same arithmetic as today's
-`compute_iv_error`). `run_refinement`'s signature takes `PrepareRefsFn` and
+TV/K filter, vega floor, and the *target-level noise clamp* — the same
+arithmetic as today's `compute_iv_error`; note it is a clamp applied only
+when the price error is within the noise floor, **not** a global cap, so
+catastrophic scores are never capped below the viability bound). `run_refinement`'s signature takes `PrepareRefsFn` and
 `ScoreErrorFn` in place of `ValidateFn` + `ComputeErrorFn`; fresh
 per-iteration validation uses the same pair (its refs are simply not
 reused). `ValidateFn` remains for reference-price generation inside
@@ -275,8 +288,11 @@ holdout_max, holdout_avg, error bins, iteration index, viable flag}`.
 **Viability (the "reject when every candidate is unsafe" contract, restated
 in measurable terms):** a candidate is *viable* iff
 
-- every valid holdout point produced a finite interpolated price and a
-  finite, nonnegative score, and
+- **every evaluation made of it** — every valid holdout point *and* every
+  valid fresh-sample point evaluated for that candidate — produced a finite
+  interpolated price and a finite, nonnegative score (a NaN on a fresh
+  in-domain point disqualifies the candidate even if the fixed holdout
+  missed that location; ranking still uses holdout error alone), and
 - `holdout_max <= kViabilityBound` with **`kViabilityBound = 0.20`
   (2,000 bps of IV, absolute)**. This is an operational garbage detector,
   not a quality bar: it is independent of `target_iv_error` by design (a
@@ -317,10 +333,23 @@ failure):
   holdout numbers; `target_met = (returned holdout_max <= target_iv_error
   && that iteration also satisfied the fresh-sample convergence check)`.
 
-**Mid-loop build failure:** if `build_fn` fails and at least one viable
-candidate exists, the loop stops and falls back to the retained best
-(recording `build_failure_fallback = true`). A failure with no viable
-candidates (including the seed build) propagates as an error.
+**Mid-loop build failure — exploration continues:** a failed refinement
+trial build must not strand exploration (a non-viable seed might only be
+recoverable through a *different* axis). Rules:
+
+- **Seed build failure** (iteration 0): propagates as an error.
+- **Failed refinement trial** (`build_fn` fails for a refined-grid build):
+  mark the attempted axis `tried`, restore the exploration base and its
+  backend state, record the attempt in `IterationStats` with
+  `build_failed = true` (new field) and `refined_dim` = the attempted axis,
+  consume one unit of `max_iter` budget, set
+  `build_failure_fallback = true`, and continue at the axis-selection step
+  while untried axes and budget remain.
+- **Exploration exhausted** (all axes tried or budget consumed): retention
+  runs as usual — best viable candidate returned; no viable candidate ⇒
+  `NoViableSurface` (the terminal error is `NoViableSurface`, not the
+  trial-build error; the failures are visible in `IterationStats`).
+- **Final-rebuild failure:** propagates as an error (D5 above).
 
 **Budget edge contracts:** `max_iter == 1` ⇒ the seed is built, evaluated,
 recorded, and returned via the same retention path (no refinement).
@@ -397,10 +426,15 @@ the correct next level (test-pinned).
 Per refinement step:
 
 1. Score each axis d over the **exploration base's** recorded error bins:
-   `score[d] = concentration[d]` — the max-bin fraction. (`dim_error_mass`
-   is identical across dimensions by construction and is dropped from the
-   score; concentration is documented as a *proposal-ordering heuristic
-   only*. The measured walk-restart, not the score, decides what is kept.)
+   `score[d] = concentration[d]` — the max-bin fraction, defined as `0`
+   when the bin total is zero (possible when fresh samples met target but
+   the holdout did not). Ties, including the all-zero case, break by
+   dimension order (moneyness, τ, σ, r); with empty bins the focus
+   intervals passed to `refine_fn` are empty, which the refiner treats as
+   uniform refinement. (`dim_error_mass` is identical across dimensions by
+   construction and is dropped from the score; concentration is documented
+   as a *proposal-ordering heuristic only*. The measured walk-restart, not
+   the score, decides what is kept.)
 2. Pick the highest-scoring axis with `tried[d] == false`. If none remain,
    stop (all axes exhausted; retention picks the final result).
 3. Reset the working grids **and backend state** to the exploration base's
@@ -449,6 +483,9 @@ struct BuildDiagnostics {
 };
 ```
 
+`IterationStats` gains `bool build_failed = false` (failed refinement
+trials, D5); the final rebuild's entry uses `refined_dim = -2`.
+
 **Monotonicity statistics** (diagnostics only, never a gate): on the
 returned candidate, at each valid holdout `(m, τ, r)`, scan 7 equally spaced
 σ across the user σ-range (`sample_bounds`). Count a violation when
@@ -461,8 +498,12 @@ violations.
 
 **Ownership path.** Adaptive builder results (`BSplineAdaptiveResult`,
 `BSplineSegmentedAdaptiveResult`, Chebyshev equivalents) carry a
-`BuildDiagnostics`. Internal factory helpers return `{table, diagnostics}`
-carriers; `AnyPriceTable::Impl` and `AnyInterpIVSolver::Impl` each gain a
+`BuildDiagnostics` **and the `sample_bounds`**; the factory's adaptive
+wrapping supplies the published surface bounds from the carrier's
+`sample_bounds` instead of deriving them from the spline/leaf knots (which
+span the fit domain) — this is how D2's published-bounds rule reaches the
+constructed surfaces on every adaptive path. Internal factory helpers
+return `{table, diagnostics}` carriers; `AnyPriceTable::Impl` and `AnyInterpIVSolver::Impl` each gain a
 separate `std::optional<BuildDiagnostics>` member (`nullopt` for manual
 builds and Parquet-loaded tables); `AnyPriceTable::make_iv_solver` copies it
 into the solver wrapper. `to_data()` and all serialization visit only the
@@ -500,17 +541,24 @@ In `InterpolatedIVSolver::solve` (src/option/interpolated_iv_solver.hpp):
    showed to be unsound).
    - **Zero tolerance:** the objective is a *price* difference; samples
      with `|objective| <= zero_tol`, `zero_tol = 1e-9 * spot`, are
-     *zeros* (this is a dollar tolerance, deliberately distinct from
-     `config_.tolerance`, which is Brent's σ-space tolerance).
-     Consecutive zeros collapse into one zero run.
+     *zeros* (a dollar tolerance, deliberately distinct from
+     `config_.tolerance`, which the root finder uses for both its interval
+     and objective convergence criteria). Consecutive zeros collapse into
+     one zero run. A zero run spanning **all 17 samples** is an unresolved
+     continuum of roots ⇒ `MultipleRoots` (`final_error = 0`,
+     `last_vol = sigma_min`).
    - **Transition counting:** transitions are counted between nonzero
      samples of opposite sign; a zero run *between* opposite signs counts
      as exactly one transition. A zero run flanked by the *same* sign on
      both sides is a tangency contact ⇒ `MultipleRoots` (an
      even-multiplicity contact means root selection is ambiguous). A zero
      run at a bracket *endpoint* flanked inward by a single nonzero sign is
-     a boundary root: with no other transition, return that endpoint σ as
-     the root directly; with any other transition ⇒ `MultipleRoots`.
+     a boundary root: with no other transition, return that endpoint σ
+     directly **only if the endpoint also satisfies the solver's configured
+     convergence tolerance** (`|objective| <= config_.tolerance` — a user's
+     tighter tolerance is never silently loosened by `zero_tol`); otherwise
+     report `BracketingFailed` as the un-screened path would (the scan
+     found no true bracket). With any other transition ⇒ `MultipleRoots`.
    - More than one transition ⇒ `IVErrorCode::MultipleRoots`
      (`final_error` = transition count, `last_vol` = the low-σ endpoint of
      the lowest transition interval — an interval bound, not a root).
@@ -566,9 +614,9 @@ implementations do **not** share an architecture):
      validity rules; fewer than `max(4, validation_samples / 4)` valid
      points ⇒ `ValidationFailed`;
   2. the original assembled surface is scored on those cached refs; if its
-     final max error exceeds the target, the existing bumped-grid retry is
-     built and scored **on the same cached refs** (identical coordinates —
-     no second reference generation);
+     final max error exceeds the target **or it fails D5 viability**, the
+     existing bumped-grid retry is built and scored **on the same cached
+     refs** (identical coordinates — no second reference generation);
   3. D5 viability (finite scores + `kViabilityBound`) applies to both; the
      builder returns the lowest-error **viable** one (`used_retry` set
      accordingly); both non-viable ⇒ `NoViableSurface`. Today's behavior —
@@ -662,9 +710,15 @@ The loop is callback-driven; tests use synthetic `BuildFn` / `PrepareRefsFn`
 - **Sub-threshold base advance:** a 0.5% improvement does not clear `tried`
   but does become the next exploration base (verified via the grids the
   next `refine_fn` call receives); a 5% improvement clears `tried`.
-- **Build-failure fallback:** `build_fn` fails at iteration j > 0 with a
-  viable candidate → success, `build_failure_fallback == true`; failure at
-  iteration 0 → error propagates; final-rebuild failure → error propagates.
+- **Build-failure exploration:** `build_fn` fails for axis 0's trial while
+  axis 2 can still produce the first viable candidate → the loop marks
+  axis 0 tried, restores the base, continues, and succeeds via axis 2
+  (`build_failure_fallback == true`, the failed attempt in
+  `IterationStats` with `build_failed == true`); failure at iteration 0 →
+  error propagates; all axes failed/no-op with no viable candidate →
+  `NoViableSurface`; final-rebuild failure → error propagates.
+- **Fresh-sample viability:** a candidate returning NaN on one fresh sample
+  but finite on the whole holdout is non-viable and never returned.
 - **Backtracking walk:** an error field reducible only along axis 2 → axes
   with higher concentration scores are tried, rejected, and axis 2's
   improvement restarts the walk.
@@ -709,8 +763,12 @@ The loop is callback-driven; tests use synthetic `BuildFn` / `PrepareRefsFn`
 - **Tangency:** objective touching zero (within `zero_tol`) at a scan
   point, same sign both sides → `MultipleRoots`.
 - **Endpoint root:** monotone objective with its only zero run at
-  `sigma_min` → returns `sigma_min` as the root; endpoint zero plus an
+  `sigma_min` and `|objective| <= config tolerance` → returns `sigma_min`;
+  same shape with a *tighter* configured tolerance than the residual →
+  `BracketingFailed`, never a silently loose success; endpoint zero plus an
   interior transition → `MultipleRoots`.
+- **All-zero scan:** objective within `zero_tol` at all 17 samples →
+  `MultipleRoots` with `final_error == 0`.
 - Monotone surface → identical root with and without the screen (narrowed
   bracket converges to the same σ within tolerance); scan cost exactly 17
   evals.
@@ -736,7 +794,9 @@ The loop is callback-driven; tests use synthetic `BuildFn` / `PrepareRefsFn`
   low root. This fails against the pre-fix loop.
 - **Segmented retry regression:** a config that forces the retry path →
   the returned surface's diagnostics describe the returned surface; a retry
-  that scores worse than the original on the shared refs is not returned.
+  that scores worse than the original on the shared refs is not returned;
+  an original that meets a loose target but fails viability still triggers
+  the retry.
 - **Segmented Chebyshev final validation:** assembled surface exceeding
   `kViabilityBound` on final validation → `NoViableSurface` (previously
   returned silently).
