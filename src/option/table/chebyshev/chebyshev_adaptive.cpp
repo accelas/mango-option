@@ -702,7 +702,8 @@ build_adaptive_chebyshev(
     auto refine_fn = make_chebyshev_refine_fn(state);
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
 
-    auto compute_error_fn = make_fd_vega_error_fn(params, validate_fn, type);
+    auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+    auto score_fn = make_iv_score_fn(params, type);
 
     // Seed initial grids: CC-level nodes for all dimensions (nested)
     InitialGrids initial;
@@ -713,8 +714,8 @@ build_adaptive_chebyshev(
     initial.exact = true;  // Preserve CC node placement
 
     auto grid_result = run_refinement(
-        params, build_fn, validate_fn, refine_fn, ctx,
-        compute_error_fn, initial);
+        params, build_fn, refine_fn, ctx,
+        prepare_refs_fn, score_fn, initial);
     if (!grid_result.has_value()) {
         return std::unexpected(grid_result.error());
     }
@@ -897,8 +898,8 @@ ChebyshevSegmentedBuilder::build_adaptive(
     auto refine_fn = make_segmented_chebyshev_refine_fn(state);
     auto validate_fn = make_validate_fn(
         config_.dividend_yield, config_.option_type, config_.discrete_dividends);
-    auto compute_error_fn = make_fd_vega_error_fn(
-        params, validate_fn, config_.option_type);
+    auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+    auto score_fn = make_iv_score_fn(params, config_.option_type);
 
     InitialGrids initial;
     initial.moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
@@ -919,8 +920,8 @@ ChebyshevSegmentedBuilder::build_adaptive(
     };
 
     auto grid_result = run_refinement(
-        params, build_fn, validate_fn, refine_fn, ctx,
-        compute_error_fn, initial);
+        params, build_fn, refine_fn, ctx,
+        prepare_refs_fn, score_fn, initial);
     if (!grid_result) return std::unexpected(grid_result.error());
     auto& grids = *grid_result;
 

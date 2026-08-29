@@ -184,12 +184,24 @@ using ValidateFn = std::function<std::expected<double, SolverError>(
     double spot, double strike, double tau,
     double sigma, double rate)>;
 
-/// Compute IV error from interpolated/reference prices and option parameters.
-/// Signature: (interp, ref_price, spot, strike, tau, sigma, rate, div_yield) -> error
-using ComputeErrorFn = std::function<double(
-    double interp, double ref_price,
+/// Per-point reference data, computed once per validation/holdout point.
+struct ErrorRefs {
+    double ref_price = 0.0;  ///< FD American price
+    double vega = 0.0;       ///< FD central-difference American vega
+};
+
+/// Produce refs for one point (base solve + two sigma-bump solves).
+/// Any failed or non-finite solve => unexpected.
+using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
+    double spot, double strike, double tau, double sigma, double rate)>;
+
+/// Score one point from interpolated price + cached refs. Pure arithmetic.
+/// Contract: returns a finite, nonnegative error (the loop treats anything
+/// else as a non-viable evaluation).
+using ScoreErrorFn = std::function<double(
+    double interp, const ErrorRefs& refs,
     double spot, double strike, double tau,
-    double sigma, double rate, double div_yield)>;
+    double sigma, double rate)>;
 
 // ============================================================================
 // Shared helper function declarations
@@ -230,12 +242,18 @@ TauSegmentSplit make_tau_split_from_segments(
 double compute_iv_error(double price_error, double vega,
                         double vega_floor, double target_iv_error);
 
-/// Error function using FD American vega with TV/K filter.
-/// 2 extra PDE solves per validation sample — acceptable at build time.
-/// Skips points where TV/K < 1e-4 (IV undefined, error metric meaningless).
-ComputeErrorFn make_fd_vega_error_fn(const AdaptiveGridParams& params,
-                                      const ValidateFn& validate_fn,
-                                      OptionType option_type);
+/// Produce ErrorRefs (FD American price + FD central-difference vega) for
+/// one point: base solve + two sigma-bump solves.
+/// 2 extra PDE solves per point — acceptable at build time.
+/// Any failed or non-finite solve => unexpected.
+PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& params,
+                                    const ValidateFn& validate_fn);
+
+/// Score an interpolated price against cached ErrorRefs using the TV/K
+/// filter (skips points where TV/K < 1e-4; IV undefined there) and
+/// `compute_iv_error` arithmetic (vega floor + target-level noise clamp).
+ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
+                              OptionType option_type);
 
 /// Create a ValidateFn that solves a single American option via FD.
 ValidateFn make_validate_fn(double dividend_yield,
@@ -261,10 +279,10 @@ std::vector<double> seed_grid(const std::vector<double>& user_knots,
 std::expected<RefinementResult, PriceTableError> run_refinement(
     const AdaptiveGridParams& params,
     BuildFn build_fn,
-    ValidateFn validate_fn,
     RefineFn refine_fn,
     const RefinementContext& ctx,
-    const ComputeErrorFn& compute_error,
+    const PrepareRefsFn& prepare_refs,
+    const ScoreErrorFn& score,
     const InitialGrids& initial_grids = {});
 
 /// Resolve K_ref values from a MultiKRefConfig.

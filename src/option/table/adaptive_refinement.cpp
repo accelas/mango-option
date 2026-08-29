@@ -170,25 +170,21 @@ double compute_iv_error(double price_error, double vega,
     return iv_error;
 }
 
-ComputeErrorFn make_fd_vega_error_fn(const AdaptiveGridParams& params,
-                                      const ValidateFn& validate_fn,
-                                      OptionType option_type) {
-    double vega_floor = params.vega_floor;
-    double target = params.target_iv_error;
+PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& /*params*/,
+                                    const ValidateFn& validate_fn) {
     // Copy validate_fn by value so the returned lambda is self-contained.
-    return [vega_floor, target, validate_fn, option_type](
-        double interp, double ref_price,
+    return [validate_fn](
         double spot, double strike, double tau,
-        double sigma, double rate, double /*div_yield*/) -> double
+        double sigma, double rate) -> std::expected<ErrorRefs, SolverError>
     {
-        // TV/K filter: skip points where IV is undefined
-        constexpr double kTVKThreshold = 1e-4;
-        double intrinsic = intrinsic_value(spot, strike, option_type);
-        if ((ref_price - intrinsic) / strike < kTVKThreshold) {
-            return 0.0;
+        auto fd_base = validate_fn(spot, strike, tau, sigma, rate);
+        if (!fd_base.has_value()) {
+            return std::unexpected(fd_base.error());
         }
-
-        double price_error = std::abs(interp - ref_price);
+        double ref_price = fd_base.value();
+        if (!std::isfinite(ref_price)) {
+            return std::unexpected(SolverError{});
+        }
 
         // FD American vega via central difference
         double eps = std::max(1e-4, 0.01 * sigma);
@@ -197,13 +193,44 @@ ComputeErrorFn make_fd_vega_error_fn(const AdaptiveGridParams& params,
         double effective_eps = (sigma_up - sigma_dn) / 2.0;
 
         auto fd_up = validate_fn(spot, strike, tau, sigma_up, rate);
+        if (!fd_up.has_value()) {
+            return std::unexpected(fd_up.error());
+        }
         auto fd_dn = validate_fn(spot, strike, tau, sigma_dn, rate);
+        if (!fd_dn.has_value()) {
+            return std::unexpected(fd_dn.error());
+        }
 
         double vega = 0.0;
-        if (fd_up.has_value() && fd_dn.has_value() && effective_eps > 1e-6) {
+        if (effective_eps > 1e-6) {
             vega = (fd_up.value() - fd_dn.value()) / (2.0 * effective_eps);
         }
-        return compute_iv_error(price_error, vega, vega_floor, target);
+        if (!std::isfinite(vega)) {
+            return std::unexpected(SolverError{});
+        }
+
+        return ErrorRefs{.ref_price = ref_price, .vega = vega};
+    };
+}
+
+ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
+                              OptionType option_type) {
+    double vega_floor = params.vega_floor;
+    double target = params.target_iv_error;
+    return [vega_floor, target, option_type](
+        double interp, const ErrorRefs& refs,
+        double spot, double strike, double /*tau*/,
+        double /*sigma*/, double /*rate*/) -> double
+    {
+        // TV/K filter: skip points where IV is undefined
+        constexpr double kTVKThreshold = 1e-4;
+        double intrinsic = intrinsic_value(spot, strike, option_type);
+        if ((refs.ref_price - intrinsic) / strike < kTVKThreshold) {
+            return 0.0;
+        }
+
+        double price_error = std::abs(interp - refs.ref_price);
+        return compute_iv_error(price_error, refs.vega, vega_floor, target);
     };
 }
 
@@ -372,8 +399,8 @@ static std::expected<ValidationResult, PriceTableError>
 evaluate_samples(
     const std::vector<std::array<double, 4>>& samples,
     const SurfaceHandle& handle,
-    const ValidateFn& validate_fn,
-    const ComputeErrorFn& compute_error,
+    const PrepareRefsFn& prepare_refs,
+    const ScoreErrorFn& score,
     const RefinementContext& ctx,
     double target_iv_error) {
     double max_error = 0.0;
@@ -392,20 +419,23 @@ evaluate_samples(
         double strike = ctx.spot * std::exp(-m);
         double interp_price = handle.price(ctx.spot, strike, tau, sigma, rate);
 
-        // Fresh FD solve for reference via callback
-        auto fd_result = validate_fn(ctx.spot, strike, tau, sigma, rate);
+        // Fresh FD refs (price + vega) for reference via callback.
+        // Note: prepare_refs performs 3 PDE solves internally (base + two
+        // sigma-bump solves), but we count 1 per successful sample here to
+        // preserve pre-existing pde_solves_validation accounting -- callers
+        // (e.g. bspline_adaptive.cpp) multiply this count by 3 downstream.
+        auto refs_result = prepare_refs(ctx.spot, strike, tau, sigma, rate);
 
-        if (!fd_result.has_value()) {
+        if (!refs_result.has_value()) {
             continue;  // Skip failed solves
         }
 
         pde_solves_validation++;
 
-        double ref_price = fd_result.value();
-        double iv_error = compute_error(
-            interp_price, ref_price,
-            ctx.spot, strike, tau, sigma, rate,
-            ctx.dividend_yield);
+        const auto& refs = refs_result.value();
+        double iv_error = score(
+            interp_price, refs,
+            ctx.spot, strike, tau, sigma, rate);
         max_error = std::max(max_error, iv_error);
         sum_error += iv_error;
         valid_samples++;
@@ -440,10 +470,10 @@ evaluate_samples(
 std::expected<RefinementResult, PriceTableError> run_refinement(
     const AdaptiveGridParams& params,
     BuildFn build_fn,
-    ValidateFn validate_fn,
     RefineFn refine_fn,
     const RefinementContext& ctx,
-    const ComputeErrorFn& compute_error,
+    const PrepareRefsFn& prepare_refs,
+    const ScoreErrorFn& score,
     const InitialGrids& initial_grids)
 {
     // Validation requires at least one sample per iteration
@@ -541,7 +571,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 
         // c. VALIDATE AGAINST FRESH FD SOLVES
         auto eval_result = evaluate_samples(
-            samples, handle, validate_fn, compute_error,
+            samples, handle, prepare_refs, score,
             ctx, params.target_iv_error);
         if (!eval_result.has_value()) {
             return std::unexpected(eval_result.error());

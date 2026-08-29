@@ -473,11 +473,12 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
 
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
 
-    auto compute_error_fn = make_fd_vega_error_fn(params, validate_fn, type);
+    auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+    auto score_fn = make_iv_score_fn(params, type);
 
     auto refine_fn = make_bspline_refine_fn(params);
-    auto grid_result = run_refinement(params, build_fn, validate_fn,
-                                      refine_fn, ctx, compute_error_fn,
+    auto grid_result = run_refinement(params, build_fn,
+                                      refine_fn, ctx, prepare_refs_fn, score_fn,
                                       extract_initial_grids(chain));
     if (!grid_result.has_value()) {
         return std::unexpected(grid_result.error());
@@ -588,8 +589,8 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             config_.dividend_yield, config_.option_type,
             config_.discrete_dividends);
 
-        auto compute_error_fn = make_fd_vega_error_fn(
-            params, validate_fn, config_.option_type);
+        auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+        auto score_fn = make_iv_score_fn(params, config_.option_type);
 
         RefinementContext ctx{
             .spot = config_.spot,
@@ -604,9 +605,9 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         initial_grids.rate = initial_grid_.rate;
 
         auto refine_fn = make_bspline_refine_fn(params);
-        auto sizes = run_refinement(params, build_fn, validate_fn,
+        auto sizes = run_refinement(params, build_fn,
                                     refine_fn, ctx,
-                                    compute_error_fn, initial_grids);
+                                    prepare_refs_fn, score_fn, initial_grids);
         if (!sizes) return std::unexpected(sizes.error());
         probe_results.push_back(std::move(*sizes));
     }
@@ -642,8 +643,8 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     auto final_validate_fn = make_validate_fn(
         config_.dividend_yield, config_.option_type,
         config_.discrete_dividends);
-    auto final_error_fn = make_fd_vega_error_fn(
-        params, final_validate_fn, config_.option_type);
+    auto final_prepare_refs_fn = make_fd_vega_refs_fn(params, final_validate_fn);
+    auto final_score_fn = make_iv_score_fn(params, config_.option_type);
 
     auto final_samples = latin_hypercube_4d(
         params.validation_samples, params.lhs_seed + 999);
@@ -666,14 +667,12 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
 
         double interp = surface->price(config_.spot, strike, tau, sigma, rate);
 
-        auto fd = final_validate_fn(config_.spot, strike, tau, sigma, rate);
+        auto fd = final_prepare_refs_fn(config_.spot, strike, tau, sigma, rate);
         if (!fd.has_value()) continue;
 
-        double ref_price = fd.value();
-        double err = final_error_fn(
-            interp, ref_price,
-            config_.spot, strike, tau, sigma, rate,
-            config_.dividend_yield);
+        double err = final_score_fn(
+            interp, fd.value(),
+            config_.spot, strike, tau, sigma, rate);
 
         final_max_error = std::max(final_max_error, err);
         final_sum_error += err;
