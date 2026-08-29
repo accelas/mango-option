@@ -38,8 +38,8 @@ struct AdaptiveGridParams {
     /// Target IV error in absolute terms (default: 2 bps = 2e-5, High profile)
     double target_iv_error = 2e-5;
 
-    /// Maximum refinement iterations (default: 5)
-    size_t max_iter = 5;
+    /// Maximum refinement iterations (default: 8)
+    size_t max_iter = 8;
 
     /// Maximum points per dimension ceiling (default: 160, High profile)
     size_t max_points_per_dim = 160;
@@ -87,6 +87,24 @@ struct IterationStats {
     double avg_error = 0.0;                  ///< Mean IV error
     int refined_dim = -1;                    ///< Which dim was refined (-1 if none)
     double elapsed_seconds = 0.0;            ///< Wall-clock time for this iteration
+    bool build_failed = false;               ///< Refinement trial build failed (D5)
+};
+
+/// Adaptive refinement build diagnostics
+struct BuildDiagnostics {
+    bool target_met = false;
+    double achieved_max_error = 0.0;   // holdout, returned candidate
+    double achieved_avg_error = 0.0;
+    size_t picked_iteration = 0;
+    size_t total_iterations = 0;       // built iterations, excl. final rebuild
+    bool final_rebuild = false;
+    bool build_failure_fallback = false;
+    size_t holdout_points = 0;
+    size_t holdout_points_invalid = 0;
+    size_t monotonicity_violations = 0;
+    size_t monotonicity_points_invalid = 0;
+    double worst_vega_slope = 0.0;
+    std::vector<IterationStats> iterations;  // final rebuild: refined_dim = -2
 };
 
 }  // namespace mango
