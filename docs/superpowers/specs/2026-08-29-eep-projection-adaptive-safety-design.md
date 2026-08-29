@@ -608,6 +608,18 @@ implementations do **not** share an architecture):
   loops gain retention/backtracking automatically (probe *size* selection
   improves; probe-loop build failures with viable candidates are
   non-fatal). Aggregation to uniform final grids is unchanged (Non-goals).
+  **Probe measurement is band-scoped** (execution amendment, 2026-08-29):
+  each probe's references are solved at the probe's own scaled coordinates
+  (`scale = strike / K_ref`, spot and price/vega scaled together, same
+  dividend schedule), and each probe is measured only over the strike band
+  it dominates in the assembly — geometric midpoints to its neighbouring
+  K_refs (log-spaced), outer bands extending to the user strike range, a
+  single K_ref serving the whole range. A probe whose band is empty is
+  skipped (`IterationStats.refined_dim = -3`); a degenerate band is
+  minimally widened. Rationale: the assembled surface blends bracketing
+  K_refs by strike, so probe error at strikes a probe never dominates is
+  not user-observable; measuring it gated builds on noise. The assembled
+  surface's own final validation below remains the safety authority.
   The **final assembled surface** contract:
   1. final validation (LHS over the **sample domain**, D2) computes
      `ErrorRefs` per point once (`PrepareRefsFn`); points follow D4's
