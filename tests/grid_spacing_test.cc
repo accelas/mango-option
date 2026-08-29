@@ -121,3 +121,51 @@ TEST(GridSpacingTest, VariantMemoryEfficiency) {
     // without OOM on a 1000-point uniform grid
     EXPECT_TRUE(spacing.is_uniform());
 }
+
+// ===========================================================================
+// Regression tests for bugs found during code review (issue #441)
+// ===========================================================================
+
+// Regression: copying NonUniformSpacing must not alias the source buffer
+// Bug: the implicitly-generated copy copied sections_view_ verbatim, so the
+//      copy's mdspan pointed into the SOURCE's precomputed vector —
+//      use-after-free once the source was destroyed.
+TEST(GridSpacingTest, NonUniformSpacingCopyOwnsItsView) {
+    std::vector<double> x = {0.0, 0.1, 0.3, 0.7, 1.0};
+
+    auto make_copy = [&]() {
+        mango::NonUniformSpacing<double> source(std::span<const double>{x});
+        mango::NonUniformSpacing<double> copy = source;  // copy-construct
+        return copy;  // source destroyed on return
+    };
+    auto copy = make_copy();
+    EXPECT_EQ(copy.sections_view_.data_handle(), copy.precomputed.data());
+    // Values still correct: dx_left_inv[0] = 1/(x[1]-x[0]) = 10.0
+    EXPECT_DOUBLE_EQ(copy.dx_left_inv()[0], 10.0);
+}
+
+// Regression: copy-assignment has the same aliasing bug
+// Bug: same root cause via the implicit copy-assignment operator.
+TEST(GridSpacingTest, NonUniformSpacingCopyAssignOwnsItsView) {
+    std::vector<double> x = {0.0, 0.1, 0.3, 0.7, 1.0};
+    std::vector<double> y = {0.0, 0.2, 0.5, 0.9, 2.0};
+    mango::NonUniformSpacing<double> target(std::span<const double>{y});
+    {
+        mango::NonUniformSpacing<double> source(std::span<const double>{x});
+        target = source;
+    }  // source destroyed
+    EXPECT_EQ(target.sections_view_.data_handle(), target.precomputed.data());
+    EXPECT_DOUBLE_EQ(target.dx_left_inv()[0], 10.0);
+}
+
+// Regression: moves must keep the view valid (vector move preserves data())
+TEST(GridSpacingTest, NonUniformSpacingMoveKeepsViewValid) {
+    std::vector<double> x = {0.0, 0.1, 0.3, 0.7, 1.0};
+    auto make_moved = [&]() {
+        mango::NonUniformSpacing<double> source(std::span<const double>{x});
+        return mango::NonUniformSpacing<double>(std::move(source));
+    };
+    auto moved = make_moved();
+    EXPECT_EQ(moved.sections_view_.data_handle(), moved.precomputed.data());
+    EXPECT_DOUBLE_EQ(moved.dx_left_inv()[0], 10.0);
+}
