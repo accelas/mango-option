@@ -282,7 +282,7 @@ TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;  // Very relaxed
     params.max_iter = 1;
-    params.validation_samples = 4;
+    params.validation_samples = 8;  // spec D3 minimum
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 31).value();
     auto result = build_adaptive_bspline(params, chain,
@@ -313,7 +313,7 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
 
     AdaptiveGridParams params;
     params.max_iter = 1;
-    params.validation_samples = 1;  // Minimum to satisfy validation guard
+    params.validation_samples = 8;  // spec D3 minimum
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 31).value();
 
@@ -386,7 +386,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result.has_value())
+        << "error code " << static_cast<int>(result.error().code);
 }
 
 // Large discrete dividend (total_div/K_ref > 0.2, stresses moneyness expansion)
@@ -411,7 +412,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
     std::vector<double> r_domain = {0.01, 0.03, 0.05, 0.10};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result.has_value()) << "code " << static_cast<int>(result.error().code);
 
     double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
@@ -439,7 +440,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result.has_value()) << "code " << static_cast<int>(result.error().code);
 
     double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
@@ -454,7 +455,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
 TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvalidKRefCount) {
     AdaptiveGridParams params;
     params.max_iter = 1;
-    params.validation_samples = 4;
+    params.validation_samples = 8;  // spec D3 minimum
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -478,7 +479,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvalidKRefCount) {
 TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsZeroSpan) {
     AdaptiveGridParams params;
     params.max_iter = 1;
-    params.validation_samples = 4;
+    params.validation_samples = 8;  // spec D3 minimum
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -613,7 +614,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result.has_value()) << "code " << static_cast<int>(result.error().code);
 
     // Query at a tau within the short maturity
     double price = result->surface.price(100.0, 100.0, 0.03, 0.20, 0.05);
@@ -651,7 +652,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     // Should succeed — moneyness floor prevents negative/zero domain
-    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result.has_value()) << "code " << static_cast<int>(result.error().code);
 }
 
 // Coverage: Negative K_ref in explicit list (K_ref_min <= 0 guard)
@@ -718,7 +719,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedProbeFailurePropagation) {
 TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsNegativeSpan) {
     AdaptiveGridParams params;
     params.max_iter = 1;
-    params.validation_samples = 4;
+    params.validation_samples = 8;  // spec D3 minimum
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -763,10 +764,8 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
     // enough for a K=80 query to clear B-spline endpoint effects.  The
     // refinement loop beyond it is a separate (pre-existing) pathology:
     // focused refinement piles knots into one bin until the collocation fit
-    // fails.  Once D5 retention lands, that failure falls back to the viable
-    // seed candidate instead of aborting the build; this max_iter pin can
-    // then be dropped (Task 6).
-    params.max_iter = 1;
+    // fails.  Spec D5 retention keeps the viable seed candidate through such
+    // a failure, so the build runs at the default budget.
 
     GridAccuracyParams accuracy;
     accuracy.min_spatial_points = 200;
@@ -820,7 +819,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;  // 100 bps — relaxed for test speed
     params.max_iter = 1;
-    params.validation_samples = 4;
+    params.validation_samples = 8;  // spec D3 minimum
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -890,7 +889,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
-    params.validation_samples = 4;
+    params.validation_samples = 8;  // spec D3 minimum
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -930,7 +929,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
-    params.validation_samples = 4;
+    params.validation_samples = 8;  // spec D3 minimum
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -970,7 +969,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
-    params.validation_samples = 4;
+    params.validation_samples = 8;  // spec D3 minimum
 
     // Maturity=0.02 (~7 days) with dividend at mid-point.
     // Gap ε=5e-4 on each side of tau_split=0.01 creates segments
@@ -1009,7 +1008,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
-    params.validation_samples = 4;
+    params.validation_samples = 8;  // spec D3 minimum
 
     // Two dividends 5 days apart. With ε=5e-4 gap half-width:
     //   div1 at cal_time=0.48 → tau_split=0.52, gap [0.5195, 0.5205]
