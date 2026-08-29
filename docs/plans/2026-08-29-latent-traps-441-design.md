@@ -57,13 +57,15 @@ Brainstorm Q&A (2026-08-29), each settled with the user:
    charter. `NonUniformSpacing` additionally sits in a `std::variant` inside
    the value-type `Grid` (grid.hpp:635), so it must stay copyable.
 7. **Item 8 reviewer disagreement (recorded, not folded):** design review
-   round 2 argued for an optional `brent_tol_x` field
+   rounds 2 and 3 both argued for an optional `brent_tol_x` field
    (`value_or(brent_tol_abs)` fallback) on the grounds that docs alone leave
-   the scale-dependent unit mixing in place. The user explicitly rejected
-   exactly that option in the brainstorm in favor of docs-only; the mixing is
-   a documented sharp edge, not a correctness bug, and no in-repo caller
-   needs separate tolerances today. Decision stands; revisit if a caller
-   needs it.
+   the scale-dependent unit mixing in place — rescaling the objective changes
+   effective root-location accuracy. The user explicitly rejected exactly
+   that option in the brainstorm in favor of docs-only; the mixing becomes a
+   documented sharp edge, not a correctness bug, and no in-repo caller needs
+   separate tolerances today. Decision stands (re-confirm at the plan
+   checkpoint — the reviewer's variant is additive and behavior-preserving,
+   so flipping later is cheap); revisit if a caller needs it.
 
 ## Fixes
 
@@ -143,6 +145,10 @@ copy's own buffer (`sections_view_.data_handle() == precomputed.data()` for
 after the source is destroyed exercises `coeffs_view_`. Move tests likewise
 construct the moved-to object, end the source's lifetime, and then evaluate.
 
+**Moved-from contract (documented):** after a move, the source's view may
+alias the destination's buffer; a moved-from object supports only
+destruction and reassignment, never evaluation.
+
 ### 5. Thomas solve with n==0 returns misleading error
 
 `src/math/thomas_solver.hpp:100` checks `lower.size() != n − 1` before the
@@ -205,9 +211,12 @@ Diagnostics are destroyed: a fitting failure surfaces as a grid-size error.
 - Map the `default:` arm and the five hardcoded sites to
   `PriceTableBuildFailed` (payload `value`/`index` preserved where
   available).
-- **Update every `ValidationErrorCode` consumer.** Three switches consume the
-  enum; two are exhaustive with an *uninitialized* `code` local and no
-  `default:`, so omitting the new value is UB, not just a warning:
+- **Update every `ValidationErrorCode` conversion switch.** Three conversion
+  switches require semantic updates; two are exhaustive with an
+  *uninitialized* `code` local and no `default:`, so omitting the new value
+  is UB, not just a warning. (Python's error-message formatting also
+  switches on selected values, but its `default:` is safe and that path
+  cannot receive `PriceTableBuildFailed` — no change needed.)
   - `convert_to_iv_error(const ValidationError&)`
     (`error_types.hpp:262`): add `PriceTableBuildFailed →
     IVErrorCode::InvalidGridConfig` — the same bucket the collapsed
@@ -224,13 +233,14 @@ Diagnostics are destroyed: a fitting failure surfaces as a grid-size error.
 - Prefer explicit grouped `case` labels over keeping a `default:` arm, so a
   future `PriceTableErrorCode` value triggers a compiler warning instead of
   being silently swallowed by the catch-all.
-- **Route the five hardcoded sites through the same mapper** (wrapping their
-  failure in a `PriceTableError`, or via a small shared helper that the unit
-  test also covers) rather than hardcoding `PriceTableBuildFailed` inline —
-  otherwise the direct unit test pins only the switch and the five sites can
-  regress independently. Where an `InterpolationError` payload
-  (index/grid-size) is available at those sites, preserve it instead of
-  returning `{…, 0.0}` unconditionally.
+- **Route the five hardcoded sites through the same mapper**: each site
+  constructs a `PriceTableError` (converting an `InterpolationError` via the
+  existing `convert_to_price_table_error` where that is the failure in hand)
+  and calls the single `to_validation_error` overload — no overload
+  proliferation on the mapper. This way the direct unit test pins the five
+  sites' code path too, and available `InterpolationError` payloads
+  (index/grid-size) are preserved instead of returning `{…, 0.0}`
+  unconditionally.
 - For testability, declare `to_validation_error` in `namespace mango::detail`
   in a small internal header (e.g.
   `src/option/detail/price_table_error_mapping.hpp`, commented as internal
@@ -242,8 +252,9 @@ Diagnostics are destroyed: a fitting failure surfaces as a grid-size error.
 
 **ADR / bindings note:** ADR 0001 (Python API parity centers on reusable
 price tables) makes factory error plumbing part of the Python surface;
-Python exposes the numeric enum value, so appending preserves all existing
-ordinals and only adds a new observable code. No persisted format (Parquet
+Python does not bind the enum — it puts `static_cast<int>(error.code)` on
+the exception's `code` attribute (`mango_bindings.cpp:50`) — so appending
+preserves all existing numeric values and only adds a new observable code. No persisted format (Parquet
 schema) serializes `ValidationErrorCode`, so no artifact change.
 
 **Interaction with PR #454:** the open PR #454 extends this same switch
@@ -283,12 +294,14 @@ T, size_t Bandwidth = 4>`, but `T basis[BANDWIDTH]` (`:439`) is passed to
 (`bspline_basis.hpp:174–177`). Any instantiation with `Bandwidth < 4` is a
 stack buffer overflow; only 4 is ever instantiated.
 
-**Fix:** `static_assert(Bandwidth == 4, ...)` in **both**
-`BSplineCollocation1D` and `BSplineCollocationWorkspace` — the workspace is
-a public type instantiated directly by tests and used independently by
-`BSplineNDSeparable`, so guarding only the collocation class would leave the
-workspace's own `KL/KU = Bandwidth − 1` underflow reachable. The parameter
-stays, but its doc comment changes from "degree + 1" generality to
+**Fix:** `static_assert(Bandwidth == 4, ...)` in `BSplineCollocation1D`
+(the type that actually calls the 4-entry cubic basis routine), and
+`static_assert(Bandwidth > 0, ...)` in `BSplineCollocationWorkspace` — the
+workspace is a public type instantiated directly by tests and used
+independently by `BSplineNDSeparable`, and its band-layout math is generic;
+its only independent hazard is the `Bandwidth − 1` underflow at 0, so
+restricting it to exactly 4 would break valid generic instantiations. The
+collocation class's parameter doc changes from "degree + 1" generality to
 *reserved*: only 4 (cubic) is supported until the basis evaluation is
 generalized.
 
@@ -316,7 +329,12 @@ under exactly the ILP64 configuration this fix targets; replace with
 **Test:** in the workspace test, `using Pivot = typename
 decltype(ws.pivots())::element_type;
 static_assert(std::same_as<Pivot, lapack_int>);` behavior under LP64
-unchanged (existing tests cover).
+unchanged (existing tests cover). **Known limitation, accepted:** under the
+repo's LP64 CI (`lapack_int == int`) this assertion passes even without the
+fix, so there is no effective automated regression guard for the type
+mismatch; a real guard needs an ILP64 compile job, which is out of scope for
+this batch. The fix itself plus `sizeof(lapack_int)`-correct arithmetic is
+the deliverable.
 
 ### 11. Newton `ConvergenceFailure` reports residual ≈ 0
 
@@ -329,10 +347,12 @@ genuine step delta was computed at `:796` and discarded.
 **Fix:** track the most recent step-delta error in a local
 (`double last_error = std::numeric_limits<double>::infinity();` updated each
 iteration) and report it in the `ConvergenceFailure` return. The
-`LinearSolveFailure` path (reports infinity) is untouched. Note the metric:
-`compute_step_delta_error` is a solution-norm-normalized RMS step delta, not
-a PDE residual — document that on `SolverError::residual` so the field is
-not misread.
+`LinearSolveFailure` path (reports infinity) is untouched. Document
+`SolverError::residual` as a **code-dependent diagnostic** — the same field
+carries a grid-validation value elsewhere (`american_option.cpp:389`),
+infinity for linear-solve failures, and, only for `ConvergenceFailure`, the
+solution-norm-normalized RMS step delta from `compute_step_delta_error`
+(not a PDE residual).
 
 **Test:** force a convergence failure with `max_iter == 1` (not 0, which
 would trivially report the infinity seed) on a deterministic fixture whose
@@ -344,11 +364,13 @@ residual > 0`.
 
 Each behavior change carries a regression test in the CLAUDE.md format
 (`// Regression:` / `// Bug:` comment, named test). Items 8 (docs) and 9
-(compile-time assert) have no runtime test. Existing suites touched:
-`time_domain_test`, `pde_solver_test`, `thomas_solver_test`,
-`cubic_spline_2d_test`, plus the b-spline workspace/collocation and factory
-tests. Full gate: `bazel test //...`, `bazel build //benchmarks/...`,
-`bazel build //src/python:mango_option`.
+(compile-time assert) have no runtime test; item 10's runtime assertion is
+acknowledged ineffective under LP64 CI (see item 10). Existing suites
+touched: `time_domain_test`, `tests/internal/pde_solver_test.cc` (its
+`TestPDESolver` fixture fits the reuse and convergence tests),
+`thomas_solver_test`, `cubic_spline_2d_test`, plus the b-spline
+workspace/collocation and factory tests. Full gate: `bazel test //...`,
+`bazel build //benchmarks/...`, `bazel build //src/python:mango_option`.
 
 ## Out of scope
 
@@ -361,3 +383,5 @@ tests. Full gate: `bazel test //...`, `bazel build //benchmarks/...`,
 - Input validation in `TimeDomain` (both the dt constructor and
   `from_n_steps(…, 0)`'s division by zero) — preconditions documented
   instead; enforcing them is a separate decision.
+- An ILP64 LAPACK CI job (the only effective automated guard for item 10's
+  regression class).
