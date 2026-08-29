@@ -33,6 +33,11 @@ struct ChebyshevBuildConfig {
     double K_ref;
     OptionType option_type;
     double dividend_yield = 0.0;
+    /// Bounds advertised on every surface this callback builds: the
+    /// user-facing sample domain (spec D2), never the CC-extended node span.
+    /// The extension is interpolation *support* and was never measured, so it
+    /// must not be queryable.
+    SurfaceBounds published_bounds{};
 };
 
 using detail::ChebyshevRefinementState;
@@ -440,16 +445,12 @@ static BuildFn make_chebyshev_build_fn(
         ChebyshevRawLeaf leaf(std::move(tleaf),
             AnalyticalEEP(config.option_type, config.dividend_yield));
 
-        SurfaceBounds bounds{
-            .m_min = m_nodes.front(), .m_max = m_nodes.back(),
-            .tau_min = tau_nodes.front(), .tau_max = tau_nodes.back(),
-            .sigma_min = sigma_nodes.front(),
-            .sigma_max = sigma_nodes.back(),
-            .rate_min = rate_nodes.front(),
-            .rate_max = rate_nodes.back()};
-
+        // Published bounds are the measurement domain (spec D2/AC2), not the
+        // node span: the CC extension beyond the user's ranges is support the
+        // validation never sampled, and a query landing there used to get
+        // oscillating garbage with a healthy-looking vega.
         auto shared = std::make_shared<ChebyshevRawSurface>(
-            std::move(leaf), bounds,
+            std::move(leaf), config.published_bounds,
             config.option_type, config.dividend_yield);
         last_surface = shared;
 
@@ -472,6 +473,11 @@ static BuildFn make_segmented_chebyshev_build_fn(
 {
     auto last_tau_size = std::make_shared<size_t>(0);
 
+    // `config` is captured by reference deliberately: it carries two vectors
+    // and a dividend schedule copied per build otherwise, and its only caller
+    // (`ChebyshevSegmentedBuilder::build_adaptive`) holds it as a local that
+    // outlives `run_refinement` -- the returned BuildFn never escapes that
+    // scope.  Any new caller must keep that invariant.
     return [&cache, &config, last_tau_size](
         std::span<const double> m_nodes,
         std::span<const double> tau_nodes,
@@ -673,6 +679,7 @@ build_adaptive_chebyshev(
         .K_ref = chain.spot,
         .option_type = type,
         .dividend_yield = chain.dividend_yield,
+        .published_bounds = ctx.sample_bounds,
     };
 
     std::shared_ptr<ChebyshevRawSurface> last_surface;

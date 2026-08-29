@@ -1882,16 +1882,25 @@ TEST(AdaptiveGridBuilderTest, ContinuousChebyshevSurfaceMatchesPickedGrids) {
     EXPECT_EQ(interp.num_pts(), last.grid_sizes)
         << "returned surface was built from grids other than the picked ones";
 
-    // Node span and published bounds agree on every axis.
+    // Published bounds are the measurement domain (spec D2/AC2), *not* the
+    // node span: the CC extension is interpolation support the validation
+    // never sampled, so it must not be advertised as queryable.
+    const auto& sb = result->sample_bounds;
+    EXPECT_DOUBLE_EQ(result->surface->m_min(), sb.m_min);
+    EXPECT_DOUBLE_EQ(result->surface->m_max(), sb.m_max);
+    EXPECT_DOUBLE_EQ(result->surface->tau_min(), sb.tau_min);
+    EXPECT_DOUBLE_EQ(result->surface->tau_max(), sb.tau_max);
+    EXPECT_DOUBLE_EQ(result->surface->sigma_min(), sb.sigma_min);
+    EXPECT_DOUBLE_EQ(result->surface->sigma_max(), sb.sigma_max);
+    EXPECT_DOUBLE_EQ(result->surface->rate_min(), sb.rate_min);
+    EXPECT_DOUBLE_EQ(result->surface->rate_max(), sb.rate_max);
+
+    // And the sample domain is strictly inside the node span it was fit on.
     const auto& dom = interp.domain();
-    EXPECT_DOUBLE_EQ(result->surface->m_min(), dom.lo[0]);
-    EXPECT_DOUBLE_EQ(result->surface->m_max(), dom.hi[0]);
-    EXPECT_DOUBLE_EQ(result->surface->tau_min(), dom.lo[1]);
-    EXPECT_DOUBLE_EQ(result->surface->tau_max(), dom.hi[1]);
-    EXPECT_DOUBLE_EQ(result->surface->sigma_min(), dom.lo[2]);
-    EXPECT_DOUBLE_EQ(result->surface->sigma_max(), dom.hi[2]);
-    EXPECT_DOUBLE_EQ(result->surface->rate_min(), dom.lo[3]);
-    EXPECT_DOUBLE_EQ(result->surface->rate_max(), dom.hi[3]);
+    EXPECT_GT(sb.m_min, dom.lo[0]);
+    EXPECT_LT(sb.m_max, dom.hi[0]);
+    EXPECT_GT(sb.sigma_min, dom.lo[2]);
+    EXPECT_LT(sb.sigma_max, dom.hi[2]);
 
     // Every CC level is nested (2^l + 1 nodes), so a refined axis stays so.
     for (size_t d = 0; d < 4; ++d) {
