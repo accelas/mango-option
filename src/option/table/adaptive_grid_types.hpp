@@ -109,8 +109,16 @@ struct BuildDiagnostics {
     size_t total_iterations = 0;       // built iterations, excl. final rebuild
     bool final_rebuild = false;
     bool build_failure_fallback = false;
+    /// Holdout points with usable FD references (the measurable set).
     size_t holdout_points = 0;
+    /// Holdout points whose references failed, or whose evaluation of the
+    /// returned surface was non-finite.
     size_t holdout_points_invalid = 0;
+    /// Of `holdout_points`, those that actually produced an error for the
+    /// returned surface.  The rest were filtered out by the score function
+    /// (TV/K or vega floor), where the IV-error metric is undefined; a build
+    /// with `holdout_points_measured == 0` is refused, never certified.
+    size_t holdout_points_measured = 0;
     size_t monotonicity_violations = 0;
     size_t monotonicity_points_invalid = 0;
     double worst_vega_slope = 0.0;

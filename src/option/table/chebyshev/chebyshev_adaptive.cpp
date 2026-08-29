@@ -986,10 +986,15 @@ ChebyshevSegmentedBuilder::build_adaptive(
 
     BuildDiagnostics diagnostics = grids.diagnostics;
     diagnostics.target_met =
-        final_score.scored > 0 && final_score.max_error <= params.target_iv_error;
+        final_score.measured > 0 &&
+        final_score.max_error <= params.target_iv_error;
     diagnostics.achieved_max_error = final_score.max_error;
     diagnostics.achieved_avg_error = final_score.avg_error;
-    diagnostics.holdout_points = final_score.scored;
+    // Same meaning as the loop's (spec D7): `holdout_points` is the usable
+    // reference set, `holdout_points_measured` how much of it actually scored
+    // the returned surface -- the difference is what the score fn filtered.
+    diagnostics.holdout_points = validation->points.size();
+    diagnostics.holdout_points_measured = final_score.measured;
     diagnostics.holdout_points_invalid =
         validation->invalid + final_score.skipped;
     // Monotonicity describes the returned surface, not the loop's candidate.

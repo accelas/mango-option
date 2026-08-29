@@ -211,12 +211,17 @@ def test_build_diagnostics_property():
     expected_keys = {
         "target_met", "achieved_max_error", "achieved_avg_error",
         "picked_iteration", "total_iterations", "final_rebuild",
-        "build_failure_fallback", "holdout_points", "holdout_points_invalid",
+        "build_failure_fallback", "holdout_points", "holdout_points_measured",
+        "holdout_points_invalid",
         "monotonicity_violations", "monotonicity_points_invalid",
         "worst_vega_slope", "n_iterations",
     }
     assert expected_keys <= diag.keys()
     assert diag["total_iterations"] >= 1
+    # A surface measured nowhere is refused, so a build that returned one
+    # must report at least one measured holdout point (spec D4/D5).
+    assert diag["holdout_points_measured"] >= 1
+    assert diag["holdout_points_measured"] <= diag["holdout_points"]
 
     # make_iv_solver() propagates the same diagnostics.
     solver = table.make_iv_solver()

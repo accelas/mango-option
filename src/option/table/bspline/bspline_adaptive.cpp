@@ -837,6 +837,11 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         };
     };
 
+    // `orig_handle` points into `*surface`, which is moved from below when
+    // the original is the pick.  It must not be used past that move: the
+    // scoring here and the retry comparison are its only uses, and the
+    // monotonicity scan deliberately re-derives a handle from
+    // `picked_surface` rather than reusing this one.
     const SurfaceHandle orig_handle = handle_for(*surface);
     const auto orig_score = detail::score_final_surface(
         validation->points, orig_handle, final_score_fn, final_ctx);
@@ -889,7 +894,8 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
 
     BuildDiagnostics diagnostics;
     diagnostics.target_met =
-        final_score.scored > 0 && final_score.max_error <= params.target_iv_error;
+        final_score.measured > 0 &&
+        final_score.max_error <= params.target_iv_error;
     diagnostics.achieved_max_error = final_score.max_error;
     diagnostics.achieved_avg_error = final_score.avg_error;
     // Iterations actually built across the probe loops: the retention final
@@ -898,7 +904,11 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     diagnostics.total_iterations = static_cast<size_t>(std::ranges::count_if(
         all_iterations,
         [](const IterationStats& it) { return it.refined_dim >= -1; }));
-    diagnostics.holdout_points = final_score.scored;
+    // Same meaning as the loop's (spec D7): `holdout_points` is the usable
+    // reference set, `holdout_points_measured` how much of it actually scored
+    // the returned surface -- the difference is what the score fn filtered.
+    diagnostics.holdout_points = validation->points.size();
+    diagnostics.holdout_points_measured = final_score.measured;
     diagnostics.holdout_points_invalid = validation->invalid + final_score.skipped;
     for (const auto& pr : probe_results) {
         diagnostics.build_failure_fallback |=

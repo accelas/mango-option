@@ -27,7 +27,7 @@ TEST(BuildDiagnosticsTest, DefaultsAreEmpty) {
 }
 
 // ===========================================================================
-// Task 3: PrepareRefsFn / ScoreErrorFn split (spec D4)
+// Reference/score split: PrepareRefsFn and ScoreErrorFn (spec D4)
 // ===========================================================================
 
 // Score equivalence with the old arithmetic:
@@ -36,15 +36,30 @@ TEST(ScoreFnTest, MatchesComputeIvError) {
     auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
     mango::ErrorRefs refs{.ref_price = 5.0, .vega = 20.0};
     // price_error 0.01 / vega 20 = 5e-4
-    EXPECT_NEAR(score(5.01, refs, 100.0, 100.0, 1.0, 0.2, 0.05), 5e-4, 1e-12);
+    auto err = score(5.01, refs, 100.0, 100.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(err.has_value());
+    EXPECT_NEAR(*err, 5e-4, 1e-12);
 }
 
-TEST(ScoreFnTest, TvkFilterZeroesDeepItm) {
+// A filtered point returns nullopt, not 0.0: the IV-error metric is
+// undefined there, and reporting a perfect score let a surface nobody could
+// measure certify itself (final-review amendment 2026-08-30).
+TEST(ScoreFnTest, TvkFilterSkipsDeepItm) {
     mango::AdaptiveGridParams p;
     auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
     // K=100, S=100 put ref 0.005 -> TV/K = 5e-5 < 1e-4 -> filtered
     mango::ErrorRefs refs{.ref_price = 0.005, .vega = 1.0};
-    EXPECT_EQ(score(1.0, refs, 100.0, 100.0, 0.01, 0.2, 0.05), 0.0);
+    EXPECT_FALSE(score(1.0, refs, 100.0, 100.0, 0.01, 0.2, 0.05).has_value());
+}
+
+TEST(ScoreFnTest, VegaFloorFilterSkipsPoint) {
+    mango::AdaptiveGridParams p;  // vega floor 1e-4
+    auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
+    // Ample time value, but vega below the floor: price error carries no
+    // volatility information, so the point is skipped like any other
+    // IV-undefined one.
+    mango::ErrorRefs refs{.ref_price = 5.0, .vega = 1e-6};
+    EXPECT_FALSE(score(5.5, refs, 100.0, 100.0, 1.0, 0.2, 0.05).has_value());
 }
 
 TEST(PrepareRefsTest, PropagatesSolveFailure) {
@@ -57,7 +72,8 @@ TEST(PrepareRefsTest, PropagatesSolveFailure) {
 }
 
 // ===========================================================================
-// Task 4: RefineFn/RefineOutcome + B-spline refiner rewrite (spec D6, D2)
+// Grid refinement callbacks: RefineFn/RefineOutcome and the B-spline
+// refiner (spec D6, D2)
 // ===========================================================================
 
 TEST(BSplineRefineFnTest, NoOpAtCapReturnsUnchanged) {
@@ -131,7 +147,7 @@ TEST(BSplineRefineFnTest, FocusIntervalTargetsBin) {
 }
 
 // ===========================================================================
-// Task 5: fit domain vs. sample domain separation (spec D2, D3)
+// Fit domain vs. sample domain separation (spec D2, D3)
 // ===========================================================================
 
 // Regression: headroom used to be 3 * width / (n_strikes - 1), which for a
@@ -263,7 +279,7 @@ TEST(RunRefinementDomainTest, ValidationSamplesStayInSampleBounds) {
 }
 
 // ===========================================================================
-// Task 6: run_refinement core loop -- holdout, retention, viability,
+// The run_refinement core loop: holdout, retention, viability,
 // measured backtracking walk, build diagnostics (spec D4/D5/D6/D7).
 //
 // Synthetic-callback harness (no PDE solves):
@@ -348,6 +364,7 @@ public:
     std::set<size_t> fail_setup_refs;  ///< holdout setup indices that fail
     std::set<size_t> noop_axes;        ///< axes whose refine is a no-op
     std::function<double(double, double, double, double, double)> price_override;
+    mango::ScoreErrorFn score_override;  ///< replaces the |interp - ref| score
     bool use_levels = false;           ///< emulate Chebyshev level counters
 
     // ---- observations -------------------------------------------------
@@ -391,8 +408,9 @@ public:
     }
 
     mango::ScoreErrorFn score_fn() {
+        if (score_override) return score_override;
         return [](double interp, const mango::ErrorRefs& refs, double, double,
-                  double, double, double) {
+                  double, double, double) -> std::optional<double> {
             return std::abs(interp - refs.ref_price);
         };
     }
@@ -686,6 +704,47 @@ TEST(RunRefinementTest, ViabilityBoundRejectsAll) {
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::NoViableSurface);
     EXPECT_GT(h.build_calls, 1u);  // exploration was attempted
+}
+
+// Regression: a candidate whose every holdout point is filtered out has been
+// measured nowhere, and must not be certified.
+// Bug: filtered points scored 0.0, so the holdout maximum of a wholly
+// unmeasurable candidate was 0 -- under every bound, "target met", returned.
+// The score fn now reports a skip as nullopt and viability requires at least
+// one real measurement (final-review amendment 2026-08-30).
+TEST(RunRefinementTest, AllFilteredHoldoutIsNotViable) {
+    Harness h;
+    h.params.max_iter = 1;  // the seed is the only candidate
+    h.score_override = [](double, const mango::ErrorRefs&, double, double,
+                          double, double, double) -> std::optional<double> {
+        return std::nullopt;  // every point filtered
+    };
+
+    auto r = h.run();
+    ASSERT_FALSE(r.has_value())
+        << "a surface measured nowhere must not be returned";
+    EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::NoViableSurface);
+}
+
+// The complement: points that do measure still certify, and the filtered ones
+// simply do not participate.
+TEST(RunRefinementTest, PartiallyFilteredHoldoutStillMeasures) {
+    Harness h;
+    h.params.max_iter = 1;
+    auto seen = std::make_shared<size_t>(0);
+    h.score_override = [seen](double interp, const mango::ErrorRefs& refs,
+                              double, double, double, double, double)
+        -> std::optional<double> {
+        if ((*seen)++ % 2 == 0) return std::nullopt;  // half filtered
+        return std::abs(interp - refs.ref_price);
+    };
+
+    auto r = h.run();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_GT(r->diagnostics.holdout_points_measured, 0u);
+    EXPECT_LT(r->diagnostics.holdout_points_measured,
+              r->diagnostics.holdout_points)
+        << "filtered points must not count as measurements";
 }
 
 TEST(RunRefinementTest, ViabilityBoundIsIndependentOfTarget) {

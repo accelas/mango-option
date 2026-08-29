@@ -310,7 +310,12 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
     chain1.rates = {0.04, 0.05};
 
     OptionGrid chain2 = chain1;
-    chain2.spot = 50.0;  // Different spot => cache must not reuse chain1 slices
+    // Different spot => cache must not reuse chain1 slices.  90, not 50: at a
+    // spot of 50 against strikes of 90-110 every holdout point is a deep-ITM
+    // put whose time value is below the TV/K filter, so the build is measured
+    // nowhere and now refuses (spec D4/D5) -- a real contract, but not the
+    // one this test is about.
+    chain2.spot = 90.0;
 
     AdaptiveGridParams params;
     params.max_iter = 1;
@@ -1992,15 +1997,26 @@ RefinementContext make_score_ctx() {
 /// exact error at every point through the surface handle.
 ScoreErrorFn passthrough_score() {
     return [](double interp, const ErrorRefs&, double, double, double,
-              double, double) { return interp; };
+              double, double) -> std::optional<double> { return interp; };
+}
+
+/// Like `passthrough_score`, but skips every `period`-th point the way the
+/// TV/K and vega-floor filters do (spec D4: nullopt, not zero).
+ScoreErrorFn filtering_score(size_t period,
+                             const std::shared_ptr<size_t>& calls) {
+    return [period, calls](double interp, const ErrorRefs&, double, double,
+                           double, double, double) -> std::optional<double> {
+        if ((*calls)++ % period == 0) return std::nullopt;
+        return interp;
+    };
 }
 
 detail::FinalScore score_of(double max_error, bool all_finite = true,
-                            size_t scored = 8) {
+                            size_t measured = 8) {
     detail::FinalScore s;
     s.max_error = max_error;
     s.avg_error = max_error;
-    s.scored = scored;
+    s.measured = measured;
     s.all_finite = all_finite;
     return s;
 }
@@ -2018,7 +2034,8 @@ TEST(SegmentedFinalContract, PerfectSurfaceCountsEveryScoredPoint) {
 
     auto s = detail::score_final_surface(pts, exact, passthrough_score(), ctx);
 
-    EXPECT_EQ(s.scored, pts.size()) << "zero error is a measurement, not a gap";
+    EXPECT_EQ(s.measured, pts.size())
+        << "zero error is a measurement, not a gap";
     EXPECT_EQ(s.skipped, 0u);
     EXPECT_DOUBLE_EQ(s.max_error, 0.0);
     EXPECT_DOUBLE_EQ(s.avg_error, 0.0);
@@ -2027,8 +2044,9 @@ TEST(SegmentedFinalContract, PerfectSurfaceCountsEveryScoredPoint) {
     EXPECT_FALSE(detail::needs_final_retry(s, 1e-5));
 }
 
-// Half the points score, half are non-finite: the average denominator is the
-// scored count, and any non-finite evaluation disqualifies the surface.
+// Half the points measure, half are non-finite: the average denominator is
+// the measured count, and any non-finite evaluation disqualifies the
+// surface.
 TEST(SegmentedFinalContract, NonFiniteEvaluationIsNotViable) {
     const auto pts = make_points(8);
     const auto ctx = make_score_ctx();
@@ -2042,7 +2060,7 @@ TEST(SegmentedFinalContract, NonFiniteEvaluationIsNotViable) {
 
     auto s = detail::score_final_surface(pts, flaky, passthrough_score(), ctx);
 
-    EXPECT_EQ(s.scored, 4u);
+    EXPECT_EQ(s.measured, 4u);
     EXPECT_EQ(s.skipped, 4u);
     EXPECT_FALSE(s.all_finite);
     EXPECT_FALSE(s.viable());
@@ -2135,11 +2153,59 @@ TEST(SegmentedFinalContract, LooseTargetStillRetriesNonViableOriginal) {
     EXPECT_FALSE(detail::needs_final_retry(good, 0.01));
 }
 
-// Zero scored points cannot certify anything, whatever the max says.
-TEST(SegmentedFinalContract, NoScoredPointsIsNotViable) {
+// Zero measured points cannot certify anything, whatever the max says.
+TEST(SegmentedFinalContract, NoMeasuredPointsIsNotViable) {
     EXPECT_FALSE(score_of(0.0, true, 0).viable());
     EXPECT_EQ(detail::select_final_surface(score_of(0.0, true, 0),
                                            std::nullopt),
+              detail::FinalPick::None);
+}
+
+// Regression: filtered points are not measurements.
+// Bug: the score fn returned 0.0 where the TV/K or vega-floor filter fired,
+// so a filtered point entered the average as a perfect score and counted
+// toward "at least one measurement".  A surface filtered everywhere reported
+// max 0 / avg 0 and passed the viability gate having been measured nowhere
+// (final-review amendment 2026-08-30).
+TEST(SegmentedFinalContract, FilteredPointsEnterNoStatistic) {
+    const auto pts = make_points(8);
+    const auto ctx = make_score_ctx();
+    // Every point would score 0.10; half of them are filtered out.
+    const SurfaceHandle flat{
+        .price = [](double, double, double, double, double) { return 0.10; }};
+
+    auto calls = std::make_shared<size_t>(0);
+    auto s = detail::score_final_surface(pts, flat, filtering_score(2, calls),
+                                         ctx);
+
+    EXPECT_EQ(s.measured, 4u);
+    EXPECT_EQ(s.filtered, 4u);
+    EXPECT_EQ(s.skipped, 0u);
+    EXPECT_TRUE(s.all_finite);
+    // Averaged over the measured points only -- a filtered point pulled the
+    // average toward zero before.
+    EXPECT_DOUBLE_EQ(s.max_error, 0.10);
+    EXPECT_DOUBLE_EQ(s.avg_error, 0.10);
+    EXPECT_TRUE(s.viable());
+}
+
+// And with *every* point filtered there is nothing to certify.
+TEST(SegmentedFinalContract, FullyFilteredSurfaceIsNotViable) {
+    const auto pts = make_points(8);
+    const auto ctx = make_score_ctx();
+    const SurfaceHandle flat{
+        .price = [](double, double, double, double, double) { return 0.10; }};
+
+    auto calls = std::make_shared<size_t>(0);
+    auto s = detail::score_final_surface(pts, flat, filtering_score(1, calls),
+                                         ctx);
+
+    EXPECT_EQ(s.measured, 0u);
+    EXPECT_EQ(s.filtered, pts.size());
+    EXPECT_DOUBLE_EQ(s.max_error, 0.0);
+    EXPECT_FALSE(s.viable())
+        << "a max of zero over an empty measurement set certifies nothing";
+    EXPECT_EQ(detail::select_final_surface(s, std::nullopt),
               detail::FinalPick::None);
 }
 
@@ -2222,7 +2288,8 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
         points->points, returned, make_iv_score_fn(params, seg_config.option_type),
         ctx);
 
-    EXPECT_EQ(measured.scored, result->diagnostics.holdout_points);
+    EXPECT_EQ(measured.measured,
+              result->diagnostics.holdout_points_measured);
     EXPECT_NEAR(measured.max_error, result->achieved_max_error, 1e-12)
         << "reported max error does not describe the returned surface"
         << " (used_retry = " << result->used_retry << ")";
@@ -2354,7 +2421,8 @@ TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
         points->points, returned,
         make_iv_score_fn(params, seg_config.option_type), ctx);
 
-    EXPECT_EQ(measured.scored, result->diagnostics.holdout_points);
+    EXPECT_EQ(measured.measured,
+              result->diagnostics.holdout_points_measured);
     EXPECT_NEAR(measured.max_error, result->achieved_max_error, 1e-12);
     EXPECT_NEAR(measured.avg_error, result->achieved_avg_error, 1e-12);
 }

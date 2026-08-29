@@ -241,13 +241,30 @@ using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
     double spot, double strike, double tau, double sigma, double rate)>;
 
 /// Score one point from interpolated price + cached refs. Pure arithmetic.
-/// Contract: returns a finite, nonnegative error (loop treats anything else
-/// as a non-viable evaluation).
-using ScoreErrorFn = std::function<double(
+/// Contract: nullopt = the point was deliberately filtered (the metric is
+/// undefined there); an engaged value is finite and nonnegative (the loop
+/// treats anything else as a non-viable evaluation).
+using ScoreErrorFn = std::function<std::optional<double>(
     double interp, const ErrorRefs& refs,
     double spot, double strike, double tau,
     double sigma, double rate)>;
 ```
+
+**Filtered points are not measurements** (final-review amendment,
+2026-08-30). `ScoreErrorFn` returns `std::optional<double>`: `std::nullopt`
+where a filter fires (TV/K below 1e-4, or |vega| below the floor), an
+engaged value everywhere else. A skipped point is excluded from the max,
+from the average, and from the measured count -- it neither certifies a
+surface nor condemns it. Consequently **viability additionally requires
+`measured > 0`** on both the loop's candidates and `FinalScore::viable()`:
+a candidate whose every holdout point was filtered has been measured
+nowhere, and its vacuous max of 0 must not read as a flawless surface.
+`FinalScore` counts `measured` (usable errors), `filtered` (deliberate
+skips), and `skipped` (non-finite or negative evaluations); a non-finite
+interpolated price still clears `all_finite` even where the metric is
+filtered, because a garbage price is garbage regardless. Returning 0.0 for
+a filtered point -- the pre-amendment behavior -- made an unmeasurable
+build report `target_met` with a zero error.
 
 `make_fd_vega_error_fn` is replaced by `make_fd_vega_refs_fn`
 (a `PrepareRefsFn`) plus `make_iv_score_fn` (a `ScoreErrorFn` carrying the
@@ -476,6 +493,7 @@ struct BuildDiagnostics {
     bool build_failure_fallback = false;
     size_t holdout_points = 0;         // valid holdout references
     size_t holdout_points_invalid = 0;
+    size_t holdout_points_measured = 0;  // of the above, those that scored
     size_t monotonicity_violations = 0;   // returned candidate, see below
     size_t monotonicity_points_invalid = 0;  // non-finite scan prices
     double worst_vega_slope = 0.0;        // most negative dPrice/dσ observed

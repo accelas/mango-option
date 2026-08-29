@@ -144,6 +144,12 @@ struct ErrorBins {
     ///
     /// Returns the dimension where errors are most localized (highest
     /// max bin count relative to total), indicating refinement will help.
+    ///
+    /// Retained as a diagnostic helper; it no longer drives axis selection
+    /// (spec D6 -- `pick_refinement_axis` walks every axis by concentration
+    /// alone, with a measured-improvement restart).  Kept because it weighs
+    /// concentration by error mass, which is the question to ask when reading
+    /// a build's bins by hand.
     [[nodiscard]] size_t worst_dimension() const {
         double best_score = -1.0;
         size_t best_dim = 0;
@@ -249,9 +255,16 @@ using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
     double spot, double strike, double tau, double sigma, double rate)>;
 
 /// Score one point from interpolated price + cached refs. Pure arithmetic.
-/// Contract: returns a finite, nonnegative error (the loop treats anything
-/// else as a non-viable evaluation).
-using ScoreErrorFn = std::function<double(
+///
+/// Contract (spec D4, final-review amendment 2026-08-30):
+///  - `std::nullopt` means the point was **deliberately skipped** by a filter
+///    (TV/K or vega floor): the error metric is undefined there, so the point
+///    carries no evidence either way.  Skipped points are excluded from the
+///    max, the average, and the measured count -- they neither certify a
+///    surface nor condemn it.
+///  - An engaged value must be finite and nonnegative; anything else is a
+///    non-viable evaluation and disqualifies the candidate (D5).
+using ScoreErrorFn = std::function<std::optional<double>(
     double interp, const ErrorRefs& refs,
     double spot, double strike, double tau,
     double sigma, double rate)>;
@@ -305,6 +318,8 @@ PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& params,
 /// Score an interpolated price against cached ErrorRefs using the TV/K
 /// filter (skips points where TV/K < 1e-4; IV undefined there) and
 /// `compute_iv_error` arithmetic (vega floor + target-level noise clamp).
+/// Filtered points return `std::nullopt`, never 0.0: a skip is the absence of
+/// a measurement, not a perfect one.
 ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
                               OptionType option_type);
 
@@ -417,20 +432,25 @@ prepare_final_validation(const AdaptiveGridParams& params,
 
 /// Score of one assembled surface over a cached `FinalValidationSet`.
 ///
-/// `scored` counts every point that produced a finite, nonnegative error --
-/// including exact zeros -- so `avg_error`'s denominator matches its
-/// numerator even for a surface that reproduces every reference exactly.
+/// `measured` counts every point whose score *engaged* and produced a finite,
+/// nonnegative error -- including exact zeros -- so `avg_error`'s denominator
+/// matches its numerator even for a surface that reproduces every reference
+/// exactly.  Points the `ScoreErrorFn` deliberately skipped are counted in
+/// `filtered` and enter no statistic: the metric is undefined there.
 struct FinalScore {
     double max_error = 0.0;
     double avg_error = 0.0;
-    size_t scored = 0;    ///< points that produced a usable error
-    size_t skipped = 0;   ///< points with a non-finite/negative evaluation
+    size_t measured = 0;   ///< points that produced a usable error
+    size_t filtered = 0;   ///< points the score fn skipped (nullopt)
+    size_t skipped = 0;    ///< points with a non-finite/negative evaluation
     bool all_finite = true;
 
-    /// D5 viability: every evaluation finite and nonnegative, at least one
-    /// measurement, and the max error within the absolute garbage bound.
+    /// D5 viability: every engaged evaluation finite and nonnegative, at
+    /// least one *measurement*, and the max error within the absolute garbage
+    /// bound.  `measured > 0` is what stops a surface whose every holdout
+    /// point was filtered from certifying itself with a vacuous max of 0.
     [[nodiscard]] bool viable() const noexcept {
-        return all_finite && scored > 0 && std::isfinite(max_error) &&
+        return all_finite && measured > 0 && std::isfinite(max_error) &&
                max_error <= kViabilityBound;
     }
 };

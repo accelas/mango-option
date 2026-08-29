@@ -28,7 +28,10 @@ using HoldoutPoint = detail::ValidationPoint;
 struct SampleEval {
     double max_error = 0.0;
     double avg_error = 0.0;
-    size_t valid_samples = 0;
+    /// Samples whose score engaged and produced a usable error.  Points the
+    /// score fn deliberately skipped (TV/K or vega floor) are not counted
+    /// here: they are not measurements of this surface.
+    size_t measured = 0;
     size_t pde_solves_validation = 0;
     ErrorBins error_bins;
     /// False when any evaluation produced a non-finite price/score or a
@@ -42,6 +45,7 @@ struct Candidate {
     std::shared_ptr<const void> state;
     double holdout_max = std::numeric_limits<double>::quiet_NaN();
     double holdout_avg = std::numeric_limits<double>::quiet_NaN();
+    size_t holdout_measured = 0;  ///< holdout points that actually measured it
     ErrorBins bins;
     size_t iteration = 0;
     bool viable = false;
@@ -245,13 +249,15 @@ ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
     return [vega_floor, target, option_type](
         double interp, const ErrorRefs& refs,
         double spot, double strike, double /*tau*/,
-        double /*sigma*/, double /*rate*/) -> double
+        double /*sigma*/, double /*rate*/) -> std::optional<double>
     {
-        // TV/K filter: skip points where IV is undefined
+        // TV/K filter: skip points where IV is undefined.  `nullopt`, not
+        // 0.0: a skipped point is no measurement at all, and reporting it as
+        // a perfect one let a surface nobody could measure look flawless.
         constexpr double kTVKThreshold = 1e-4;
         double intrinsic = intrinsic_value(spot, strike, option_type);
         if ((refs.ref_price - intrinsic) / strike < kTVKThreshold) {
-            return 0.0;
+            return std::nullopt;
         }
 
         // Vega floor: below it the price carries no volatility information,
@@ -266,7 +272,7 @@ ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
         // like any other IV-undefined one.  Price accuracy where vega ~ 0
         // is not what the IV-error metric (or kViabilityBound) measures.
         if (std::abs(refs.vega) < vega_floor) {
-            return 0.0;
+            return std::nullopt;
         }
 
         double price_error = std::abs(interp - refs.ref_price);
@@ -416,8 +422,9 @@ static std::vector<std::array<double, 4>> generate_validation_samples(
 /// Score a candidate surface over freshly drawn samples (spec D4).
 ///
 /// Failed reference solves are skipped (they carry no evidence about the
-/// surface).  Non-finite prices or scores do not contribute to the error
-/// statistics but do clear `all_finite`, which disqualifies the candidate.
+/// surface), as are points the score fn filters out (`std::nullopt`).
+/// Non-finite prices or scores do not contribute to the error statistics but
+/// do clear `all_finite`, which disqualifies the candidate.
 static SampleEval evaluate_fresh_samples(
     const std::vector<std::array<double, 4>>& samples,
     const SurfaceHandle& handle,
@@ -451,21 +458,30 @@ static SampleEval evaluate_fresh_samples(
 
         ev.pde_solves_validation++;
 
-        double iv_error = score(
+        auto scored = score(
             interp_price, refs_result.value(),
             ctx.spot, strike, tau, sigma, rate);
 
-        if (!std::isfinite(interp_price) || !std::isfinite(iv_error) ||
-            iv_error < 0.0) {
-            // A NaN on an in-domain fresh sample disqualifies the candidate
-            // even if the fixed holdout missed that location (spec D5).
+        // A NaN price on an in-domain fresh sample disqualifies the candidate
+        // even if the fixed holdout missed that location (spec D5) -- and
+        // even where the error metric is filtered out: the filter says the
+        // *IV error* is undefined there, not that garbage prices are fine.
+        if (!std::isfinite(interp_price)) {
+            ev.all_finite = false;
+            continue;
+        }
+        if (!scored.has_value()) {
+            continue;  // filtered: the metric is undefined here (D4)
+        }
+        const double iv_error = *scored;
+        if (!std::isfinite(iv_error) || iv_error < 0.0) {
             ev.all_finite = false;
             continue;
         }
 
         ev.max_error = std::max(ev.max_error, iv_error);
         sum_error += iv_error;
-        ev.valid_samples++;
+        ev.measured++;
 
         // Normalize position for error bins over the SAMPLE domain (spec
         // D2) -- bins must line up with the domain the samples came from.
@@ -479,8 +495,8 @@ static SampleEval evaluate_fresh_samples(
         ev.error_bins.record_error(norm_pos, iv_error, target_iv_error);
     }
 
-    ev.avg_error = ev.valid_samples > 0
-        ? sum_error / static_cast<double>(ev.valid_samples)
+    ev.avg_error = ev.measured > 0
+        ? sum_error / static_cast<double>(ev.measured)
         : 0.0;
     return ev;
 }
@@ -507,7 +523,7 @@ static SampleEval evaluate_holdout(
     SampleEval ev;
     ev.max_error = scored.max_error;
     ev.avg_error = scored.avg_error;
-    ev.valid_samples = scored.scored;
+    ev.measured = scored.measured;
     ev.all_finite = scored.all_finite;
     return ev;
 }
@@ -654,19 +670,31 @@ detail::FinalScore detail::score_final_surface(
         const double rate = pt.coords[3];
         const double interp =
             handle.price(ctx.spot, pt.strike, tau, sigma, rate);
-        const double err = score(interp, pt.refs, ctx.spot, pt.strike,
-                                 tau, sigma, rate);
-        if (!std::isfinite(interp) || !std::isfinite(err) || err < 0.0) {
+        const auto err = score(interp, pt.refs, ctx.spot, pt.strike,
+                               tau, sigma, rate);
+        // A NaN price is garbage whether or not the metric is defined here.
+        if (!std::isfinite(interp)) {
             ev.all_finite = false;
             ++ev.skipped;
             continue;
         }
-        ev.max_error = std::max(ev.max_error, err);
-        sum_error += err;
-        // Every scored point counts -- a zero error is a measurement, not a
+        if (!err.has_value()) {
+            // Deliberately filtered (TV/K or vega floor): no evidence either
+            // way, so it enters no statistic and cannot certify the surface.
+            ++ev.filtered;
+            continue;
+        }
+        if (!std::isfinite(*err) || *err < 0.0) {
+            ev.all_finite = false;
+            ++ev.skipped;
+            continue;
+        }
+        ev.max_error = std::max(ev.max_error, *err);
+        sum_error += *err;
+        // Every measured point counts -- a zero error is a measurement, not a
         // missing one, and using it as the avg denominator's gate produced a
         // spurious "target met" for a surface nobody had measured.
-        ++ev.scored;
+        ++ev.measured;
     }
 
     if (!ev.all_finite) {
@@ -674,8 +702,8 @@ detail::FinalScore detail::score_final_surface(
         ev.avg_error = std::numeric_limits<double>::quiet_NaN();
         return ev;
     }
-    ev.avg_error = ev.scored > 0
-        ? sum_error / static_cast<double>(ev.scored)
+    ev.avg_error = ev.measured > 0
+        ? sum_error / static_cast<double>(ev.measured)
         : 0.0;
     return ev;
 }
@@ -848,6 +876,11 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     RefinementResult result;
     BuildDiagnostics& diag = result.diagnostics;
     diag.iterations.reserve(params.max_iter + 1);
+    // `holdout_points` is the size of the *usable reference set*: points whose
+    // FD refs were produced and finite.  How many of them actually measured
+    // the returned surface is `holdout_points_measured`, filled in from the
+    // picked candidate below -- the two differ by the points the score fn
+    // filters out (TV/K, vega floor).
     diag.holdout_points = holdout.size();
     diag.holdout_points_invalid = holdout_invalid;
 
@@ -936,12 +969,18 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             cand.state = snapshot_state();
             cand.holdout_max = hold.max_error;
             cand.holdout_avg = hold.avg_error;
+            cand.holdout_measured = hold.measured;
             cand.bins = fresh.error_bins;
             cand.iteration = iteration;
             cand.fresh_converged =
-                fresh.valid_samples > 0 &&
+                fresh.measured > 0 &&
                 fresh.max_error <= params.target_iv_error;
+            // `hold.measured > 0`: a candidate whose every holdout point was
+            // filtered out has been measured nowhere, and a max of 0 over an
+            // empty set must not certify it (spec D5, final-review amendment
+            // 2026-08-30).
             cand.viable = hold.all_finite && fresh.all_finite &&
+                          hold.measured > 0 &&
                           std::isfinite(hold.max_error) &&
                           hold.max_error <= kViabilityBound;
 
@@ -1102,6 +1141,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     diag.achieved_max_error = result.achieved_max_error;
     diag.achieved_avg_error = result.achieved_avg_error;
     diag.picked_iteration = picked->iteration;
+    diag.holdout_points_measured = picked->holdout_measured;
     diag.total_iterations = iteration;  // excludes the final rebuild
 
     detail::scan_monotonicity(holdout, *last_handle, ctx,

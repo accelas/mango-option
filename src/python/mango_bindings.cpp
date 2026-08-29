@@ -282,6 +282,7 @@ py::object build_diagnostics_to_pyobject(
     result["final_rebuild"] = d.final_rebuild;
     result["build_failure_fallback"] = d.build_failure_fallback;
     result["holdout_points"] = d.holdout_points;
+    result["holdout_points_measured"] = d.holdout_points_measured;
     result["holdout_points_invalid"] = d.holdout_points_invalid;
     result["monotonicity_violations"] = d.monotonicity_violations;
     result["monotonicity_points_invalid"] = d.monotonicity_points_invalid;
@@ -1043,7 +1044,8 @@ PYBIND11_MODULE(mango_option, m) {
                 Parquet.  Otherwise a dict with keys: target_met,
                 achieved_max_error, achieved_avg_error, picked_iteration,
                 total_iterations, final_rebuild, build_failure_fallback,
-                holdout_points, holdout_points_invalid,
+                holdout_points, holdout_points_measured,
+                holdout_points_invalid,
                 monotonicity_violations, monotonicity_points_invalid,
                 worst_vega_slope, n_iterations.
             )pbdoc")
