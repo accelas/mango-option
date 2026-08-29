@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/ffi/mango_c_api.h"
+#include "mango/ffi/iv_error_mapping.hpp"
 
 #include "mango/option/american_option.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
@@ -121,25 +122,7 @@ std::string format_iv_error(const mango::IVError& e) {
   return m.str();
 }
 
-MangoStatus map_iv_error(const mango::IVError& e) {
-  switch (e.code) {
-    case mango::IVErrorCode::ArbitrageViolation: return MANGO_ERR_ARBITRAGE;
-    case mango::IVErrorCode::BracketingFailed:
-    case mango::IVErrorCode::MultipleRoots: return MANGO_ERR_BRACKETING;
-    case mango::IVErrorCode::MaxIterationsExceeded: return MANGO_ERR_NO_CONVERGENCE;
-    case mango::IVErrorCode::NegativeSpot:
-    case mango::IVErrorCode::NegativeStrike:
-    case mango::IVErrorCode::NegativeMaturity:
-    case mango::IVErrorCode::NegativeMarketPrice:
-    // Validation-category codes produced by the interpolated solver. Without
-    // these explicit arms they fall through to MANGO_ERR_SOLVER, so Rust
-    // callers see ErrorKind::Solver for what are really bad-input errors.
-    case mango::IVErrorCode::InvalidGridConfig:
-    case mango::IVErrorCode::OptionTypeMismatch:
-    case mango::IVErrorCode::DividendYieldMismatch: return MANGO_ERR_VALIDATION;
-    default: return MANGO_ERR_SOLVER;
-  }
-}
+using mango::ffi::map_iv_error;
 
 void fill_iv_success(MangoIvSuccess* out, const mango::IVSuccess& s) {
   out->implied_vol = s.implied_vol;
