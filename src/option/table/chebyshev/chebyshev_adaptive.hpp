@@ -106,6 +106,7 @@ private:
         SegmentedAdaptiveConfig config,
         std::vector<double> K_refs,
         SurfaceBounds domain,
+        SurfaceBounds sample_domain,
         std::vector<double> seg_bounds,
         std::vector<bool> seg_is_gap);
 
@@ -126,7 +127,8 @@ private:
 
     SegmentedAdaptiveConfig config_;
     std::vector<double> K_refs_;
-    SurfaceBounds domain_;
+    SurfaceBounds domain_;         ///< node/support domain (incl. dividend span)
+    SurfaceBounds sample_domain_;  ///< user-facing measurement domain (D2)
     std::vector<double> seg_bounds_;
     std::vector<bool> seg_is_gap_;
 };

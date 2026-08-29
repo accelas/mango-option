@@ -766,11 +766,13 @@ ChebyshevSegmentedBuilder::ChebyshevSegmentedBuilder(
     SegmentedAdaptiveConfig config,
     std::vector<double> K_refs,
     SurfaceBounds domain,
+    SurfaceBounds sample_domain,
     std::vector<double> seg_bounds,
     std::vector<bool> seg_is_gap)
     : config_(std::move(config)),
       K_refs_(std::move(K_refs)),
       domain_(domain),
+      sample_domain_(sample_domain),
       seg_bounds_(std::move(seg_bounds)),
       seg_is_gap_(std::move(seg_is_gap)) {}
 
@@ -781,17 +783,26 @@ ChebyshevSegmentedBuilder::create(
     auto K_refs = resolve_k_refs(config.kref_config, config.spot);
     if (!K_refs) return std::unexpected(K_refs.error());
 
+    // Support domain: the user's ranges widened for the cumulative discrete
+    // dividend spot shifts, so the nodes cover post-dividend spots.
     auto dom = expand_segmented_domain(
         domain, config.maturity, config.dividend_yield,
         config.discrete_dividends, K_refs->front());
     if (!dom) return std::unexpected(dom.error());
+
+    // Measurement domain: the same construction *without* the dividend
+    // widening (spec D2 -- accuracy is measured only where the user can
+    // query, never in the support band).
+    auto sample_dom = expand_segmented_domain(
+        domain, config.maturity, config.dividend_yield, {}, K_refs->front());
+    if (!sample_dom) return std::unexpected(sample_dom.error());
 
     auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(
         config.discrete_dividends, config.maturity,
         dom->tau_min, dom->tau_max);
 
     return ChebyshevSegmentedBuilder(
-        config, std::move(*K_refs), *dom,
+        config, std::move(*K_refs), *dom, *sample_dom,
         std::move(seg_bounds), std::move(seg_is_gap));
 }
 
@@ -930,7 +941,9 @@ ChebyshevSegmentedBuilder::build_adaptive(
     initial.exact = true;
 
     // domain_ carries no support headroom (spec D3); the fit domain is the
-    // CC-extended node span, the sample domain is the user's own range.
+    // CC-extended node span, the sample domain is the user's own range
+    // (sample_domain_ -- domain_ still carries the discrete-dividend
+    // widening, which is support, not a queryable range).
     RefinementContext ctx{
         .spot = config_.spot,
         .dividend_yield = config_.dividend_yield,
@@ -941,7 +954,7 @@ ChebyshevSegmentedBuilder::build_adaptive(
             .sigma_min = state.sigma_lo, .sigma_max = state.sigma_hi,
             .rate_min = state.rate_lo, .rate_max = state.rate_hi,
         },
-        .sample_bounds = domain_,
+        .sample_bounds = sample_domain_,
     };
 
     // TODO(#434, task 8/9): supply snapshot/restore hooks for the CC level

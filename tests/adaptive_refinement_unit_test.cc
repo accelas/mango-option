@@ -304,6 +304,9 @@ struct SurfaceScript {
     double holdout_err = 0.0;
     bool nan_fresh = false;    ///< NaN price at the first fresh sample
     bool nan_holdout = false;  ///< NaN price at the first holdout point
+    /// Per-point fresh error keyed on (m, tau, sigma, rate); overrides
+    /// `fresh_err` when set.  Used to place error mass in a chosen bin.
+    std::function<double(const std::array<double, 4>&)> fresh_err_fn;
 };
 
 class Harness {
@@ -427,6 +430,10 @@ public:
                     }
                     if (s.nan_fresh && (*fresh_seen)++ == 0) {
                         return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    if (s.fresh_err_fn) {
+                        return base + s.fresh_err_fn(
+                            {std::log(spot / strike), tau, sigma, rate});
                     }
                     return base + s.fresh_err;
                 },
@@ -814,6 +821,33 @@ TEST(RunRefinementTest, BacktrackReachesThirdAxis) {
     EXPECT_EQ(Harness::result_sizes(*r), (GridSizes{5, 6, 7, 7}));
 }
 
+// Spec D6 step 1: the axis score is the concentration of the exploration
+// base's error bins, so error mass packed into one bin of one axis picks that
+// axis ahead of the dimension-order tie-break.
+TEST(RunRefinementTest, ConcentratedBinPicksItsAxis) {
+    Harness h;
+    h.params.validation_samples = 40;  // enough mass to fill one sigma bin
+    h.params.max_iter = 2;
+    // sigma in [0.1, 0.5] -> five bins of width 0.08; all above-target error
+    // lands in bin 0, while the same points spread over the other three axes.
+    SurfaceScript s{.holdout_err = 0.05};
+    s.fresh_err_fn = [](const std::array<double, 4>& pt) {
+        return pt[2] < 0.18 ? 0.01 : 0.0;
+    };
+    h.script = by_growth({}, s);
+
+    auto r = h.run();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_FALSE(h.refine_axes.empty());
+    EXPECT_EQ(h.refine_axes[0], 2u) << "concentration must beat dim order";
+
+    // ... and the focus interval handed to the refiner is that bin, in
+    // physical sigma coordinates (spec D2).
+    ASSERT_EQ(h.refine_focus[0].size(), 1u);
+    EXPECT_NEAR(h.refine_focus[0][0].first, 0.10, 1e-12);
+    EXPECT_NEAR(h.refine_focus[0][0].second, 0.18, 1e-12);
+}
+
 TEST(RunRefinementTest, NoOpRefineConsumesNoBuild) {
     Harness h;
     h.noop_axes = {0, 1, 2, 3};
@@ -976,6 +1010,31 @@ TEST(RunRefinementTest, ConvergenceRequiresHoldout) {
     EXPECT_FALSE(r->target_met) << "fresh convergence alone must not certify";
     EXPECT_GT(h.build_calls, 1u) << "the loop must keep refining";
     EXPECT_NEAR(r->achieved_max_error, 0.001, 1e-12);
+}
+
+// Spec D4/D5: convergence certifies the *returned* surface, so a candidate
+// that looks converged only because its NaN fresh sample was skipped must not
+// end exploration and strand the untried axes.
+TEST(RunRefinementTest, ConvergenceRequiresViableCandidate) {
+    Harness h;
+    h.params.max_iter = 4;
+    h.script = by_growth(
+        {
+            {{0, 0, 0, 0}, {.holdout_err = 0.05}},
+            // Both sample sets read as under target -- but one fresh sample
+            // is NaN, so the candidate is non-viable and cannot converge.
+            {{1, 0, 0, 0}, {.holdout_err = 1e-5, .nan_fresh = true}},
+            // Reachable only if the walk keeps going.
+            {{2, 0, 0, 0}, {.holdout_err = 0.002}},
+        },
+        SurfaceScript{.holdout_err = 0.05});
+
+    auto r = h.run();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_GT(r->diagnostics.total_iterations, 2u)
+        << "a non-viable candidate must not end the walk";
+    EXPECT_EQ(r->diagnostics.picked_iteration, 2u);
+    EXPECT_NEAR(r->achieved_max_error, 0.002, 1e-12);
 }
 
 TEST(RunRefinementTest, HoldoutRefsPreparedOnce) {

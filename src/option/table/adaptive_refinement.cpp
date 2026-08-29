@@ -894,9 +894,12 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 
             candidates.push_back(std::move(cand));
 
-            // f. CONVERGENCE requires both sample sets under target (D4)
-            if (candidates.back().fresh_converged &&
-                std::isfinite(candidates.back().holdout_max) &&
+            // f. CONVERGENCE requires both sample sets under target (D4) on a
+            //    candidate that could actually be returned: a non-viable one
+            //    (a NaN fresh sample is simply skipped in the statistics)
+            //    would otherwise read as converged and strand untried axes.
+            if (candidates.back().viable &&
+                candidates.back().fresh_converged &&
                 candidates.back().holdout_max <= params.target_iv_error) {
                 break;
             }
@@ -967,6 +970,13 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 
     // The loop must never return grids that do not describe the caller's
     // captured surface: rebuild once when the pick is not the last build.
+    //
+    // `last_attempt_failed` is part of that test because a failed build_fn can
+    // still have overwritten the caller's captured state: the B-spline path's
+    // build_cached_surface assigns `last_spline`/`last_axes` *before* wrapping
+    // the surface, so a wrapper failure returns an error while leaving the
+    // caller pointing at the failed trial's spline.  Rebuilding is the cheap,
+    // backend-independent way to guarantee the capture matches the pick.
     if (picked->iteration != last_built_iteration || last_attempt_failed ||
         !last_handle.has_value()) {
         auto iter_start = std::chrono::steady_clock::now();
@@ -976,7 +986,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             return std::unexpected(rebuilt.error());
         }
         IterationStats stats;
-        stats.iteration = picked->iteration;
+        stats.iteration = iteration;  // next slot in the build sequence
         stats.refined_dim = -2;  // final rebuild marker (spec D7)
         stats.grid_sizes = {picked->moneyness.size(), picked->tau.size(),
                             picked->vol.size(), picked->rate.size()};

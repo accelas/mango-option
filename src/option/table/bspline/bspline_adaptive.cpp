@@ -619,18 +619,18 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             return SurfaceHandle{
                 // A probe surface is a single-K_ref object: TauSegmentSplit
                 // *discards* the query strike and prices at K_ref, so calling
-                // it with the validation strike compares a K_ref-struck price
-                // against a K-struck reference (errors of several IV points on
-                // a healthy surface).  Map the query onto the probe's own
-                // K_ref problem by the exact scaling P(S, K) =
-                // (K/K_ref) * P(S * K_ref/K, K_ref) so the probe measures its
-                // interpolation accuracy rather than a strike mismatch.
+                // it with the validation strike would compare a K_ref-struck
+                // price against a K-struck reference (errors of several IV
+                // points on a healthy surface).  Map the query onto the
+                // probe's own K_ref problem instead -- and measure it against
+                // a reference solved at the *same* scaled coordinates (see
+                // the PrepareRefsFn below), so what the loop scores is this
+                // probe's interpolation error and nothing else.
                 .price = [shared, probe_ref](double spot, double strike,
                                              double tau, double sigma,
                                              double rate) -> double {
-                    if (!(strike > 0.0)) return shared->price(
-                        spot, probe_ref, tau, sigma, rate);
-                    const double scale = strike / probe_ref;
+                    const double scale =
+                        (strike > 0.0) ? strike / probe_ref : 1.0;
                     return scale * shared->price(spot / scale, probe_ref,
                                                  tau, sigma, rate);
                 },
@@ -642,7 +642,29 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             config_.dividend_yield, config_.option_type,
             config_.discrete_dividends);
 
-        auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+        // The probe's references live on the probe's own problem.  A query
+        // (S, K) reaches the surface as scale * probe(S/scale, K_ref) with
+        // scale = K/K_ref, so the reference is the FD solve at
+        // (S/scale, K_ref) under the same dividend schedule, scaled the same
+        // way.  Rescaling the *option* rather than the query -- pricing
+        // (S, K) and comparing against a K_ref-struck surface, or leaning on
+        // P(lambda S, lambda K) homogeneity -- does not hold here: absolute
+        // discrete dividends are not scaled by lambda, so
+        // scale * P(S/scale, K_ref; D) is P(S, K; scale * D), and the
+        // (scale - 1) * D * dP/dD residual would be scored as interpolation
+        // error.  Price and vega scale together, so the IV error the loop
+        // sees is unaffected by the scaling itself.
+        auto base_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+        PrepareRefsFn prepare_refs_fn =
+            [base_refs_fn, probe_ref](double spot, double strike, double tau,
+                                      double sigma, double rate)
+            -> std::expected<ErrorRefs, SolverError> {
+            const double scale = (strike > 0.0) ? strike / probe_ref : 1.0;
+            auto refs = base_refs_fn(spot / scale, probe_ref, tau, sigma, rate);
+            if (!refs) return std::unexpected(refs.error());
+            return ErrorRefs{.ref_price = scale * refs->ref_price,
+                             .vega = scale * refs->vega};
+        };
         auto score_fn = make_iv_score_fn(params, config_.option_type);
 
         RefinementContext ctx{
@@ -665,16 +687,21 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
                                     prepare_refs_fn, score_fn, initial_grids,
                                     RefineStateHooks{});
         if (!sizes) {
-            // A probe is a *sizing* device, never a returned surface, and a
-            // single-K_ref segmented surface cannot be measured away from
-            // its own K_ref: with absolute discrete dividends neither the
-            // assembly's K/K_ref scaling nor the exact homogeneity map above
-            // preserves the option value once K/K_ref is far from 1 (a
-            // 20%-of-spot dividend schedule measures 3.6 IV on a healthy
-            // probe).  So a probe that cannot certify itself contributes no
-            // sizing signal rather than failing the build; the *assembled*
-            // surface gets its own mandatory validation and viability gate
-            // (spec D9, task 8).  Genuine build errors still propagate.
+            // PROVISIONAL (see task-6 report, awaiting a decision): a probe
+            // that cannot certify *itself* contributes no sizing signal
+            // rather than failing the build.  This is not the measurement
+            // artifact it once was -- with the scaled references above the
+            // probe scores its own interpolation error and nothing else --
+            // but on dividend-heavy configs that error is genuinely huge:
+            // the //tests BuildSegmentedLargeDividend config ($20 of
+            // absolute dividends on a $100 spot, K_refs 70/100/130) measures
+            // 583,897 bps on its worst probe, and 38,465 bps even with the
+            // sampled moneyness narrowed to S/K in [0.9, 1.1].  A probe is a
+            // *sizing* device, never a returned surface, and the assembly
+            // never asks a K_ref surface about the strikes another K_ref
+            // serves; safety belongs on the assembled surface, which gets
+            // its own mandatory validation and viability gate (spec D9,
+            // task 8).  Genuine build errors still propagate.
             if (sizes.error().code != PriceTableErrorCode::NoViableSurface &&
                 sizes.error().code != PriceTableErrorCode::ValidationFailed) {
                 return std::unexpected(sizes.error());
@@ -687,9 +714,9 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     // 3. Aggregate max grid sizes and convergence stats across probes
     auto gsz = aggregate_max_sizes(probe_results);
     if (probe_results.empty()) {
-        // No probe could certify: fall back to the grids the loop would
-        // have started from (the user's own knots, padded to the minimum
-        // density) -- the same sizes a max_iter == 1 build would produce.
+        // No probe could certify: fall back to the grids the loop would have
+        // started from (the user's own knots, padded to the minimum density)
+        // -- the same sizes a max_iter == 1 build would produce.
         RefinementContext seed_ctx{
             .spot = config_.spot,
             .dividend_yield = config_.dividend_yield,
