@@ -104,6 +104,17 @@ ValidationError to_validation_error(const PriceTableError& error) {
             return ValidationError{ValidationErrorCode::InvalidGridSize,
                                    static_cast<double>(error.count),
                                    error.axis_index};
+        // An adaptive build that refuses (spec D5/D9) must reach the caller as
+        // a refusal, not as a grid-shape complaint: these are the forward
+        // direction of the round trip pinned in error_types.hpp.
+        case PriceTableErrorCode::NoViableSurface:
+            return ValidationError{ValidationErrorCode::NoViableSurface,
+                                   static_cast<double>(error.count),
+                                   error.axis_index};
+        case PriceTableErrorCode::ValidationFailed:
+            return ValidationError{ValidationErrorCode::AdaptiveValidationFailed,
+                                   static_cast<double>(error.count),
+                                   error.axis_index};
         default:
             return ValidationError{ValidationErrorCode::InvalidGridSize,
                                    static_cast<double>(error.count),

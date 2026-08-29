@@ -297,10 +297,11 @@ TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
 
     IVQuery query(spec, ref->value());
     auto result = solver->solve(query);
-    if (result.has_value()) {
-        EXPECT_GT(result->implied_vol, 0.0);
-        EXPECT_LT(result->implied_vol, 3.0);
-    }
+    ASSERT_TRUE(result.has_value())
+        << "the documented config must also solve, not merely build: code "
+        << static_cast<int>(result.error().code);
+    EXPECT_GT(result->implied_vol, 0.0);
+    EXPECT_LT(result->implied_vol, 3.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +438,58 @@ TEST(IVSolverFactoryComparison, AccuracyManualVsAdaptive) {
 
     EXPECT_LT(manual_max_err, 0.05);
     EXPECT_LT(adaptive_max_err, 0.05);
+}
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: an adaptive build that refuses must surface as a refusal
+// through the factory, not as a grid-shape complaint.
+// Bug: `to_validation_error` had no arm for `PriceTableErrorCode::
+// NoViableSurface` / `ValidationFailed`, so both fell through the `default:`
+// arm and reached callers as `ValidationErrorCode::InvalidGridSize` -- a
+// caller told to fix its grid sizes when the real answer is that no candidate
+// surface passed the D5 viability gate.  This survived 11 task reviews
+// because only the reverse mapping (ValidationError -> PriceTableError) was
+// tested; nothing exercised the forward direction end to end.
+//
+// The config is `AdaptiveGridBuilderTest.BuildSegmentedLargeDividend`'s --
+// $20 of absolute dividends against a $100 spot, which measures 583,897 bps
+// against the 0.20 viability bound -- routed through the public factory.
+TEST(IVSolverFactorySegmented, AdaptiveRefusalSurfacesAsNoViableSurface) {
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = 100.0,
+        .dividend_yield = 0.0,
+        .grid = IVGrid{
+            .moneyness = {0.5, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5},
+            .vol = {0.05, 0.10, 0.20, 0.30, 0.50},
+            .rate = {0.01, 0.03, 0.05, 0.10},
+        },
+        .adaptive = AdaptiveGridParams{
+            .target_iv_error = 0.005,
+            .max_iter = 2,
+            .validation_samples = 16,
+        },
+        .backend = BSplineBackend{
+            .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+        },
+        .discrete_dividends = DiscreteDividendConfig{
+            .maturity = 1.0,
+            .discrete_dividends = {
+                Dividend{.calendar_time = 0.25, .amount = 10.0},
+                Dividend{.calendar_time = 0.75, .amount = 10.0}},
+            .kref_config = {.K_refs = {70.0, 100.0, 130.0}},
+        },
+    };
+
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_FALSE(solver.has_value())
+        << "an unusable surface must not be returned";
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::NoViableSurface)
+        << "adaptive refusal reached the caller as code "
+        << static_cast<int>(solver.error().code);
 }
 
 // ---------------------------------------------------------------------------
