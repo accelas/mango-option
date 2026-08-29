@@ -864,7 +864,14 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("tolerance", &mango::InterpolatedIVSolverConfig::tolerance)
         .def_readwrite("sigma_min", &mango::InterpolatedIVSolverConfig::sigma_min)
         .def_readwrite("sigma_max", &mango::InterpolatedIVSolverConfig::sigma_max)
-        .def_readwrite("vega_threshold", &mango::InterpolatedIVSolverConfig::vega_threshold);
+        .def_readwrite("vega_threshold", &mango::InterpolatedIVSolverConfig::vega_threshold)
+        .def_readwrite("detect_multiple_roots",
+                       &mango::InterpolatedIVSolverConfig::detect_multiple_roots,
+                       "Screen the sigma bracket for multiple roots before inverting "
+                       "(default True).  Returns IVErrorCode.MultipleRoots when the "
+                       "17-point scan finds more than one root feature.  A screen, "
+                       "not a proof of uniqueness: folds narrower than one bracket/16 "
+                       "cell can still pass.");
 
     // IVGrid config
     py::class_<mango::IVGrid>(m, "IVGrid")
