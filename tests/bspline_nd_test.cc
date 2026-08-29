@@ -431,3 +431,71 @@ TEST(SharedBSplineInterpTest, EvalSecondPartialForwards) {
         }
     }
 }
+
+// ===========================================================================
+// Regression tests for bugs found during code review (issue #441)
+// ===========================================================================
+
+// Regression: copying BSplineND must not alias the source's coefficients
+// Bug: the implicitly-generated copy copied coeffs_view_ verbatim, so the
+//      copy evaluated through the SOURCE's coeffs_ vector — use-after-free
+//      once the source was destroyed.
+TEST_F(BSplineNDTest, CopyOwnsItsCoefficientView) {
+    auto grid = create_uniform_grid(0.0, 1.0, 10);
+    auto knots = create_clamped_knots(grid);
+    // Non-constant coefficients so a stale/aliased buffer would read wrong
+    std::vector<double> coeffs(grid.size());
+    for (size_t i = 0; i < grid.size(); ++i) {
+        coeffs[i] = 2.0 + 3.0 * grid[i];
+    }
+
+    auto make_copy = [&]() {
+        auto source = BSplineND<double, 1>::create({grid}, {knots}, coeffs).value();
+        double expected = source.eval({0.37});
+        auto copy = source;  // copy-construct
+        return std::pair{copy, expected};
+    };
+    auto [copy, expected] = make_copy();  // source destroyed
+    EXPECT_DOUBLE_EQ(copy.eval({0.37}), expected);
+}
+
+// Regression: copy-assignment has the same aliasing bug
+TEST_F(BSplineNDTest, CopyAssignOwnsItsCoefficientView) {
+    auto grid2 = create_uniform_grid(-1.0, 1.0, 8);
+    auto knots2 = create_clamped_knots(grid2);
+    std::vector<double> coeffs2(grid2.size(), 5.0);
+    auto target = BSplineND<double, 1>::create({grid2}, {knots2}, coeffs2).value();
+
+    auto grid = create_uniform_grid(0.0, 1.0, 10);
+    auto knots = create_clamped_knots(grid);
+    std::vector<double> coeffs(grid.size());
+    for (size_t i = 0; i < grid.size(); ++i) {
+        coeffs[i] = 2.0 + 3.0 * grid[i];
+    }
+
+    double expected = 0.0;
+    {
+        auto source = BSplineND<double, 1>::create({grid}, {knots}, coeffs).value();
+        expected = source.eval({0.37});
+        target = source;
+    }  // source destroyed
+    EXPECT_DOUBLE_EQ(target.eval({0.37}), expected);
+}
+
+// Regression: moved-to object must evaluate correctly after source death
+TEST_F(BSplineNDTest, MoveKeepsCoefficientViewValid) {
+    auto grid = create_uniform_grid(0.0, 1.0, 10);
+    auto knots = create_clamped_knots(grid);
+    std::vector<double> coeffs(grid.size());
+    for (size_t i = 0; i < grid.size(); ++i) {
+        coeffs[i] = 2.0 + 3.0 * grid[i];
+    }
+
+    auto make_moved = [&]() {
+        auto source = BSplineND<double, 1>::create({grid}, {knots}, coeffs).value();
+        double expected = source.eval({0.37});
+        return std::pair{std::move(source), expected};
+    };
+    auto [moved, expected] = make_moved();
+    EXPECT_DOUBLE_EQ(moved.eval({0.37}), expected);
+}
