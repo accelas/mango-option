@@ -225,10 +225,11 @@ TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
 
     IVQuery query(spec, ref->value());
     auto result = solver->solve(query);
-    if (result.has_value()) {
-        EXPECT_GT(result->implied_vol, 0.0);
-        EXPECT_LT(result->implied_vol, 3.0);
-    }
+    // The market price comes from a reference solve, so a solve failure here
+    // would be a real regression — assert, don't skip.
+    ASSERT_TRUE(result.has_value());
+    EXPECT_GT(result->implied_vol, 0.0);
+    EXPECT_LT(result->implied_vol, 3.0);
 }
 
 // The adaptive + discrete-dividend configuration published in CLAUDE.md

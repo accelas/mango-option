@@ -2166,7 +2166,7 @@ TEST(SegmentedFinalContract, NoMeasuredPointsIsNotViable) {
 // so a filtered point entered the average as a perfect score and counted
 // toward "at least one measurement".  A surface filtered everywhere reported
 // max 0 / avg 0 and passed the viability gate having been measured nowhere
-// (final-review amendment 2026-08-30).
+// (final-review amendment 2026-08-29).
 TEST(SegmentedFinalContract, FilteredPointsEnterNoStatistic) {
     const auto pts = make_points(8);
     const auto ctx = make_score_ctx();

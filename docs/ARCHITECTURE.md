@@ -287,7 +287,9 @@ result under a safety contract, not just a stopping rule:
   for it (holdout and fresh) produced a finite, nonnegative error and its
   holdout max error is below an absolute operational bound
   (`kViabilityBound`, independent of the accuracy target — it flags
-  catastrophically broken surfaces, not merely off-target ones). If no
+  catastrophically broken surfaces, not merely off-target ones), and at
+  least one holdout point actually measured it (a surface whose whole
+  holdout is filtered as IV-undefined cannot be certified). If no
   candidate built during a run is viable, the build fails with
   `PriceTableErrorCode::NoViableSurface` rather than silently returning
   garbage.

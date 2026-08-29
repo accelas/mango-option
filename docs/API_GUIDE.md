@@ -461,7 +461,7 @@ if (auto diag = solver.build_diagnostics(); diag.has_value()) {
 
 `build_diagnostics()` returns `std::nullopt` for a manually-built (non-adaptive) table, a table loaded from Parquet, or a build on a factory path that does not honor `.adaptive` — the continuous (non-segmented) Chebyshev path and `DimensionlessBackend`. Diagnostics are never persisted to `PriceTableData`/Parquet. Python exposes the same data via the `build_diagnostics` property (a dict) on `PriceTable` and `InterpolatedIVSolver`.
 
-If every candidate built during refinement fails the internal viability gate (holdout error above an absolute, target-independent garbage-detection bound), the build itself fails with `ValidationErrorCode::NoViableSurface` rather than silently returning a broken surface — check for it alongside the usual validation errors.
+If every candidate built during refinement fails the internal viability gate (holdout error above an absolute, target-independent garbage-detection bound — or no holdout point could be measured at all, e.g. a domain where implied vol is everywhere undefined), the build itself fails with `ValidationErrorCode::NoViableSurface` rather than silently returning a broken surface — check for it alongside the usual validation errors.
 
 ### Multiple-Root Screening
 

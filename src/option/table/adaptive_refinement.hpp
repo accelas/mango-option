@@ -256,7 +256,7 @@ using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
 
 /// Score one point from interpolated price + cached refs. Pure arithmetic.
 ///
-/// Contract (spec D4, final-review amendment 2026-08-30):
+/// Contract (spec D4, final-review amendment 2026-08-29):
 ///  - `std::nullopt` means the point was **deliberately skipped** by a filter
 ///    (TV/K or vega floor): the error metric is undefined there, so the point
 ///    carries no evidence either way.  Skipped points are excluded from the

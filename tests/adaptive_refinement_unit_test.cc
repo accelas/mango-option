@@ -43,7 +43,7 @@ TEST(ScoreFnTest, MatchesComputeIvError) {
 
 // A filtered point returns nullopt, not 0.0: the IV-error metric is
 // undefined there, and reporting a perfect score let a surface nobody could
-// measure certify itself (final-review amendment 2026-08-30).
+// measure certify itself (final-review amendment 2026-08-29).
 TEST(ScoreFnTest, TvkFilterSkipsDeepItm) {
     mango::AdaptiveGridParams p;
     auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
@@ -711,7 +711,7 @@ TEST(RunRefinementTest, ViabilityBoundRejectsAll) {
 // Bug: filtered points scored 0.0, so the holdout maximum of a wholly
 // unmeasurable candidate was 0 -- under every bound, "target met", returned.
 // The score fn now reports a skip as nullopt and viability requires at least
-// one real measurement (final-review amendment 2026-08-30).
+// one real measurement (final-review amendment 2026-08-29).
 TEST(RunRefinementTest, AllFilteredHoldoutIsNotViable) {
     Harness h;
     h.params.max_iter = 1;  // the seed is the only candidate

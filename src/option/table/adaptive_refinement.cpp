@@ -978,7 +978,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             // `hold.measured > 0`: a candidate whose every holdout point was
             // filtered out has been measured nowhere, and a max of 0 over an
             // empty set must not certify it (spec D5, final-review amendment
-            // 2026-08-30).
+            // 2026-08-29).
             cand.viable = hold.all_finite && fresh.all_finite &&
                           hold.measured > 0 &&
                           std::isfinite(hold.max_error) &&
@@ -1004,9 +1004,12 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
                 }
             }
 
-            // Any improvement (even sub-threshold) advances the base.
+            // Any improvement (even sub-threshold) advances the base.  A
+            // candidate measured nowhere (holdout_measured == 0) reports
+            // holdout_max = 0 vacuously and must not seize the base.
             if (!have_base ||
-                (std::isfinite(cand.holdout_max) &&
+                (cand.holdout_measured > 0 &&
+                 std::isfinite(cand.holdout_max) &&
                  (!have_finite_base || cand.holdout_max < prev_best_holdout))) {
                 base = cand;
                 have_base = true;

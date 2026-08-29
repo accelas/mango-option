@@ -251,7 +251,7 @@ using ScoreErrorFn = std::function<std::optional<double>(
 ```
 
 **Filtered points are not measurements** (final-review amendment,
-2026-08-30). `ScoreErrorFn` returns `std::optional<double>`: `std::nullopt`
+2026-08-29). `ScoreErrorFn` returns `std::optional<double>`: `std::nullopt`
 where a filter fires (TV/K below 1e-4, or |vega| below the floor), an
 engaged value everywhere else. A skipped point is excluded from the max,
 from the average, and from the measured count -- it neither certifies a
