@@ -47,22 +47,25 @@ SegmentedPriceTableBuilder::Config make_seg_config(
     };
 }
 
+}  // anonymous namespace
+
 // ============================================================================
 // B-spline refinement strategy
 // ============================================================================
 
-/// Create a RefineFn that does B-spline midpoint insertion in problematic bins.
-static RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params) {
-    return [&params](size_t worst_dim, const ErrorBins& error_bins,
-                     std::vector<double>& moneyness,
-                     std::vector<double>& tau,
-                     std::vector<double>& vol,
-                     std::vector<double>& rate) -> bool
+RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params) {
+    return [params](size_t requested_dim,
+                    std::span<const std::pair<double, double>> focus_intervals,
+                    std::vector<double>& moneyness,
+                    std::vector<double>& tau,
+                    std::vector<double>& vol,
+                    std::vector<double>& rate) -> RefineOutcome
     {
-        auto problematic = error_bins.problematic_bins(worst_dim);
-
-        auto refine_grid_targeted = [&params, &problematic](
-            std::vector<double>& grid, double lo, double hi)
+        // Insert midpoints in `grid` within the target intervals (empty
+        // focus_intervals => the whole [lo, hi] axis, i.e. uniform
+        // refinement). Returns true iff at least one midpoint was inserted.
+        auto refine_grid_targeted = [&params, focus_intervals](
+            std::vector<double>& grid, double lo, double hi) -> bool
         {
             size_t target_size = std::min(
                 static_cast<size_t>(grid.size() * params.refinement_factor),
@@ -70,23 +73,17 @@ static RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params) {
             );
 
             // Already at or beyond the limit - no refinement possible
-            if (target_size <= grid.size()) return;
+            if (target_size <= grid.size()) return false;
 
             size_t max_new_points = target_size - grid.size();
 
-            // Build set of intervals to refine based on problematic bins
+            // Build set of intervals to refine: caller-supplied focus
+            // intervals, or the whole axis when none were given.
             std::vector<std::pair<double, double>> refine_intervals;
-            if (problematic.empty()) {
-                // No concentrated errors - uniform refinement
+            if (focus_intervals.empty()) {
                 refine_intervals.push_back({lo, hi});
             } else {
-                // Only refine within problematic bins
-                constexpr double N_BINS = static_cast<double>(ErrorBins::N_BINS);
-                for (size_t bin : problematic) {
-                    double bin_lo = lo + (hi - lo) * bin / N_BINS;
-                    double bin_hi = lo + (hi - lo) * (bin + 1) / N_BINS;
-                    refine_intervals.push_back({bin_lo, bin_hi});
-                }
+                refine_intervals.assign(focus_intervals.begin(), focus_intervals.end());
             }
 
             // Insert midpoints only in intervals that need refinement
@@ -111,10 +108,13 @@ static RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params) {
                 }
             }
 
+            if (points_added == 0) return false;
+
             std::sort(new_grid.begin(), new_grid.end());
             new_grid.erase(std::unique(new_grid.begin(), new_grid.end()),
                            new_grid.end());
             grid = std::move(new_grid);
+            return true;
         };
 
         // Need domain bounds for targeted refinement
@@ -123,15 +123,23 @@ static RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params) {
         double v_lo = vol.front(), v_hi = vol.back();
         double r_lo = rate.front(), r_hi = rate.back();
 
-        switch (worst_dim) {
-            case 0: refine_grid_targeted(moneyness, m_lo, m_hi); break;
-            case 1: refine_grid_targeted(tau, t_lo, t_hi); break;
-            case 2: refine_grid_targeted(vol, v_lo, v_hi); break;
-            case 3: refine_grid_targeted(rate, r_lo, r_hi); break;
+        bool changed = false;
+        switch (requested_dim) {
+            case 0: changed = refine_grid_targeted(moneyness, m_lo, m_hi); break;
+            case 1: changed = refine_grid_targeted(tau, t_lo, t_hi); break;
+            case 2: changed = refine_grid_targeted(vol, v_lo, v_hi); break;
+            case 3: changed = refine_grid_targeted(rate, r_lo, r_hi); break;
+            default: break;
         }
-        return true;
+        // Never redirects: changed_dim == requested_dim whenever changed.
+        return RefineOutcome{
+            .changed = changed,
+            .changed_dim = changed ? static_cast<int>(requested_dim) : -1,
+        };
     };
 }
+
+namespace {
 
 // ============================================================================
 // Segmented surface helpers

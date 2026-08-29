@@ -17,6 +17,7 @@
 #include <numeric>
 #include <ranges>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace mango {
@@ -168,12 +169,24 @@ using BuildFn = std::function<std::expected<SurfaceHandle, PriceTableError>(
     std::span<const double> vol,
     std::span<const double> rate)>;
 
+/// Outcome of a single refinement attempt (spec D6).
+struct RefineOutcome {
+    bool changed = false;  ///< grids actually changed
+    int changed_dim = -1;  ///< the axis that actually changed (may differ
+                           ///< from the requested axis only if the backend
+                           ///< documents redirection)
+};
+
 /// Decides how to grow grids when error exceeds target.
-/// Called with the worst dimension, error bins (for targeted refinement),
-/// and current grids (mutable). Returns true if refinement was applied.
-using RefineFn = std::function<bool(
-    size_t worst_dim,
-    const ErrorBins& error_bins,
+///
+/// Called with the requested axis and physical focus intervals (D2:
+/// coordinates within sample_bounds identifying where refinement should
+/// concentrate; empty means unconstrained/uniform refinement over the
+/// whole axis) and the current grids (mutable). Returns the outcome:
+/// whether anything changed, and which axis actually changed.
+using RefineFn = std::function<RefineOutcome(
+    size_t requested_dim,
+    std::span<const std::pair<double, double>> focus_intervals,
     std::vector<double>& moneyness,
     std::vector<double>& tau,
     std::vector<double>& vol,

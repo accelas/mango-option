@@ -603,10 +603,32 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         // e. DIAGNOSE & REFINE
         size_t worst_dim = error_bins.worst_dimension();
 
-        bool refined = refine_fn(worst_dim, error_bins,
-                                 moneyness_grid, maturity_grid,
-                                 vol_grid, rate_grid);
-        if (!refined) {
+        // Convert the chosen axis's problematic bins into physical focus
+        // intervals for the refiner (spec D2 bin->interval conversion).
+        // Task 5 flips this to sample_bounds.
+        std::pair<double, double> axis_bounds;
+        switch (worst_dim) {
+            case 0: axis_bounds = {min_moneyness, max_moneyness}; break;
+            case 1: axis_bounds = {min_tau, max_tau}; break;
+            case 2: axis_bounds = {min_vol, max_vol}; break;
+            default: axis_bounds = {min_rate, max_rate}; break;
+        }
+        auto problematic_bins = error_bins.problematic_bins(worst_dim);
+        std::vector<std::pair<double, double>> focus_intervals;
+        focus_intervals.reserve(problematic_bins.size());
+        constexpr double kNBins = static_cast<double>(ErrorBins::N_BINS);
+        for (size_t bin : problematic_bins) {
+            double bin_lo = axis_bounds.first +
+                (axis_bounds.second - axis_bounds.first) * static_cast<double>(bin) / kNBins;
+            double bin_hi = axis_bounds.first +
+                (axis_bounds.second - axis_bounds.first) * static_cast<double>(bin + 1) / kNBins;
+            focus_intervals.push_back({bin_lo, bin_hi});
+        }
+
+        RefineOutcome outcome = refine_fn(worst_dim, focus_intervals,
+                                          moneyness_grid, maturity_grid,
+                                          vol_grid, rate_grid);
+        if (!outcome.changed) {
             // Maxed out — treat as final iteration
             save_refinement_result(result, stats,
                                    moneyness_grid, maturity_grid,
@@ -623,7 +645,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             }
         }
 
-        stats.refined_dim = static_cast<int>(worst_dim);
+        stats.refined_dim = outcome.changed_dim;
         result.iterations.push_back(stats);
     }
 

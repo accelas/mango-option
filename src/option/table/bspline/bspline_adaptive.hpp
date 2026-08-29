@@ -41,6 +41,13 @@ struct BSplineSegmentedAdaptiveResult {
     bool used_retry = false;                 ///< True if bumped-grid retry was used
 };
 
+/// Create a RefineFn that does B-spline midpoint insertion, targeted at the
+/// physical focus intervals the loop passes (empty => uniform refinement
+/// over the whole axis). Returns changed=false when the requested axis is
+/// at max_points_per_dim or no midpoint could be inserted; never redirects
+/// to a different axis.
+[[nodiscard]] RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params);
+
 /// Build B-spline price table with adaptive grid refinement.
 ///
 /// Uses cached PDE solver (BSplinePDECache) for incremental builds.

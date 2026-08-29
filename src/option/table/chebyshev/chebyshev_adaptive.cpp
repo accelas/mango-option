@@ -481,16 +481,19 @@ static BuildFn make_segmented_chebyshev_build_fn(
 /// Create a RefineFn for Chebyshev CC-level refinement.
 /// All 4 dimensions use nested CC levels (2^l+1 nodes at level l).
 ///
-/// Balanced strategy: use error_bins worst_dim as primary signal, but
+/// Balanced strategy: use the requested dimension as primary signal, but
 /// prevent runaway anisotropy by refusing to bump a dimension that is
 /// already >2 levels ahead of the minimum.  Falls back to bumping the
-/// dimension with the lowest current level.
+/// dimension with the lowest current level (redirection; removed in a
+/// later task).  focus_intervals is ignored -- CC nodes are placed at
+/// fixed nested positions, not steered by physical intervals.
 static RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state) {
-    return [&state](size_t worst_dim, const ErrorBins& /*error_bins*/,
+    return [&state](size_t requested_dim,
+                    std::span<const std::pair<double, double>> /*focus_intervals*/,
                     std::vector<double>& moneyness,
                     std::vector<double>& tau,
                     std::vector<double>& vol,
-                    std::vector<double>& rate) -> bool
+                    std::vector<double>& rate) -> RefineOutcome
     {
         std::array<size_t*, 4> levels = {
             &state.m_level, &state.tau_level,
@@ -512,9 +515,9 @@ static RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state) {
             min_level = std::min(min_level, *levels[d]);
         }
 
-        // Try worst_dim first if it isn't too far ahead
+        // Try requested_dim first if it isn't too far ahead
         constexpr size_t kMaxSpread = 2;
-        size_t dim = worst_dim;
+        size_t dim = requested_dim;
         if (*levels[dim] >= state.max_level ||
             *levels[dim] > min_level + kMaxSpread) {
             // Fall back: find lowest-level dimension that can be bumped
@@ -526,26 +529,28 @@ static RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state) {
                     dim = d;
                 }
             }
-            if (dim == 4) return false;  // All maxed out
+            if (dim == 4) return RefineOutcome{.changed = false, .changed_dim = -1};  // All maxed out
         }
 
         (*levels[dim])++;
         *grids[dim] = cc_level_nodes(*levels[dim], lo[dim], hi[dim]);
-        return true;
+        return RefineOutcome{.changed = true, .changed_dim = static_cast<int>(dim)};
     };
 }
 
 /// Create a RefineFn for segmented Chebyshev CC-level refinement.
 /// Tau refinement generates per-segment CC-level nodes instead of a single
 /// range.  Uses the same balanced strategy as the vanilla refine function.
+/// focus_intervals is ignored (see make_chebyshev_refine_fn).
 static RefineFn make_segmented_chebyshev_refine_fn(
     ChebyshevRefinementState& state)
 {
-    return [&state](size_t worst_dim, const ErrorBins&,
+    return [&state](size_t requested_dim,
+                    std::span<const std::pair<double, double>> /*focus_intervals*/,
                     std::vector<double>& moneyness,
                     std::vector<double>& tau,
                     std::vector<double>& vol,
-                    std::vector<double>& rate) -> bool
+                    std::vector<double>& rate) -> RefineOutcome
     {
         std::array<size_t*, 4> levels = {
             &state.m_level, &state.tau_level,
@@ -560,7 +565,7 @@ static RefineFn make_segmented_chebyshev_refine_fn(
 
         // Balanced dimension selection (same as vanilla)
         constexpr size_t kMaxSpread = 2;
-        size_t dim = worst_dim;
+        size_t dim = requested_dim;
         if (*levels[dim] >= state.max_level ||
             *levels[dim] > min_level + kMaxSpread) {
             dim = 4;
@@ -571,7 +576,7 @@ static RefineFn make_segmented_chebyshev_refine_fn(
                     dim = d;
                 }
             }
-            if (dim == 4) return false;
+            if (dim == 4) return RefineOutcome{.changed = false, .changed_dim = -1};
         }
 
         (*levels[dim])++;
@@ -591,7 +596,7 @@ static RefineFn make_segmented_chebyshev_refine_fn(
             rate = cc_level_nodes(state.rate_level, state.rate_lo, state.rate_hi);
             break;
         }
-        return true;
+        return RefineOutcome{.changed = true, .changed_dim = static_cast<int>(dim)};
     };
 }
 
