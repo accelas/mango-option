@@ -633,6 +633,19 @@ cc_test(
 )
 
 cc_test(
+    name = "bspline_bit_identity_test",
+    size = "small",
+    srcs = ["bspline_bit_identity_test.cc"],
+    deps = [
+        "//src/math/bspline:bspline_collocation",
+        "//src/math/bspline:bspline_nd_separable",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-Wall", "-Wextra", "-fopenmp"],
+    linkopts = ["-fopenmp"],
+)
+
+cc_test(
     name = "centered_difference_test",
     srcs = ["centered_difference_facade_test.cc"],
     deps = [
