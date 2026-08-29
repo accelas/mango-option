@@ -1124,6 +1124,10 @@ cc_test(
     name = "adaptive_grid_builder_test",
     size = "large",
     timeout = "long",
+    # The suite runs ~10 min under -c dbg on CI (see ci.yml's dedicated dbg
+    # step) and grew past the 900s budget with the adaptive-safety work;
+    # sharding gives each shard its own timeout and parallelism.
+    shard_count = 4,
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_types",
