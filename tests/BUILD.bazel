@@ -177,7 +177,9 @@ cc_test(
 
 cc_test(
     name = "price_table_factory_test",
-    size = "medium",
+    # 87s measured: the adaptive factory paths build real surfaces, which a
+    # "medium" (300s soft budget, 60s warning) target reports as oversized.
+    size = "large",
     srcs = ["price_table_factory_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],

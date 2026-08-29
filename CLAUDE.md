@@ -205,7 +205,7 @@ mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .grid = mango::IVGrid{
-        .moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
+        .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
         .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate = {0.02, 0.03, 0.05, 0.07},
     },
@@ -215,12 +215,21 @@ mango::IVSolverFactoryConfig config{
     .discrete_dividends = mango::DiscreteDividendConfig{
         .maturity = 1.0,
         .discrete_dividends = {mango::Dividend{.calendar_time = 0.25, .amount = 1.50}},
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                   102.5, 105.0, 107.5, 110.0}},
     },
 };
 auto solver = mango::make_interpolated_iv_solver(config);
 auto result = solver->solve(query);
 ```
+
+The moneyness grid and the `K_refs` must agree: the assembled surface blends
+K_ref-struck prices linearly in strike, so the K_refs must span and resolve
+the strike range the moneyness grid implies (`S/K ∈ [0.92, 1.08]` means
+strikes in `[92.6, 108.7]`, served by K_refs at 2.5% spacing across
+`[90, 110]`).  Without `.adaptive` there is no viability gate to catch a
+mismatch, so on this manual path config coherence is the caller's job: an
+incoherent pairing builds a surface and prices off it instead of refusing.
 
 **Pattern 4: Discrete Dividend IV with Adaptive Grid**
 

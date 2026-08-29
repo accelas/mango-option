@@ -442,7 +442,7 @@ auto iv_result = iv_solver.solve(iv_query);
 
 ### Adaptive Build Diagnostics
 
-An adaptive-built table records honest quality diagnostics that survive retention and backtracking. `build_diagnostics()` lives on the factory-returned handles — `AnyPriceTable` (from `AdaptiveGridBuilder`) and `AnyInterpIVSolver` (from `make_interpolated_iv_solver` with `.adaptive` set) — and describes the *returned* candidate, not necessarily the last one built:
+An adaptive-built table records honest quality diagnostics that survive retention and backtracking. `build_diagnostics()` lives on the factory-returned handles — `AnyPriceTable` (from `make_price_table` with `.adaptive` set) and `AnyInterpIVSolver` (from `make_interpolated_iv_solver` with `.adaptive` set) — and describes the *returned* candidate, not necessarily the last one built:
 
 ```cpp
 auto solver = mango::make_interpolated_iv_solver(config).value();
@@ -459,7 +459,7 @@ if (auto diag = solver.build_diagnostics(); diag.has_value()) {
 }
 ```
 
-`build_diagnostics()` returns `std::nullopt` for a manually-built (non-adaptive) table, the continuous Chebyshev factory path (which does not yet honor `.adaptive`), or a table loaded from Parquet — diagnostics are never persisted to `PriceTableData`/Parquet. Python exposes the same data via the `build_diagnostics` property (a dict) on `PriceTable` and `InterpolatedIVSolver`.
+`build_diagnostics()` returns `std::nullopt` for a manually-built (non-adaptive) table, a table loaded from Parquet, or a build on a factory path that does not honor `.adaptive` — the continuous (non-segmented) Chebyshev path and `DimensionlessBackend`. Diagnostics are never persisted to `PriceTableData`/Parquet. Python exposes the same data via the `build_diagnostics` property (a dict) on `PriceTable` and `InterpolatedIVSolver`.
 
 If every candidate built during refinement fails the internal viability gate (holdout error above an absolute, target-independent garbage-detection bound), the build itself fails with `ValidationErrorCode::NoViableSurface` rather than silently returning a broken surface — check for it alongside the usual validation errors.
 
@@ -593,7 +593,7 @@ mango::IVSolverFactoryConfig config{
     .spot = 100.0,
     .dividend_yield = 0.01,
     .grid = mango::IVGrid{
-        .moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
+        .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
         .vol = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
         .rate = {0.02, 0.03, 0.05, 0.07},
     },
@@ -605,19 +605,22 @@ mango::IVSolverFactoryConfig config{
         .discrete_dividends = {
             mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
             mango::Dividend{.calendar_time = 0.50, .amount = 1.50}},
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                   102.5, 105.0, 107.5, 110.0}},
     },
 };
 
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
+The moneyness grid and the `K_refs` must agree: the assembled surface blends K_ref-struck prices linearly in strike, so the K_refs must span **and resolve** the strike range the moneyness grid implies — `S/K ∈ [0.92, 1.08]` means strikes in `[92.6, 108.7]`, served by K_refs at 2.5% spacing across `[90, 110]`. This manual path has no viability gate (that arrives with `.adaptive`), so config coherence is the caller's job here: an incoherent pairing builds a surface and prices off it rather than refusing.
+
 The factory dispatches on two orthogonal variants:
 
 - **`backend`**: `BSplineBackend`, `ChebyshevBackend`, or `DimensionlessBackend`
 - **`discrete_dividends`**: When set, uses the segmented surface path (tau splits + K_ref blending)
 
-With optional `adaptive` for automatic grid density tuning to a target IV accuracy.
+With optional `adaptive` for automatic grid density tuning to a target IV accuracy. It is honored on three of the factory's paths — continuous `BSplineBackend`, and both segmented (discrete-dividend) paths, B-spline and Chebyshev. The continuous `ChebyshevBackend` and `DimensionlessBackend` paths ignore it and build their fixed grids, reporting no build diagnostics.
 
 ### Standard (Continuous Dividend) with Manual Grid
 

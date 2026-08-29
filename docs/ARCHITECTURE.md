@@ -255,7 +255,7 @@ The builder supports automatic grid estimation via `from_grid_auto_profile()` wi
 | Maturity (tau) | 1.0x | Baseline, sqrt-tau behavior |
 | Rate (r) | 0.6x | Nearly linear discounting |
 
-The default (High) targets ~20 bps average IV error. For tighter tolerance, `AdaptiveGridBuilder` iteratively refines grid density until a target error is met — typically achieving <5 bps IV error in the core region (ATM ±30%, T ≥ 0.25).
+The default (High) targets ~20 bps average IV error. For tighter tolerance, pass `.adaptive` to `make_price_table` / `make_interpolated_iv_solver`: the shared refinement loop iteratively refines grid density toward a target error, retaining the best *viable* candidate it measured — typically <5 bps IV error in the core region (ATM ±30%, T ≥ 0.25).
 
 ### Adaptive Refinement Safety Contract
 
@@ -297,8 +297,12 @@ result under a safety contract, not just a stopping rule:
   retrievable via `build_diagnostics()` on the factory-returned handles
   `AnyPriceTable` / `AnyInterpIVSolver` (Python: the `build_diagnostics`
   property on `PriceTable` / `InterpolatedIVSolver`). Diagnostics never
-  enter serialization (`to_data()` / Parquet); a manually-built or
-  Parquet-loaded table reports `nullopt`.
+  enter serialization (`to_data()` / Parquet); `nullopt` is reported by a
+  manually-built table, a Parquet-loaded table, and the two factory paths
+  that ignore `.adaptive` — `DimensionlessBackend` and the continuous
+  (non-segmented) `ChebyshevBackend`. `.adaptive` is honored by the
+  continuous B-spline path and by both segmented (discrete-dividend) paths,
+  B-spline and Chebyshev.
 
 This closes the failure mode where an adaptive build silently returned a
 degraded final iteration whose error, measured honestly against the user

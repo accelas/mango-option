@@ -776,7 +776,7 @@ The interpolated solver is ~2,000× faster, at the cost of pre-computation time 
 
 When an option's vega is near zero (deep OTM/ITM, or very short dated), implied volatility is effectively undefined — any tiny price error maps to huge IV swings.
 
-The interpolated IV solver checks surface vega at three representative volatilities (10%, 25%, 50%) before starting the root search. If $\max(\nu) < \nu_\text{threshold}$ (default $10^{-4}$), it returns `VegaTooSmall` immediately (~600ns) instead of running a doomed Brent search.
+The interpolated IV solver checks surface vega at the quartile points of the *actual* search bracket $[\sigma_\min, \sigma_\max]$ — that is, at 25%, 50% and 75% of the bracket — before starting the root search. The test is on the **signed** maximum, not $|\nu|$: if $\max_k \nu(\sigma_k) < \nu_\text{threshold}$ (default $10^{-4}$), vega is near zero or negative across the bracket, IV is effectively undefined, and the solver returns `VegaTooSmall` immediately (~600ns) instead of running a doomed or backwards Brent search. Probing the bracket rather than fixed volatilities matters when the bracket is narrower than the old fixed probes' span, where the fixed points could fall outside the region actually searched.
 
 This is more robust than a time-value/strike ratio heuristic, and costs only 3 surface evaluations.
 
