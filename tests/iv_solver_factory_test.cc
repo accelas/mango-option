@@ -231,6 +231,78 @@ TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
     }
 }
 
+// The adaptive + discrete-dividend configuration published in CLAUDE.md
+// (Pattern 4) and docs/API_GUIDE.md ("Discrete Dividends with Adaptive
+// Grid"), pinned so the documentation cannot silently rot into a
+// configuration the viability gate refuses.
+//
+// Everything a reader would copy is verbatim: the moneyness/vol/rate grid,
+// the dividend schedule, the maturity grid and the K_refs.  Only
+// `AdaptiveGridParams` is relaxed, for test runtime.
+//
+// The pairing is the fragile part.  The assembled surface blends
+// K_ref-struck prices linearly in strike, so the K_refs must span *and
+// resolve* the strike range the moneyness grid implies: S/K in [0.92, 1.08]
+// means strikes in [92.6, 108.7], served here by K_refs at 2.5 % spacing
+// across [90, 110].  The pre-#434 pairing -- moneyness 0.7-1.3 with K_refs
+// {80, 100, 120} -- measures 8,278 (827,756 bps) and is refused.
+//
+// Measured on this config: 0.077 (770 bps) at the parameters below and
+// 0.074 at max_iter = 4, against the 0.20 viability bound.  The final error
+// is *not* monotone in the iteration budget -- the aggregated uniform grids
+// change discontinuously -- so the config was checked at both budgets rather
+// than argued from the looser one.
+TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = 100.0,
+        .dividend_yield = 0.01,
+        .grid = IVGrid{
+            .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
+            .vol = {0.10, 0.15, 0.20, 0.30},
+            .rate = {0.02, 0.03, 0.05, 0.07},
+        },
+        .adaptive = AdaptiveGridParams{
+            .target_iv_error = 0.005,  // documented: 0.001; relaxed for speed
+            .max_iter = 2,             // documented: default 8
+            .validation_samples = 16,  // documented: default 64
+        },
+        .backend = BSplineBackend{
+            .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+        },
+        .discrete_dividends = DiscreteDividendConfig{
+            .maturity = 1.0,
+            .discrete_dividends = {
+                Dividend{.calendar_time = 0.25, .amount = 1.50},
+                Dividend{.calendar_time = 0.50, .amount = 1.50}},
+            .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                       102.5, 105.0, 107.5, 110.0}},
+        },
+    };
+
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_TRUE(solver.has_value())
+        << "the documented adaptive discrete-dividend config must build a "
+           "viable surface";
+
+    OptionSpec spec{
+        .spot = 100.0, .strike = 95.0, .maturity = 0.5,
+        .rate = 0.05, .dividend_yield = 0.01,
+        .option_type = OptionType::PUT
+    };
+    PricingParams pricing_params(spec, 0.20);
+    pricing_params.discrete_dividends = config.discrete_dividends->discrete_dividends;
+    auto ref = solve_american_option(pricing_params);
+    ASSERT_TRUE(ref.has_value());
+
+    IVQuery query(spec, ref->value());
+    auto result = solver->solve(query);
+    if (result.has_value()) {
+        EXPECT_GT(result->implied_vol, 0.0);
+        EXPECT_LT(result->implied_vol, 3.0);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Chebyshev backend: continuous and discrete dividend paths
 // ---------------------------------------------------------------------------

@@ -818,11 +818,18 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         params, final_ctx, final_prepare_refs_fn, params.lhs_seed + 999);
     if (!validation) return std::unexpected(validation.error());
 
+    // The final validation is not free: every reference is a base solve plus
+    // two sigma bumps, and the caller's PDE budget should say so.
+    total_pde += validation->ref_attempts * 3;
+
+    // The lambda captures the surface by pointer, not by reference to the
+    // parameter: a reference capture would dangle the moment `handle_for`
+    // returns, even though the referent outlives every use.
     const auto handle_for = [](const BSplineMultiKRefInner& s) {
         return SurfaceHandle{
-            .price = [&s](double query_spot, double strike, double tau,
-                          double sigma, double rate) -> double {
-                return s.price(query_spot, strike, tau, sigma, rate);
+            .price = [p = &s](double query_spot, double strike, double tau,
+                              double sigma, double rate) -> double {
+                return p->price(query_spot, strike, tau, sigma, rate);
             },
             .pde_solves = 0,
         };

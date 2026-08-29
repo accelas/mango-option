@@ -45,6 +45,11 @@ struct BSplineSegmentedAdaptiveResult {
 
     /// Diagnostics for the returned final surface (spec D7/D9), with the
     /// per-probe iterations appended for forensics.
+    ///
+    /// `picked_iteration` is left at 0 and carries no meaning here: the
+    /// segmented builder runs one refinement loop per probe and then
+    /// assembles a surface none of them built, so there is no single picked
+    /// iteration to name.
     BuildDiagnostics diagnostics;
 };
 

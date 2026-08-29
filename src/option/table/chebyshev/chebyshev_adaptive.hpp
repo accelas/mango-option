@@ -142,7 +142,8 @@ struct ChebyshevSegmentedAdaptiveResult {
     size_t total_pde_solves = 0;
 
     /// Diagnostics for the returned final surface (spec D7/D9), with the
-    /// sizing-loop iterations appended for forensics.
+    /// sizing-loop iterations appended for forensics.  `picked_iteration`
+    /// names the sizing loop's pick, not a build of the assembled surface.
     BuildDiagnostics diagnostics;
 };
 

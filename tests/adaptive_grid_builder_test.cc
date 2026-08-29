@@ -356,22 +356,29 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
         << "build_adaptive_bspline_segmented failed: code "
         << static_cast<int>(result.error().code);
 
-    // Should be able to query prices at various strikes
+    // On a K_ref, where the multi-K_ref bracket resolves to a single entry
     double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 
-    // And at off-K_ref strikes
-    double price2 = result->surface.price(100.0, 90.0, 0.5, 0.20, 0.05);
+    // And off every K_ref: 97.5 sits midway between 95 and 100, so the query
+    // exercises the two-entry blend rather than resolving to one surface.
+    double price2 = result->surface.price(100.0, 97.5, 0.5, 0.20, 0.05);
     EXPECT_GT(price2, 0.0);
     EXPECT_TRUE(std::isfinite(price2));
+    EXPECT_LT(price2, price) << "a lower-struck put must be worth less";
 }
 
 TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
     params.max_iter = 1;
-    params.validation_samples = 8;
+    // 16, not 8: a schedule entry at or beyond the queried tau makes
+    // `solve_american_option` refuse, so every sample below the first
+    // dividend date loses its reference -- roughly half the tau range
+    // here.  Eight samples would leave the validation set sitting
+    // exactly on the `max(4, n/4)` floor.
+    params.validation_samples = 16;
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -506,7 +513,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
 // A probe whose served band lies entirely outside the user's strike range is
 // skipped: no refinement loop, its seed sizes still feed the aggregate, and
 // the skip is recorded with the refined_dim = -3 sentinel.  K_ref = 50 with
-// user strikes in [90, 110] serves nothing (its band ends at sqrt(50*100)).
+// user strikes in [91.7, 108.7] serves nothing: its band ends at the
+// geometric midpoint to its neighbour, sqrt(50 * 90) = 67.1.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedEmptyProbeBandSkipped) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
@@ -600,7 +608,12 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
     params.max_iter = 1;
-    params.validation_samples = 8;
+    // 16, not 8: a schedule entry at or beyond the queried tau makes
+    // `solve_american_option` refuse, so every sample below the first
+    // dividend date loses its reference -- roughly half the tau range
+    // here.  Eight samples would leave the validation set sitting
+    // exactly on the `max(4, n/4)` floor.
+    params.validation_samples = 16;
     params.min_moneyness_points = 10;  // Use smaller grid for test speed
 
     // spot=100, K_refs sorted: {100, 110, 120, 130}
@@ -633,7 +646,12 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
     params.max_iter = 1;
-    params.validation_samples = 8;
+    // 16, not 8: a schedule entry at or beyond the queried tau makes
+    // `solve_american_option` refuse, so every sample below the first
+    // dividend date loses its reference -- roughly half the tau range
+    // here.  Eight samples would leave the validation set sitting
+    // exactly on the `max(4, n/4)` floor.
+    params.validation_samples = 16;
     params.min_moneyness_points = 10;  // Use smaller grid for test speed
 
     // spot=100, K_refs sorted: {70, 80, 90, 100}
@@ -668,6 +686,11 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
 // refuses (spec D9).  The coverage here is that `K_ref_count = 1` resolves
 // to a single K_ref and the build runs all the way to the final gate rather
 // than failing configuration validation.
+//
+// Revisit when MultiKRefSplit spot-scaling is fixed (follow-up): a split
+// that mapped the query onto the K_ref problem instead of substituting the
+// strike would make a single K_ref usable, and this test would go back to
+// asserting a successful build.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -951,7 +974,12 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;  // 100 bps — relaxed for test speed
     params.max_iter = 1;
-    params.validation_samples = 8;  // spec D3 minimum
+    // 16, not 8: a schedule entry at or beyond the queried tau makes
+    // `solve_american_option` refuse, so every sample below the first
+    // dividend date loses its reference -- roughly half the tau range
+    // here.  Eight samples would leave the validation set sitting
+    // exactly on the `max(4, n/4)` floor.
+    params.validation_samples = 16;
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -1025,7 +1053,12 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
-    params.validation_samples = 8;  // spec D3 minimum
+    // 16, not 8: a schedule entry at or beyond the queried tau makes
+    // `solve_american_option` refuse, so every sample below the first
+    // dividend date loses its reference -- roughly half the tau range
+    // here.  Eight samples would leave the validation set sitting
+    // exactly on the `max(4, n/4)` floor.
+    params.validation_samples = 16;
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -1069,7 +1102,12 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
-    params.validation_samples = 8;  // spec D3 minimum
+    // 16, not 8: a schedule entry at or beyond the queried tau makes
+    // `solve_american_option` refuse, so every sample below the first
+    // dividend date loses its reference -- roughly half the tau range
+    // here.  Eight samples would leave the validation set sitting
+    // exactly on the `max(4, n/4)` floor.
+    params.validation_samples = 16;
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -1137,7 +1175,8 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     // (spec D9) exactly as BuildSegmentedVeryShortMaturity does.  The
     // regression under test is in segment classification, not in
     // refinement, so it is pinned on the fixed-level build of the same
-    // configuration.
+    // configuration.  Revisit when MultiKRefSplit spot-scaling is fixed
+    // (follow-up): part of this error is the lone K_ref, not the maturity.
     auto adaptive = build_adaptive_chebyshev_segmented(
         params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_FALSE(adaptive.has_value());
@@ -1165,7 +1204,12 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
-    params.validation_samples = 8;  // spec D3 minimum
+    // 16, not 8: a schedule entry at or beyond the queried tau makes
+    // `solve_american_option` refuse, so every sample below the first
+    // dividend date loses its reference -- roughly half the tau range
+    // here.  Eight samples would leave the validation set sitting
+    // exactly on the `max(4, n/4)` floor.
+    params.validation_samples = 16;
 
     // Two dividends 5 days apart. With ε=5e-4 gap half-width:
     //   div1 at cal_time=0.48 → tau_split=0.52, gap [0.5195, 0.5205]
@@ -2177,10 +2221,48 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
     // Measured on this config: the bumped-grid retry scores 0.0202 against
     // the original's larger error on the shared references, so it is the
     // surface returned -- and the numbers above are its own.
-    EXPECT_TRUE(result->used_retry)
+    ASSERT_TRUE(result->used_retry)
         << "expected the bumped-grid retry to win on this config; if it did "
            "not, the identity checks above still hold for whichever surface "
            "was returned";
+
+    // The grids reported must be the retry's too, not the aggregated ones the
+    // original was built on.  With max_iter = 1 no probe refines, so every
+    // probe returns its seed and the aggregate is exactly the seed sizes;
+    // the retry adds (+2, +2, +1, +1) on (moneyness, tau, vol, rate).
+    auto support = expand_segmented_domain(
+        domain, seg_config.maturity, seg_config.dividend_yield,
+        seg_config.discrete_dividends, K_refs->front());
+    ASSERT_TRUE(support.has_value());
+    SurfaceBounds fit = *support;
+    const double headroom = spline_support_headroom(
+        sample->m_max - sample->m_min,
+        std::max(domain.moneyness.size(), params.min_moneyness_points));
+    fit.m_min -= headroom;
+    fit.m_max += headroom;
+
+    RefinementContext seed_ctx{
+        .spot = seg_config.spot,
+        .dividend_yield = seg_config.dividend_yield,
+        .option_type = seg_config.option_type,
+        .bounds = fit,
+        .sample_bounds = *sample,
+    };
+    auto seeded = seed_refinement_grids(
+        params, seed_ctx,
+        InitialGrids{.moneyness = domain.moneyness,
+                     .vol = domain.vol,
+                     .rate = domain.rate});
+
+    EXPECT_EQ(result->grid.moneyness.size(),
+              std::min(seeded.moneyness.size() + 2, params.max_points_per_dim));
+    EXPECT_EQ(result->grid.vol.size(),
+              std::min(seeded.vol.size() + 1, params.max_points_per_dim));
+    EXPECT_EQ(result->grid.rate.size(),
+              std::min(seeded.rate.size() + 1, params.max_points_per_dim));
+    EXPECT_EQ(result->tau_points_per_segment,
+              std::min(static_cast<int>(seeded.tau.size()) + 2,
+                       static_cast<int>(params.max_points_per_dim)));
 }
 
 // The segmented Chebyshev path gained a mandatory final gate: the assembled
@@ -2190,7 +2272,12 @@ TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
-    params.validation_samples = 8;
+    // 16, not 8: a schedule entry at or beyond the queried tau makes
+    // `solve_american_option` refuse, so every sample below the first
+    // dividend date loses its reference -- roughly half the tau range
+    // here.  Eight samples would leave the validation set sitting
+    // exactly on the `max(4, n/4)` floor.
+    params.validation_samples = 16;
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,

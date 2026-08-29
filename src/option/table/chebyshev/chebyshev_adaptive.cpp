@@ -974,7 +974,7 @@ ChebyshevSegmentedBuilder::build_adaptive(
 
     BuildDiagnostics diagnostics = grids.diagnostics;
     diagnostics.target_met =
-        final_score.max_error <= params.target_iv_error;
+        final_score.scored > 0 && final_score.max_error <= params.target_iv_error;
     diagnostics.achieved_max_error = final_score.max_error;
     diagnostics.achieved_avg_error = final_score.avg_error;
     diagnostics.holdout_points = final_score.scored;
@@ -994,8 +994,10 @@ ChebyshevSegmentedBuilder::build_adaptive(
         .achieved_max_error = final_score.max_error,
         .achieved_avg_error = final_score.avg_error,
         .target_met = diagnostics.target_met,
-        .total_pde_solves =
-            pde_cache.total_pde_solves() + surface->pde_solves,
+        // The final validation is not free: every reference is a base solve
+        // plus two sigma bumps, and the caller's PDE budget should say so.
+        .total_pde_solves = pde_cache.total_pde_solves() + surface->pde_solves
+                          + validation->ref_attempts * 3,
         .diagnostics = std::move(diagnostics),
     };
 }

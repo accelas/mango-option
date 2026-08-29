@@ -389,6 +389,11 @@ struct ValidationPoint {
 struct FinalValidationSet {
     std::vector<ValidationPoint> points;
     size_t invalid = 0;
+    /// `PrepareRefsFn` invocations made, valid and invalid alike.  Each costs
+    /// up to three FD solves (base plus two sigma bumps); an attempt that
+    /// fails on the base solve costs fewer, so `3 * ref_attempts` is an upper
+    /// bound on the build's validation cost.
+    size_t ref_attempts = 0;
 };
 
 /// Draw `params.validation_samples` LHS points over the **sample** domain
@@ -398,11 +403,17 @@ struct FinalValidationSet {
 /// than `max(4, validation_samples / 4)` valid points ⇒
 /// `PriceTableErrorCode::ValidationFailed`: a validation set that cannot
 /// measure cannot certify the surface.
+///
+/// @param seed  LHS seed for this set, passed explicitly and deliberately
+///              *instead of* `params.lhs_seed`: the final validation must not
+///              land on the coordinates the refinement loop already fit and
+///              measured, so callers offset the configured seed (the
+///              segmented builders use `params.lhs_seed + 999`).
 [[nodiscard]] std::expected<FinalValidationSet, PriceTableError>
 prepare_final_validation(const AdaptiveGridParams& params,
                          const RefinementContext& ctx,
                          const PrepareRefsFn& prepare_refs,
-                         uint64_t lhs_seed);
+                         uint64_t seed);
 
 /// Score of one assembled surface over a cached `FinalValidationSet`.
 ///

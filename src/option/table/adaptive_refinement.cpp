@@ -491,39 +491,24 @@ static SampleEval evaluate_fresh_samples(
 /// Any non-finite price or score makes the whole holdout score NaN, which
 /// both disqualifies the candidate (D5 viability) and removes it from the
 /// exploration-base ranking (which requires finite scores).
+///
+/// The arithmetic is `detail::score_final_surface`'s -- the segmented
+/// builders' final gate scores its surfaces exactly the way the loop scores
+/// its candidates, and the two must not drift apart.  This wrapper only
+/// re-shapes the result into `SampleEval`; the holdout leaves
+/// `pde_solves_validation` and `error_bins` at their defaults (it performs no
+/// solves, and refinement bins come from the fresh samples).
 static SampleEval evaluate_holdout(
     const std::vector<HoldoutPoint>& holdout,
     const SurfaceHandle& handle,
     const ScoreErrorFn& score,
     const RefinementContext& ctx) {
+    const auto scored = detail::score_final_surface(holdout, handle, score, ctx);
     SampleEval ev;
-    double sum_error = 0.0;
-
-    for (const auto& pt : holdout) {
-        double tau = pt.coords[1];
-        double sigma = pt.coords[2];
-        double rate = pt.coords[3];
-        double interp = handle.price(ctx.spot, pt.strike, tau, sigma, rate);
-        double iv_error = score(interp, pt.refs, ctx.spot, pt.strike,
-                                tau, sigma, rate);
-        if (!std::isfinite(interp) || !std::isfinite(iv_error) ||
-            iv_error < 0.0) {
-            ev.all_finite = false;
-            continue;
-        }
-        ev.max_error = std::max(ev.max_error, iv_error);
-        sum_error += iv_error;
-        ev.valid_samples++;
-    }
-
-    if (!ev.all_finite) {
-        ev.max_error = std::numeric_limits<double>::quiet_NaN();
-        ev.avg_error = std::numeric_limits<double>::quiet_NaN();
-        return ev;
-    }
-    ev.avg_error = ev.valid_samples > 0
-        ? sum_error / static_cast<double>(ev.valid_samples)
-        : 0.0;
+    ev.max_error = scored.max_error;
+    ev.avg_error = scored.avg_error;
+    ev.valid_samples = scored.scored;
+    ev.all_finite = scored.all_finite;
     return ev;
 }
 
@@ -620,7 +605,7 @@ std::expected<detail::FinalValidationSet, PriceTableError>
 detail::prepare_final_validation(const AdaptiveGridParams& params,
                                  const RefinementContext& ctx,
                                  const PrepareRefsFn& prepare_refs,
-                                 uint64_t lhs_seed) {
+                                 uint64_t seed) {
     const std::array<std::pair<double, double>, 4> axis_bounds = {{
         {ctx.sample_bounds.m_min, ctx.sample_bounds.m_max},
         {ctx.sample_bounds.tau_min, ctx.sample_bounds.tau_max},
@@ -628,13 +613,14 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
         {ctx.sample_bounds.rate_min, ctx.sample_bounds.rate_max}
     }};
 
-    auto unit = latin_hypercube_4d(params.validation_samples, lhs_seed);
+    auto unit = latin_hypercube_4d(params.validation_samples, seed);
     auto scaled = scale_lhs_samples(unit, axis_bounds);
 
     FinalValidationSet set;
     set.points.reserve(scaled.size());
     for (const auto& pt : scaled) {
         const double strike = ctx.spot * std::exp(-pt[0]);
+        ++set.ref_attempts;
         auto refs = prepare_refs(ctx.spot, strike, pt[1], pt[2], pt[3]);
         if (!refs.has_value() || !std::isfinite(refs->ref_price) ||
             !std::isfinite(refs->vega)) {
