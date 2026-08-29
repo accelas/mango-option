@@ -14,8 +14,10 @@
 #include <expected>
 #include <functional>
 #include <limits>
+#include <cstdint>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <utility>
@@ -360,6 +362,107 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     const ScoreErrorFn& score,
     const InitialGrids& initial_grids = {},
     const RefineStateHooks& hooks = {});
+
+namespace detail {
+
+// ============================================================================
+// Final-surface validation for the segmented builders (spec D9)
+// ============================================================================
+//
+// The segmented builders assemble their *final* surface outside the
+// refinement loop (uniform grids aggregated across probes for B-spline, the
+// all-K_ref blend for Chebyshev), so the loop's holdout says nothing about
+// the object the caller receives.  These helpers give both builders the same
+// contract the loop applies to its candidates: references computed once, D4
+// validity rules, D5 viability, and an honest score for whichever surface is
+// returned.
+
+/// One validation point with its cached references (spec D4).
+struct ValidationPoint {
+    std::array<double, 4> coords{};  ///< m, tau, sigma, rate
+    double strike = 0.0;
+    ErrorRefs refs;
+};
+
+/// The final validation set: valid points plus the count that could not be
+/// referenced (spec D9 step 1).
+struct FinalValidationSet {
+    std::vector<ValidationPoint> points;
+    size_t invalid = 0;
+};
+
+/// Draw `params.validation_samples` LHS points over the **sample** domain
+/// (spec D2) and compute `ErrorRefs` for each exactly once.
+///
+/// Points whose refs fail or are non-finite are dropped and counted.  Fewer
+/// than `max(4, validation_samples / 4)` valid points ⇒
+/// `PriceTableErrorCode::ValidationFailed`: a validation set that cannot
+/// measure cannot certify the surface.
+[[nodiscard]] std::expected<FinalValidationSet, PriceTableError>
+prepare_final_validation(const AdaptiveGridParams& params,
+                         const RefinementContext& ctx,
+                         const PrepareRefsFn& prepare_refs,
+                         uint64_t lhs_seed);
+
+/// Score of one assembled surface over a cached `FinalValidationSet`.
+///
+/// `scored` counts every point that produced a finite, nonnegative error --
+/// including exact zeros -- so `avg_error`'s denominator matches its
+/// numerator even for a surface that reproduces every reference exactly.
+struct FinalScore {
+    double max_error = 0.0;
+    double avg_error = 0.0;
+    size_t scored = 0;    ///< points that produced a usable error
+    size_t skipped = 0;   ///< points with a non-finite/negative evaluation
+    bool all_finite = true;
+
+    /// D5 viability: every evaluation finite and nonnegative, at least one
+    /// measurement, and the max error within the absolute garbage bound.
+    [[nodiscard]] bool viable() const noexcept {
+        return all_finite && scored > 0 && std::isfinite(max_error) &&
+               max_error <= kViabilityBound;
+    }
+};
+
+/// Score `handle` on the cached references (interpolations plus arithmetic --
+/// no FD solves).  Mirrors the loop's holdout scoring: any non-finite price
+/// or score clears `all_finite` and makes the aggregate NaN, so a surface
+/// that produced garbage can never report a rosy number.
+[[nodiscard]] FinalScore score_final_surface(
+    const std::vector<ValidationPoint>& points,
+    const SurfaceHandle& handle,
+    const ScoreErrorFn& score,
+    const RefinementContext& ctx);
+
+/// Retry trigger (spec D9 step 2): the original assembled surface misses the
+/// target, or it is not viable at all.
+[[nodiscard]] bool needs_final_retry(const FinalScore& original,
+                                     double target_iv_error);
+
+/// Which assembled surface the builder returns (spec D9 step 3).
+enum class FinalPick { None, Original, Retry };
+
+/// Return the lower-error **viable** surface; `None` when neither is viable
+/// (⇒ `PriceTableErrorCode::NoViableSurface`).  A missing retry means the
+/// retry was never built (or its build failed).  Ties keep the original: the
+/// retry is strictly larger, so equal accuracy is not worth the extra knots.
+[[nodiscard]] FinalPick select_final_surface(
+    const FinalScore& original,
+    const std::optional<FinalScore>& retry);
+
+/// Monotonicity statistics for a returned surface (spec D7).
+///
+/// Diagnostics only, never a gate: at each validation point's (m, tau, r),
+/// scan 7 equally spaced sigma across `ctx.sample_bounds` and count steps
+/// where the price falls by more than the noise floor.
+void scan_monotonicity(const std::vector<ValidationPoint>& points,
+                       const SurfaceHandle& handle,
+                       const RefinementContext& ctx,
+                       double target_iv_error,
+                       double vega_floor,
+                       BuildDiagnostics& diag);
+
+}  // namespace detail
 
 /// Resolve K_ref values from a MultiKRefConfig.
 /// If config.K_refs is non-empty, returns them sorted.

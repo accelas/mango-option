@@ -21,11 +21,8 @@ constexpr double kMinPositive = 1e-6;
 constexpr size_t kMonotonicityPoints = 7;
 
 /// One fixed holdout point with its cached references (spec D4).
-struct HoldoutPoint {
-    std::array<double, 4> coords{};  ///< m, tau, sigma, rate
-    double strike = 0.0;
-    ErrorRefs refs;
-};
+/// Shared with the segmented builders' final validation (spec D9).
+using HoldoutPoint = detail::ValidationPoint;
 
 /// Outcome of scoring one candidate surface over a set of samples.
 struct SampleEval {
@@ -578,12 +575,12 @@ static std::vector<std::pair<double, double>> bins_to_intervals(
 /// Diagnostics only, never a gate: at each valid holdout (m, tau, r), scan 7
 /// equally spaced sigma across the user sigma-range and count steps where the
 /// price falls by more than the noise floor.
-static void scan_monotonicity(const std::vector<HoldoutPoint>& holdout,
-                              const SurfaceHandle& handle,
-                              const RefinementContext& ctx,
-                              double target_iv_error,
-                              double vega_floor,
-                              BuildDiagnostics& diag) {
+void detail::scan_monotonicity(const std::vector<HoldoutPoint>& holdout,
+                               const SurfaceHandle& handle,
+                               const RefinementContext& ctx,
+                               double target_iv_error,
+                               double vega_floor,
+                               BuildDiagnostics& diag) {
     const double sigma_lo = ctx.sample_bounds.sigma_min;
     const double sigma_hi = ctx.sample_bounds.sigma_max;
     if (!(sigma_hi > sigma_lo)) {
@@ -613,6 +610,108 @@ static void scan_monotonicity(const std::vector<HoldoutPoint>& holdout,
             prev_sigma = sigma;
         }
     }
+}
+
+// ============================================================================
+// Final-surface validation for the segmented builders (spec D9)
+// ============================================================================
+
+std::expected<detail::FinalValidationSet, PriceTableError>
+detail::prepare_final_validation(const AdaptiveGridParams& params,
+                                 const RefinementContext& ctx,
+                                 const PrepareRefsFn& prepare_refs,
+                                 uint64_t lhs_seed) {
+    const std::array<std::pair<double, double>, 4> axis_bounds = {{
+        {ctx.sample_bounds.m_min, ctx.sample_bounds.m_max},
+        {ctx.sample_bounds.tau_min, ctx.sample_bounds.tau_max},
+        {ctx.sample_bounds.sigma_min, ctx.sample_bounds.sigma_max},
+        {ctx.sample_bounds.rate_min, ctx.sample_bounds.rate_max}
+    }};
+
+    auto unit = latin_hypercube_4d(params.validation_samples, lhs_seed);
+    auto scaled = scale_lhs_samples(unit, axis_bounds);
+
+    FinalValidationSet set;
+    set.points.reserve(scaled.size());
+    for (const auto& pt : scaled) {
+        const double strike = ctx.spot * std::exp(-pt[0]);
+        auto refs = prepare_refs(ctx.spot, strike, pt[1], pt[2], pt[3]);
+        if (!refs.has_value() || !std::isfinite(refs->ref_price) ||
+            !std::isfinite(refs->vega)) {
+            ++set.invalid;
+            continue;
+        }
+        set.points.push_back(ValidationPoint{
+            .coords = pt, .strike = strike, .refs = refs.value()});
+    }
+
+    const size_t min_valid =
+        std::max<size_t>(4, params.validation_samples / 4);
+    if (set.points.size() < min_valid) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::ValidationFailed});
+    }
+    return set;
+}
+
+detail::FinalScore detail::score_final_surface(
+    const std::vector<ValidationPoint>& points,
+    const SurfaceHandle& handle,
+    const ScoreErrorFn& score,
+    const RefinementContext& ctx) {
+    FinalScore ev;
+    double sum_error = 0.0;
+
+    for (const auto& pt : points) {
+        const double tau = pt.coords[1];
+        const double sigma = pt.coords[2];
+        const double rate = pt.coords[3];
+        const double interp =
+            handle.price(ctx.spot, pt.strike, tau, sigma, rate);
+        const double err = score(interp, pt.refs, ctx.spot, pt.strike,
+                                 tau, sigma, rate);
+        if (!std::isfinite(interp) || !std::isfinite(err) || err < 0.0) {
+            ev.all_finite = false;
+            ++ev.skipped;
+            continue;
+        }
+        ev.max_error = std::max(ev.max_error, err);
+        sum_error += err;
+        // Every scored point counts -- a zero error is a measurement, not a
+        // missing one, and using it as the avg denominator's gate produced a
+        // spurious "target met" for a surface nobody had measured.
+        ++ev.scored;
+    }
+
+    if (!ev.all_finite) {
+        ev.max_error = std::numeric_limits<double>::quiet_NaN();
+        ev.avg_error = std::numeric_limits<double>::quiet_NaN();
+        return ev;
+    }
+    ev.avg_error = ev.scored > 0
+        ? sum_error / static_cast<double>(ev.scored)
+        : 0.0;
+    return ev;
+}
+
+bool detail::needs_final_retry(const FinalScore& original,
+                               double target_iv_error) {
+    return original.max_error > target_iv_error || !original.viable();
+}
+
+detail::FinalPick detail::select_final_surface(
+    const FinalScore& original,
+    const std::optional<FinalScore>& retry) {
+    const bool orig_ok = original.viable();
+    const bool retry_ok = retry.has_value() && retry->viable();
+
+    if (orig_ok && retry_ok) {
+        return retry->max_error < original.max_error ? FinalPick::Retry
+                                                     : FinalPick::Original;
+    }
+    if (orig_ok) return FinalPick::Original;
+    if (retry_ok) return FinalPick::Retry;
+    return FinalPick::None;
 }
 
 SeededGrids seed_refinement_grids(const AdaptiveGridParams& params,
@@ -1019,8 +1118,8 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     diag.picked_iteration = picked->iteration;
     diag.total_iterations = iteration;  // excludes the final rebuild
 
-    scan_monotonicity(holdout, *last_handle, ctx, params.target_iv_error,
-                      params.vega_floor, diag);
+    detail::scan_monotonicity(holdout, *last_handle, ctx,
+                              params.target_iv_error, params.vega_floor, diag);
 
     result.iterations = diag.iterations;
     return result;
