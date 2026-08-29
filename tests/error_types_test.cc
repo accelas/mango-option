@@ -157,3 +157,72 @@ TEST(MapExpectedTest, ErrorMappedForPriceTableError) {
     ASSERT_FALSE(mapped.has_value());
     EXPECT_EQ(mapped.error().code, PriceTableErrorCode::FittingFailed);
 }
+
+// ===========================================================================
+// Regression tests for issue #434 (EEP adaptive-build error codes)
+// ===========================================================================
+
+// Regression: new IVErrorCode::MultipleRoots (D8 IV inversion screen) must
+// have a human-readable message like every other IVErrorCode.
+TEST(ErrorCodeTest, MultipleRootsHasMessage) {
+    EXPECT_NE(iv_error_message(IVErrorCode::MultipleRoots), nullptr);
+    EXPECT_STRNE(iv_error_message(IVErrorCode::MultipleRoots), "");
+}
+
+// Every existing IVErrorCode must also resolve to a non-empty message so the
+// switch in iv_error_message() stays exhaustive as new codes are appended.
+TEST(ErrorCodeTest, AllIVErrorCodesHaveMessages) {
+    const IVErrorCode codes[] = {
+        IVErrorCode::NegativeSpot,
+        IVErrorCode::NegativeStrike,
+        IVErrorCode::NegativeMaturity,
+        IVErrorCode::NegativeMarketPrice,
+        IVErrorCode::ArbitrageViolation,
+        IVErrorCode::InvalidGridConfig,
+        IVErrorCode::OptionTypeMismatch,
+        IVErrorCode::DividendYieldMismatch,
+        IVErrorCode::MaxIterationsExceeded,
+        IVErrorCode::BracketingFailed,
+        IVErrorCode::NumericalInstability,
+        IVErrorCode::VegaTooSmall,
+        IVErrorCode::PDESolveFailed,
+        IVErrorCode::MultipleRoots,
+    };
+    for (auto code : codes) {
+        EXPECT_NE(iv_error_message(code), nullptr);
+        EXPECT_STRNE(iv_error_message(code), "");
+    }
+}
+
+// Regression: new ValidationErrorCode::NoViableSurface/AdaptiveValidationFailed
+// (D5 adaptive-build viability gate) must round-trip through the existing
+// exhaustive ValidationErrorCode -> PriceTableErrorCode switch. This mirrors
+// the forward mapping the adaptive-build factory will use
+// (PriceTableErrorCode::NoViableSurface -> ValidationErrorCode::NoViableSurface,
+// PriceTableErrorCode::ValidationFailed -> ValidationErrorCode::AdaptiveValidationFailed).
+TEST(ErrorConversionTest, ValidationNoViableSurfaceToPriceTableError) {
+    ValidationError err(ValidationErrorCode::NoViableSurface, 0.0);
+    PriceTableError pt_err = convert_to_price_table_error(err);
+    EXPECT_EQ(pt_err.code, PriceTableErrorCode::NoViableSurface);
+}
+
+TEST(ErrorConversionTest, ValidationAdaptiveValidationFailedToPriceTableError) {
+    ValidationError err(ValidationErrorCode::AdaptiveValidationFailed, 0.0);
+    PriceTableError pt_err = convert_to_price_table_error(err);
+    EXPECT_EQ(pt_err.code, PriceTableErrorCode::ValidationFailed);
+}
+
+// Regression: new ValidationErrorCode values must also flow through the
+// exhaustive ValidationErrorCode -> IVErrorCode switch without a compile
+// failure (missing arm) or an unmapped runtime code.
+TEST(ErrorConversionTest, ValidationNoViableSurfaceToIVError) {
+    ValidationError err(ValidationErrorCode::NoViableSurface, 0.0);
+    IVError iv_err = convert_to_iv_error(err);
+    EXPECT_EQ(iv_err.code, IVErrorCode::InvalidGridConfig);
+}
+
+TEST(ErrorConversionTest, ValidationAdaptiveValidationFailedToIVError) {
+    ValidationError err(ValidationErrorCode::AdaptiveValidationFailed, 0.0);
+    IVError iv_err = convert_to_iv_error(err);
+    EXPECT_EQ(iv_err.code, IVErrorCode::InvalidGridConfig);
+}

@@ -477,6 +477,8 @@ PYBIND11_MODULE(mango_option, m) {
                 case mango::IVErrorCode::DividendYieldMismatch: return "Dividend yield mismatch";
                 case mango::IVErrorCode::VegaTooSmall: return "Vega too small";
                 case mango::IVErrorCode::PDESolveFailed: return "PDE solve failed";
+                case mango::IVErrorCode::MultipleRoots:
+                    return "Multiple roots detected during IV inversion";
                 default: return "Unknown error";
             }
         })
@@ -503,6 +505,7 @@ PYBIND11_MODULE(mango_option, m) {
         .value("DividendYieldMismatch", mango::IVErrorCode::DividendYieldMismatch)
         .value("VegaTooSmall", mango::IVErrorCode::VegaTooSmall)
         .value("PDESolveFailed", mango::IVErrorCode::PDESolveFailed)
+        .value("MultipleRoots", mango::IVErrorCode::MultipleRoots)
         .export_values();
 
     // IVSolver class (FDM-based IV solver with std::expected)

@@ -124,7 +124,8 @@ std::string format_iv_error(const mango::IVError& e) {
 MangoStatus map_iv_error(const mango::IVError& e) {
   switch (e.code) {
     case mango::IVErrorCode::ArbitrageViolation: return MANGO_ERR_ARBITRAGE;
-    case mango::IVErrorCode::BracketingFailed: return MANGO_ERR_BRACKETING;
+    case mango::IVErrorCode::BracketingFailed:
+    case mango::IVErrorCode::MultipleRoots: return MANGO_ERR_BRACKETING;
     case mango::IVErrorCode::MaxIterationsExceeded: return MANGO_ERR_NO_CONVERGENCE;
     case mango::IVErrorCode::NegativeSpot:
     case mango::IVErrorCode::NegativeStrike:
