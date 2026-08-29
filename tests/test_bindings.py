@@ -261,6 +261,23 @@ def test_price_table_validation_and_iv_error_parity():
         assert hasattr(e, "code")
 
 
+def test_multiple_root_screen_is_configurable():
+    """The query-time multi-root screen is on by default and switchable."""
+    config = mo.InterpolatedIVSolverConfig()
+    assert config.detect_multiple_roots is True
+
+    config.detect_multiple_roots = False
+    assert config.detect_multiple_roots is False
+
+    # An unscreened solve on a monotone surface is unaffected.
+    table = mo.make_price_table(make_price_table_config())
+    price = table.price(make_pricing_params())
+    solver = table.make_iv_solver(config)
+    success, result, error = solver.solve(make_iv_query(price))
+    assert success, error.message if error else ""
+    assert isinstance(result, mo.IVSuccess)
+
+
 def test_legacy_interpolated_iv_solver_factory_still_works():
     solver = mo.make_interpolated_iv_solver(make_price_table_config())
     table = mo.make_price_table(make_price_table_config())

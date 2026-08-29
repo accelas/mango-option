@@ -66,11 +66,12 @@ struct InterpolatedIVSolverConfig {
     /// spaced volatilities across the bracket and refuses to return a root
     /// when the samples show more than one sign change, a tangency contact,
     /// or an endpoint root alongside an interior crossing (IVErrorCode::
-    /// MultipleRoots).  A single sign change narrows the bracket handed to
-    /// Brent, which offsets part of the scan cost.
+    /// MultipleRoots).  A single sign change narrows the search handed to
+    /// Brent.
     ///
     /// Cost: 17 surface evaluations (~4 us) on top of a ~3.5 us solve.
-    /// Set to false to restore the unscreened path exactly.
+    /// Set to false to restore the unscreened path exactly; the signed vega
+    /// pre-check is unconditional and applies either way.
     ///
     /// **This is a screen, not a proof of uniqueness.**  Guaranteed to
     /// detect any objective sign excursion spanning at least one
@@ -104,9 +105,16 @@ struct InterpolatedIVSolverConfig {
 /// returns `IVErrorCode::MultipleRoots` when those samples reveal more than
 /// one root feature (sign change, tangency contact within
 /// `zero_tol = 1e-9 * spot`, or a bracket-endpoint root beside an interior
-/// crossing).  One sign change narrows the bracket handed to Brent, and the
+/// crossing).  One sign change narrows the search handed to Brent, and the
 /// converged root is rejected if the objective slope across that narrowed
 /// interval is not positive.
+///
+/// On a `MultipleRoots` return, `final_error` is the number of **root
+/// features** the scan found — sign changes, tangency contacts and
+/// bracket-endpoint roots together, not sign changes alone — and `last_vol`
+/// is the lowest sigma among them (an interval bound or an endpoint, never a
+/// root).  A tangency reports `2.0`: an even-multiplicity contact is at
+/// least a double root.  The all-zero scan reports `0.0`.
 ///
 /// **The screen is not a proof of uniqueness.**  What it guarantees: every
 /// sign excursion spanning at least one bracket/16 cell is detected, as is
@@ -666,11 +674,12 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
             note_feature(sigma_max);
         }
 
-        // A tangency makes root selection ambiguous even on its own (an
-        // even-multiplicity contact); anything beyond one root feature is
+        // Root features found by the scan.  A tangency counts as two: an
+        // even-multiplicity contact is at least a double root, which makes
+        // it ambiguous on its own.  Anything beyond a single feature is
         // ambiguous by construction.
-        const size_t features = transitions + tangencies + boundary_roots;
-        if (tangencies > 0 || features > 1) {
+        const size_t features = transitions + 2 * tangencies + boundary_roots;
+        if (features > 1) {
             return std::unexpected(IVError{
                 .code = IVErrorCode::MultipleRoots,
                 .iterations = 0,

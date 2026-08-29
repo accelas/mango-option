@@ -513,6 +513,8 @@ TEST(IVScreenTest, TangencyReportsMultipleRoots) {
     auto result = solver->solve(screen_query());
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::MultipleRoots);
+    // An even-multiplicity contact is at least a double root.
+    EXPECT_DOUBLE_EQ(result.error().final_error, 2.0);
     ASSERT_TRUE(result.error().last_vol.has_value());
     EXPECT_NEAR(*result.error().last_vol, 0.30, 1e-12);
 }
@@ -608,6 +610,14 @@ TEST(IVScreenTest, MonotoneSurfaceUnchangedAndCostsSeventeenEvals) {
     EXPECT_NEAR(result_on->implied_vol, result_off->implied_vol, 1e-6);
     EXPECT_EQ(stub_on.price_calls(), stub_off.price_calls() + 17)
         << "screen must cost exactly its 17 scan evaluations";
+
+    // Those 17 evaluations are the uniform scan grid, endpoints included.
+    ASSERT_GE(stub_on.price_sigmas().size(), 17u);
+    for (size_t i = 0; i < 17; ++i) {
+        const double expected = 0.10 + (0.50 - 0.10) * static_cast<double>(i) / 16.0;
+        EXPECT_NEAR(stub_on.price_sigmas()[i], expected, 1e-12) << "scan point " << i;
+    }
+    EXPECT_DOUBLE_EQ(stub_on.price_sigmas()[16], 0.50) << "last sample lands on the bound";
 }
 
 // A converged root whose narrowed interval has a falling objective means the
@@ -627,6 +637,51 @@ TEST(IVScreenTest, NegativeNarrowedSlopeReportsMultipleRoots) {
     EXPECT_EQ(result.error().code, IVErrorCode::MultipleRoots);
     ASSERT_TRUE(result.error().last_vol.has_value());
     EXPECT_NEAR(*result.error().last_vol, 0.30, 1e-12);
+}
+
+// A non-finite objective anywhere in the scan is a broken surface, not an
+// ambiguous one.
+TEST(IVScreenTest, NonFiniteScanSampleIsNumericalInstability) {
+    auto price = [](double s) {
+        return (std::abs(s - 0.325) < 1e-12)
+            ? std::numeric_limits<double>::quiet_NaN()
+            : kMarketPrice + 20.0 * (s - 0.30);
+    };
+    // Explicit finite vega so the pre-check cannot claim the failure first.
+    auto stub = ScreenStubSurface(price, [](double) { return 20.0; });
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(stub);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::NumericalInstability);
+    ASSERT_TRUE(result.error().last_vol.has_value());
+    EXPECT_NEAR(*result.error().last_vol, 0.325, 1e-12);
+    EXPECT_EQ(stub.price_calls(), 10u) << "must stop at the offending sample";
+}
+
+// Zero features: the screen must fall through to Brent on the full bracket
+// and report exactly what the unscreened path reports.
+TEST(IVScreenTest, NoTransitionFallsThroughToBracketingFailed) {
+    // Strictly positive across [0.10, 0.50]: the market price is below the
+    // surface everywhere, so there is no root to find.
+    auto price = [](double s) { return kMarketPrice + 1.0 + 20.0 * (s - 0.10); };
+
+    auto solver_on = InterpolatedIVSolver<ScreenStubSurface>::create(make_stub(price));
+    ASSERT_TRUE(solver_on.has_value());
+    auto result_on = solver_on->solve(screen_query());
+    ASSERT_FALSE(result_on.has_value());
+    EXPECT_EQ(result_on.error().code, IVErrorCode::BracketingFailed);
+
+    InterpolatedIVSolverConfig off{};
+    off.detect_multiple_roots = false;
+    auto solver_off = InterpolatedIVSolver<ScreenStubSurface>::create(make_stub(price), off);
+    ASSERT_TRUE(solver_off.has_value());
+    auto result_off = solver_off->solve(screen_query());
+    ASSERT_FALSE(result_off.has_value());
+    EXPECT_EQ(result_off.error().code, result_on.error().code)
+        << "screened and unscreened paths must agree when there is no root";
 }
 
 // ---------------------------------------------------------------------------
