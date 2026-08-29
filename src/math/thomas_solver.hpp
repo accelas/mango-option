@@ -95,12 +95,13 @@ template<std::floating_point T>
     using Result = ThomasResult<T>;
 
     const size_t n = diag.size();
+    const size_t offdiag_size = (n == 0) ? 0 : n - 1;
 
-    // Validate dimensions
-    if (lower.size() != n - 1) {
+    // Validate dimensions (offdiag_size avoids n-1 wrap-around at n==0)
+    if (lower.size() != offdiag_size) {
         return Result::error_result("Lower diagonal size must be n-1");
     }
-    if (upper.size() != n - 1) {
+    if (upper.size() != offdiag_size) {
         return Result::error_result("Upper diagonal size must be n-1");
     }
     if (rhs.size() != n) {
@@ -331,12 +332,13 @@ template<std::floating_point T>
     using Result = ThomasResult<T>;
 
     const size_t n = diag.size();
+    const size_t offdiag_size = (n == 0) ? 0 : n - 1;
 
-    // Validate dimensions
-    if (lower.size() != n - 1) {
+    // Validate dimensions (offdiag_size avoids n-1 wrap-around at n==0)
+    if (lower.size() != offdiag_size) {
         return Result::error_result("Lower diagonal size must be n-1");
     }
-    if (upper.size() != n - 1) {
+    if (upper.size() != offdiag_size) {
         return Result::error_result("Upper diagonal size must be n-1");
     }
     if (rhs.size() != n) {

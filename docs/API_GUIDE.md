@@ -622,6 +622,28 @@ The factory dispatches on two orthogonal variants:
 
 With optional `adaptive` for automatic grid density tuning to a target IV accuracy. It is honored on three of the factory's paths — continuous `BSplineBackend`, and both segmented (discrete-dividend) paths, B-spline and Chebyshev. The continuous `ChebyshevBackend` and `DimensionlessBackend` paths ignore it and build their fixed grids, reporting no build diagnostics.
 
+**Query-time dividend schedule validation.** `IVQuery::discrete_dividends` is
+optional at query time: leaving it empty against a segmented surface is
+valid, since the surface's build-time schedule is authoritative and is what
+actually prices the query. If you do pass a schedule, it is checked against
+the build-time schedule restricted to dividends within the query's maturity
+window, and a mismatch is rejected with `IVErrorCode::DiscreteDividendMismatch`.
+In particular, a non-empty query schedule against a continuous
+(dividend-free) surface is always rejected, since there is no build-time
+schedule to match — this guarantee holds for solvers built via
+`make_interpolated_iv_solver` / `AnyPriceTable::make_iv_solver`, which record
+"no build-time dividends" explicitly; a solver created directly via
+`InterpolatedIVSolver::create` without a `build_dividends` argument instead
+defaults to "unknown provenance" and skips this check. One exception:
+segmented tables loaded from Parquet have no persisted build schedule, so
+their non-empty query schedules are accepted unverified — the caller is
+responsible for consistency in that case. Both the build-time and
+query-time schedules are canonicalized with the same rules the table
+builders use (`filter_and_merge_dividends`): same-date entries are merged,
+and non-positive-time/non-positive-amount entries are ignored — and, on the
+build side only, entries at or after the surface maturity are dropped,
+since that's what the builders actually priced — before the comparison.
+
 ### Standard (Continuous Dividend) with Manual Grid
 
 ```cpp

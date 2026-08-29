@@ -81,10 +81,17 @@ inline IVError validation_error_to_iv_error(const ValidationError& ve) {
         case ValidationErrorCode::DividendYieldMismatch:
             code = IVErrorCode::DividendYieldMismatch;
             break;
+        case ValidationErrorCode::DiscreteDividendMismatch:
+            code = IVErrorCode::DiscreteDividendMismatch;
+            break;
         case ValidationErrorCode::InvalidRate:
         case ValidationErrorCode::InvalidDividend:
         case ValidationErrorCode::InvalidVolatility:
             code = IVErrorCode::ArbitrageViolation;
+            break;
+        case ValidationErrorCode::PriceTableBuildFailed:
+            // A build failure is a grid/table problem, not an arbitrage signal.
+            code = IVErrorCode::InvalidGridConfig;
             break;
         default:
             code = IVErrorCode::ArbitrageViolation;

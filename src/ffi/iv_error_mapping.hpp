@@ -36,7 +36,8 @@ inline MangoStatus map_iv_error(const IVError& e) {
     case IVErrorCode::NegativeMarketPrice:
     case IVErrorCode::InvalidGridConfig:
     case IVErrorCode::OptionTypeMismatch:
-    case IVErrorCode::DividendYieldMismatch: return MANGO_ERR_VALIDATION;
+    case IVErrorCode::DividendYieldMismatch:
+    case IVErrorCode::DiscreteDividendMismatch: return MANGO_ERR_VALIDATION;
     default: return MANGO_ERR_SOLVER;
   }
 }

@@ -22,7 +22,11 @@ enum class SolverErrorCode {
 struct SolverError {
     SolverErrorCode code{SolverErrorCode::Unknown};
     size_t iterations{0};
-    double residual{0.0};  // Final residual at failure
+    double residual{0.0};  // Code-dependent diagnostic: for ConvergenceFailure,
+                           // the solution-norm-normalized RMS Newton step delta
+                           // (not a PDE residual); infinity for
+                           // LinearSolveFailure; other codes may carry other
+                           // values (e.g. grid-validation data).
 };
 
 /// Error codes for parameter validation failures
@@ -42,9 +46,13 @@ enum class ValidationErrorCode {
     ZeroWidthGrid,
     OptionTypeMismatch,
     DividendYieldMismatch,
+    DiscreteDividendMismatch,
+    PriceTableBuildFailed,     ///< Price table construction failed (non-grid cause)
 
     // Adaptive price-table build errors (surfaced from PriceTableErrorCode;
-    // see PriceTableErrorCode::NoViableSurface / ValidationFailed)
+    // see PriceTableErrorCode::NoViableSurface / ValidationFailed).
+    // Appended after PriceTableBuildFailed: merged ordinals stay stable
+    // (Python exposes the numeric value; see ADR 0001).
     NoViableSurface,           ///< No adaptive-build candidate passed the D5 viability gate
     AdaptiveValidationFailed   ///< Adaptive build's holdout validation set could not measure error
 };
@@ -128,6 +136,7 @@ enum class IVErrorCode {
     InvalidGridConfig,
     OptionTypeMismatch,
     DividendYieldMismatch,
+    DiscreteDividendMismatch,
 
     // Convergence errors
     MaxIterationsExceeded,
@@ -165,6 +174,9 @@ inline const char* iv_error_message(IVErrorCode code) {
         case IVErrorCode::InvalidGridConfig: msg = "Invalid grid configuration"; break;
         case IVErrorCode::OptionTypeMismatch: msg = "Option type mismatch"; break;
         case IVErrorCode::DividendYieldMismatch: msg = "Dividend yield mismatch"; break;
+        case IVErrorCode::DiscreteDividendMismatch:
+            msg = "Discrete dividend schedule mismatch";
+            break;
         case IVErrorCode::MaxIterationsExceeded: msg = "Maximum iterations exceeded"; break;
         case IVErrorCode::BracketingFailed: msg = "Bracketing failed"; break;
         case IVErrorCode::NumericalInstability: msg = "Numerical instability"; break;
@@ -330,6 +342,10 @@ inline IVError convert_to_iv_error(const ValidationError& err) {
         case ValidationErrorCode::DividendYieldMismatch:
             code = IVErrorCode::DividendYieldMismatch;
             break;
+        case ValidationErrorCode::DiscreteDividendMismatch:
+            code = IVErrorCode::DiscreteDividendMismatch;
+            break;
+        case ValidationErrorCode::PriceTableBuildFailed:
         case ValidationErrorCode::NoViableSurface:
         case ValidationErrorCode::AdaptiveValidationFailed:
             // Adaptive-build failures are grid/config-shaped problems, not a
@@ -357,7 +373,11 @@ inline IVError convert_to_iv_error(const SolverError& err) {
 
 /// Convert InterpolationError to PriceTableError
 inline PriceTableError convert_to_price_table_error(const InterpolationError& err) {
-    PriceTableErrorCode code;
+    // Initialized (not left uninitialized like the switches below) because
+    // deep inlining at -O3 from price_table_factory.cpp's new call sites
+    // defeats GCC's exhaustiveness analysis and trips -Wmaybe-uninitialized;
+    // the switch is still exhaustive and -Werror=switch still enforces it.
+    PriceTableErrorCode code = PriceTableErrorCode::FittingFailed;
     switch (err.code) {
         case InterpolationErrorCode::InsufficientGridPoints:
             code = PriceTableErrorCode::InsufficientGridPoints;
@@ -411,11 +431,16 @@ inline PriceTableError convert_to_price_table_error(const ValidationError& err) 
             break;
         case ValidationErrorCode::OptionTypeMismatch:
         case ValidationErrorCode::DividendYieldMismatch:
+        case ValidationErrorCode::DiscreteDividendMismatch:
             code = PriceTableErrorCode::InvalidConfig;
             break;
+        case ValidationErrorCode::PriceTableBuildFailed:
+            code = PriceTableErrorCode::SurfaceBuildFailed;
+            break;
         case ValidationErrorCode::NoViableSurface:
-            // Mirrors the forward mapping in price_table_factory.cpp's
-            // to_validation_error(): PriceTableErrorCode::NoViableSurface ->
+            // Mirrors the forward mapping in
+            // detail/price_table_error_mapping.cpp's to_validation_error():
+            // PriceTableErrorCode::NoViableSurface ->
             // ValidationErrorCode::NoViableSurface.
             code = PriceTableErrorCode::NoViableSurface;
             break;

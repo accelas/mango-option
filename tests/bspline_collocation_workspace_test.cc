@@ -4,14 +4,26 @@
 #include "mango/support/thread_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <concepts>
+#include <utility>
+#include <lapacke.h>
 
 using namespace mango;
+
+// Regression: pivot storage must use lapack_int, not int
+// Bug: the workspace sized and sliced pivots as int but handed them to
+//      LAPACKE_dgbtrf/dgbtrs (lapack_int*) — a compile break under ILP64.
+//      NOTE: under this repo's LP64 CI lapack_int == int, so this assert
+//      cannot catch a regression here; the real guard would be an ILP64
+//      build (out of scope, see design doc).
+using Pivot = typename decltype(std::declval<mango::BSplineCollocationWorkspace<double, 4>&>().pivots())::element_type;
+static_assert(std::same_as<Pivot, lapack_int>);
 
 TEST(BSplineCollocationWorkspaceTest, RequiredBytesCalculation) {
     // For n=100, bandwidth=4:
     // band_storage: 10*100*8 = 8000 bytes + padding
     // lapack_storage: 10*100*8 = 8000 bytes + padding
-    // pivots: 100*4 = 400 bytes + padding
+    // pivots: 100*sizeof(lapack_int) = 400 bytes + padding
     // coeffs: 100*8 = 800 bytes + padding
     size_t bytes = BSplineCollocationWorkspace<double>::required_bytes(100);
 
@@ -75,7 +87,7 @@ TEST(BSplineCollocationWorkspaceTest, SpansNonOverlapping) {
     auto* lapack_end = ws.lapack_storage().data() + ws.lapack_storage().size();
     auto* pivots_start = ws.pivots().data();
     auto* pivots_end = reinterpret_cast<double*>(
-        reinterpret_cast<std::byte*>(ws.pivots().data()) + ws.pivots().size() * sizeof(int));
+        reinterpret_cast<std::byte*>(ws.pivots().data()) + ws.pivots().size() * sizeof(lapack_int));
     auto* coeffs_start = ws.coeffs().data();
 
     // band_storage < lapack_storage

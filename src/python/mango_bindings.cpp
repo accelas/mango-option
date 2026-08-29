@@ -502,6 +502,7 @@ PYBIND11_MODULE(mango_option, m) {
                 case mango::IVErrorCode::InvalidGridConfig: return "Invalid grid configuration";
                 case mango::IVErrorCode::OptionTypeMismatch: return "Option type mismatch";
                 case mango::IVErrorCode::DividendYieldMismatch: return "Dividend yield mismatch";
+                case mango::IVErrorCode::DiscreteDividendMismatch: return "Discrete dividend mismatch";
                 case mango::IVErrorCode::VegaTooSmall: return "Vega too small";
                 case mango::IVErrorCode::PDESolveFailed: return "PDE solve failed";
                 case mango::IVErrorCode::MultipleRoots:
@@ -530,6 +531,7 @@ PYBIND11_MODULE(mango_option, m) {
         .value("InvalidGridConfig", mango::IVErrorCode::InvalidGridConfig)
         .value("OptionTypeMismatch", mango::IVErrorCode::OptionTypeMismatch)
         .value("DividendYieldMismatch", mango::IVErrorCode::DividendYieldMismatch)
+        .value("DiscreteDividendMismatch", mango::IVErrorCode::DiscreteDividendMismatch)
         .value("VegaTooSmall", mango::IVErrorCode::VegaTooSmall)
         .value("PDESolveFailed", mango::IVErrorCode::PDESolveFailed)
         .value("MultipleRoots", mango::IVErrorCode::MultipleRoots)

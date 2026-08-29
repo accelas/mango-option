@@ -248,3 +248,125 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
         << "Continuous dividend round-trip should recover vol=0.20, got "
         << result->implied_vol;
 }
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: validate_query ignored query.discrete_dividends (#440 item 1)
+// Bug: A query carrying a discrete schedule against a mismatched surface
+//      priced off the wrong surface with no error.
+TEST_F(DiscreteDividendIVIntegrationTest, MatchingQueryScheduleAccepted) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8,
+            .rate = 0.05, .option_type = OptionType::PUT},
+        0.20, {{.calendar_time = 0.5, .amount = 2.0}});
+    auto price_result = solve_american_option(params);
+    ASSERT_TRUE(price_result.has_value());
+
+    IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 0.8;
+    query.rate = RateSpec{0.05};
+    query.option_type = OptionType::PUT;
+    query.market_price = price_result->value();
+    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}};
+
+    auto iv_result = solver_->solve(query);
+    ASSERT_TRUE(iv_result.has_value())
+        << "matching schedule must be accepted; error code: "
+        << (iv_result.has_value() ? 0 : static_cast<int>(iv_result.error().code));
+    EXPECT_NEAR(iv_result->implied_vol, 0.20, 0.02);
+}
+
+// Regression: same-date query dividends must be coalesced before comparison
+// (PR #449 pre-merge review, P2) — a query splitting one build-time
+// dividend into two same-date entries that sum to the build amount must
+// still validate, since the builders would price them identically.
+TEST_F(DiscreteDividendIVIntegrationTest, SameDateQuerySplitAccepted) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8,
+            .rate = 0.05, .option_type = OptionType::PUT},
+        0.20, {{.calendar_time = 0.5, .amount = 2.0}});
+    auto price_result = solve_american_option(params);
+    ASSERT_TRUE(price_result.has_value());
+
+    IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 0.8;
+    query.rate = RateSpec{0.05};
+    query.option_type = OptionType::PUT;
+    query.market_price = price_result->value();
+    // Split into two same-date entries that sum to the build amount.
+    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 1.0},
+                                 {.calendar_time = 0.5, .amount = 1.0}};
+
+    auto iv_result = solver_->solve(query);
+    ASSERT_TRUE(iv_result.has_value())
+        << "same-date split summing to the build amount must be accepted; "
+           "error code: "
+        << (iv_result.has_value() ? 0 : static_cast<int>(iv_result.error().code));
+    EXPECT_NEAR(iv_result->implied_vol, 0.20, 0.02);
+}
+
+// Regression: mismatched dividend amount must be rejected loudly (#440 item 1)
+TEST_F(DiscreteDividendIVIntegrationTest, MismatchedAmountRejected) {
+    IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 0.8;
+    query.rate = RateSpec{0.05};
+    query.option_type = OptionType::PUT;
+    query.market_price = 5.0;
+    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 3.0}};
+
+    auto iv_result = solver_->solve(query);
+    ASSERT_FALSE(iv_result.has_value());
+    EXPECT_EQ(iv_result.error().code, IVErrorCode::DiscreteDividendMismatch);
+}
+
+// Regression: extra dividend in the query must be rejected (#440 item 1)
+TEST_F(DiscreteDividendIVIntegrationTest, ExtraDividendRejected) {
+    IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 0.8;
+    query.rate = RateSpec{0.05};
+    query.option_type = OptionType::PUT;
+    query.market_price = 5.0;
+    query.discrete_dividends = {
+        {.calendar_time = 0.25, .amount = 1.0},
+        {.calendar_time = 0.5, .amount = 2.0}};
+
+    auto iv_result = solver_->solve(query);
+    ASSERT_FALSE(iv_result.has_value());
+    EXPECT_EQ(iv_result.error().code, IVErrorCode::DiscreteDividendMismatch);
+}
+
+// Prefix rule: a shorter-dated query only carries dividends inside its
+// life. Build dividend at t=0.5; a query with maturity 0.4 must pass with
+// an empty schedule and be rejected if it claims the t=0.5 dividend.
+TEST_F(DiscreteDividendIVIntegrationTest, PrefixWindowSemantics) {
+    IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 0.4;
+    query.rate = RateSpec{0.05};
+    query.option_type = OptionType::PUT;
+    query.market_price = 4.0;
+
+    query.discrete_dividends = {};  // dividend at 0.5 is outside [0, 0.4]
+    auto ok = solver_->solve(query);
+    // May fail numerically for other reasons, but must NOT be a
+    // schedule mismatch.
+    if (!ok.has_value()) {
+        EXPECT_NE(ok.error().code, IVErrorCode::DiscreteDividendMismatch);
+    }
+
+    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}};
+    auto bad = solver_->solve(query);
+    ASSERT_FALSE(bad.has_value());
+    EXPECT_EQ(bad.error().code, IVErrorCode::DiscreteDividendMismatch);
+}

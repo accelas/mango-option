@@ -758,5 +758,50 @@ TEST(IVScreenTest, NonFiniteProbeVegaIsNumericalInstability) {
     EXPECT_EQ(stub.price_calls(), 0u) << "must reject before any price eval";
 }
 
+// Regression: create()'s build_dividends default was known-empty, so direct
+// construction over a dividend-aware surface falsely rejected correct
+// non-empty query schedules (PR #449 pre-merge review, P1)
+// Bug: the generic template cannot know surface provenance; the default is
+//      now nullopt (unknown -> validation skipped), and validation is
+//      opt-in via an explicit schedule.
+TEST_F(InterpolatedIVSolverTest, DirectCreateDefaultsToUnknownSchedule) {
+    // Direct create() with no build_dividends argument: unknown provenance.
+    auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
+    ASSERT_TRUE(solver.has_value());
+
+    IVQuery query(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .option_type = OptionType::PUT},
+        8.0,
+        {{.calendar_time = 0.5, .amount = 2.0}});
+
+    auto iv_result = solver->solve(query);
+    // Unknown provenance skips schedule validation; the query may still
+    // fail for other numerical reasons, but never for a schedule mismatch.
+    if (!iv_result.has_value()) {
+        EXPECT_NE(iv_result.error().code, IVErrorCode::DiscreteDividendMismatch);
+    }
+}
+
+TEST_F(InterpolatedIVSolverTest, DirectCreateExplicitEmptyScheduleRejectsQuery) {
+    // Direct create() with an explicit known-empty schedule: the surface is
+    // asserted to be dividend-free, so a non-empty query schedule must fail.
+    auto solver = InterpolatedIVSolver<BSplinePriceTable>::create(
+        make_wrapper(), InterpolatedIVSolverConfig{}, std::vector<Dividend>{});
+    ASSERT_TRUE(solver.has_value());
+
+    IVQuery query(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .option_type = OptionType::PUT},
+        8.0,
+        {{.calendar_time = 0.5, .amount = 2.0}});
+
+    auto iv_result = solver->solve(query);
+    ASSERT_FALSE(iv_result.has_value())
+        << "Solver should reject non-empty query schedule against a "
+           "known-empty build schedule";
+    EXPECT_EQ(iv_result.error().code, IVErrorCode::DiscreteDividendMismatch);
+}
+
 }  // namespace
 }  // namespace mango

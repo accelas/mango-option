@@ -164,3 +164,69 @@ TEST(PDESolverTest, SteadyStateConvergence) {
             << "Steady state mismatch at x[" << i << "] = " << x[i];
     }
 }
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: ConvergenceFailure must report the actual last step delta
+// Bug: the loop's final statement copied u into newton_u_old, then the
+//      failure path computed the delta of u against that same buffer —
+//      comparing u with itself, so every failure reported residual == 0.
+TEST(PDESolverTest, ConvergenceFailureReportsNonzeroResidual) {
+    // Heat-equation fixture as in HeatEquationDirichletBC, but with a
+    // config forcing failure: max_iter = 1, tolerance = 1e-300 so one
+    // iteration with a genuinely nonzero first update cannot converge.
+    const double D = 0.1;
+    const double pi = std::numbers::pi;
+
+    auto grid_spec = mango::GridSpec<double>::uniform(0.0, 1.0, 51).value();
+    auto time = mango::TimeDomain::from_n_steps(0.0, 0.1, 100);
+
+    auto grid_result = mango::Grid<double>::create(grid_spec, time);
+    ASSERT_TRUE(grid_result.has_value()) << grid_result.error();
+    auto grid = grid_result.value();
+
+    std::pmr::monotonic_buffer_resource pool;
+    size_t buffer_size = mango::PDEWorkspace::required_size(grid->n_space());
+    std::pmr::vector<double> pmr_buffer(buffer_size, 0.0, &pool);
+    auto workspace_result = mango::PDEWorkspace::from_buffer_and_grid(
+        std::span{pmr_buffer.data(), pmr_buffer.size()},
+        grid->x(),
+        grid->n_space()
+    );
+    ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
+    auto workspace = workspace_result.value();
+
+    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
+    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
+
+    auto pde_heat_op = mango::operators::LaplacianPDE<double>(D);
+    auto spacing = std::make_shared<mango::GridSpacing<double>>(grid->spacing());
+    auto heat_op = mango::operators::create_spatial_operator(std::move(pde_heat_op), spacing, workspace);
+
+    auto ic = [pi](std::span<const double> x, std::span<double> u) {
+        for (size_t i = 0; i < x.size(); ++i) {
+            u[i] = std::sin(pi * x[i]);
+        }
+    };
+
+    auto solver = TestPDESolver(grid, workspace, left_bc, right_bc, heat_op);
+
+    // Force failure: a single Newton iteration cannot hit an unreachably
+    // tight tolerance, and disabling Rannacher startup keeps the first
+    // implicit stage (and its Newton solve) on the code path under test.
+    mango::TRBDF2Config config;
+    config.max_iter = 1;
+    config.tolerance = 1e-300;
+    config.rannacher_startup = false;
+    solver.set_config(config);
+
+    solver.initialize(ic);
+
+    auto result = solver.solve();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::SolverErrorCode::ConvergenceFailure);
+    EXPECT_TRUE(std::isfinite(result.error().residual));
+    EXPECT_GT(result.error().residual, 0.0);
+}

@@ -576,6 +576,30 @@ struct NonUniformSpacing {
         }
     }
 
+    /// Copy ops re-point sections_view_ into this object's own buffer;
+    /// the defaulted copies would alias the source's vector (dangling
+    /// once the source dies).  Moves are safe defaulted: vector move
+    /// preserves data(), so the transferred view stays valid.  A
+    /// moved-from object supports only destruction and reassignment —
+    /// never evaluation.
+    NonUniformSpacing(const NonUniformSpacing& other)
+        : n(other.n)
+        , precomputed(other.precomputed)
+        , sections_view_(precomputed.data(), 5, n - 2)
+    {}
+
+    NonUniformSpacing& operator=(const NonUniformSpacing& other) {
+        if (this != &other) {
+            NonUniformSpacing tmp(other);      // strong exception safety
+            *this = std::move(tmp);
+        }
+        return *this;
+    }
+
+    NonUniformSpacing(NonUniformSpacing&&) noexcept = default;
+    NonUniformSpacing& operator=(NonUniformSpacing&&) noexcept = default;
+    ~NonUniformSpacing() = default;
+
     /// Get inverse left spacing for each interior point
     /// Returns: 1/(x[i] - x[i-1]) for i=1..n-2
     std::span<const T> dx_left_inv() const {

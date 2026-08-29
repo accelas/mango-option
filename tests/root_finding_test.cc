@@ -181,3 +181,50 @@ TEST(RootFindingErrorTest, BrentRootAtEndpoint) {
     ASSERT_TRUE(result.has_value());
     EXPECT_NEAR(result->root, 0.0, 1e-6);
 }
+
+// ===========================================================================
+// Regression tests for bugs found during code review (issue #441)
+// ===========================================================================
+
+// Regression: unset brent_tol_x must reproduce current behavior exactly
+// Bug: brent_tol_abs served both |f| and x-distance comparisons; the new
+//      optional x-tolerance must not change any existing caller's result.
+TEST(RootFindingTest, BrentTolXUnsetMatchesLegacyBehavior) {
+    auto f = [](double x) { return x * x - 2.0; };
+    mango::RootFindingConfig legacy{.max_iter = 100, .brent_tol_abs = 1e-6};
+    mango::RootFindingConfig with_field{.max_iter = 100, .brent_tol_abs = 1e-6};
+    // brent_tol_x left unset in both
+    auto r1 = mango::brent_find_root(f, 0.0, 2.0, legacy);
+    auto r2 = mango::brent_find_root(f, 0.0, 2.0, with_field);
+    ASSERT_TRUE(r1.has_value());
+    ASSERT_TRUE(r2.has_value());
+    EXPECT_DOUBLE_EQ(r1->root, r2->root);
+    EXPECT_EQ(r1->iterations, r2->iterations);
+}
+
+// Regression: one knob for |f| and x-distance is scale-dependent
+// Bug: with a steep objective (f-values huge relative to x), a loose
+//      brent_tol_abs stops on the |b-a| test at poor x-accuracy; there was
+//      no way to tighten x-accuracy without also tightening the |f| test.
+TEST(RootFindingTest, BrentTolXControlsXAccuracyIndependently) {
+    // Steep function: root at sqrt(2), |f'| ~ 2.8e6 near the root
+    auto f = [](double x) { return 1e6 * (x * x - 2.0); };
+    const double root = std::sqrt(2.0);
+
+    mango::RootFindingConfig loose{.max_iter = 200, .brent_tol_abs = 1e-2};
+    auto r_loose = mango::brent_find_root(f, 0.0, 2.0, loose);
+    ASSERT_TRUE(r_loose.has_value());
+
+    mango::RootFindingConfig tight_x{.max_iter = 200, .brent_tol_abs = 1e-2};
+    tight_x.brent_tol_x = 1e-12;
+    auto r_tight = mango::brent_find_root(f, 0.0, 2.0, tight_x);
+    ASSERT_TRUE(r_tight.has_value());
+
+    // Demonstrates that the two knobs are independent: the loose run
+    // (brent_tol_x falling back to the shared brent_tol_abs = 1e-2) stops
+    // on the coarse bracket-width test at x-error ~1.4e-4, while setting
+    // brent_tol_x = 1e-12 forces the bracket to shrink far past that,
+    // landing x-error well under 1e-6.
+    EXPECT_GT(std::abs(r_loose->root - root), 1e-5);
+    EXPECT_LT(std::abs(r_tight->root - root), 1e-6);
+}

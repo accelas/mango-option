@@ -191,13 +191,15 @@ TEST(CubicSpline2DTest, ExtrapolationBeyondXBounds) {
     auto error = spline.build(std::span{x}, std::span{y}, std::span{z});
     ASSERT_FALSE(error.has_value());
 
-    // Extrapolate beyond x bounds (uses natural spline extrapolation)
+    // Extrapolate beyond x bounds: clamps to the nearest boundary value,
+    // per the documented contract (not cubic extrapolation).
     double val_low = spline.eval(0.5, 0.5);
     double val_high = spline.eval(3.5, 0.5);
 
-    // Should return some value (not crash)
     EXPECT_TRUE(std::isfinite(val_low));
     EXPECT_TRUE(std::isfinite(val_high));
+    EXPECT_DOUBLE_EQ(val_low, spline.eval(1.0, 0.5));
+    EXPECT_DOUBLE_EQ(val_high, spline.eval(3.0, 0.5));
 }
 
 TEST(CubicSpline2DTest, ExtrapolationBeyondYBounds) {
@@ -211,12 +213,15 @@ TEST(CubicSpline2DTest, ExtrapolationBeyondYBounds) {
     auto error = spline.build(std::span{x}, std::span{y}, std::span{z});
     ASSERT_FALSE(error.has_value());
 
-    // Extrapolate beyond y bounds
+    // Extrapolate beyond y bounds: clamps to the nearest boundary value,
+    // per the documented contract (not cubic extrapolation).
     double val_low = spline.eval(0.5, 0.5);
     double val_high = spline.eval(0.5, 3.5);
 
     EXPECT_TRUE(std::isfinite(val_low));
     EXPECT_TRUE(std::isfinite(val_high));
+    EXPECT_DOUBLE_EQ(val_low, spline.eval(0.5, 1.0));
+    EXPECT_DOUBLE_EQ(val_high, spline.eval(0.5, 3.0));
 }
 
 // ========== Template Instantiation Tests ==========
@@ -389,4 +394,37 @@ TEST(CubicSpline2DTest, LargeGrid) {
 
     // Sample evaluation
     EXPECT_NEAR(spline.eval(25.0, 15.0), 40.0, 1e-9);
+}
+
+// ===========================================================================
+// Regression tests for bugs found during code review (issue #441)
+// ===========================================================================
+
+// Regression: out-of-domain eval must clamp, per the documented contract
+// Bug: docs promised "extrapolation uses nearest boundary value" but the
+//      code evaluated the boundary cubic at the out-of-range offset,
+//      diverging cubically off-grid.
+TEST(CubicSpline2DTest, ExtrapolationClampsToBoundary) {
+    // grid with nonzero boundary slope so cubic extrapolation would diverge
+    std::vector<double> xs = {0.0, 1.0, 2.0, 3.0};
+    std::vector<double> ys = {0.0, 1.0, 2.0, 3.0};
+    // z = x^2 + y^2 sampled on the grid
+    std::vector<double> zs;
+    for (double xv : xs) {
+        for (double yv : ys) {
+            zs.push_back(xv * xv + yv * yv);
+        }
+    }
+
+    CubicSpline2D<double> spline;
+    auto error = spline.build(std::span{xs}, std::span{ys}, std::span{zs});
+    ASSERT_FALSE(error.has_value());
+
+    // outside on each side clamps to the boundary evaluation:
+    EXPECT_DOUBLE_EQ(spline.eval(5.0, 1.5), spline.eval(3.0, 1.5));
+    EXPECT_DOUBLE_EQ(spline.eval(-2.0, 1.5), spline.eval(0.0, 1.5));
+    EXPECT_DOUBLE_EQ(spline.eval(1.5, 5.0), spline.eval(1.5, 3.0));
+    EXPECT_DOUBLE_EQ(spline.eval(1.5, -2.0), spline.eval(1.5, 0.0));
+    // corner: both coordinates outside
+    EXPECT_DOUBLE_EQ(spline.eval(5.0, -2.0), spline.eval(3.0, 0.0));
 }
