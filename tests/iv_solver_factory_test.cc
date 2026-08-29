@@ -184,6 +184,16 @@ TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
         .option_type = OptionType::PUT,
         .spot = 100.0,
         .dividend_yield = 0.02,
+        // The assembled multi-K_ref surface blends K_ref-struck prices
+        // linearly in strike, so the K_refs must both span and resolve the
+        // queryable strike range.  The default +/-30 % moneyness grid with
+        // K_refs {80, 100, 120} measures 8,278 (827,756 bps) on the final
+        // validation and is refused by the viability gate (spec D9).
+        .grid = IVGrid{
+            .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
+            .vol = {0.10, 0.15, 0.20, 0.30},
+            .rate = {0.02, 0.03, 0.05, 0.07},
+        },
         .adaptive = AdaptiveGridParams{
             .target_iv_error = 0.005,  // 50 bps for test speed
             .max_iter = 2,
@@ -193,7 +203,7 @@ TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
         .discrete_dividends = DiscreteDividendConfig{
             .maturity = 1.0,
             .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
-            .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+            .kref_config = {.K_refs = {90.0, 95.0, 100.0, 105.0, 110.0}},
         },
     };
 

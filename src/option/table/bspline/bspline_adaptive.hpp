@@ -32,13 +32,20 @@ struct BSplineSegmentedAdaptiveResult {
     IVGrid grid;
     int tau_points_per_segment;
 
-    // Convergence stats (aggregated across probe K_refs)
-    std::vector<IterationStats> iterations;  ///< Per-probe worst-case iterations
+    // Convergence stats.  The achieved errors and `target_met` describe the
+    // **returned** assembled surface as measured by the final validation
+    // (spec D9), not the probe loops -- including when the bumped-grid retry
+    // is the surface returned.
+    std::vector<IterationStats> iterations;  ///< Per-probe loop forensics
     double achieved_max_error = 0.0;         ///< Max error from final LHS validation
     double achieved_avg_error = 0.0;
     bool target_met = false;
     size_t total_pde_solves = 0;
-    bool used_retry = false;                 ///< True if bumped-grid retry was used
+    bool used_retry = false;                 ///< True if bumped-grid retry was returned
+
+    /// Diagnostics for the returned final surface (spec D7/D9), with the
+    /// per-probe iterations appended for forensics.
+    BuildDiagnostics diagnostics;
 };
 
 /// Create a RefineFn that does B-spline midpoint insertion, targeted at the

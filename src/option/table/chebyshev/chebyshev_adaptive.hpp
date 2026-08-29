@@ -129,6 +129,10 @@ build_chebyshev_segmented_pieces(
     std::span<const double> rate_nodes);
 
 /// Result of adaptive segmented Chebyshev surface construction.
+///
+/// The achieved errors and `target_met` describe the **assembled all-K_ref
+/// surface** as measured by the mandatory final validation (spec D9), not the
+/// single-K_ref sizing loop.
 struct ChebyshevSegmentedAdaptiveResult {
     ChebyshevMultiKRefSurface surface;
     std::vector<IterationStats> iterations;
@@ -136,6 +140,10 @@ struct ChebyshevSegmentedAdaptiveResult {
     double achieved_avg_error = 0.0;
     bool target_met = false;
     size_t total_pde_solves = 0;
+
+    /// Diagnostics for the returned final surface (spec D7/D9), with the
+    /// sizing-loop iterations appended for forensics.
+    BuildDiagnostics diagnostics;
 };
 
 /// Builder for segmented Chebyshev surfaces (discrete dividends, multi-K_ref).

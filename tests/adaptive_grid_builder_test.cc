@@ -344,16 +344,17 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
         .dividend_yield = 0.02,
         .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
         .maturity = 1.0,
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        .kref_config = {.K_refs = {90.0, 95.0, 100.0, 105.0, 110.0}},
     };
 
-    auto m_domain = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
-    std::vector<double> v_domain = {0.05, 0.10, 0.20, 0.30, 0.50};
-    std::vector<double> r_domain = {0.01, 0.03, 0.05, 0.10};
+    auto m_domain = to_log_m({0.92, 0.95, 1.0, 1.05, 1.08});
+    std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
+    std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value())
-        << "build_adaptive_bspline_segmented failed";
+        << "build_adaptive_bspline_segmented failed: code "
+        << static_cast<int>(result.error().code);
 
     // Should be able to query prices at various strikes
     double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
@@ -378,10 +379,10 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
         .dividend_yield = 0.0,
         .discrete_dividends = {Dividend{.calendar_time = 0.25, .amount = 1.50}},
         .maturity = 0.5,
-        .kref_config = {.K_refs = {95.0, 105.0}},  // < 3 K_refs — probe all
+        .kref_config = {.K_refs = {90.0, 110.0}},  // < 3 K_refs — probe all
     };
 
-    auto m_domain = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
+    auto m_domain = to_log_m({0.91, 0.95, 1.0, 1.05, 1.1});
     std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
@@ -440,7 +441,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
     };
 
-    auto m_domain = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
+    auto m_domain = to_log_m({0.85, 0.9, 1.0, 1.1, 1.2});
     std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
@@ -465,6 +466,14 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
 // its midpoint rather than being handed to run_refinement as m_max == m_min
 // (which would fail the build with InvalidConfig).  K_refs one basis point
 // apart give the middle probe a band ~1e-4 wide in log-moneyness.
+//
+// Such a config cannot produce a usable surface: three K_refs within one
+// basis point of 100 cannot resolve strikes spanning [90.9, 111.1], and the
+// assembled surface measures 0.278 (2,776 bps) on the final validation
+// against the 0.20 viability bound, so the build refuses (spec D9).  What
+// this test pins is *which* refusal: `NoViableSurface` from the final gate
+// means the degenerate band was widened and every probe loop ran;
+// `InvalidConfig` would mean the band was handed over degenerate.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
@@ -486,11 +495,12 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    ASSERT_TRUE(result.has_value())
-        << "a degenerate band must be widened, not rejected: code "
-        << static_cast<int>(result.error().code);
-    EXPECT_TRUE(std::isfinite(
-        result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05)));
+    ASSERT_FALSE(result.has_value())
+        << "three K_refs a basis point apart cannot serve [90.9, 111.1]";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface)
+        << "a degenerate band must be widened and measured, not rejected up "
+           "front (InvalidConfig would mean it reached run_refinement "
+           "degenerate)";
 }
 
 // A probe whose served band lies entirely outside the user's strike range is
@@ -510,10 +520,10 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedEmptyProbeBandSkipped) {
         .dividend_yield = 0.0,
         .discrete_dividends = {},
         .maturity = 1.0,
-        .kref_config = {.K_refs = {50.0, 100.0}},
+        .kref_config = {.K_refs = {50.0, 90.0, 100.0, 110.0}},
     };
 
-    auto m = to_log_m({0.91, 0.95, 1.0, 1.05, 1.11});
+    auto m = to_log_m({0.92, 0.95, 1.0, 1.05, 1.09});
     std::vector<double> v = {0.15, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
@@ -605,7 +615,10 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
         .kref_config = {.K_refs = {100.0, 110.0, 120.0, 130.0}},
     };
 
-    auto m = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
+    // Strikes must stay inside the K_ref span: S/K in [0.77, 1.0] maps to
+    // K in [100, 130].  Outside it the multi-K_ref blend clamps to the
+    // nearest K_ref and the assembled surface is not viable.
+    auto m = to_log_m({0.77, 0.85, 0.9, 0.95, 1.0});
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
@@ -635,7 +648,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
         .kref_config = {.K_refs = {70.0, 80.0, 90.0, 100.0}},
     };
 
-    auto m = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
+    // Strikes inside the K_ref span: S/K in [1.0, 1.42] maps to K in [70, 100].
+    auto m = to_log_m({1.0, 1.1, 1.2, 1.3, 1.42});
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
@@ -646,6 +660,14 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
 }
 
 // Coverage: Single auto-generated K_ref (count=1)
+//
+// One K_ref cannot serve a +/-30 % strike range.  The assembled surface
+// prices every query as (K / K_ref) * P(S, K_ref) -- the multi-K_ref split
+// substitutes K_ref for the query strike while holding the spot fixed -- so
+// it measures 4.69 (46,924 bps) on the final validation and the build
+// refuses (spec D9).  The coverage here is that `K_ref_count = 1` resolves
+// to a single K_ref and the build runs all the way to the final gate rather
+// than failing configuration validation.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -667,12 +689,11 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    ASSERT_TRUE(result.has_value());
-
-    // Single K_ref = spot, should produce valid prices
-    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
-    EXPECT_GT(price, 0.0);
-    EXPECT_TRUE(std::isfinite(price));
+    ASSERT_FALSE(result.has_value())
+        << "a lone K_ref cannot serve a +/-30 % strike range";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface)
+        << "K_ref_count = 1 must resolve and build, then fail the final "
+           "viability gate -- not fail configuration validation";
 }
 
 // Coverage: Very short maturity — tau domain compressed, max_tau clamped
@@ -938,10 +959,14 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
         .dividend_yield = 0.02,
         .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
         .maturity = 1.0,
-        .kref_config = {.K_refs = {100.0}},
+        // The assembled surface blends K_ref-struck prices linearly in
+        // strike, so the K_refs must span (and resolve) the queryable strike
+        // range [90.9, 111.1]; a lone K_ref = 100 measures 0.59 on the final
+        // validation and is refused by the viability gate (spec D9).
+        .kref_config = {.K_refs = {91.0, 100.0, 111.0}},
     };
 
-    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    auto m_domain = to_log_m({0.9, 0.95, 1.0, 1.05, 1.1});
     std::vector<double> v_domain = {0.10, 0.20, 0.30};
     std::vector<double> r_domain = {0.03, 0.05};
 
@@ -1012,10 +1037,14 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
             Dividend{.calendar_time = 0.5, .amount = 1.5},
         },
         .maturity = 1.0,
-        .kref_config = {.K_refs = {100.0}},
+        // The assembled surface blends K_ref-struck prices linearly in
+        // strike, so the K_refs must span (and resolve) the queryable strike
+        // range [90.9, 111.1]; a lone K_ref = 100 measures 0.59 on the final
+        // validation and is refused by the viability gate (spec D9).
+        .kref_config = {.K_refs = {91.0, 100.0, 111.0}},
     };
 
-    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    auto m_domain = to_log_m({0.9, 0.95, 1.0, 1.05, 1.1});
     std::vector<double> v_domain = {0.10, 0.20, 0.30};
     std::vector<double> r_domain = {0.03, 0.05};
 
@@ -1052,10 +1081,14 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
             Dividend{.calendar_time = 0.503, .amount = 1.0},  // ~1 day later
         },
         .maturity = 1.0,
-        .kref_config = {.K_refs = {100.0}},
+        // The assembled surface blends K_ref-struck prices linearly in
+        // strike, so the K_refs must span (and resolve) the queryable strike
+        // range [90.9, 111.1]; a lone K_ref = 100 measures 0.59 on the final
+        // validation and is refused by the viability gate (spec D9).
+        .kref_config = {.K_refs = {91.0, 100.0, 111.0}},
     };
 
-    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    auto m_domain = to_log_m({0.9, 0.95, 1.0, 1.05, 1.1});
     std::vector<double> v_domain = {0.10, 0.20, 0.30};
     std::vector<double> r_domain = {0.03, 0.05};
 
@@ -1098,15 +1131,28 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     std::vector<double> v_domain = {0.15, 0.25};
     std::vector<double> r_domain = {0.05};
 
-    auto result = build_adaptive_chebyshev_segmented(
+    // A 7-day option has near-zero vega, so any price error divides into an
+    // enormous IV error: the assembled surface measures 970 (9.7 million
+    // bps) on the final validation, and the adaptive path now refuses it
+    // (spec D9) exactly as BuildSegmentedVeryShortMaturity does.  The
+    // regression under test is in segment classification, not in
+    // refinement, so it is pinned on the fixed-level build of the same
+    // configuration.
+    auto adaptive = build_adaptive_chebyshev_segmented(
         params, seg_config, {m_domain, v_domain, r_domain});
+    ASSERT_FALSE(adaptive.has_value());
+    EXPECT_EQ(adaptive.error().code, PriceTableErrorCode::NoViableSurface)
+        << "the segments must build and be measured; a gap misclassification "
+           "would surface as a build error instead";
 
+    auto surface = build_chebyshev_segmented_manual(
+        seg_config, {m_domain, v_domain, r_domain});
     // Narrow real segments should build successfully, not be rejected as gaps
-    ASSERT_TRUE(result.has_value())
+    ASSERT_TRUE(surface.has_value())
         << "Narrow real segments should produce valid prices, not errors";
 
     // Price at ATM should be positive
-    double p = result->surface.price(100.0, 100.0, 0.01, 0.20, 0.05);
+    double p = surface->price(100.0, 100.0, 0.01, 0.20, 0.05);
     EXPECT_GT(p, 0.0) << "ATM put price should be positive";
 }
 
@@ -1139,10 +1185,14 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
             Dividend{.calendar_time = 0.500, .amount = 1.0},
         },
         .maturity = 1.0,
-        .kref_config = {.K_refs = {100.0}},
+        // The assembled surface blends K_ref-struck prices linearly in
+        // strike, so the K_refs must span (and resolve) the queryable strike
+        // range [90.9, 111.1]; a lone K_ref = 100 measures 0.59 on the final
+        // validation and is refused by the viability gate (spec D9).
+        .kref_config = {.K_refs = {91.0, 100.0, 111.0}},
     };
 
-    auto m_domain = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2});
+    auto m_domain = to_log_m({0.9, 0.95, 1.0, 1.05, 1.1});
     std::vector<double> v_domain = {0.10, 0.20, 0.30};
     std::vector<double> r_domain = {0.03, 0.05};
 
@@ -1844,6 +1894,372 @@ TEST(SegmentedChebyshevRefineFn, HonorsRequestedAxisAndCap) {
     EXPECT_FALSE(outcome.changed);
     EXPECT_EQ(outcome.changed_dim, -1);
     EXPECT_TRUE(grids == before);
+}
+
+// ===========================================================================
+// Segmented final-surface contracts (spec D9)
+//
+// The segmented builders assemble their final surface outside the refinement
+// loop, so it gets its own references, its own score, and its own viability
+// gate.  These tests pin the selection arithmetic directly (no PDE solves)
+// and then check the assembled B-spline path reports its *returned* surface.
+// ===========================================================================
+
+/// A validation set of `n` points, all at the same coordinates, whose refs
+/// carry a price and a vega large enough that the score is dominated by the
+/// price error rather than the vega floor.
+std::vector<detail::ValidationPoint> make_points(size_t n) {
+    std::vector<detail::ValidationPoint> pts;
+    pts.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        pts.push_back(detail::ValidationPoint{
+            .coords = {0.0, 0.5, 0.20 + 0.01 * static_cast<double>(i), 0.05},
+            .strike = 100.0,
+            .refs = {.ref_price = 10.0, .vega = 1.0}});
+    }
+    return pts;
+}
+
+RefinementContext make_score_ctx() {
+    return RefinementContext{
+        .spot = 100.0,
+        .dividend_yield = 0.0,
+        .option_type = OptionType::PUT,
+        .bounds = {.m_min = -0.4, .m_max = 0.4, .tau_min = 0.05,
+                   .tau_max = 1.0, .sigma_min = 0.1, .sigma_max = 0.5,
+                   .rate_min = 0.0, .rate_max = 0.1},
+        .sample_bounds = {.m_min = -0.3, .m_max = 0.3, .tau_min = 0.05,
+                          .tau_max = 1.0, .sigma_min = 0.1, .sigma_max = 0.5,
+                          .rate_min = 0.0, .rate_max = 0.1},
+    };
+}
+
+/// A ScoreErrorFn that returns |interp| verbatim, so a test can dictate the
+/// exact error at every point through the surface handle.
+ScoreErrorFn passthrough_score() {
+    return [](double interp, const ErrorRefs&, double, double, double,
+              double, double) { return interp; };
+}
+
+detail::FinalScore score_of(double max_error, bool all_finite = true,
+                            size_t scored = 8) {
+    detail::FinalScore s;
+    s.max_error = max_error;
+    s.avg_error = max_error;
+    s.scored = scored;
+    s.all_finite = all_finite;
+    return s;
+}
+
+// Regression: `if (err > 0.0) valid++` counted only *nonzero* errors, so a
+// surface that reproduced every reference exactly reported valid == 0 -- a
+// zero average denominator and a `target_met` that came from the
+// "nothing measured" branch rather than from convergence.
+TEST(SegmentedFinalContract, PerfectSurfaceCountsEveryScoredPoint) {
+    const auto pts = make_points(8);
+    const auto ctx = make_score_ctx();
+    // Interpolation reproduces the reference exactly => score 0 everywhere.
+    const SurfaceHandle exact{
+        .price = [](double, double, double, double, double) { return 0.0; }};
+
+    auto s = detail::score_final_surface(pts, exact, passthrough_score(), ctx);
+
+    EXPECT_EQ(s.scored, pts.size()) << "zero error is a measurement, not a gap";
+    EXPECT_EQ(s.skipped, 0u);
+    EXPECT_DOUBLE_EQ(s.max_error, 0.0);
+    EXPECT_DOUBLE_EQ(s.avg_error, 0.0);
+    EXPECT_TRUE(s.viable());
+    // target_met now comes from a real measurement of 8 points.
+    EXPECT_FALSE(detail::needs_final_retry(s, 1e-5));
+}
+
+// Half the points score, half are non-finite: the average denominator is the
+// scored count, and any non-finite evaluation disqualifies the surface.
+TEST(SegmentedFinalContract, NonFiniteEvaluationIsNotViable) {
+    const auto pts = make_points(8);
+    const auto ctx = make_score_ctx();
+    size_t calls = 0;
+    const SurfaceHandle flaky{
+        .price = [&calls](double, double, double, double, double) {
+            return (calls++ % 2 == 0)
+                ? 0.001
+                : std::numeric_limits<double>::quiet_NaN();
+        }};
+
+    auto s = detail::score_final_surface(pts, flaky, passthrough_score(), ctx);
+
+    EXPECT_EQ(s.scored, 4u);
+    EXPECT_EQ(s.skipped, 4u);
+    EXPECT_FALSE(s.all_finite);
+    EXPECT_FALSE(s.viable());
+    EXPECT_TRUE(std::isnan(s.max_error))
+        << "a surface that produced NaN must not report a rosy max";
+    EXPECT_TRUE(detail::needs_final_retry(s, 1.0))
+        << "non-viable must retry even under a target it nominally meets";
+}
+
+// A validation set that cannot measure cannot certify the surface (D4/D9.1).
+TEST(SegmentedFinalContract, SparseReferencesFailValidation) {
+    AdaptiveGridParams params;
+    params.validation_samples = 16;  // min valid = max(4, 16/4) = 4
+    const auto ctx = make_score_ctx();
+
+    size_t calls = 0;
+    PrepareRefsFn mostly_failing =
+        [&calls](double, double, double, double, double)
+        -> std::expected<ErrorRefs, SolverError> {
+        if (calls++ < 3) return ErrorRefs{.ref_price = 10.0, .vega = 1.0};
+        return std::unexpected(SolverError{SolverErrorCode::ConvergenceFailure});
+    };
+
+    auto set = detail::prepare_final_validation(params, ctx, mostly_failing,
+                                                params.lhs_seed + 999);
+    ASSERT_FALSE(set.has_value());
+    EXPECT_EQ(set.error().code, PriceTableErrorCode::ValidationFailed);
+
+    // One more valid point clears the bar.
+    calls = 0;
+    PrepareRefsFn four_ok = [&calls](double, double, double, double, double)
+        -> std::expected<ErrorRefs, SolverError> {
+        if (calls++ < 4) return ErrorRefs{.ref_price = 10.0, .vega = 1.0};
+        return std::unexpected(SolverError{SolverErrorCode::ConvergenceFailure});
+    };
+    auto ok = detail::prepare_final_validation(params, ctx, four_ok,
+                                               params.lhs_seed + 999);
+    ASSERT_TRUE(ok.has_value());
+    EXPECT_EQ(ok->points.size(), 4u);
+    EXPECT_EQ(ok->invalid, 12u);
+}
+
+// Selection returns the lowest-error *viable* surface -- the retry is not
+// preferred just because it was built.
+TEST(SegmentedFinalContract, SelectionKeepsOriginalWhenRetryIsWorse) {
+    const auto orig = score_of(0.01);
+    const auto retry = score_of(0.05);
+
+    EXPECT_EQ(detail::select_final_surface(orig, retry),
+              detail::FinalPick::Original);
+    EXPECT_EQ(detail::select_final_surface(orig, std::nullopt),
+              detail::FinalPick::Original);
+    // Equal accuracy keeps the smaller surface.
+    EXPECT_EQ(detail::select_final_surface(orig, score_of(0.01)),
+              detail::FinalPick::Original);
+    // And a genuine improvement is taken.
+    EXPECT_EQ(detail::select_final_surface(orig, score_of(0.001)),
+              detail::FinalPick::Retry);
+}
+
+// A non-viable original is never returned, even when the retry is worse than
+// the target -- viability, not accuracy, decides admissibility.
+TEST(SegmentedFinalContract, SelectionPrefersViableOverLowerError) {
+    const auto garbage = score_of(5.0);          // > kViabilityBound
+    const auto mediocre = score_of(0.05);        // viable, misses a tight target
+
+    EXPECT_EQ(detail::select_final_surface(garbage, mediocre),
+              detail::FinalPick::Retry);
+    EXPECT_EQ(detail::select_final_surface(mediocre, garbage),
+              detail::FinalPick::Original);
+    EXPECT_EQ(detail::select_final_surface(garbage, score_of(6.0)),
+              detail::FinalPick::None)
+        << "both non-viable must refuse, not return the lesser garbage";
+    EXPECT_EQ(detail::select_final_surface(garbage, std::nullopt),
+              detail::FinalPick::None);
+}
+
+// A loose target does not admit a garbage surface: the retry is still tried
+// even though the original's max error is nominally "under target".
+TEST(SegmentedFinalContract, LooseTargetStillRetriesNonViableOriginal) {
+    const auto orig = score_of(0.30);  // <= 0.5 target, > 0.20 viability bound
+    EXPECT_LE(orig.max_error, 0.5);
+    EXPECT_FALSE(orig.viable());
+    EXPECT_TRUE(detail::needs_final_retry(orig, 0.5));
+
+    // And a strict target retries a perfectly viable surface too.
+    const auto good = score_of(0.001);
+    EXPECT_TRUE(good.viable());
+    EXPECT_TRUE(detail::needs_final_retry(good, 1e-5));
+    EXPECT_FALSE(detail::needs_final_retry(good, 0.01));
+}
+
+// Zero scored points cannot certify anything, whatever the max says.
+TEST(SegmentedFinalContract, NoScoredPointsIsNotViable) {
+    EXPECT_FALSE(score_of(0.0, true, 0).viable());
+    EXPECT_EQ(detail::select_final_surface(score_of(0.0, true, 0),
+                                           std::nullopt),
+              detail::FinalPick::None);
+}
+
+// The numbers a segmented build reports must describe the surface it
+// returned.  Pre-#434 the bumped-grid retry was returned carrying the
+// *pre-retry* error numbers; here the returned surface is re-scored on an
+// independently reproduced reference set and must match what it reported.
+TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 1e-6;  // unreachable => the retry path is taken
+    params.max_iter = 1;
+    // 16, not 8: `solve_american_option` refuses a schedule whose dividend
+    // date is at or beyond the requested maturity, so every sample with
+    // tau <= 0.25 loses its reference -- half the tau range here.  Eight
+    // samples would leave the validation set sitting exactly on the
+    // `max(4, n/4)` floor.
+    params.validation_samples = 16;
+    params.min_moneyness_points = 8;
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.25, .amount = 1.50}},
+        .maturity = 0.5,
+        .kref_config = {.K_refs = {90.0, 95.0, 100.0, 105.0, 110.0}},
+    };
+
+    auto m_domain = to_log_m({0.95, 1.0, 1.05});
+    std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
+    std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
+    IVGrid domain{m_domain, v_domain, r_domain};
+
+    auto result = build_adaptive_bspline_segmented(params, seg_config, domain);
+    ASSERT_TRUE(result.has_value())
+        << "code " << static_cast<int>(result.error().code);
+
+    // The target is unreachable, so the builder must have tried the retry and
+    // reported the miss honestly.
+    EXPECT_FALSE(result->target_met);
+    EXPECT_EQ(result->diagnostics.target_met, result->target_met);
+    EXPECT_DOUBLE_EQ(result->diagnostics.achieved_max_error,
+                     result->achieved_max_error);
+    EXPECT_DOUBLE_EQ(result->diagnostics.achieved_avg_error,
+                     result->achieved_avg_error);
+    EXPECT_GT(result->diagnostics.holdout_points, 0u);
+    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+
+    // Reproduce the builder's final validation set exactly (same sample
+    // domain, same seed, same references) and re-score the surface we were
+    // handed.  A retry returned with the original's numbers fails here.
+    auto K_refs = resolve_k_refs(seg_config.kref_config, seg_config.spot);
+    ASSERT_TRUE(K_refs.has_value());
+    auto sample = expand_segmented_domain(domain, seg_config.maturity,
+                                          seg_config.dividend_yield, {},
+                                          K_refs->front());
+    ASSERT_TRUE(sample.has_value());
+
+    RefinementContext ctx{
+        .spot = seg_config.spot,
+        .dividend_yield = seg_config.dividend_yield,
+        .option_type = seg_config.option_type,
+        .bounds = *sample,
+        .sample_bounds = *sample,
+    };
+    auto validate_fn = make_validate_fn(seg_config.dividend_yield,
+                                        seg_config.option_type,
+                                        seg_config.discrete_dividends);
+    auto refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+    auto points = detail::prepare_final_validation(params, ctx, refs_fn,
+                                                   params.lhs_seed + 999);
+    ASSERT_TRUE(points.has_value());
+
+    const SurfaceHandle returned{
+        .price = [&](double spot, double strike, double tau, double sigma,
+                     double rate) {
+            return result->surface.price(spot, strike, tau, sigma, rate);
+        }};
+    auto measured = detail::score_final_surface(
+        points->points, returned, make_iv_score_fn(params, seg_config.option_type),
+        ctx);
+
+    EXPECT_EQ(measured.scored, result->diagnostics.holdout_points);
+    EXPECT_NEAR(measured.max_error, result->achieved_max_error, 1e-12)
+        << "reported max error does not describe the returned surface"
+        << " (used_retry = " << result->used_retry << ")";
+    EXPECT_NEAR(measured.avg_error, result->achieved_avg_error, 1e-12);
+
+    // Measured on this config: the bumped-grid retry scores 0.0202 against
+    // the original's larger error on the shared references, so it is the
+    // surface returned -- and the numbers above are its own.
+    EXPECT_TRUE(result->used_retry)
+        << "expected the bumped-grid retry to win on this config; if it did "
+           "not, the identity checks above still hold for whichever surface "
+           "was returned";
+}
+
+// The segmented Chebyshev path gained a mandatory final gate: the assembled
+// all-K_ref surface is measured, and its numbers -- not the single-K_ref
+// sizing loop's -- are what the result reports.
+TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        // The assembled surface blends K_ref-struck prices linearly in
+        // strike, so the K_refs must span (and resolve) the queryable strike
+        // range [90.9, 111.1]; a lone K_ref = 100 measures 0.59 on the final
+        // validation and is refused by the viability gate (spec D9).
+        .kref_config = {.K_refs = {91.0, 100.0, 111.0}},
+    };
+
+    auto m_domain = to_log_m({0.9, 0.95, 1.0, 1.05, 1.1});
+    std::vector<double> v_domain = {0.10, 0.20, 0.30};
+    std::vector<double> r_domain = {0.03, 0.05};
+    IVGrid domain{m_domain, v_domain, r_domain};
+
+    auto result = build_adaptive_chebyshev_segmented(params, seg_config, domain);
+    ASSERT_TRUE(result.has_value())
+        << "code " << static_cast<int>(result.error().code);
+
+    EXPECT_GT(result->diagnostics.holdout_points, 0u)
+        << "the assembled surface must be measured, not assumed";
+    EXPECT_DOUBLE_EQ(result->diagnostics.achieved_max_error,
+                     result->achieved_max_error);
+    EXPECT_EQ(result->diagnostics.target_met, result->target_met);
+    // The gate refuses anything above the viability bound, so a returned
+    // surface is always within it.
+    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    EXPECT_TRUE(std::isfinite(result->achieved_max_error));
+
+    // Re-score the surface we were handed on an independently reproduced
+    // reference set: the reported numbers must be its own, not the
+    // single-K_ref sizing loop's.
+    auto K_refs = resolve_k_refs(seg_config.kref_config, seg_config.spot);
+    ASSERT_TRUE(K_refs.has_value());
+    auto sample = expand_segmented_domain(domain, seg_config.maturity,
+                                          seg_config.dividend_yield, {},
+                                          K_refs->front());
+    ASSERT_TRUE(sample.has_value());
+    RefinementContext ctx{
+        .spot = seg_config.spot,
+        .dividend_yield = seg_config.dividend_yield,
+        .option_type = seg_config.option_type,
+        .bounds = *sample,
+        .sample_bounds = *sample,
+    };
+    auto refs_fn = make_fd_vega_refs_fn(
+        params, make_validate_fn(seg_config.dividend_yield,
+                                 seg_config.option_type,
+                                 seg_config.discrete_dividends));
+    auto points = detail::prepare_final_validation(params, ctx, refs_fn,
+                                                   params.lhs_seed + 999);
+    ASSERT_TRUE(points.has_value());
+
+    const SurfaceHandle returned{
+        .price = [&](double spot, double strike, double tau, double sigma,
+                     double rate) {
+            return result->surface.price(spot, strike, tau, sigma, rate);
+        }};
+    auto measured = detail::score_final_surface(
+        points->points, returned,
+        make_iv_score_fn(params, seg_config.option_type), ctx);
+
+    EXPECT_EQ(measured.scored, result->diagnostics.holdout_points);
+    EXPECT_NEAR(measured.max_error, result->achieved_max_error, 1e-12);
+    EXPECT_NEAR(measured.avg_error, result->achieved_avg_error, 1e-12);
 }
 
 }  // namespace

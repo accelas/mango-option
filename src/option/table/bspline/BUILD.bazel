@@ -120,7 +120,6 @@ cc_library(
         ":bspline_surface",
         ":bspline_tensor_accessor",
         "//src/math:cubic_spline_solver",
-        "//src/math:latin_hypercube",
         "//src/option:american_option_batch",
         "//src/option:dividend_utils",
         "//src/option:option_grid",

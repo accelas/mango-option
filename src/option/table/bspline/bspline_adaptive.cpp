@@ -14,12 +14,12 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/dividend_utils.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
-#include "mango/math/latin_hypercube.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <span>
 
@@ -791,51 +791,55 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     auto surface = assemble(std::move(*seg_surfaces));
     if (!surface) return std::unexpected(surface.error());
 
-    // 6. Final multi-K_ref validation at arbitrary strikes
+    // 6. Final multi-K_ref validation at arbitrary strikes (spec D9).
+    //
+    // The probe loops measured single-K_ref surfaces on their own bands; the
+    // object the caller receives is the blend of *all* K_refs on the uniform
+    // aggregated grids, so it gets its own references and its own gate.
+    RefinementContext final_ctx{
+        .spot = config_.spot,
+        .dividend_yield = config_.dividend_yield,
+        .option_type = config_.option_type,
+        .bounds = fit_domain,
+        // Final validation measures the user-facing domain (spec D2), not
+        // the interpolation support band.
+        .sample_bounds = sample_domain_,
+    };
+
     auto final_validate_fn = make_validate_fn(
         config_.dividend_yield, config_.option_type,
         config_.discrete_dividends);
     auto final_prepare_refs_fn = make_fd_vega_refs_fn(params, final_validate_fn);
     auto final_score_fn = make_iv_score_fn(params, config_.option_type);
 
-    auto final_samples = latin_hypercube_4d(
-        params.validation_samples, params.lhs_seed + 999);
+    // References are computed ONCE here and reused for the retry, so the two
+    // assembled surfaces are compared on identical coordinates.
+    auto validation = detail::prepare_final_validation(
+        params, final_ctx, final_prepare_refs_fn, params.lhs_seed + 999);
+    if (!validation) return std::unexpected(validation.error());
 
-    // Final validation measures the user-facing domain (spec D2), not the
-    // interpolation support band.
-    std::array<std::pair<double, double>, 4> final_bounds = {{
-        {sample_domain_.m_min, sample_domain_.m_max},
-        {sample_domain_.tau_min, sample_domain_.tau_max},
-        {sample_domain_.sigma_min, sample_domain_.sigma_max},
-        {sample_domain_.rate_min, sample_domain_.rate_max},
-    }};
-    auto scaled = scale_lhs_samples(final_samples, final_bounds);
+    const auto handle_for = [](const BSplineMultiKRefInner& s) {
+        return SurfaceHandle{
+            .price = [&s](double query_spot, double strike, double tau,
+                          double sigma, double rate) -> double {
+                return s.price(query_spot, strike, tau, sigma, rate);
+            },
+            .pde_solves = 0,
+        };
+    };
 
-    double final_max_error = 0.0;
-    double final_sum_error = 0.0;
-    size_t valid = 0;
+    const SurfaceHandle orig_handle = handle_for(*surface);
+    const auto orig_score = detail::score_final_surface(
+        validation->points, orig_handle, final_score_fn, final_ctx);
 
-    for (const auto& sample : scaled) {
-        double m = sample[0], tau = sample[1], sigma = sample[2], rate = sample[3];
-        double strike = config_.spot * std::exp(-m);
+    // 7. Optional retry with bumped grids -- triggered when the original
+    //    misses the target OR is not viable at all (spec D9 step 2).
+    std::optional<BSplineMultiKRefInner> retry_surface;
+    std::optional<detail::FinalScore> retry_score;
+    IVGrid retry_grid;
+    int retry_tau_pts = 0;
 
-        double interp = surface->price(config_.spot, strike, tau, sigma, rate);
-
-        auto fd = final_prepare_refs_fn(config_.spot, strike, tau, sigma, rate);
-        if (!fd.has_value()) continue;
-
-        double err = final_score_fn(
-            interp, fd.value(),
-            config_.spot, strike, tau, sigma, rate);
-
-        final_max_error = std::max(final_max_error, err);
-        final_sum_error += err;
-        if (err > 0.0) valid++;
-    }
-    double final_avg_error = valid > 0 ? final_sum_error / static_cast<double>(valid) : 0.0;
-
-    // 7. Optional retry with bumped grids
-    if (valid > 0 && final_max_error > params.target_iv_error) {
+    if (detail::needs_final_retry(orig_score, params.target_iv_error)) {
         size_t bumped_m = std::min(gsz.moneyness + 2, params.max_points_per_dim);
         size_t bumped_v = std::min(gsz.vol + 1, params.max_points_per_dim);
         size_t bumped_r = std::min(gsz.rate + 1, params.max_points_per_dim);
@@ -849,34 +853,64 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         auto retry_template = make_seg_config(config_, retry_m, retry_v, retry_r, bumped_tau);
         auto retry_segs = build_segmented_surfaces(retry_template, K_refs_);
         if (retry_segs) {
-            auto retry_surface = assemble(std::move(*retry_segs));
-            if (retry_surface) {
-                return BSplineSegmentedAdaptiveResult{
-                    .surface = std::move(*retry_surface),
-                    .grid = {.moneyness = retry_m, .vol = retry_v, .rate = retry_r},
-                    .tau_points_per_segment = bumped_tau,
-                    .iterations = std::move(all_iterations),
-                    .achieved_max_error = final_max_error,
-                    .achieved_avg_error = final_avg_error,
-                    .target_met = false,  // retry means target wasn't met
-                    .total_pde_solves = total_pde,
-                    .used_retry = true,
-                };
+            auto assembled = assemble(std::move(*retry_segs));
+            if (assembled) {
+                retry_surface = std::move(*assembled);
+                // Scored on the SAME cached refs -- no second reference pass.
+                retry_score = detail::score_final_surface(
+                    validation->points, handle_for(*retry_surface),
+                    final_score_fn, final_ctx);
+                retry_grid = retry_template.grid;
+                retry_tau_pts = bumped_tau;
             }
         }
     }
 
-    bool met = (valid == 0) || (final_max_error <= params.target_iv_error);
+    // 8. Return the lower-error viable surface; neither viable => refuse.
+    const auto pick = detail::select_final_surface(orig_score, retry_score);
+    if (pick == detail::FinalPick::None) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::NoViableSurface});
+    }
+
+    const bool use_retry = (pick == detail::FinalPick::Retry);
+    const detail::FinalScore& final_score = use_retry ? *retry_score : orig_score;
+    BSplineMultiKRefInner picked_surface =
+        use_retry ? std::move(*retry_surface) : std::move(*surface);
+
+    BuildDiagnostics diagnostics;
+    diagnostics.target_met =
+        final_score.scored > 0 && final_score.max_error <= params.target_iv_error;
+    diagnostics.achieved_max_error = final_score.max_error;
+    diagnostics.achieved_avg_error = final_score.avg_error;
+    // Iterations actually built across the probe loops: the retention final
+    // rebuild (-2) and the skipped-probe marker (-3) are not builds charged
+    // to a budget (spec D7).
+    diagnostics.total_iterations = static_cast<size_t>(std::ranges::count_if(
+        all_iterations,
+        [](const IterationStats& it) { return it.refined_dim >= -1; }));
+    diagnostics.holdout_points = final_score.scored;
+    diagnostics.holdout_points_invalid = validation->invalid + final_score.skipped;
+    for (const auto& pr : probe_results) {
+        diagnostics.build_failure_fallback |=
+            pr.diagnostics.build_failure_fallback;
+    }
+    detail::scan_monotonicity(validation->points, handle_for(picked_surface),
+                              final_ctx, params.target_iv_error,
+                              params.vega_floor, diagnostics);
+    diagnostics.iterations = all_iterations;
+
     return BSplineSegmentedAdaptiveResult{
-        .surface = std::move(*surface),
-        .grid = seg_template.grid,
-        .tau_points_per_segment = max_tau_pts,
+        .surface = std::move(picked_surface),
+        .grid = use_retry ? retry_grid : seg_template.grid,
+        .tau_points_per_segment = use_retry ? retry_tau_pts : max_tau_pts,
         .iterations = std::move(all_iterations),
-        .achieved_max_error = final_max_error,
-        .achieved_avg_error = final_avg_error,
-        .target_met = met,
+        .achieved_max_error = final_score.max_error,
+        .achieved_avg_error = final_score.avg_error,
+        .target_met = diagnostics.target_met,
         .total_pde_solves = total_pde,
-        .used_retry = false,
+        .used_retry = use_retry,
+        .diagnostics = std::move(diagnostics),
     };
 }
 

@@ -944,14 +944,59 @@ ChebyshevSegmentedBuilder::build_adaptive(
         grids.moneyness, grids.tau, grids.vol, grids.rate);
     if (!surface) return std::unexpected(surface.error());
 
+    // Mandatory final validation of the assembled surface (spec D9).
+    //
+    // The sizing loop measured a single-K_ref surface at K_ref = spot; what
+    // the caller receives is the blend of every K_ref.  Returning that
+    // unmeasured -- carrying the loop's numbers as if they described it --
+    // was the pre-#434 behavior.  There is no retry on this path: the loop
+    // owns sizing, and a second uncalibrated guess would only hide the
+    // refusal.
+    auto final_prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+    auto validation = detail::prepare_final_validation(
+        params, ctx, final_prepare_refs_fn, params.lhs_seed + 999);
+    if (!validation) return std::unexpected(validation.error());
+
+    const SurfaceHandle final_handle{
+        .price = [&s = surface->surface](double spot, double strike, double tau,
+                                         double sigma, double rate) -> double {
+            return s.price(spot, strike, tau, sigma, rate);
+        },
+        .pde_solves = 0,
+    };
+    const auto final_score = detail::score_final_surface(
+        validation->points, final_handle, score_fn, ctx);
+
+    if (!final_score.viable()) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::NoViableSurface});
+    }
+
+    BuildDiagnostics diagnostics = grids.diagnostics;
+    diagnostics.target_met =
+        final_score.max_error <= params.target_iv_error;
+    diagnostics.achieved_max_error = final_score.max_error;
+    diagnostics.achieved_avg_error = final_score.avg_error;
+    diagnostics.holdout_points = final_score.scored;
+    diagnostics.holdout_points_invalid =
+        validation->invalid + final_score.skipped;
+    // Monotonicity describes the returned surface, not the loop's candidate.
+    diagnostics.monotonicity_violations = 0;
+    diagnostics.monotonicity_points_invalid = 0;
+    diagnostics.worst_vega_slope = 0.0;
+    detail::scan_monotonicity(validation->points, final_handle, ctx,
+                              params.target_iv_error, params.vega_floor,
+                              diagnostics);
+
     return ChebyshevSegmentedAdaptiveResult{
         .surface = std::move(surface->surface),
         .iterations = std::move(grids.iterations),
-        .achieved_max_error = grids.achieved_max_error,
-        .achieved_avg_error = grids.achieved_avg_error,
-        .target_met = grids.target_met,
+        .achieved_max_error = final_score.max_error,
+        .achieved_avg_error = final_score.avg_error,
+        .target_met = diagnostics.target_met,
         .total_pde_solves =
             pde_cache.total_pde_solves() + surface->pde_solves,
+        .diagnostics = std::move(diagnostics),
     };
 }
 
