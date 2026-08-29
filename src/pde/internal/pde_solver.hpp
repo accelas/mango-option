@@ -92,9 +92,16 @@ public:
 
     /// Initialize with initial condition
     ///
+    /// Starts a new run: sets the initial condition and rewinds the
+    /// temporal-event cursor.  The reuse contract is one
+    /// `initialize(ic); solve();` pair per run — calling solve() again
+    /// without re-initializing is unsupported (it would evolve the
+    /// already-final state).
+    ///
     /// @param ic Initial condition function: ic(x, u)
     template<typename IC>
     void initialize(IC&& ic) {
+        next_event_idx_ = 0;  // rewind event replay for the new run
         auto u_current = grid_->solution();
         ic(grid_->x(), u_current);
 
@@ -109,6 +116,8 @@ public:
     }
 
     /// Solve PDE from t_start to t_end
+    ///
+    /// Requires a preceding initialize(ic) for each run; see initialize().
     ///
     /// @return expected success or solver error diagnostic
     std::expected<void, SolverError> solve() {
