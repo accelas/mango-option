@@ -601,11 +601,14 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     const double user_k_lo = config_.spot * std::exp(-sample_domain_.m_max);
     const double user_k_hi = config_.spot * std::exp(-sample_domain_.m_min);
 
-    // The strike band a probe serves in the assembled surface.  The assembly
-    // routes each query to the K_ref nearest its strike, so a probe is only
-    // ever asked about strikes between the geometric midpoints to its
-    // neighbours (K_refs are log-spaced); the outermost bands run out to the
-    // user's own strike range, and a single K_ref serves all of it.
+    // The strike band a probe dominates in the assembled surface.  The
+    // assembly blends the two K_refs bracketing a query's strike linearly
+    // (MultiKRefSplit::bracket), so a probe's weight is largest between the
+    // midpoints to its neighbours; we take geometric midpoints since K_refs
+    // are log-spaced.  This scopes a sizing measurement, not a safety gate —
+    // the assembled surface's own final validation queries the true blend.
+    // The outermost bands run out to the user's strike range, and a single
+    // K_ref serves all of it.
     const auto strike_band = [this, user_k_lo, user_k_hi](double k) {
         const size_t n = K_refs_.size();
         const size_t idx = static_cast<size_t>(
