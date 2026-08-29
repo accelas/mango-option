@@ -51,11 +51,31 @@ cc_library(
         ":adaptive_grid_types",
         ":price_table",
         ":tau_segment_split",
-        "//src/option:american_option",
         "//src/option:dividend_utils",
         "//src/option:option_grid",
         "//src/option:option_spec",
         "//src/math:latin_hypercube",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+# Option-domain adapters for the generic refinement loop: the FD reference
+# solver (ValidateFn), FD-vega reference generator (PrepareRefsFn), and
+# IV-error scoring metric (ScoreErrorFn).  Kept out of :adaptive_refinement
+# so the loop never depends on the American PDE solver.
+cc_library(
+    name = "adaptive_metrics",
+    srcs = ["adaptive_metrics.cpp"],
+    hdrs = ["adaptive_metrics.hpp"],
+    deps = [
+        ":adaptive_grid_types",
+        ":adaptive_refinement",
+        "//src/option:american_option",
+        "//src/option:dividend_utils",
+        "//src/option:option_spec",
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],

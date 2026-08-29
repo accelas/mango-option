@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/support/error_types.hpp"

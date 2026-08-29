@@ -1104,6 +1104,7 @@ cc_test(
     srcs = ["adaptive_refinement_unit_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_metrics",
         "//src/option/table:adaptive_refinement",
         "//src/option/table/bspline:bspline_adaptive",
         "//src/support:error_types",
@@ -1119,6 +1120,7 @@ cc_test(
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_metrics",
         "//src/option/table:adaptive_refinement",
         "//src/option/table:tau_segment_split",
         "//src/option/table/bspline:bspline_adaptive",
