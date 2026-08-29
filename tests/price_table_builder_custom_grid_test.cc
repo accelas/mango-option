@@ -217,7 +217,10 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridCoversWideMoneyness) {
     EXPECT_FALSE(std::isnan(deep_itm)) << "Deep ITM should not be NaN";
 
     // Deep OTM put (ln(2.0) → spot/strike=2.0 → spot >> strike): near zero
-    // Debiased softplus can produce tiny negative values (~1e-34) due to FP precision
+    // The exact projection floors stored EEP values at exactly 0, but the
+    // B-spline fit evaluated *between* knots can still ring slightly
+    // negative due to floating-point precision in spline evaluation, not
+    // the projection itself — the tolerance below guards that.
     double deep_otm = spline->eval({std::log(2.0), 0.17, 0.14, 0.05});
     EXPECT_GE(deep_otm, -1e-10) << "Put price should be non-negative (within FP tolerance)";
     EXPECT_FALSE(std::isnan(deep_otm)) << "Deep OTM should not be NaN";

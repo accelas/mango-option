@@ -1130,7 +1130,6 @@ cc_test(
         "//src/option:interpolated_iv_solver",
         "//src/option:option_grid",
         "//src/pde/core:grid",
-        "//src/support:error_types",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

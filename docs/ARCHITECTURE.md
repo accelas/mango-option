@@ -183,7 +183,7 @@ The interpolated solver replaces the nested PDE solve with a lookup into a pre-c
 
 Before starting the root search, the solver evaluates surface vega at the 25/50/75% quartile points of the actual search bracket `[sigma_min, sigma_max]`. The check is on the **signed** maximum (not `|vega|`): if the largest signed vega across the three probes is still below a threshold (default 1e-4), the option has near-zero or negative vega sensitivity and IV is effectively undefined — the solver returns `VegaTooSmall` immediately (~600ns) instead of running a doomed or backwards search.
 
-**Multiple-root screen.** An unconstrained least-squares B-spline fit is not certified monotone in σ — small negative wiggles are expected wherever vega is small — so a naive root search can converge to a spurious root. By default (`detect_multiple_roots = true`), before Brent runs, the solver samples the pricing objective at 17 uniformly spaced points across the bracket (~4μs) and classifies the sign pattern: any sign transition, tangency (a scan point touching zero flanked by the same sign on both sides), or extra boundary root beyond a single clean crossing returns `IVErrorCode::MultipleRoots` instead of guessing. Exactly one transition narrows Brent to that subinterval and adds a post-hoc slope check on convergence; no transition falls through to the unscreened `BracketingFailed` path. This is a **screen, not a proof of uniqueness**: it guarantees detection of any sign excursion spanning at least one bracket/16 cell and of tangency at a scan point, but a narrower fold that also leaves the post-hoc slope positive can still pass. `detect_multiple_roots = false` restores the pre-screen behavior exactly (C API callers always get the default-on screen; the toggle is C++/Python only).
+**Multiple-root screen.** An unconstrained least-squares B-spline fit is not certified monotone in σ — small negative wiggles are expected wherever vega is small — so a naive root search can converge to a spurious root. By default (`detect_multiple_roots = true`), before Brent runs, the solver samples the pricing objective at 17 uniformly spaced points across the bracket (~4μs) and classifies the sign pattern: more than one sign transition, a tangency (a scan point touching zero flanked by the same sign on both sides), or an extra boundary root beyond a single clean crossing returns `IVErrorCode::MultipleRoots` instead of guessing. Exactly one transition narrows Brent to that subinterval and adds a post-hoc slope check on convergence; no transition falls through to the unscreened `BracketingFailed` path. This is a **screen, not a proof of uniqueness**: it guarantees detection of any sign excursion spanning at least one bracket/16 cell and of tangency at a scan point, but a narrower fold that also leaves the post-hoc slope positive can still pass. `detect_multiple_roots = false` restores the pre-screen behavior exactly (C API callers always get the default-on screen; the toggle is C++/Python only).
 
 This is the production path. You pay a one-time pre-computation cost (see next section), then amortize it over millions of queries.
 
@@ -272,9 +272,11 @@ result under a safety contract, not just a stopping rule:
   (before iteration 0) and reused, unchanged, to score every candidate the
   loop builds, so candidates are compared on a common yardstick. The loop
   never returns whichever iteration happened to run last: it retains the
-  best-scoring *viable* candidate across the whole run, including candidates
-  from mid-loop build failures, and rebuilds it once at the end if a later,
-  worse iteration was actually built last.
+  best-scoring *viable* candidate across the whole run and survives
+  mid-loop build failures (a failed refinement trial restores the
+  exploration base and continues on a different axis rather than aborting),
+  rebuilding the retained candidate once at the end if a later, worse
+  iteration was actually built last.
 - **Measured backtracking walk.** Refinement axes (moneyness, τ, σ, r) are
   tried by a greedy coordinate descent: refine the highest-scoring untried
   axis from the best-evaluated candidate; only a ≥2% relative holdout
@@ -292,10 +294,11 @@ result under a safety contract, not just a stopping rule:
 - **Build diagnostics.** Every adaptive build records a `BuildDiagnostics`
   struct — `target_met`, achieved max/avg error, which iteration was
   returned, monotonicity-violation statistics, and per-iteration forensics —
-  retrievable via `build_diagnostics()` on the built `PriceTable` /
-  `InterpolatedIVSolver` (C++ and Python). Diagnostics never enter
-  serialization (`to_data()` / Parquet); a manually-built or Parquet-loaded
-  table reports `nullopt`.
+  retrievable via `build_diagnostics()` on the factory-returned handles
+  `AnyPriceTable` / `AnyInterpIVSolver` (Python: the `build_diagnostics`
+  property on `PriceTable` / `InterpolatedIVSolver`). Diagnostics never
+  enter serialization (`to_data()` / Parquet); a manually-built or
+  Parquet-loaded table reports `nullopt`.
 
 This closes the failure mode where an adaptive build silently returned a
 degraded final iteration whose error, measured honestly against the user

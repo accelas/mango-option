@@ -10,7 +10,6 @@
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/support/error_types.hpp"
 #include <algorithm>
 #include <iostream>
 
@@ -2424,15 +2423,16 @@ TEST(AdaptiveRegressionTest, Q0BifurcationRetainedAndScreened) {
                    .option_type = OptionType::PUT},
         market_price);
 
+    // `MultipleRoots` would also be a defended outcome here (the D8 screen
+    // refusing to guess), but the retained candidate from this build
+    // recovers the true root cleanly (implied_vol == 0.30034), so assert
+    // that outright rather than accepting the weaker disjunction.
     auto iv_result = solver.solve(query);
-    if (iv_result.has_value()) {
-        // Never a spurious low root: the pre-fix bug returned IVs well
-        // below 0.15 in this region.
-        EXPECT_GE(iv_result->implied_vol, 0.15);
-        EXPECT_NEAR(iv_result->implied_vol, 0.30, 2e-2);
-    } else {
-        EXPECT_EQ(iv_result.error().code, IVErrorCode::MultipleRoots);
-    }
+    ASSERT_TRUE(iv_result.has_value());
+    // Never a spurious low root: the pre-fix bug returned IVs well below
+    // 0.15 in this region.
+    EXPECT_GE(iv_result->implied_vol, 0.15);
+    EXPECT_NEAR(iv_result->implied_vol, 0.30, 2e-2);
 }
 
 }  // namespace

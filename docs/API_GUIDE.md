@@ -442,7 +442,7 @@ auto iv_result = iv_solver.solve(iv_query);
 
 ### Adaptive Build Diagnostics
 
-An adaptive-built `PriceTable` or `InterpolatedIVSolver` (from `AdaptiveGridBuilder` or `make_interpolated_iv_solver` with `.adaptive` set) records honest quality diagnostics that survive retention and backtracking — `build_diagnostics()` describes the *returned* candidate, not necessarily the last one built:
+An adaptive-built table records honest quality diagnostics that survive retention and backtracking. `build_diagnostics()` lives on the factory-returned handles — `AnyPriceTable` (from `AdaptiveGridBuilder`) and `AnyInterpIVSolver` (from `make_interpolated_iv_solver` with `.adaptive` set) — and describes the *returned* candidate, not necessarily the last one built:
 
 ```cpp
 auto solver = mango::make_interpolated_iv_solver(config).value();
