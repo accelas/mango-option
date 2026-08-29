@@ -447,6 +447,11 @@ public:
             return T{0};
         }
 
+        // Documented contract: extrapolation uses the nearest boundary
+        // value — clamp both coordinates to the grid domain.
+        x_eval = std::clamp(x_eval, x_.front(), x_.back());
+        y_eval = std::clamp(y_eval, y_.front(), y_.back());
+
         const size_t ny = y_.size();
 
         // Step 1: Evaluate all x-direction splines at x_eval
