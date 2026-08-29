@@ -234,3 +234,44 @@ TEST(ThomasWorkspaceTest, Resize) {
     auto span = ws.get();
     EXPECT_EQ(span.size(), 40);  // Workspace is 2n
 }
+
+// ===========================================================================
+// Regression tests for bugs found during code review (issue #441)
+// ===========================================================================
+
+// Regression: n==0 must be trivial success, not a size error
+// Bug: `lower.size() != n - 1` ran before the n==0 check; with n==0 the
+//      subtraction wrapped to SIZE_MAX, so empty systems returned
+//      "Lower diagonal size must be n-1" and the success path was dead code.
+TEST(ThomasSolverTest, EmptySystemSucceeds) {
+    std::span<const double> empty_c;
+    std::span<double> empty_m;
+    auto result = mango::solve_thomas<double>(
+        empty_c, empty_c, empty_c, empty_c, empty_m, empty_m);
+    EXPECT_TRUE(result.ok());
+}
+
+// Regression: empty diag with nonempty companion spans must still error
+// Bug: naive hoisting of the n==0 check above validation would have
+//      accepted malformed calls (empty diag, nonempty rhs) as success.
+TEST(ThomasSolverTest, EmptyDiagNonemptyRhsRejected) {
+    std::vector<double> rhs = {1.0};
+    std::vector<double> sol(1);
+    std::vector<double> ws(2);
+    std::span<const double> empty_c;
+    auto result = mango::solve_thomas<double>(
+        empty_c, empty_c, empty_c,
+        std::span<const double>{rhs}, std::span<double>{sol},
+        std::span<double>{ws});
+    EXPECT_FALSE(result.ok());
+}
+
+// Regression: same n==0 ordering bug in the projected (obstacle) variant
+// Bug: duplicate of the wrap-around in solve_thomas_projected.
+TEST(ThomasSolverTest, ProjectedEmptySystemSucceeds) {
+    std::span<const double> empty_c;
+    std::span<double> empty_m;
+    auto result = mango::solve_thomas_projected<double>(
+        empty_c, empty_c, empty_c, empty_c, empty_c, empty_m, empty_m);
+    EXPECT_TRUE(result.ok());
+}
