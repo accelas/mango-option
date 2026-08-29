@@ -14,6 +14,7 @@
 #include <expected>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <ranges>
 #include <span>
@@ -52,7 +53,19 @@ struct RefinementContext {
     SurfaceBounds sample_bounds;  ///< user-facing measurement domain
 };
 
+/// Absolute holdout-error ceiling above which a candidate surface is treated
+/// as garbage and never returned (spec D5).  2,000 bps of IV: an operational
+/// garbage detector, deliberately independent of `target_iv_error`.
+inline constexpr double kViabilityBound = 0.20;
+
+/// Relative holdout improvement required to restart the axis walk (spec D6).
+inline constexpr double kMinRelImprovement = 0.02;
+
 /// Result of grid sizing from the refinement loop
+///
+/// `achieved_max_error` / `achieved_avg_error` / `target_met` describe the
+/// *returned* candidate measured on the fixed holdout (spec D5), not the last
+/// iteration's fresh samples.
 struct RefinementResult {
     std::vector<double> moneyness;
     std::vector<double> tau;
@@ -63,6 +76,7 @@ struct RefinementResult {
     double achieved_avg_error = 0.0;
     bool target_met = false;
     std::vector<IterationStats> iterations;
+    BuildDiagnostics diagnostics;
 };
 
 /// Aggregate max grid sizes across probe results
@@ -203,6 +217,19 @@ using RefineFn = std::function<RefineOutcome(
     std::vector<double>& vol,
     std::vector<double>& rate)>;
 
+/// Opaque snapshot/restore hooks for backend refinement state (spec D6).
+///
+/// Restoring the grid vectors is not always enough: the Chebyshev refiners
+/// advance per-axis level counters held outside the grids.  Backends with
+/// such state provide both hooks; backends whose grids are the whole state
+/// (B-spline) leave them empty.  The loop takes a snapshot with every
+/// candidate it records and restores it together with the grids whenever the
+/// backtracking walk resets to the exploration base.
+struct RefineStateHooks {
+    std::function<std::shared_ptr<const void>()> snapshot;
+    std::function<void(const std::shared_ptr<const void>&)> restore;
+};
+
 /// Produces a fresh FD reference price for one validation point
 using ValidateFn = std::function<std::expected<double, SolverError>(
     double spot, double strike, double tau,
@@ -296,10 +323,34 @@ std::vector<double> linspace(double lo, double hi, size_t n);
 std::vector<double> seed_grid(const std::vector<double>& user_knots,
                                double lo, double hi, size_t fallback_n = 5);
 
-/// Run the iterative adaptive refinement loop.
+/// The four working grids the refinement loop starts from.
+struct SeededGrids {
+    std::vector<double> moneyness;
+    std::vector<double> tau;
+    std::vector<double> vol;
+    std::vector<double> rate;
+};
+
+/// Seed the working grids over the fit domain exactly as `run_refinement`
+/// does (user knots where given, linspace otherwise, moneyness padded to
+/// `params.min_moneyness_points`; `InitialGrids::exact` passes through).
+/// Exposed so callers can reproduce the loop's starting sizes without
+/// running it.
+SeededGrids seed_refinement_grids(const AdaptiveGridParams& params,
+                                  const RefinementContext& ctx,
+                                  const InitialGrids& initial_grids);
+
+/// Run the iterative adaptive refinement loop (spec D4-D7).
 ///
-/// Repeatedly builds a surface, validates against fresh FD solves, and refines
-/// the grid until the target IV error is met or max iterations are reached.
+/// Builds a surface, measures it against a fixed holdout (references cached
+/// once) *and* fresh per-iteration samples, records every candidate, and
+/// walks the four axes with greedy coordinate descent plus a measured
+/// walk-restart.  The best *viable* candidate is returned -- rebuilt once if
+/// it is not the surface most recently built -- or
+/// `PriceTableErrorCode::NoViableSurface` when no candidate is safe.
+///
+/// @param hooks Optional backend-state snapshot/restore (spec D6).  Backends
+///              whose refinement state lives entirely in the grids pass none.
 std::expected<RefinementResult, PriceTableError> run_refinement(
     const AdaptiveGridParams& params,
     BuildFn build_fn,
@@ -307,7 +358,8 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     const RefinementContext& ctx,
     const PrepareRefsFn& prepare_refs,
     const ScoreErrorFn& score,
-    const InitialGrids& initial_grids = {});
+    const InitialGrids& initial_grids = {},
+    const RefineStateHooks& hooks = {});
 
 /// Resolve K_ref values from a MultiKRefConfig.
 /// If config.K_refs is non-empty, returns them sorted.

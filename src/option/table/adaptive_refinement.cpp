@@ -8,6 +8,8 @@
 #include <cmath>
 #include <chrono>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <random>
 
 namespace mango {
@@ -15,12 +17,38 @@ namespace mango {
 namespace {
 constexpr double kMinPositive = 1e-6;
 
-struct ValidationResult {
-    double max_error;
-    double avg_error;
-    size_t valid_samples;
-    size_t pde_solves_validation;
+/// Number of sigma points in the monotonicity scan (spec D7).
+constexpr size_t kMonotonicityPoints = 7;
+
+/// One fixed holdout point with its cached references (spec D4).
+struct HoldoutPoint {
+    std::array<double, 4> coords{};  ///< m, tau, sigma, rate
+    double strike = 0.0;
+    ErrorRefs refs;
+};
+
+/// Outcome of scoring one candidate surface over a set of samples.
+struct SampleEval {
+    double max_error = 0.0;
+    double avg_error = 0.0;
+    size_t valid_samples = 0;
+    size_t pde_solves_validation = 0;
     ErrorBins error_bins;
+    /// False when any evaluation produced a non-finite price/score or a
+    /// negative score (spec D5 viability).
+    bool all_finite = true;
+};
+
+/// One recorded candidate surface (spec D5).
+struct Candidate {
+    std::vector<double> moneyness, tau, vol, rate;
+    std::shared_ptr<const void> state;
+    double holdout_max = std::numeric_limits<double>::quiet_NaN();
+    double holdout_avg = std::numeric_limits<double>::quiet_NaN();
+    ErrorBins bins;
+    size_t iteration = 0;
+    bool viable = false;
+    bool fresh_converged = false;
 };
 
 }  // namespace
@@ -229,6 +257,21 @@ ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
             return 0.0;
         }
 
+        // Vega floor: below it the price carries no volatility information,
+        // so `price_error / vega_floor` is a price error in units of the
+        // floor -- not an IV error.  Left unfiltered it reads as thousands
+        // of IV points from a sub-cent price wobble (measured: a deep-ITM
+        // put with vega = -3.5e-5 scoring 9,700 on a surface whose worst
+        // *measurable* point scored 0.15), which the D5 viability gate then
+        // condemns.  This is the documented meaning of `vega_floor` --
+        // "when vega < floor, fall back to price-based tolerance" -- and
+        // there is no IV tolerance to fall back to, so the point is skipped
+        // like any other IV-undefined one.  Price accuracy where vega ~ 0
+        // is not what the IV-error metric (or kViabilityBound) measures.
+        if (std::abs(refs.vega) < vega_floor) {
+            return 0.0;
+        }
+
         double price_error = std::abs(interp - refs.ref_price);
         return compute_iv_error(price_error, refs.vega, vega_floor, target);
     };
@@ -373,41 +416,20 @@ static std::vector<std::array<double, 4>> generate_validation_samples(
     return samples;
 }
 
-static void save_refinement_result(
-    RefinementResult& result,
-    IterationStats& stats,
-    const std::vector<double>& moneyness_grid,
-    const std::vector<double>& maturity_grid,
-    const std::vector<double>& vol_grid,
-    const std::vector<double>& rate_grid,
-    double max_error,
-    double avg_error,
-    bool target_met) {
-    stats.refined_dim = -1;
-    result.iterations.push_back(stats);
-    result.moneyness = moneyness_grid;
-    result.tau = maturity_grid;
-    result.vol = vol_grid;
-    result.rate = rate_grid;
-    result.tau_points = static_cast<int>(maturity_grid.size());
-    result.achieved_max_error = max_error;
-    result.achieved_avg_error = avg_error;
-    result.target_met = target_met;
-}
-
-static std::expected<ValidationResult, PriceTableError>
-evaluate_samples(
+/// Score a candidate surface over freshly drawn samples (spec D4).
+///
+/// Failed reference solves are skipped (they carry no evidence about the
+/// surface).  Non-finite prices or scores do not contribute to the error
+/// statistics but do clear `all_finite`, which disqualifies the candidate.
+static SampleEval evaluate_fresh_samples(
     const std::vector<std::array<double, 4>>& samples,
     const SurfaceHandle& handle,
     const PrepareRefsFn& prepare_refs,
     const ScoreErrorFn& score,
     const RefinementContext& ctx,
     double target_iv_error) {
-    double max_error = 0.0;
+    SampleEval ev;
     double sum_error = 0.0;
-    size_t valid_samples = 0;
-    size_t pde_solves_validation = 0;
-    ErrorBins error_bins;
 
     for (const auto& sample : samples) {
         double m = sample[0];
@@ -430,15 +452,23 @@ evaluate_samples(
             continue;  // Skip failed solves
         }
 
-        pde_solves_validation++;
+        ev.pde_solves_validation++;
 
-        const auto& refs = refs_result.value();
         double iv_error = score(
-            interp_price, refs,
+            interp_price, refs_result.value(),
             ctx.spot, strike, tau, sigma, rate);
-        max_error = std::max(max_error, iv_error);
+
+        if (!std::isfinite(interp_price) || !std::isfinite(iv_error) ||
+            iv_error < 0.0) {
+            // A NaN on an in-domain fresh sample disqualifies the candidate
+            // even if the fixed holdout missed that location (spec D5).
+            ev.all_finite = false;
+            continue;
+        }
+
+        ev.max_error = std::max(ev.max_error, iv_error);
         sum_error += iv_error;
-        valid_samples++;
+        ev.valid_samples++;
 
         // Normalize position for error bins over the SAMPLE domain (spec
         // D2) -- bins must line up with the domain the samples came from.
@@ -449,24 +479,181 @@ evaluate_samples(
             (sigma - sb.sigma_min) / (sb.sigma_max - sb.sigma_min),
             (rate - sb.rate_min) / (sb.rate_max - sb.rate_min)
         }};
-        error_bins.record_error(norm_pos, iv_error, target_iv_error);
+        ev.error_bins.record_error(norm_pos, iv_error, target_iv_error);
     }
 
-    if (valid_samples == 0) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::ExtractionFailed, /*axis=*/0, /*detail=*/0
-        });
+    ev.avg_error = ev.valid_samples > 0
+        ? sum_error / static_cast<double>(ev.valid_samples)
+        : 0.0;
+    return ev;
+}
+
+/// Score a candidate surface over the fixed holdout using cached references
+/// (spec D4): interpolations plus arithmetic, no FD solves.
+///
+/// Any non-finite price or score makes the whole holdout score NaN, which
+/// both disqualifies the candidate (D5 viability) and removes it from the
+/// exploration-base ranking (which requires finite scores).
+static SampleEval evaluate_holdout(
+    const std::vector<HoldoutPoint>& holdout,
+    const SurfaceHandle& handle,
+    const ScoreErrorFn& score,
+    const RefinementContext& ctx) {
+    SampleEval ev;
+    double sum_error = 0.0;
+
+    for (const auto& pt : holdout) {
+        double tau = pt.coords[1];
+        double sigma = pt.coords[2];
+        double rate = pt.coords[3];
+        double interp = handle.price(ctx.spot, pt.strike, tau, sigma, rate);
+        double iv_error = score(interp, pt.refs, ctx.spot, pt.strike,
+                                tau, sigma, rate);
+        if (!std::isfinite(interp) || !std::isfinite(iv_error) ||
+            iv_error < 0.0) {
+            ev.all_finite = false;
+            continue;
+        }
+        ev.max_error = std::max(ev.max_error, iv_error);
+        sum_error += iv_error;
+        ev.valid_samples++;
     }
 
-    double avg_error = sum_error / valid_samples;
+    if (!ev.all_finite) {
+        ev.max_error = std::numeric_limits<double>::quiet_NaN();
+        ev.avg_error = std::numeric_limits<double>::quiet_NaN();
+        return ev;
+    }
+    ev.avg_error = ev.valid_samples > 0
+        ? sum_error / static_cast<double>(ev.valid_samples)
+        : 0.0;
+    return ev;
+}
 
-    return ValidationResult{
-        .max_error = max_error,
-        .avg_error = avg_error,
-        .valid_samples = valid_samples,
-        .pde_solves_validation = pde_solves_validation,
-        .error_bins = std::move(error_bins),
-    };
+/// Pick the highest-scoring untried axis (spec D6 step 1-2).
+///
+/// score[d] = concentration = max bin count / total bin count, defined as 0
+/// when the bin total is zero.  Ties -- including the all-zero case -- break
+/// by dimension order (moneyness, tau, sigma, rate).  Returns -1 when every
+/// axis has been tried.
+static int pick_refinement_axis(const ErrorBins& bins,
+                                const std::array<bool, 4>& tried) {
+    int best_dim = -1;
+    double best_score = -1.0;
+    for (size_t d = 0; d < ErrorBins::N_DIMS; ++d) {
+        if (tried[d]) continue;
+        size_t max_count = std::ranges::max(bins.bin_counts[d]);
+        size_t total = std::reduce(bins.bin_counts[d].begin(),
+                                   bins.bin_counts[d].end());
+        double concentration = total == 0
+            ? 0.0
+            : static_cast<double>(max_count) / static_cast<double>(total);
+        if (concentration > best_score) {  // strict: ties keep dim order
+            best_score = concentration;
+            best_dim = static_cast<int>(d);
+        }
+    }
+    return best_dim;
+}
+
+/// Convert an axis's problematic bins into physical focus intervals (D2).
+static std::vector<std::pair<double, double>> bins_to_intervals(
+    const ErrorBins& bins, size_t dim,
+    const std::pair<double, double>& axis_bounds) {
+    auto problematic = bins.problematic_bins(dim);
+    std::vector<std::pair<double, double>> intervals;
+    intervals.reserve(problematic.size());
+    constexpr double kNBins = static_cast<double>(ErrorBins::N_BINS);
+    const double span = axis_bounds.second - axis_bounds.first;
+    for (size_t bin : problematic) {
+        intervals.push_back({
+            axis_bounds.first + span * static_cast<double>(bin) / kNBins,
+            axis_bounds.first + span * static_cast<double>(bin + 1) / kNBins});
+    }
+    return intervals;
+}
+
+/// Monotonicity statistics for the returned candidate (spec D7).
+///
+/// Diagnostics only, never a gate: at each valid holdout (m, tau, r), scan 7
+/// equally spaced sigma across the user sigma-range and count steps where the
+/// price falls by more than the noise floor.
+static void scan_monotonicity(const std::vector<HoldoutPoint>& holdout,
+                              const SurfaceHandle& handle,
+                              const RefinementContext& ctx,
+                              double target_iv_error,
+                              double vega_floor,
+                              BuildDiagnostics& diag) {
+    const double sigma_lo = ctx.sample_bounds.sigma_min;
+    const double sigma_hi = ctx.sample_bounds.sigma_max;
+    if (!(sigma_hi > sigma_lo)) {
+        return;  // degenerate sigma range: scan skipped
+    }
+    const auto sigmas = linspace(sigma_lo, sigma_hi, kMonotonicityPoints);
+    const double tol = std::max(1e-8 * ctx.spot, target_iv_error * vega_floor);
+
+    for (const auto& pt : holdout) {
+        double prev_price = std::numeric_limits<double>::quiet_NaN();
+        double prev_sigma = std::numeric_limits<double>::quiet_NaN();
+        for (double sigma : sigmas) {
+            double price = handle.price(ctx.spot, pt.strike, pt.coords[1],
+                                        sigma, pt.coords[3]);
+            if (!std::isfinite(price)) {
+                diag.monotonicity_points_invalid++;
+                prev_price = std::numeric_limits<double>::quiet_NaN();
+                prev_sigma = sigma;
+                continue;
+            }
+            if (std::isfinite(prev_price) && price < prev_price - tol) {
+                diag.monotonicity_violations++;
+                double slope = (price - prev_price) / (sigma - prev_sigma);
+                diag.worst_vega_slope = std::min(diag.worst_vega_slope, slope);
+            }
+            prev_price = price;
+            prev_sigma = sigma;
+        }
+    }
+}
+
+SeededGrids seed_refinement_grids(const AdaptiveGridParams& params,
+                                  const RefinementContext& ctx,
+                                  const InitialGrids& initial_grids) {
+    SeededGrids g;
+    if (initial_grids.exact) {
+        // Use grids exactly as provided (Chebyshev CGL/CC nodes)
+        g.moneyness = initial_grids.moneyness;
+        g.tau = initial_grids.tau;
+        g.vol = initial_grids.vol;
+        g.rate = initial_grids.rate;
+        return g;
+    }
+
+    // Seed grids from user-provided knots (or linspace fallback) over the
+    // FIT domain.  This ensures user-specified knots (e.g. benchmark vols)
+    // are always grid points.
+    g.moneyness = seed_grid(initial_grids.moneyness, ctx.bounds.m_min,
+                            ctx.bounds.m_max, params.min_moneyness_points);
+    g.tau = seed_grid(initial_grids.tau, ctx.bounds.tau_min,
+                      ctx.bounds.tau_max, 5);
+    g.vol = seed_grid(initial_grids.vol, ctx.bounds.sigma_min,
+                      ctx.bounds.sigma_max, 5);
+    g.rate = seed_grid(initial_grids.rate, ctx.bounds.rate_min,
+                       ctx.bounds.rate_max, 4);
+
+    // Moneyness needs higher density than the other axes (exercise boundary
+    // curvature): insert midpoints in the largest gaps until the minimum.
+    while (g.moneyness.size() < params.min_moneyness_points) {
+        double max_gap = 0.0;
+        size_t max_idx = 0;
+        for (size_t i = 0; i + 1 < g.moneyness.size(); ++i) {
+            double gap = g.moneyness[i + 1] - g.moneyness[i];
+            if (gap > max_gap) { max_gap = gap; max_idx = i; }
+        }
+        g.moneyness.push_back(
+            (g.moneyness[max_idx] + g.moneyness[max_idx + 1]) / 2.0);
+        std::sort(g.moneyness.begin(), g.moneyness.end());
+    }
+    return g;
 }
 
 std::expected<RefinementResult, PriceTableError> run_refinement(
@@ -476,33 +663,39 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     const RefinementContext& ctx,
     const PrepareRefsFn& prepare_refs,
     const ScoreErrorFn& score,
-    const InitialGrids& initial_grids)
+    const InitialGrids& initial_grids,
+    const RefineStateHooks& hooks)
 {
-    // Validation requires at least one sample per iteration
-    if (params.validation_samples == 0) {
+    // ---------------------------------------------------------------------
+    // 1. Parameter validation (spec D3)
+    // ---------------------------------------------------------------------
+    const auto invalid_config = [] {
         return std::unexpected(PriceTableError{
-            PriceTableErrorCode::InvalidConfig
-        });
-    }
+            PriceTableErrorCode::InvalidConfig});
+    };
 
+    if (!std::isfinite(params.target_iv_error) || params.target_iv_error <= 0.0) {
+        return invalid_config();
+    }
+    if (!std::isfinite(params.vega_floor) || params.vega_floor <= 0.0) {
+        return invalid_config();
+    }
+    if (!std::isfinite(params.refinement_factor) ||
+        params.refinement_factor <= 1.0) {
+        return invalid_config();
+    }
+    if (params.max_iter < 1) {
+        return invalid_config();
+    }
+    if (params.validation_samples < 8) {
+        return invalid_config();
+    }
     // B-spline requires minimum 4 control points per dimension
     if (params.min_moneyness_points < 4) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::InvalidConfig
-        });
+        return invalid_config();
     }
 
-    // Grids are seeded over and span the FIT domain ...
-    const double min_moneyness = ctx.bounds.m_min;
-    const double max_moneyness = ctx.bounds.m_max;
-    const double min_tau = ctx.bounds.tau_min;
-    const double max_tau = ctx.bounds.tau_max;
-    const double min_vol = ctx.bounds.sigma_min;
-    const double max_vol = ctx.bounds.sigma_max;
-    const double min_rate = ctx.bounds.rate_min;
-    const double max_rate = ctx.bounds.rate_max;
-
-    // ... while all measurement (validation sampling, bin normalization,
+    // Grids are seeded over and span the FIT domain, while all measurement (validation sampling, bin normalization,
     // focus intervals) happens over the user-facing SAMPLE domain (spec D2).
     const std::array<std::pair<double, double>, 4> sample_axis_bounds = {{
         {ctx.sample_bounds.m_min, ctx.sample_bounds.m_max},
@@ -511,50 +704,92 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         {ctx.sample_bounds.rate_min, ctx.sample_bounds.rate_max}
     }};
 
-    std::vector<double> moneyness_grid, maturity_grid, vol_grid, rate_grid;
-
-    if (initial_grids.exact) {
-        // Use grids exactly as provided (Chebyshev CGL/CC nodes)
-        moneyness_grid = initial_grids.moneyness;
-        maturity_grid = initial_grids.tau;
-        vol_grid = initial_grids.vol;
-        rate_grid = initial_grids.rate;
-    } else {
-        // Seed grids from user-provided knots (or linspace fallback)
-        // This ensures user-specified knots (e.g., benchmark vols) are always grid points
-        moneyness_grid = seed_grid(initial_grids.moneyness, min_moneyness, max_moneyness,
-                                   params.min_moneyness_points);
-        maturity_grid = seed_grid(initial_grids.tau, min_tau, max_tau, 5);
-        vol_grid = seed_grid(initial_grids.vol, min_vol, max_vol, 5);
-        rate_grid = seed_grid(initial_grids.rate, min_rate, max_rate, 4);
-
-        // Ensure moneyness grid meets minimum density requirement
-        // Moneyness needs higher density due to exercise boundary curvature
-        while (moneyness_grid.size() < params.min_moneyness_points) {
-            // Insert midpoints in largest gaps until we reach minimum
-            double max_gap = 0.0;
-            size_t max_idx = 0;
-            for (size_t i = 0; i + 1 < moneyness_grid.size(); ++i) {
-                double gap = moneyness_grid[i + 1] - moneyness_grid[i];
-                if (gap > max_gap) { max_gap = gap; max_idx = i; }
-            }
-            moneyness_grid.push_back(
-                (moneyness_grid[max_idx] + moneyness_grid[max_idx + 1]) / 2.0);
-            std::sort(moneyness_grid.begin(), moneyness_grid.end());
+    // A measurement domain that cannot be sampled cannot certify anything.
+    for (const auto& [lo, hi] : sample_axis_bounds) {
+        if (!std::isfinite(lo) || !std::isfinite(hi) || !(hi > lo)) {
+            return invalid_config();
         }
     }
 
-    RefinementResult result;
-    result.iterations.reserve(params.max_iter);
+    auto seeded = seed_refinement_grids(params, ctx, initial_grids);
+    std::vector<double> moneyness_grid = std::move(seeded.moneyness);
+    std::vector<double> maturity_grid = std::move(seeded.tau);
+    std::vector<double> vol_grid = std::move(seeded.vol);
+    std::vector<double> rate_grid = std::move(seeded.rate);
 
+    // ---------------------------------------------------------------------
+    // 3. Fixed holdout with cached references (spec D4)
+    // ---------------------------------------------------------------------
+    constexpr uint64_t kHoldoutSeedMix = 0x484F4C44ULL;  // "HOLD"
+    auto holdout_unit = latin_hypercube_4d(params.validation_samples,
+                                           params.lhs_seed ^ kHoldoutSeedMix);
+    auto holdout_scaled = scale_lhs_samples(holdout_unit, sample_axis_bounds);
+
+    std::vector<HoldoutPoint> holdout;
+    holdout.reserve(holdout_scaled.size());
+    size_t holdout_invalid = 0;
+    for (const auto& pt : holdout_scaled) {
+        double strike = ctx.spot * std::exp(-pt[0]);
+        auto refs = prepare_refs(ctx.spot, strike, pt[1], pt[2], pt[3]);
+        if (!refs.has_value() || !std::isfinite(refs->ref_price) ||
+            !std::isfinite(refs->vega)) {
+            ++holdout_invalid;
+            continue;
+        }
+        holdout.push_back(HoldoutPoint{
+            .coords = pt, .strike = strike, .refs = refs.value()});
+    }
+
+    // A holdout that cannot measure cannot certify retention.
+    const size_t min_valid_holdout =
+        std::max<size_t>(4, params.validation_samples / 4);
+    if (holdout.size() < min_valid_holdout) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::ValidationFailed});
+    }
+
+    // ---------------------------------------------------------------------
+    // 4. Refinement loop with candidate retention (spec D5/D6)
+    // ---------------------------------------------------------------------
+    const auto snapshot_state = [&hooks]() -> std::shared_ptr<const void> {
+        return hooks.snapshot ? hooks.snapshot()
+                              : std::shared_ptr<const void>{};
+    };
+    const auto restore_state =
+        [&hooks](const std::shared_ptr<const void>& snap) {
+        if (hooks.restore) hooks.restore(snap);
+    };
+
+    RefinementResult result;
+    BuildDiagnostics& diag = result.diagnostics;
+    diag.iterations.reserve(params.max_iter + 1);
+    diag.holdout_points = holdout.size();
+    diag.holdout_points_invalid = holdout_invalid;
+
+    std::vector<Candidate> candidates;
+    candidates.reserve(params.max_iter);
+
+    Candidate base;  ///< exploration base (spec D5 roles)
+    bool have_base = false;
+    bool have_finite_base = false;
+    double prev_best_holdout = std::numeric_limits<double>::infinity();
+
+    std::array<bool, 4> tried = {false, false, false, false};
     std::array<std::vector<size_t>, 4> focus_bins;
     bool focus_active = false;
 
-    for (size_t iteration = 0; iteration < params.max_iter; ++iteration) {
+    size_t iteration = 0;            ///< built iterations (budget consumed)
+    int pending_refined_dim = -1;    ///< axis that produced the current grids
+    std::optional<SurfaceHandle> last_handle;
+    size_t last_built_iteration = 0;
+    bool last_attempt_failed = false;
+
+    while (true) {
         auto iter_start = std::chrono::steady_clock::now();
 
         IterationStats stats;
         stats.iteration = iteration;
+        stats.refined_dim = pending_refined_dim;
         stats.grid_sizes = {
             moneyness_grid.size(),
             maturity_grid.size(),
@@ -562,95 +797,222 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             rate_grid.size()
         };
 
-        // a. BUILD/UPDATE TABLE via callback
-        auto surface_result = build_fn(moneyness_grid, maturity_grid, vol_grid, rate_grid);
+        // a. BUILD via callback
+        auto surface_result =
+            build_fn(moneyness_grid, maturity_grid, vol_grid, rate_grid);
+
         if (!surface_result.has_value()) {
-            return std::unexpected(surface_result.error());
-        }
-        auto& handle = surface_result.value();
+            // Seed build failure is terminal (spec D5).
+            if (iteration == 0) {
+                return std::unexpected(surface_result.error());
+            }
+            // A failed refinement trial must not strand exploration: mark the
+            // axis tried, roll back to the exploration base, and continue.
+            if (pending_refined_dim >= 0 && pending_refined_dim < 4) {
+                tried[static_cast<size_t>(pending_refined_dim)] = true;
+            }
+            moneyness_grid = base.moneyness;
+            maturity_grid = base.tau;
+            vol_grid = base.vol;
+            rate_grid = base.rate;
+            restore_state(base.state);
 
-        stats.pde_solves_table = handle.pde_solves;
+            stats.build_failed = true;
+            stats.elapsed_seconds = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - iter_start).count();
+            diag.iterations.push_back(stats);
+            diag.build_failure_fallback = true;
+            last_attempt_failed = true;
+            ++iteration;
+        } else {
+            auto& handle = surface_result.value();
+            stats.pde_solves_table = handle.pde_solves;
 
-        // b. GENERATE VALIDATION SAMPLE (from the sample domain, spec D2)
-        auto samples = generate_validation_samples(
-            params, iteration, sample_axis_bounds, focus_bins, focus_active);
+            // b. FRESH SAMPLES (from the sample domain, spec D2)
+            auto samples = generate_validation_samples(
+                params, iteration, sample_axis_bounds, focus_bins,
+                focus_active);
+            auto fresh = evaluate_fresh_samples(
+                samples, handle, prepare_refs, score, ctx,
+                params.target_iv_error);
+            stats.pde_solves_validation = fresh.pde_solves_validation;
+            stats.max_error = fresh.max_error;
+            stats.avg_error = fresh.avg_error;
 
-        // c. VALIDATE AGAINST FRESH FD SOLVES
-        auto eval_result = evaluate_samples(
-            samples, handle, prepare_refs, score,
-            ctx, params.target_iv_error);
-        if (!eval_result.has_value()) {
-            return std::unexpected(eval_result.error());
-        }
-        auto& vr = eval_result.value();
-        double max_error = vr.max_error;
-        double avg_error = vr.avg_error;
-        auto& error_bins = vr.error_bins;
-        stats.pde_solves_validation = vr.pde_solves_validation;
+            // c. HOLDOUT (cached refs, no FD solves)
+            auto hold = evaluate_holdout(holdout, handle, score, ctx);
 
-        stats.max_error = max_error;
-        stats.avg_error = avg_error;
+            // d. RECORD THE CANDIDATE
+            Candidate cand;
+            cand.moneyness = moneyness_grid;
+            cand.tau = maturity_grid;
+            cand.vol = vol_grid;
+            cand.rate = rate_grid;
+            cand.state = snapshot_state();
+            cand.holdout_max = hold.max_error;
+            cand.holdout_avg = hold.avg_error;
+            cand.bins = fresh.error_bins;
+            cand.iteration = iteration;
+            cand.fresh_converged =
+                fresh.valid_samples > 0 &&
+                fresh.max_error <= params.target_iv_error;
+            cand.viable = hold.all_finite && fresh.all_finite &&
+                          std::isfinite(hold.max_error) &&
+                          hold.max_error <= kViabilityBound;
 
-        auto iter_end = std::chrono::steady_clock::now();
-        stats.elapsed_seconds = std::chrono::duration<double>(iter_end - iter_start).count();
+            stats.elapsed_seconds = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - iter_start).count();
+            diag.iterations.push_back(stats);
 
-        // d. CHECK CONVERGENCE
-        bool converged = (max_error <= params.target_iv_error);
+            last_handle = handle;
+            last_built_iteration = iteration;
+            last_attempt_failed = false;
+            ++iteration;
 
-        if (converged || iteration == params.max_iter - 1) {
-            // Final iteration - save results
-            save_refinement_result(result, stats,
-                                   moneyness_grid, maturity_grid,
-                                   vol_grid, rate_grid,
-                                   max_error, avg_error, converged);
-            break;
-        }
+            // e. WALK BOOKKEEPING (spec D6 step 5)
+            if (pending_refined_dim >= 0 && pending_refined_dim < 4) {
+                if (std::isfinite(cand.holdout_max) &&
+                    cand.holdout_max <
+                        prev_best_holdout * (1.0 - kMinRelImprovement)) {
+                    tried.fill(false);  // measured improvement: restart
+                } else {
+                    tried[static_cast<size_t>(pending_refined_dim)] = true;
+                }
+            }
 
-        // e. DIAGNOSE & REFINE
-        size_t worst_dim = error_bins.worst_dimension();
+            // Any improvement (even sub-threshold) advances the base.
+            if (!have_base ||
+                (std::isfinite(cand.holdout_max) &&
+                 (!have_finite_base || cand.holdout_max < prev_best_holdout))) {
+                base = cand;
+                have_base = true;
+                if (std::isfinite(cand.holdout_max)) {
+                    have_finite_base = true;
+                    prev_best_holdout = cand.holdout_max;
+                }
+            }
 
-        // Convert the chosen axis's problematic bins into physical focus
-        // intervals for the refiner (spec D2 bin->interval conversion).
-        // Bins are normalized over the sample domain, so the inverse map
-        // must use the same domain.
-        const auto& axis_bounds =
-            sample_axis_bounds[std::min(worst_dim, size_t{3})];
-        auto problematic_bins = error_bins.problematic_bins(worst_dim);
-        std::vector<std::pair<double, double>> focus_intervals;
-        focus_intervals.reserve(problematic_bins.size());
-        constexpr double kNBins = static_cast<double>(ErrorBins::N_BINS);
-        for (size_t bin : problematic_bins) {
-            double bin_lo = axis_bounds.first +
-                (axis_bounds.second - axis_bounds.first) * static_cast<double>(bin) / kNBins;
-            double bin_hi = axis_bounds.first +
-                (axis_bounds.second - axis_bounds.first) * static_cast<double>(bin + 1) / kNBins;
-            focus_intervals.push_back({bin_lo, bin_hi});
-        }
+            candidates.push_back(std::move(cand));
 
-        RefineOutcome outcome = refine_fn(worst_dim, focus_intervals,
-                                          moneyness_grid, maturity_grid,
-                                          vol_grid, rate_grid);
-        if (!outcome.changed) {
-            // Maxed out — treat as final iteration
-            save_refinement_result(result, stats,
-                                   moneyness_grid, maturity_grid,
-                                   vol_grid, rate_grid,
-                                   max_error, avg_error, false);
-            break;
-        }
-
-        focus_active = false;
-        for (size_t d = 0; d < focus_bins.size(); ++d) {
-            focus_bins[d] = error_bins.problematic_bins(d);
-            if (!focus_bins[d].empty()) {
-                focus_active = true;
+            // f. CONVERGENCE requires both sample sets under target (D4)
+            if (candidates.back().fresh_converged &&
+                std::isfinite(candidates.back().holdout_max) &&
+                candidates.back().holdout_max <= params.target_iv_error) {
+                break;
             }
         }
 
-        stats.refined_dim = outcome.changed_dim;
-        result.iterations.push_back(stats);
+        if (iteration >= params.max_iter) break;
+
+        // g. AXIS SELECTION over the exploration base's bins (spec D6)
+        bool have_next = false;
+        while (true) {
+            int axis = pick_refinement_axis(base.bins, tried);
+            if (axis < 0) break;  // all axes exhausted
+
+            // Reset grids AND backend state to the exploration base.
+            moneyness_grid = base.moneyness;
+            maturity_grid = base.tau;
+            vol_grid = base.vol;
+            rate_grid = base.rate;
+            restore_state(base.state);
+
+            auto focus_intervals = bins_to_intervals(
+                base.bins, static_cast<size_t>(axis),
+                sample_axis_bounds[static_cast<size_t>(axis)]);
+
+            RefineOutcome outcome = refine_fn(
+                static_cast<size_t>(axis), focus_intervals,
+                moneyness_grid, maturity_grid, vol_grid, rate_grid);
+
+            if (!outcome.changed) {
+                // No build consumed (spec D6 step 4).
+                tried[static_cast<size_t>(axis)] = true;
+                continue;
+            }
+
+            pending_refined_dim =
+                (outcome.changed_dim >= 0 && outcome.changed_dim < 4)
+                    ? outcome.changed_dim
+                    : axis;
+            have_next = true;
+            break;
+        }
+        if (!have_next) break;
+
+        focus_active = false;
+        for (size_t d = 0; d < focus_bins.size(); ++d) {
+            focus_bins[d] = base.bins.problematic_bins(d);
+            if (!focus_bins[d].empty()) focus_active = true;
+        }
     }
 
+    // ---------------------------------------------------------------------
+    // 5. Retention: return the best viable candidate (spec D5)
+    // ---------------------------------------------------------------------
+    const Candidate* picked = nullptr;
+    for (const auto& cand : candidates) {
+        if (!cand.viable) continue;
+        if (picked == nullptr ||
+            cand.holdout_max < picked->holdout_max ||
+            (cand.holdout_max == picked->holdout_max &&
+             cand.holdout_avg < picked->holdout_avg)) {
+            picked = &cand;  // earliest iteration wins remaining ties
+        }
+    }
+    if (picked == nullptr) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::NoViableSurface});
+    }
+
+    // The loop must never return grids that do not describe the caller's
+    // captured surface: rebuild once when the pick is not the last build.
+    if (picked->iteration != last_built_iteration || last_attempt_failed ||
+        !last_handle.has_value()) {
+        auto iter_start = std::chrono::steady_clock::now();
+        auto rebuilt = build_fn(picked->moneyness, picked->tau,
+                                picked->vol, picked->rate);
+        if (!rebuilt.has_value()) {
+            return std::unexpected(rebuilt.error());
+        }
+        IterationStats stats;
+        stats.iteration = picked->iteration;
+        stats.refined_dim = -2;  // final rebuild marker (spec D7)
+        stats.grid_sizes = {picked->moneyness.size(), picked->tau.size(),
+                            picked->vol.size(), picked->rate.size()};
+        stats.pde_solves_table = rebuilt->pde_solves;
+        stats.max_error = picked->holdout_max;
+        stats.avg_error = picked->holdout_avg;
+        stats.elapsed_seconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - iter_start).count();
+        diag.iterations.push_back(stats);
+        diag.final_rebuild = true;
+        last_handle = std::move(rebuilt.value());
+    }
+
+    // ---------------------------------------------------------------------
+    // 6. Result + diagnostics (spec D7)
+    // ---------------------------------------------------------------------
+    result.moneyness = picked->moneyness;
+    result.tau = picked->tau;
+    result.vol = picked->vol;
+    result.rate = picked->rate;
+    result.tau_points = static_cast<int>(picked->tau.size());
+    result.achieved_max_error = picked->holdout_max;
+    result.achieved_avg_error = picked->holdout_avg;
+    result.target_met = picked->holdout_max <= params.target_iv_error &&
+                        picked->fresh_converged;
+
+    diag.target_met = result.target_met;
+    diag.achieved_max_error = result.achieved_max_error;
+    diag.achieved_avg_error = result.achieved_avg_error;
+    diag.picked_iteration = picked->iteration;
+    diag.total_iterations = iteration;  // excludes the final rebuild
+
+    scan_monotonicity(holdout, *last_handle, ctx, params.target_iv_error,
+                      params.vega_floor, diag);
+
+    result.iterations = diag.iterations;
     return result;
 }
 

@@ -727,9 +727,12 @@ build_adaptive_chebyshev(
     initial.rate = cc_level_nodes(state.rate_level, state.rate_lo, state.rate_hi);
     initial.exact = true;  // Preserve CC node placement
 
+    // TODO(#434, task 8/9): supply snapshot/restore hooks for the CC level
+    // counters held in `state` (spec D6) so the backtracking walk can roll
+    // them back with the grids.
     auto grid_result = run_refinement(
         params, build_fn, refine_fn, ctx,
-        prepare_refs_fn, score_fn, initial);
+        prepare_refs_fn, score_fn, initial, RefineStateHooks{});
     if (!grid_result.has_value()) {
         return std::unexpected(grid_result.error());
     }
@@ -941,9 +944,12 @@ ChebyshevSegmentedBuilder::build_adaptive(
         .sample_bounds = domain_,
     };
 
+    // TODO(#434, task 8/9): supply snapshot/restore hooks for the CC level
+    // counters held in `state` (spec D6) so the backtracking walk can roll
+    // them back with the grids.
     auto grid_result = run_refinement(
         params, build_fn, refine_fn, ctx,
-        prepare_refs_fn, score_fn, initial);
+        prepare_refs_fn, score_fn, initial, RefineStateHooks{});
     if (!grid_result) return std::unexpected(grid_result.error());
     auto& grids = *grid_result;
 
