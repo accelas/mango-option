@@ -375,15 +375,30 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
     EXPECT_LT(price2, price) << "a lower-struck put must be worth less";
 }
 
+// A two-K_ref list cannot blend accurately across the strike range it is
+// asked to serve, and the build refuses rather than shipping the blend.
+//
+// K_refs {90, 110} against S/K in [0.91, 1.1] means strikes in [90.9, 109.9]
+// served by exactly two surfaces: every query but the two endpoints is a
+// linear-in-strike blend across a 20-point gap.  The assembled surface
+// measures **0.4756 (4,756 bps) max IV error** on the D9 validation set
+// (avg 0.1191, 15 of 16 points measured), and the bumped-grid retry measures
+// 0.4766 -- both far outside the 0.20 viability bound, so the build returns
+// `NoViableSurface`.
+//
+// This shipped silently before #434.  The test previously asserted success:
+// with the full dividend schedule handed to every reference solve, each
+// sample below the dividend date lost its reference and only the long-tau
+// tail was measured, which was not enough to expose the blend.  Once
+// `make_validate_fn` filters the schedule by the sampled maturity all 16
+// samples measure, and the sparse-K_ref error is unavoidable.
+//
+// Tracked as the sparse-K_ref accuracy follow-up (MultiKRefSplit blend
+// resolution); the refusal is the correct behavior until it lands.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
     params.max_iter = 1;
-    // 16, not 8: a schedule entry at or beyond the queried tau makes
-    // `solve_american_option` refuse, so every sample below the first
-    // dividend date loses its reference -- roughly half the tau range
-    // here.  Eight samples would leave the validation set sitting
-    // exactly on the `max(4, n/4)` floor.
     params.validation_samples = 16;
 
     SegmentedAdaptiveConfig seg_config{
@@ -400,8 +415,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_TRUE(result.has_value())
-        << "error code " << static_cast<int>(result.error().code);
+    ASSERT_FALSE(result.has_value())
+        << "a two-K_ref blend measuring 4,756 bps must not be returned";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
 }
 
 // Large discrete dividend (total_div/K_ref > 0.2, stresses moneyness expansion)
@@ -773,11 +789,25 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
 // Coverage: Large expansion clamps moneyness to 0.01
 //
 // The clamp itself is asserted directly (no build needed).  The adaptive
-// build over the same config cannot be measured at all: $50 of absolute
-// dividends puts the K_ref = 50 probe's own references at a ~$72 spot
-// against $50 of dividends, and those FD solves fail, so fewer than the
-// minimum valid holdout points survive (spec D4) -- ValidationFailed even
-// with the viability gate disabled.
+// build over the same config is then refused: $50 of absolute dividends
+// against a $100 spot leaves no usable surface, and the D5 viability gate in
+// the probe loop says so -- `NoViableSurface`.
+//
+// This expected `ValidationFailed` before #434, and the reason it no longer
+// does is the point: with the full schedule handed to every reference solve,
+// every sampled tau below the last dividend date (0.75 of a 1y surface) lost
+// its reference and the holdout fell under the `max(4, n/4)` floor, so the
+// build died at reference validation without ever scoring a surface.  Now
+// that `make_validate_fn` filters the schedule by the sampled maturity those
+// references solve, the holdout clears the floor, and the build proceeds far
+// enough for the viability gate to do the refusing.  Both codes mean "this
+// must not be returned"; the build simply gets further before saying it.
+//
+// The D4 `ValidationFailed` path keeps its own coverage elsewhere, at both
+// levels: `SegmentedFinalContract.SparseReferencesFailValidation` drives
+// `prepare_final_validation` past the floor (and back under it) directly, and
+// `RunRefinementTest.HoldoutValidityThresholds` does the same for the
+// refinement loop's holdout.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -812,8 +842,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_FALSE(result.has_value())
-        << "a holdout that cannot be solved must not certify a surface";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::ValidationFailed);
+        << "a surface this config cannot support must not be certified";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
 }
 
 // Coverage: Negative K_ref in explicit list (K_ref_min <= 0 guard)
@@ -2295,18 +2325,26 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
         << " (used_retry = " << result->used_retry << ")";
     EXPECT_NEAR(measured.avg_error, result->achieved_avg_error, 1e-12);
 
-    // Measured on this config: the bumped-grid retry scores 0.0202 against
-    // the original's larger error on the shared references, so it is the
-    // surface returned -- and the numbers above are its own.
-    ASSERT_TRUE(result->used_retry)
-        << "expected the bumped-grid retry to win on this config; if it did "
-           "not, the identity checks above still hold for whichever surface "
-           "was returned";
-
-    // The grids reported must be the retry's too, not the aggregated ones the
-    // original was built on.  With max_iter = 1 no probe refines, so every
-    // probe returns its seed and the aggregate is exactly the seed sizes;
-    // the retry adds (+2, +2, +1, +1) on (moneyness, tau, vol, rate).
+    // Which of the two surfaces wins is deliberately NOT pinned.
+    //
+    // This config sits at its own accuracy floor, so the bumped grids buy
+    // nothing and the two scores land on top of each other: measured here,
+    // original 0.020230 vs retry 0.020352 -- 0.6 % apart, with the original
+    // winning by 1.2e-4.  Sweeping `min_moneyness_points` over 5..12 shows
+    // the retry winning at 6 and losing at 5, 7, 8, 9, 10 and 12, with every
+    // score in 0.0196-0.0278 and no trend in the grid size: the outcome is
+    // numerical noise, not a property of the design.  An earlier revision
+    // asserted `used_retry` here and duly broke when an unrelated fix to the
+    // reference solves shifted the validation set.
+    //
+    // The contract this test exists for is the identity above -- the
+    // *reported* numbers describe the surface actually returned -- and it is
+    // checked unconditionally.  The grid check below extends that identity to
+    // the reported grid sizes, for whichever surface won.
+    //
+    // With max_iter = 1 no probe refines, so every probe returns its seed and
+    // the aggregate is exactly the seed sizes; the retry adds (+2, +2, +1, +1)
+    // on (moneyness, tau, vol, rate).
     auto support = expand_segmented_domain(
         domain, seg_config.maturity, seg_config.dividend_yield,
         seg_config.discrete_dividends, K_refs->front());
@@ -2331,14 +2369,22 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
                      .vol = domain.vol,
                      .rate = domain.rate});
 
+    const size_t m_bump = result->used_retry ? 2 : 0;
+    const size_t v_bump = result->used_retry ? 1 : 0;
+    const size_t r_bump = result->used_retry ? 1 : 0;
+    const int tau_bump = result->used_retry ? 2 : 0;
+
     EXPECT_EQ(result->grid.moneyness.size(),
-              std::min(seeded.moneyness.size() + 2, params.max_points_per_dim));
+              std::min(seeded.moneyness.size() + m_bump,
+                       params.max_points_per_dim))
+        << "reported moneyness grid does not describe the returned surface"
+        << " (used_retry = " << result->used_retry << ")";
     EXPECT_EQ(result->grid.vol.size(),
-              std::min(seeded.vol.size() + 1, params.max_points_per_dim));
+              std::min(seeded.vol.size() + v_bump, params.max_points_per_dim));
     EXPECT_EQ(result->grid.rate.size(),
-              std::min(seeded.rate.size() + 1, params.max_points_per_dim));
+              std::min(seeded.rate.size() + r_bump, params.max_points_per_dim));
     EXPECT_EQ(result->tau_points_per_segment,
-              std::min(static_cast<int>(seeded.tau.size()) + 2,
+              std::min(static_cast<int>(seeded.tau.size()) + tau_bump,
                        static_cast<int>(params.max_points_per_dim)));
 }
 
