@@ -763,7 +763,9 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
     // enough for a K=80 query to clear B-spline endpoint effects.  The
     // refinement loop beyond it is a separate (pre-existing) pathology:
     // focused refinement piles knots into one bin until the collocation fit
-    // is ill-conditioned, which is what the D5 viability gate addresses.
+    // fails.  Once D5 retention lands, that failure falls back to the viable
+    // seed candidate instead of aborting the build; this max_iter pin can
+    // then be dropped (Task 6).
     params.max_iter = 1;
 
     GridAccuracyParams accuracy;
