@@ -9,6 +9,8 @@
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/support/error_types.hpp"
 #include <algorithm>
 #include <iostream>
 
@@ -2347,6 +2349,90 @@ TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
     EXPECT_EQ(measured.scored, result->diagnostics.holdout_points);
     EXPECT_NEAR(measured.max_error, result->achieved_max_error, 1e-12);
     EXPECT_NEAR(measured.avg_error, result->achieved_avg_error, 1e-12);
+}
+
+// ===========================================================================
+// Regression tests for the q0 bifurcation (issue #434)
+// ===========================================================================
+
+// Regression: adaptive refinement returned its catastrophically-degraded
+// final iteration (issue #434); retention must return the best candidate
+// and IV inversion must never return a spurious low root.
+// Bug: the pre-fix loop returned the last built iteration unconditionally,
+// measured error over an oversized headroom band, and had no query-time
+// screen. Under the exact EEP projection (max(0, x)) this bifurcated a q=0
+// PUT B-spline surface's sigma=30% region so badly that the diagnostic
+// `interp_iv_safety --path=q0` regressed from 7.3-8.7 bps to 289.3 bps RMS,
+// and interpolated IV inversion near K/S=0.8, T=30d could converge to a
+// spurious low root instead of the true 30% vol. Fixed-holdout retention
+// (D5), user-domain measurement (D2/D3), and the query-time multi-root
+// screen (D8) together bound both failure modes.
+TEST(AdaptiveRegressionTest, Q0BifurcationRetainedAndScreened) {
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = 100.0,
+        .dividend_yield = 0.0,
+        .grid = IVGrid{
+            // Upper bound widened to 1.30 (vs. the brief's 1.2 sketch) so
+            // the wrong-root probe below (S/K = 100/80 = 1.25) falls inside
+            // the surface's published bounds instead of being rejected.
+            .moneyness = {0.8, 0.9, 1.0, 1.15, 1.3},
+            .vol = {0.10, 0.20, 0.30, 0.40},
+            .rate = {0.02, 0.05, 0.08},
+        },
+        .adaptive = AdaptiveGridParams{
+            .target_iv_error = 2e-5,
+            .max_iter = 4,
+            .min_moneyness_points = 10,  // keep build under the test budget
+            .validation_samples = 16,
+        },
+        .backend = BSplineBackend{
+            .maturity_grid = {0.05, 0.1, 0.3, 0.6, 1.0},
+        },
+    };
+
+    auto solver_result = make_interpolated_iv_solver(config);
+    ASSERT_TRUE(solver_result.has_value());
+    auto solver = std::move(*solver_result);
+
+    auto diag = solver.build_diagnostics();
+    ASSERT_TRUE(diag.has_value());
+    EXPECT_LE(diag->achieved_max_error, 0.01);  // 100 bps sanity bound
+
+    // Wrong-root region probe: sigma=0.30, T=30d, K/S=0.8 put -- the corner
+    // of the surface where the pre-fix loop's degraded candidate produced a
+    // spurious low IV root.
+    PricingParams params;
+    params.spot = 100.0;
+    params.strike = 80.0;
+    params.maturity = 30.0 / 365.0;
+    params.rate = 0.05;
+    params.dividend_yield = 0.0;
+    params.volatility = 0.30;
+    params.option_type = OptionType::PUT;
+
+    auto ref = solve_american_option(params);
+    ASSERT_TRUE(ref.has_value());
+    double market_price = ref->value_at(params.spot);
+
+    IVQuery query(
+        OptionSpec{.spot = 100.0,
+                   .strike = 80.0,
+                   .maturity = 30.0 / 365.0,
+                   .rate = 0.05,
+                   .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        market_price);
+
+    auto iv_result = solver.solve(query);
+    if (iv_result.has_value()) {
+        // Never a spurious low root: the pre-fix bug returned IVs well
+        // below 0.15 in this region.
+        EXPECT_GE(iv_result->implied_vol, 0.15);
+        EXPECT_NEAR(iv_result->implied_vol, 0.30, 2e-2);
+    } else {
+        EXPECT_EQ(iv_result.error().code, IVErrorCode::MultipleRoots);
+    }
 }
 
 }  // namespace
