@@ -5,8 +5,12 @@
  */
 
 #include "mango/option/american_option_result.hpp"
+#include "mango/option/american_option.hpp"
 #include <gtest/gtest.h>
+#include <array>
+#include <barrier>
 #include <cmath>
+#include <thread>
 
 using namespace mango;
 
@@ -379,6 +383,70 @@ TEST_F(AmericanOptionResultTest, CubicSplineDeltaAccuracy) {
         << "\n  computed delta: " << delta
         << "\n  exact delta:    " << expected_delta
         << "\n  rel error:      " << rel_error * 100 << "%";
+}
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: const accessors raced on lazy spline/operator initialization
+// Bug (#436): ensure_spline()/ensure_operator() mutated shared state under a
+// documented "const methods are thread-safe" promise; concurrent FIRST calls
+// were a data race (both threads see built==false and build concurrently).
+TEST(AmericanOptionResultConcurrencyTest, ConcurrentFirstAccessMatchesSerial) {
+    mango::PricingParams params(
+        mango::OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
+                          .rate = 0.05, .dividend_yield = 0.02,
+                          .option_type = mango::OptionType::PUT},
+        0.20);
+    // Expected values from a separate, serially-used result.
+    auto expected = mango::solve_american_option(params);
+    ASSERT_TRUE(expected.has_value());
+    const double e_value = expected->value_at(102.0);
+    const double e_delta = expected->delta();
+    const double e_gamma = expected->gamma();
+    const double e_theta = expected->theta();
+
+    constexpr int kThreads = 8;
+
+    // Phase 1: spline race — value_at is every thread's FIRST accessor call.
+    auto r1 = mango::solve_american_option(params);
+    ASSERT_TRUE(r1.has_value());
+    {
+        std::barrier sync(kThreads);
+        std::array<std::array<double, 3>, kThreads> got{};
+        std::vector<std::thread> threads;
+        for (int t = 0; t < kThreads; ++t) {
+            threads.emplace_back([&, t] {
+                sync.arrive_and_wait();
+                got[t] = {r1->value_at(102.0), r1->delta(), r1->theta()};
+            });
+        }
+        for (auto& th : threads) th.join();
+        for (int t = 0; t < kThreads; ++t) {
+            EXPECT_EQ(got[t][0], e_value);
+            EXPECT_EQ(got[t][1], e_delta);
+            EXPECT_EQ(got[t][2], e_theta);
+        }
+    }
+
+    // Phase 2: operator race — fresh result, gamma() is every thread's FIRST
+    // call, so the lazy operator build races independently of phase 1.
+    auto r2 = mango::solve_american_option(params);
+    ASSERT_TRUE(r2.has_value());
+    {
+        std::barrier sync(kThreads);
+        std::array<double, kThreads> got{};
+        std::vector<std::thread> threads;
+        for (int t = 0; t < kThreads; ++t) {
+            threads.emplace_back([&, t] {
+                sync.arrive_and_wait();
+                got[t] = r2->gamma();
+            });
+        }
+        for (auto& th : threads) th.join();
+        for (int t = 0; t < kThreads; ++t) EXPECT_EQ(got[t], e_gamma);
+    }
 }
 
 } // namespace
