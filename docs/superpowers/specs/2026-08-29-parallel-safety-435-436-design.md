@@ -92,6 +92,19 @@ No public API change. Behavior change: construction cost rises by O(n)
 (microseconds, dwarfed by the PDE solve that produces the grid); accessors
 lose their first-call spike. `assert(grid_)` already guards the null case.
 
+**Thread-safety contract (design-review round 1):** the object is not
+*deep*-const — it shares a caller-supplied `shared_ptr<Grid<double>>`,
+`grid()` hands that mutable pointer back out, and `value_at`'s boundary
+branch, `gamma()`, and `theta()`'s previous-step half read live grid
+storage. The documented guarantee is therefore: *const methods are
+thread-safe provided no thread mutates the underlying grid concurrently*
+(the doc comment says exactly that). A second recorded consequence of
+eager construction: the spline snapshots `grid_->solution()` at
+construction time, so mutating the grid between construction and first
+access no longer changes `value_at`/`delta` output the way it did under
+lazy init. Both facts go in the class doc comment. Deep constness would
+need an ownership redesign — out of scope.
+
 ### Part 2 — BSplineCollocation1D (#435)
 
 `src/math/bspline/bspline_collocation.hpp` (header-only class):
@@ -143,6 +156,18 @@ solve_factored(const BSplineCollocationFactorization<T>& fact,
   `fact.lu`/`fact.pivots`, computes the residual with the existing
   `compute_residual_from_span` (now `const`-clean reads of the prebuilt
   band), and enforces `config.tolerance`. Returns the max residual.
+- **Factorization validity invariants (design-review round 1):** the
+  aggregate is decoupled from its producing solver, so `solve_factored()`
+  must reject malformed input before any LAPACK call:
+  `fact.lu.size() != LDAB * n_` or `fact.pivots.size() != n_` returns
+  `InterpolationErrorCode::BufferSizeMismatch`. This blocks
+  default-constructed or truncated factorizations (out-of-bounds LAPACK
+  access). A *same-sized* factorization from a different solver with the
+  same n is not detectable at this layer and remains caller
+  responsibility, stated in the doc comment (the sole production caller,
+  `fit_axis`, creates and consumes the pair locally). Full provenance
+  coupling (opaque type keyed to the solver) was considered and rejected
+  as machinery the one caller doesn't need.
 - `fit()` / `fit_with_buffer()` / `fit_with_workspace()` remain, with
   unchanged signatures and semantics minus the redundant rebuilds; they
   are kept because tests and `thread_workspace.hpp` docs reference them.
@@ -187,7 +212,11 @@ conditions[Axis] = fact->condition_estimate;    // one estimate, not a per-slice
 **Numerical identity:** the per-slice LAPACK call sequence on each slice's
 data is unchanged (`dgbtrf` on the identical matrix produces identical LU
 factors; `dgbtrs` then sees bit-identical inputs), so fitted coefficients
-are bit-for-bit identical to today's output.
+are expected bit-for-bit identical to today's output. Because no existing
+test pins coefficient *contents* (the 4D separable test checks success and
+count only, and table-level comparisons carry tolerances), the claim is
+**proved by a golden test written against the current implementation
+before the refactor** (see Testing item 0) rather than asserted.
 
 ## Error handling
 
@@ -204,22 +233,36 @@ are bit-for-bit identical to today's output.
 Per CLAUDE.md, every bug gets a regression test with the standard header
 comment naming the bug.
 
-1. **#436 regression** (`tests/american_option_test.cc`): solve one option,
-   then hammer `value_at()` / `delta()` / `gamma()` / `theta()` from ~8
-   threads (with a start barrier) against values captured single-threaded
-   first; assert exact equality. Under the old code this is a genuine race
-   (TSan-visible; occasionally torn under load); under the new code the
-   object is deep-const after construction.
+0. **Bit-identity golden (written FIRST, against the unmodified code):**
+   a new test fits a small fixed nonuniform 3D grid via
+   `BSplineNDSeparable` and a 1D grid via `fit()`, and pins a sampling of
+   the resulting coefficients with exact (`EXPECT_EQ` on doubles /
+   bit-pattern) golden values hardcoded from a run of the *current*
+   implementation. Committed green before any #435 refactor commit; the
+   refactor must keep it green, which proves the bit-for-bit claim
+   against a true pre-change baseline.
+1. **#436 regression** (`tests/american_option_test.cc`): compute expected
+   values (`value_at`/`delta`/`gamma`/`theta`) from a *separate* result
+   solved with identical params, then construct a **fresh** result and
+   race the accessors' *first* calls from ~8 threads behind a
+   `std::barrier`; assert exact equality with the expected values. On the
+   old code the first calls concurrently run the lazy builds — the actual
+   race (TSan-visible; occasionally torn under load); warming the caches
+   first would make the threaded phase read-only and prove nothing.
 2. **#435 equivalence** (`tests/bspline_collocation_test.cc` or the
    workspace test file): `factorize()` + `solve_factored()` must reproduce
    `fit()` coefficients bit-for-bit on a nonuniform grid; error paths
-   (size mismatch, NaN, singular-degenerate grid) return the same codes.
-3. **#435 concurrent solve** : one shared solver + one shared factorization,
+   (value-size mismatch, coeffs-size mismatch, NaN/Inf input) return the
+   same codes as the fit paths.
+3. **#435 malformed-factorization guard:** `solve_factored()` with a
+   default-constructed factorization, and with truncated `lu` / `pivots`,
+   returns `BufferSizeMismatch` and never reaches LAPACK.
+4. **#435 concurrent solve:** one shared solver + one shared factorization,
    ~8 threads each solving a different slice's values concurrently; results
    equal the serial answers exactly.
-4. **Existing coverage:** `bspline_fitter_4d_separable_test.cc` and the
-   full table-builder suites already pin fitted values; they must pass
-   unchanged (bit-identical output claim).
+5. **Existing coverage:** `bspline_fitter_4d_separable_test.cc` and the
+   table-builder suites must pass unchanged (success/shape and
+   tolerance-level checks; the exactness burden is carried by item 0).
 
 TSan is not in CI; the structural fix (const receiver + const
 factorization, matrix built in the constructor) is the guarantee, and the
