@@ -22,7 +22,11 @@ enum class SolverErrorCode {
 struct SolverError {
     SolverErrorCode code{SolverErrorCode::Unknown};
     size_t iterations{0};
-    double residual{0.0};  // Final residual at failure
+    double residual{0.0};  // Code-dependent diagnostic: for ConvergenceFailure,
+                           // the solution-norm-normalized RMS Newton step delta
+                           // (not a PDE residual); infinity for
+                           // LinearSolveFailure; other codes may carry other
+                           // values (e.g. grid-validation data).
 };
 
 /// Error codes for parameter validation failures

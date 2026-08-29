@@ -753,6 +753,7 @@ private:
         std::copy(u.begin(), u.end(), workspace_.newton_u_old().begin());
 
         // Newton iteration
+        double last_error = std::numeric_limits<double>::infinity();
         for (size_t iter = 0; iter < config_.max_iter; ++iter) {
             // Evaluate L(u)
             apply_spatial_operator(t, u, workspace_.lu());
@@ -803,6 +804,7 @@ private:
 
             // Check convergence via step delta
             double error = compute_step_delta_error(u, workspace_.newton_u_old());
+            last_error = error;
 
             if (error < config_.tolerance) {
                 return {};
@@ -815,7 +817,7 @@ private:
         return std::unexpected(SolverError{
             .code = SolverErrorCode::ConvergenceFailure,
             .iterations = config_.max_iter,
-            .residual = compute_step_delta_error(u, workspace_.newton_u_old())
+            .residual = last_error
         });
     }
 
