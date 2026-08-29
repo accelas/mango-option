@@ -36,6 +36,8 @@ template<typename T, size_t Bandwidth = 4>
 struct BSplineCollocationWorkspace {
     static constexpr size_t ALIGNMENT = 64;  // Cache line / AVX-512
     static constexpr size_t BANDWIDTH = Bandwidth;
+    static_assert(Bandwidth > 0,
+                  "Bandwidth == 0 underflows the KL/KU band constants");
     static constexpr int KL = static_cast<int>(Bandwidth - 1);  // sub-diagonals
     static constexpr int KU = static_cast<int>(Bandwidth - 1);  // super-diagonals
     static constexpr size_t LDAB = 2 * KL + KU + 1;             // LAPACK leading dimension
