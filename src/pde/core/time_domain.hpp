@@ -14,17 +14,27 @@ namespace mango {
 /// Computes the number of time steps needed to reach t_end.
 class TimeDomain {
 public:
-    /// Construct time domain from time step size
+    /// Construct time domain from a maximum time step size
+    ///
+    /// n_steps = ceil((t_end - t_start) / dt) and dt is then shrunk to
+    /// (t_end - t_start) / n_steps, so the grid lands on t_end (within
+    /// floating-point rounding) and the actual step never exceeds the
+    /// requested dt.  Same semantics as from_n_steps.
+    ///
+    /// Preconditions (documented, not validated): finite inputs,
+    /// t_end > t_start, dt > 0.
     ///
     /// @param t_start Initial time
     /// @param t_end Final time
-    /// @param dt Time step size
+    /// @param dt Maximum time step size
     TimeDomain(double t_start, double t_end, double dt)
         : t_start_(t_start)
         , t_end_(t_end)
-        , dt_(dt)
-        , n_steps_(static_cast<size_t>(std::ceil((t_end - t_start) / dt)))
-    {}
+    {
+        n_steps_ = std::max<size_t>(
+            1, static_cast<size_t>(std::ceil((t_end - t_start) / dt)));
+        dt_ = (t_end - t_start) / static_cast<double>(n_steps_);
+    }
 
     /// Construct time domain from number of steps (avoids floating-point rounding)
     ///
