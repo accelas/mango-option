@@ -35,6 +35,7 @@
 #include <array>
 #include <cmath>
 #include <algorithm>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -83,6 +84,49 @@ struct InterpolatedIVSolverConfig {
     /// interim measure.
     bool detect_multiple_roots = true;
 };
+
+namespace detail {
+
+/// Verdict of the multiple-root bracket screen (spec D8.2).
+///
+/// Exactly one of three outcomes is expressed:
+///  - `refusal` engaged: the screen refuses the query (MultipleRoots,
+///    NumericalInstability at a scan point, or BracketingFailed at an
+///    endpoint whose residual misses the solver tolerance).
+///  - `boundary_root` engaged: an endpoint satisfies the solver tolerance
+///    and is the only root feature; the caller returns it directly (after
+///    setting `used_rate_approximation`, which the screen cannot know).
+///  - neither engaged: proceed to Brent on `[lo, hi]` — the full bracket,
+///    or the single scan interval containing the one sign change, in which
+///    case `check_slope` is set and `f_lo`/`f_hi` carry the scan samples
+///    for the caller's post-hoc slope check.
+struct BracketScreen {
+    std::optional<IVError> refusal;
+    std::optional<IVSuccess> boundary_root;
+    double lo = 0.0;           ///< bracket to hand Brent
+    double hi = 0.0;
+    bool check_slope = false;  ///< post-hoc slope check applies to [lo, hi]
+    double f_lo = 0.0;         ///< objective at lo (valid when check_slope)
+    double f_hi = 0.0;         ///< objective at hi (valid when check_slope)
+};
+
+/// Screen the solve bracket for multiple roots before inverting (spec D8.2).
+///
+/// Samples `objective` at 17 equally spaced volatilities across
+/// `[sigma_min, sigma_max]` and classifies the sign pattern: consecutive
+/// zeros (|f| <= `zero_tol` = 1e-9 * spot) collapse into one run, a run
+/// between opposite signs is a transition, between equal signs a tangency
+/// (counted as two features — an even-multiplicity contact is at least a
+/// double root), at an endpoint a boundary root.  More than one feature is
+/// ambiguous by construction.  Pure function of its arguments; the
+/// guarantees and blind spots are documented on
+/// `InterpolatedIVSolverConfig::detect_multiple_roots`.
+[[nodiscard]] BracketScreen screen_bracket(
+    const std::function<double(double)>& objective,
+    double sigma_min, double sigma_max,
+    double spot, double tolerance);
+
+}  // namespace detail
 
 /// Interpolation-based IV Solver
 ///
@@ -583,146 +627,25 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
 
     // Multiple-root screen (spec D8.2).  A price surface that is not
     // monotone in sigma admits several implied vols for one market price;
-    // Brent would silently return whichever one it lands on.  Sample the
-    // objective on a uniform 17-point scan and refuse ambiguous brackets.
+    // Brent would silently return whichever one it lands on.
+    // `detail::screen_bracket` samples the objective on a uniform 17-point
+    // scan and refuses ambiguous brackets; a single sign change narrows the
+    // bracket handed to Brent.
     if (config_.detect_multiple_roots) {
-        constexpr size_t kScanPoints = 17;
-        // Zero tolerance is a *price* tolerance in dollars, deliberately
-        // distinct from config_.tolerance (which the root finder uses for
-        // both its interval and its objective convergence test).
-        const double zero_tol = 1e-9 * query.spot;
-        const double step = (sigma_max - sigma_min) / static_cast<double>(kScanPoints - 1);
-
-        std::array<double, kScanPoints> scan_sigma{};
-        std::array<double, kScanPoints> scan_f{};
-        std::array<int, kScanPoints> scan_sign{};
-        size_t zero_samples = 0;
-
-        for (size_t i = 0; i < kScanPoints; ++i) {
-            scan_sigma[i] = (i + 1 == kScanPoints)
-                ? sigma_max
-                : sigma_min + step * static_cast<double>(i);
-            scan_f[i] = objective(scan_sigma[i]);
-            if (!std::isfinite(scan_f[i])) {
-                return std::unexpected(IVError{
-                    .code = IVErrorCode::NumericalInstability,
-                    .iterations = 0,
-                    .final_error = std::numeric_limits<double>::quiet_NaN(),
-                    .last_vol = scan_sigma[i]
-                });
-            }
-            scan_sign[i] = (std::abs(scan_f[i]) <= zero_tol)
-                ? 0
-                : (scan_f[i] > 0.0 ? 1 : -1);
-            if (scan_sign[i] == 0) ++zero_samples;
+        auto screen = detail::screen_bracket(objective, sigma_min, sigma_max,
+                                             query.spot, config_.tolerance);
+        if (screen.refusal.has_value()) {
+            return std::unexpected(*screen.refusal);
         }
-
-        // Every sample a zero: an unresolved continuum of roots.
-        if (zero_samples == kScanPoints) {
-            return std::unexpected(IVError{
-                .code = IVErrorCode::MultipleRoots,
-                .iterations = 0,
-                .final_error = 0.0,
-                .last_vol = sigma_min
-            });
+        if (screen.boundary_root.has_value()) {
+            screen.boundary_root->used_rate_approximation = rate_is_curve;
+            return *screen.boundary_root;
         }
-
-        // Walk the nonzero samples.  Consecutive zeros collapse into one
-        // zero run; a run between opposite signs is one transition, a run
-        // between equal signs is a tangency contact, and a run at a bracket
-        // endpoint is a boundary root.
-        size_t transitions = 0;
-        size_t tangencies = 0;
-        size_t boundary_roots = 0;
-        bool leading_boundary = false;
-        double lowest_feature_sigma = sigma_max;
-        size_t first_lo = 0;
-        size_t first_hi = 0;
-
-        auto note_feature = [&](double sigma) {
-            lowest_feature_sigma = std::min(lowest_feature_sigma, sigma);
-        };
-
-        int last_sign = 0;
-        size_t last_idx = 0;
-        bool have_last = false;
-        for (size_t i = 0; i < kScanPoints; ++i) {
-            if (scan_sign[i] == 0) continue;
-            if (have_last) {
-                if (scan_sign[i] != last_sign) {
-                    if (transitions == 0) {
-                        first_lo = last_idx;
-                        first_hi = i;
-                    }
-                    ++transitions;
-                    note_feature(scan_sigma[last_idx]);
-                } else if (i > last_idx + 1) {
-                    ++tangencies;
-                    note_feature(scan_sigma[last_idx + 1]);
-                }
-            } else if (i > 0) {
-                ++boundary_roots;
-                leading_boundary = true;
-                note_feature(sigma_min);
-            }
-            last_sign = scan_sign[i];
-            last_idx = i;
-            have_last = true;
-        }
-        if (last_idx + 1 < kScanPoints) {
-            ++boundary_roots;
-            note_feature(sigma_max);
-        }
-
-        // Root features found by the scan.  A tangency counts as two: an
-        // even-multiplicity contact is at least a double root, which makes
-        // it ambiguous on its own.  Anything beyond a single feature is
-        // ambiguous by construction.
-        const size_t features = transitions + 2 * tangencies + boundary_roots;
-        if (features > 1) {
-            return std::unexpected(IVError{
-                .code = IVErrorCode::MultipleRoots,
-                .iterations = 0,
-                .final_error = static_cast<double>(features),
-                .last_vol = lowest_feature_sigma
-            });
-        }
-
-        if (boundary_roots == 1) {
-            // Boundary root: honor it only when it also satisfies the
-            // solver's configured convergence tolerance.  zero_tol must
-            // never silently loosen a user's tighter tolerance.
-            const double endpoint = leading_boundary ? sigma_min : sigma_max;
-            const double residual =
-                std::abs(leading_boundary ? scan_f[0] : scan_f[kScanPoints - 1]);
-            if (residual <= config_.tolerance) {
-                return IVSuccess{
-                    .implied_vol = endpoint,
-                    .iterations = 0,
-                    .final_error = residual,
-                    .vega = std::nullopt,
-                    .used_rate_approximation = rate_is_curve
-                };
-            }
-            // The scan found no true bracket: report what the unscreened
-            // path would have reported.
-            return std::unexpected(IVError{
-                .code = IVErrorCode::BracketingFailed,
-                .iterations = 0,
-                .final_error = residual,
-                .last_vol = endpoint
-            });
-        }
-
-        if (transitions == 1) {
-            brent_lo = scan_sigma[first_lo];
-            brent_hi = scan_sigma[first_hi];
-            narrowed_f_lo = scan_f[first_lo];
-            narrowed_f_hi = scan_f[first_hi];
-            check_narrowed_slope = true;
-        }
-        // No transition: fall through to Brent on the full bracket, which
-        // reports BracketingFailed exactly as the unscreened path does.
+        brent_lo = screen.lo;
+        brent_hi = screen.hi;
+        check_narrowed_slope = screen.check_slope;
+        narrowed_f_lo = screen.f_lo;
+        narrowed_f_hi = screen.f_hi;
     }
 
     // Brent's method
