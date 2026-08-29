@@ -89,6 +89,10 @@ inline IVError validation_error_to_iv_error(const ValidationError& ve) {
         case ValidationErrorCode::InvalidVolatility:
             code = IVErrorCode::ArbitrageViolation;
             break;
+        case ValidationErrorCode::PriceTableBuildFailed:
+            // A build failure is a grid/table problem, not an arbitrage signal.
+            code = IVErrorCode::InvalidGridConfig;
+            break;
         default:
             code = IVErrorCode::ArbitrageViolation;
             break;

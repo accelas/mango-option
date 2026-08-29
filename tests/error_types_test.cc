@@ -157,3 +157,14 @@ TEST(MapExpectedTest, ErrorMappedForPriceTableError) {
     ASSERT_FALSE(mapped.has_value());
     EXPECT_EQ(mapped.error().code, PriceTableErrorCode::FittingFailed);
 }
+
+// Regression: PriceTableBuildFailed must convert without UB
+// Bug: convert_to_iv_error / convert_to_price_table_error switch over
+//      ValidationErrorCode with an uninitialized local and no default; a
+//      new enum value without a case reads uninitialized memory.
+TEST(ErrorTypesTest, PriceTableBuildFailedConversions) {
+    ValidationError ve{ValidationErrorCode::PriceTableBuildFailed};
+    EXPECT_EQ(convert_to_iv_error(ve).code, IVErrorCode::InvalidGridConfig);
+    EXPECT_EQ(convert_to_price_table_error(ve).code,
+              PriceTableErrorCode::SurfaceBuildFailed);
+}

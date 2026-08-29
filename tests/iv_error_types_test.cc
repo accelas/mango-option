@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
+#include "mango/option/iv_result.hpp"
 #include "mango/support/error_types.hpp"
 
 using namespace mango;
@@ -187,4 +188,13 @@ TEST(ErrorConversionTest, MapExpectedInterpolationToPriceTable) {
     auto pt_fail = map_expected_to_price_table_error(fail_result);
     ASSERT_FALSE(pt_fail.has_value());
     EXPECT_EQ(pt_fail.error().code, PriceTableErrorCode::FittingFailed);
+}
+
+// Regression: a build failure must not masquerade as an arbitrage violation
+// Bug: validation_error_to_iv_error's default: arm mapped every unlisted
+//      code to ArbitrageViolation.
+TEST(IVErrorTypesTest, PriceTableBuildFailedMapsToInvalidGridConfig) {
+    ValidationError ve{ValidationErrorCode::PriceTableBuildFailed};
+    EXPECT_EQ(validation_error_to_iv_error(ve).code,
+              IVErrorCode::InvalidGridConfig);
 }

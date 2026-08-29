@@ -46,7 +46,8 @@ enum class ValidationErrorCode {
     ZeroWidthGrid,
     OptionTypeMismatch,
     DividendYieldMismatch,
-    DiscreteDividendMismatch
+    DiscreteDividendMismatch,
+    PriceTableBuildFailed      ///< Price table construction failed (non-grid cause)
 };
 
 /// Detailed validation error for parameter validation failures
@@ -300,6 +301,9 @@ inline IVError convert_to_iv_error(const ValidationError& err) {
         case ValidationErrorCode::DiscreteDividendMismatch:
             code = IVErrorCode::DiscreteDividendMismatch;
             break;
+        case ValidationErrorCode::PriceTableBuildFailed:
+            code = IVErrorCode::InvalidGridConfig;
+            break;
     }
     return IVError{
         .code = code,
@@ -321,7 +325,11 @@ inline IVError convert_to_iv_error(const SolverError& err) {
 
 /// Convert InterpolationError to PriceTableError
 inline PriceTableError convert_to_price_table_error(const InterpolationError& err) {
-    PriceTableErrorCode code;
+    // Initialized (not left uninitialized like the switches below) because
+    // deep inlining at -O3 from price_table_factory.cpp's new call sites
+    // defeats GCC's exhaustiveness analysis and trips -Wmaybe-uninitialized;
+    // the switch is still exhaustive and -Werror=switch still enforces it.
+    PriceTableErrorCode code = PriceTableErrorCode::FittingFailed;
     switch (err.code) {
         case InterpolationErrorCode::InsufficientGridPoints:
             code = PriceTableErrorCode::InsufficientGridPoints;
@@ -377,6 +385,9 @@ inline PriceTableError convert_to_price_table_error(const ValidationError& err) 
         case ValidationErrorCode::DividendYieldMismatch:
         case ValidationErrorCode::DiscreteDividendMismatch:
             code = PriceTableErrorCode::InvalidConfig;
+            break;
+        case ValidationErrorCode::PriceTableBuildFailed:
+            code = PriceTableErrorCode::SurfaceBuildFailed;
             break;
     }
     return PriceTableError{code, err.index, 0};

@@ -176,6 +176,17 @@ cc_library(
 )
 
 cc_library(
+    name = "price_table_error_mapping",
+    srcs = ["detail/price_table_error_mapping.cpp"],
+    hdrs = ["detail/price_table_error_mapping.hpp"],
+    deps = ["//src/support:error_types"],
+    copts = ["-Wall", "-Wextra", "-Werror", "-O3"],
+    visibility = ["//src/option:__pkg__", "//tests:__pkg__"],
+    strip_include_prefix = "/src/option",
+    include_prefix = "mango/option",
+)
+
+cc_library(
     name = "price_table_factory",
     srcs = ["price_table_factory.cpp"],
     hdrs = ["price_table_factory.hpp"],
@@ -186,6 +197,7 @@ cc_library(
         ":iv_result",
         ":option_grid",
         ":option_spec",
+        ":price_table_error_mapping",
         "//src/math/bspline:bspline_nd_separable",
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/option/table:adaptive_grid_types",
