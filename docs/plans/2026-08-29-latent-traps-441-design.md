@@ -8,8 +8,9 @@ path today; each is a footgun for future callers.
 each with a regression test. Item 4 (Neumann Jacobian boundary rows degenerate
 to identity) is split into its own issue: it requires genuine numerical design
 (how to differentiate the spatial operator at a Neumann boundary), it has no
-in-repo Neumann user, and its `lower[n-2]` sub-item is already fixed on the
-PR #454 branch. The new issue is filed when this PR opens, referencing #441.
+in-repo Neumann user, and its `lower[n-2]` sub-item was already fixed on main
+by PR #445 (issue #433). The new issue is filed when this PR opens,
+referencing #441.
 
 All line references below are against main @ `b87a6b65` (the branch point of
 `fix/441-latent-traps`).
@@ -46,13 +47,23 @@ Brainstorm Q&A (2026-08-29), each settled with the user:
    split Brent's x-tolerance into a new field; (c) implement relative
    tolerance as documented. **Chosen: (a) docs-only.** Zero behavior change;
    all in-repo callers were tuned against the actual (absolute) semantics.
-6. **Item 3 sub-choice** (resolved from code evidence, not asked): `BSplineND`
-   gets **deleted copy ops** — every in-repo use holds it via
-   `std::shared_ptr<const BSplineND<...>>` constructed by move, so copying is
-   never needed and deletion documents intent. `NonUniformSpacing` gets
-   **re-pointing user-defined copy ops** — it sits in a `std::variant` inside
-   the value-type `Grid` (grid.hpp:635), and killing `Grid`'s copyability is a
-   larger API change than this batch warrants.
+6. **Item 3 sub-choice** (resolved from code evidence, not asked): **both**
+   types get **re-pointing user-defined copy ops**. *Adjusted in design
+   review round 2:* the original plan deleted `BSplineND`'s copies on the
+   premise that all uses go through `shared_ptr<const BSplineND>`; that
+   premise is false — `BSplineND::create` returns
+   `std::expected<BSplineND, …>` (a value-type API) and tests/benchmarks use
+   it as a value, so deletion would be a public API break beyond this batch's
+   charter. `NonUniformSpacing` additionally sits in a `std::variant` inside
+   the value-type `Grid` (grid.hpp:635), so it must stay copyable.
+7. **Item 8 reviewer disagreement (recorded, not folded):** design review
+   round 2 argued for an optional `brent_tol_x` field
+   (`value_or(brent_tol_abs)` fallback) on the grounds that docs alone leave
+   the scale-dependent unit mixing in place. The user explicitly rejected
+   exactly that option in the brainstorm in favor of docs-only; the mixing is
+   a documented sharp edge, not a correctness bug, and no in-repo caller
+   needs separate tolerances today. Decision stands; revisit if a caller
+   needs it.
 
 ## Fixes
 
@@ -90,48 +101,47 @@ incremented (`:250`, `:273`); neither `solve()` (`:114`) nor `initialize()`
 index past the end and silently skips every temporal event (dividends
 dropped).
 
-**Fix:** reset `next_event_idx_ = 0;` at the top of `solve()`. Placing it in
-`solve()` rather than `initialize()` guarantees correct event replay on every
-solve. Note this does **not** make the *solution state* self-contained:
-`solve()` operates on the grid's current solution, so re-running still
-requires the caller to `initialize(ic)` again — the documented reuse contract
-is `initialize(ic); solve();` per run.
+**Fix:** reset `next_event_idx_ = 0;` in `initialize()`, where a new run's
+solution state begins — cursor reset and state reset stay coupled. (Resetting
+in `solve()` instead would replay events if a caller mistakenly re-solves the
+already-final state without re-initializing.) Document the lifecycle on both
+methods: the reuse contract is `initialize(ic); solve();` per run, and
+`solve()` without a fresh `initialize()` is unsupported.
 
-**Test:** with a temporal event that visibly changes the solution:
-`initialize(ic); solve();` capture the result; then `initialize(ic); solve();`
-on the same instance and assert the second result equals the first (today the
-second run differs because the event is skipped).
+**Test:** with a temporal event that visibly changes the solution and counts
+its invocations: `initialize(ic); solve();` capture the result; then
+`initialize(ic); solve();` on the same instance and assert (a) the second
+result equals the first and (b) the event fired exactly twice — today it is
+skipped on the second run, so equality alone would be an indirect signal.
 
 ### 3. Implicit copies leave mdspan views dangling
 
 Two value types hold an mdspan over their own vector and rely on
 compiler-generated copies, which alias the *source's* buffer:
 
-- `src/math/bspline/bspline_nd.hpp:271` — `coeffs_view_` over `coeffs_`.
-  **Fix:** delete copy constructor/assignment; explicitly default move
-  constructor/assignment (safe: `std::vector` move preserves `data()`, so the
-  view copied from the source points into the buffer now owned by the
-  target). All special-member declarations public. All in-repo uses are
-  `shared_ptr<const BSplineND>` built by move
-  (`price_table_factory.cpp:561`, `serialization/reconstruct.hpp:69`), so
-  nothing breaks.
-- `src/pde/core/grid.hpp:547` — `NonUniformSpacing::sections_view_` over
-  `precomputed`. **Fix:** user-defined copy constructor/assignment that copy
-  the members then re-point `sections_view_ =
-  SectionView(precomputed.data(), 5, n − 2);` explicitly defaulted move
-  constructor/assignment (same vector-move argument). All special members
-  public. Exception safety: copy assignment uses copy-construct-then-move
-  (or copies the vector into a local first), so a throwing allocation never
-  leaves `n`/`sections_view_` inconsistent with `precomputed`. Keeps
-  `Grid`/`SpacingVariant` copyable.
+Both types get user-defined **re-pointing copy operations** and explicitly
+defaulted moves (safe: `std::vector` move preserves `data()`, so the view
+copied from the source points into the buffer now owned by the target). All
+special-member declarations public. Copy assignment is strong-exception-safe
+via copy-construct-then-move-assign, so a throwing allocation never leaves
+size metadata inconsistent with the buffer.
 
-**Tests:** for `NonUniformSpacing`: copy-construct *and* copy-assign, let the
-source be destroyed (scope), assert `copy.sections_view_.data_handle() ==
-copy.precomputed.data()` and values still read correctly; same
-`data_handle()`-identity assertion after a move and after copy-then-move.
-For `BSplineND`: `static_assert(!std::is_copy_constructible_v<...> &&
-!std::is_copy_assignable_v<...>)` plus a move test asserting the moved-to
-object evaluates correctly (evaluation exercises `coeffs_view_`).
+- `src/math/bspline/bspline_nd.hpp:271` — `coeffs_view_` over `coeffs_`:
+  copy the members, then `coeffs_view_ = create_coeffs_view(coeffs_.data(),
+  dims_);`. (`BSplineND` is a value type — `create` returns
+  `std::expected<BSplineND, …>` and tests/benchmarks hold it by value — so
+  copyability must be preserved, not deleted.)
+- `src/pde/core/grid.hpp:547` — `NonUniformSpacing::sections_view_` over
+  `precomputed`: copy the members, then `sections_view_ =
+  SectionView(precomputed.data(), 5, n − 2);`. Keeps `Grid`/`SpacingVariant`
+  copyable.
+
+**Tests:** for each type: copy-construct *and* copy-assign inside a scope,
+destroy the source, then assert outside the scope that the view aliases the
+copy's own buffer (`sections_view_.data_handle() == precomputed.data()` for
+`NonUniformSpacing`) and values read correctly; for `BSplineND`, evaluation
+after the source is destroyed exercises `coeffs_view_`. Move tests likewise
+construct the moved-to object, end the source's lifetime, and then evaluate.
 
 ### 5. Thomas solve with n==0 returns misleading error
 
@@ -141,10 +151,14 @@ object evaluates correctly (evaluation exercises `coeffs_view_`).
 the success path is dead code. `solve_thomas_projected` (the obstacle
 variant) duplicates the bug (`:336` guard vs `:356` trivial case).
 
-**Fix:** in both functions, hoist `if (n == 0) return Result::ok_result();`
-above the dimension validation.
+**Fix:** in both functions, compute
+`const size_t offdiag_size = (n == 0) ? 0 : n - 1;`, validate all companion
+span sizes against it (so a malformed call — empty `diag` with nonempty
+`lower`/`upper`/`rhs`/`psi`/`solution` — is still rejected), then return
+`ok_result()` for `n == 0` after validation passes.
 
-**Test:** call both solvers with all-empty spans → expect success, not error.
+**Test:** both solvers with all-empty spans → success; empty `diag` with a
+nonempty companion span → error, not success.
 
 ### 6. `CubicSpline2D::eval` ignores its documented extrapolation contract
 
@@ -162,8 +176,12 @@ Risk is low: `CubicSpline2D` has no production consumer — only its own test
 and `benchmarks/cubic_spline_template_vs_hardcoded.cc`.
 
 **Test:** build a 2D spline on data whose boundary cubic has nonzero slope;
-query outside the grid on each side; assert the result equals the boundary
-evaluation (`eval(x_max, y)` etc.), not the diverged cubic value.
+query outside the grid on each side *and* at corners (both coordinates
+outside); assert the result equals the boundary evaluation
+(`eval(x_max, y)` etc.), not the diverged cubic value. Update the existing
+extrapolation tests in `tests/cubic_spline_2d_test.cc`, whose comments
+currently describe "natural spline extrapolation" — they pin the old
+behavior and must flip to the clamped contract.
 
 ### 7. Factory collapses distinct build failures into `InvalidGridSize`
 
@@ -203,12 +221,24 @@ Diagnostics are destroyed: a fitting failure surfaces as a grid-size error.
     `ArbitrageViolation`); add an explicit `PriceTableBuildFailed →
     IVErrorCode::InvalidGridConfig` case rather than letting a build failure
     masquerade as an arbitrage violation.
+- Prefer explicit grouped `case` labels over keeping a `default:` arm, so a
+  future `PriceTableErrorCode` value triggers a compiler warning instead of
+  being silently swallowed by the catch-all.
+- **Route the five hardcoded sites through the same mapper** (wrapping their
+  failure in a `PriceTableError`, or via a small shared helper that the unit
+  test also covers) rather than hardcoding `PriceTableBuildFailed` inline —
+  otherwise the direct unit test pins only the switch and the five sites can
+  regress independently. Where an `InterpolationError` payload
+  (index/grid-size) is available at those sites, preserve it instead of
+  returning `{…, 0.0}` unconditionally.
 - For testability, declare `to_validation_error` in `namespace mango::detail`
   in a small internal header (e.g.
   `src/option/detail/price_table_error_mapping.hpp`, commented as internal
-  and unstable — not part of the public API), included by the factory `.cpp`
-  and the unit test. This avoids leaking a test seam into
-  `price_table_factory.hpp`.
+  and unstable — not part of the public API). **Bazel:** the header must not
+  be exported through the public factory target's `hdrs`; give it a small
+  library target (or `hdrs` entry) with visibility restricted to
+  `//src/option` and `//tests`, so reverse dependencies of the factory never
+  see it.
 
 **ADR / bindings note:** ADR 0001 (Python API parity centers on reusable
 price tables) makes factory error plumbing part of the Python surface;
@@ -220,7 +250,9 @@ schema) serializes `ValidationErrorCode`, so no artifact change.
 (adds `NoViableSurface`/`AdaptiveValidationFailed` arms). Whichever merges
 second resolves a small, mechanical conflict in `to_validation_error` and the
 `ValidationErrorCode` enum; the changes are semantically independent (454
-adds specific arms; this change only retargets the fallback).
+adds specific arms; this change only retargets the fallback). Rebase rule:
+already-merged enum values keep their ordinals; whichever change lands second
+appends its new values after the first's.
 
 **Test:** direct unit test of `mango::detail::to_validation_error`: each
 still-collapsed `PriceTableErrorCode` maps to `PriceTableBuildFailed`, and
@@ -256,7 +288,9 @@ stack buffer overflow; only 4 is ever instantiated.
 a public type instantiated directly by tests and used independently by
 `BSplineNDSeparable`, so guarding only the collocation class would leave the
 workspace's own `KL/KU = Bandwidth − 1` underflow reachable. The parameter
-stays for future generality.
+stays, but its doc comment changes from "degree + 1" generality to
+*reserved*: only 4 (cubic) is supported until the basis evaluation is
+generalized.
 
 **Test:** compile-time; no runtime test. (The static_asserts *are* the
 regression guard.)
@@ -295,11 +329,15 @@ genuine step delta was computed at `:796` and discarded.
 **Fix:** track the most recent step-delta error in a local
 (`double last_error = std::numeric_limits<double>::infinity();` updated each
 iteration) and report it in the `ConvergenceFailure` return. The
-`LinearSolveFailure` path (reports infinity) is untouched.
+`LinearSolveFailure` path (reports infinity) is untouched. Note the metric:
+`compute_step_delta_error` is a solution-norm-normalized RMS step delta, not
+a PDE residual — document that on `SolverError::residual` so the field is
+not misread.
 
 **Test:** force a convergence failure with `max_iter == 1` (not 0, which
-would trivially report the infinity seed) and a tolerance tight enough that
-one iteration cannot converge; assert `std::isfinite(residual) &&
+would trivially report the infinity seed) on a deterministic fixture whose
+first Newton update is nonzero, with a tolerance tight enough that one
+iteration cannot converge; assert `std::isfinite(residual) &&
 residual > 0`.
 
 ## Test strategy
