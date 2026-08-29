@@ -1242,3 +1242,34 @@ TEST(RunRefinementTest, MonotonicityScanCountsInvalidPrices) {
               r->diagnostics.holdout_points);
     EXPECT_EQ(r->diagnostics.monotonicity_violations, 0u);
 }
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: reference solves must not carry dividends beyond the sampled
+// maturity.
+// Bug: make_validate_fn passed the full build schedule to every reference
+// solve, so solve_american_option rejected any sampled tau earlier than the
+// last dividend; the D4 minimum-valid-holdout gate then turned valid
+// late-dividend configs (e.g. a dividend at 0.9y on a 1y surface) into
+// deterministic ValidationFailed.
+TEST(MakeValidateFnTest, DropsDividendsBeyondSampledMaturity) {
+    std::vector<mango::Dividend> schedule{
+        {.calendar_time = 0.9, .amount = 1.50}};
+    auto validate = mango::make_validate_fn(0.0, mango::OptionType::PUT,
+                                            schedule);
+
+    // tau = 0.5 lies before the dividend: the reference solve must succeed
+    // with the dividend filtered out.
+    auto before = validate(100.0, 100.0, 0.5, 0.2, 0.05);
+    ASSERT_TRUE(before.has_value());
+    EXPECT_TRUE(std::isfinite(before.value()));
+
+    // tau = 1.0 spans the dividend: it stays in the schedule.
+    auto spanning = validate(100.0, 100.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(spanning.has_value());
+    // The dividend lowers the forward, so the put is worth more than the
+    // pre-dividend solve.
+    EXPECT_GT(spanning.value(), before.value());
+}

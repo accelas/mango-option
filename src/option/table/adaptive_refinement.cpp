@@ -295,7 +295,14 @@ ValidateFn make_validate_fn(double dividend_yield,
         p.dividend_yield = dividend_yield;
         p.option_type = option_type;
         p.volatility = sigma;
-        p.discrete_dividends = discrete_dividends;
+        // A reference solve at maturity tau prices an option whose life ends
+        // at tau: dividends on or after tau are outside it.  Passing the
+        // full build schedule makes solve_american_option reject every
+        // sampled maturity before the last dividend, which the D4
+        // minimum-valid-holdout gate would turn into deterministic
+        // ValidationFailed for valid late-dividend configs.
+        p.discrete_dividends =
+            filter_and_merge_dividends(discrete_dividends, tau);
         auto fd = solve_american_option(p);
         if (!fd.has_value()) return std::unexpected(fd.error());
         return fd->value();
