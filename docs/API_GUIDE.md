@@ -620,6 +620,11 @@ mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.01,
+    .grid = mango::IVGrid{
+        .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
+        .vol = {0.10, 0.15, 0.20, 0.30},
+        .rate = {0.02, 0.03, 0.05, 0.07},
+    },
     .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
     .backend = mango::BSplineBackend{
         .maturity_grid = {0.1, 0.25, 0.5, 1.0},
@@ -629,12 +634,25 @@ mango::IVSolverFactoryConfig config{
         .discrete_dividends = {
             mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
             mango::Dividend{.calendar_time = 0.50, .amount = 1.50}},
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                   102.5, 105.0, 107.5, 110.0}},
     },
 };
 
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
+
+**The moneyness grid and the K_refs must agree.** The assembled surface routes
+a query to the K_refs bracketing its strike and blends their prices linearly
+in strike, so the K_refs must both *span* and *resolve* the strike range the
+moneyness grid implies. Here `S/K ∈ [0.92, 1.08]` means strikes in
+`[92.6, 108.7]`, served by K_refs at 2.5% spacing across `[90, 110]`; that
+surface measures 770 bps of IV error against a 2,000 bps viability bound.
+Pairing the same K_refs with the default ±30% moneyness grid puts most
+queried strikes outside the K_ref span, where the blend clamps to a single
+K_ref: measured 827,756 bps, and the build fails with `NoViableSurface`
+rather than returning it. This config is pinned by
+`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig`.
 
 ### Querying the Solver
 
@@ -657,7 +675,8 @@ if (result.has_value()) {
 
 ### Configuration Notes
 
-- **`kref_config`** is optional. When omitted, the builder selects reference strikes automatically at log-spaced intervals around the spot. Explicit K_refs are useful when you know the strike range of interest.
+- **`kref_config`** is optional. When omitted, the builder selects reference strikes automatically at log-spaced intervals around the spot. Explicit K_refs are useful when you know the strike range of interest — but they must span and resolve the strike range your moneyness grid implies (see above).
+- **Adaptive builds are gated on measured accuracy.** After assembling the final surface the builder re-measures it against fresh PDE solves over your own moneyness/vol/rate ranges and refuses to return one whose IV error exceeds 2,000 bps (`PriceTableErrorCode::NoViableSurface`). A surface that misses `target_iv_error` but stays inside that bound is returned as best-effort.
 - **Continuous yield** applies inside each segment's PDE. Discrete dividends operate at segment boundaries. Both can be used together.
 
 ---
