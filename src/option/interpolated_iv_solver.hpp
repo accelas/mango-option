@@ -35,7 +35,6 @@
 #include <array>
 #include <cmath>
 #include <algorithm>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -87,6 +86,28 @@ struct InterpolatedIVSolverConfig {
 
 namespace detail {
 
+/// Non-owning view of the IV objective f(sigma).
+///
+/// `screen_bracket` runs on the `noexcept` solve path, where a
+/// `std::function` conversion could heap-allocate (the solve objective
+/// captures more than the small-object buffer holds) and so introduce a
+/// `std::bad_alloc` that would terminate.  The view must not outlive the
+/// callable it wraps; the screen only calls it during the scan.
+class ObjectiveRef {
+public:
+    template <typename F>
+    ObjectiveRef(const F& f) noexcept  // NOLINT(google-explicit-constructor)
+        : ctx_(&f), call_([](const void* ctx, double sigma) {
+              return (*static_cast<const F*>(ctx))(sigma);
+          }) {}
+
+    double operator()(double sigma) const { return call_(ctx_, sigma); }
+
+private:
+    const void* ctx_;
+    double (*call_)(const void*, double);
+};
+
 /// Verdict of the multiple-root bracket screen (spec D8.2).
 ///
 /// Exactly one of three outcomes is expressed:
@@ -122,7 +143,7 @@ struct BracketScreen {
 /// guarantees and blind spots are documented on
 /// `InterpolatedIVSolverConfig::detect_multiple_roots`.
 [[nodiscard]] BracketScreen screen_bracket(
-    const std::function<double(double)>& objective,
+    ObjectiveRef objective,
     double sigma_min, double sigma_max,
     double spot, double tolerance);
 

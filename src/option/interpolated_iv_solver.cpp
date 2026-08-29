@@ -22,7 +22,7 @@ namespace mango {
 // =====================================================================
 
 detail::BracketScreen detail::screen_bracket(
-    const std::function<double(double)>& objective,
+    ObjectiveRef objective,
     double sigma_min, double sigma_max,
     double spot, double tolerance)
 {
