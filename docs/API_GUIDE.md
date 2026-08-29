@@ -440,6 +440,54 @@ auto iv_solver = mango::InterpolatedIVSolver<mango::BSplinePriceTable>::create(
 auto iv_result = iv_solver.solve(iv_query);
 ```
 
+### Adaptive Build Diagnostics
+
+An adaptive-built `PriceTable` or `InterpolatedIVSolver` (from `AdaptiveGridBuilder` or `make_interpolated_iv_solver` with `.adaptive` set) records honest quality diagnostics that survive retention and backtracking — `build_diagnostics()` describes the *returned* candidate, not necessarily the last one built:
+
+```cpp
+auto solver = mango::make_interpolated_iv_solver(config).value();
+
+if (auto diag = solver.build_diagnostics(); diag.has_value()) {
+    std::cout << "Target met: " << diag->target_met << "\n";
+    std::cout << "Achieved max/avg IV error: "
+               << diag->achieved_max_error << " / "
+               << diag->achieved_avg_error << "\n";
+    std::cout << "Picked iteration " << diag->picked_iteration
+               << " of " << diag->total_iterations << "\n";
+    std::cout << "Monotonicity violations: "
+               << diag->monotonicity_violations << "\n";
+}
+```
+
+`build_diagnostics()` returns `std::nullopt` for a manually-built (non-adaptive) table, the continuous Chebyshev factory path (which does not yet honor `.adaptive`), or a table loaded from Parquet — diagnostics are never persisted to `PriceTableData`/Parquet. Python exposes the same data via the `build_diagnostics` property (a dict) on `PriceTable` and `InterpolatedIVSolver`.
+
+If every candidate built during refinement fails the internal viability gate (holdout error above an absolute, target-independent garbage-detection bound), the build itself fails with `ValidationErrorCode::NoViableSurface` rather than silently returning a broken surface — check for it alongside the usual validation errors.
+
+### Multiple-Root Screening
+
+Because the fitted surface is not certified monotone in σ (unconstrained least squares can wiggle slightly wherever vega is small), `InterpolatedIVSolver` screens for multiple roots before running Brent's method. It is on by default:
+
+```cpp
+mango::InterpolatedIVSolverConfig config{
+    .detect_multiple_roots = true,  // default; set false to restore the
+                                     // pre-screen, unscreened path exactly
+};
+```
+
+A query whose bracket contains more than one sign transition, a tangency, or an ambiguous boundary root returns `mango::IVErrorCode::MultipleRoots` instead of an arbitrary root:
+
+```cpp
+auto iv_result = solver.solve(query);
+if (!iv_result.has_value()) {
+    if (iv_result.error().code == mango::IVErrorCode::MultipleRoots) {
+        // The 17-point bracket screen found more than one candidate root —
+        // treat the surface as ambiguous here rather than trusting a guess.
+    }
+}
+```
+
+This is a **screen, not a proof of uniqueness**: it is guaranteed to catch any sign excursion spanning at least one bracket/16 cell and any tangency at a scan point, but a narrower fold that also passes the post-hoc slope check can slip through. `detect_multiple_roots = false` disables the screen (Python: same-named config field); C API callers always get the default-on screen (the toggle is not exposed through the C ABI).
+
 ### Build Diagnostics
 
 **Access performance and quality metrics:**

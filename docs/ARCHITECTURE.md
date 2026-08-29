@@ -181,7 +181,9 @@ Each Brent iteration solves the PDE from scratch (no warm-starting), so total ti
 
 The interpolated solver replaces the nested PDE solve with a lookup into a pre-computed price surface. Brent's method on the smooth surface converges in ~4-6 function evaluations, each requiring only a surface evaluation (~250ns). Total IV solve: ~3.5μs — a ~2,000x speedup over FDM.
 
-Before starting the root search, the solver evaluates surface vega at three representative volatilities (10%, 25%, 50%). If all are below a threshold (default 1e-4), the option has near-zero vega sensitivity and IV is effectively undefined — the solver returns `VegaTooSmall` immediately (~600ns) instead of running a doomed search.
+Before starting the root search, the solver evaluates surface vega at the 25/50/75% quartile points of the actual search bracket `[sigma_min, sigma_max]`. The check is on the **signed** maximum (not `|vega|`): if the largest signed vega across the three probes is still below a threshold (default 1e-4), the option has near-zero or negative vega sensitivity and IV is effectively undefined — the solver returns `VegaTooSmall` immediately (~600ns) instead of running a doomed or backwards search.
+
+**Multiple-root screen.** An unconstrained least-squares B-spline fit is not certified monotone in σ — small negative wiggles are expected wherever vega is small — so a naive root search can converge to a spurious root. By default (`detect_multiple_roots = true`), before Brent runs, the solver samples the pricing objective at 17 uniformly spaced points across the bracket (~4μs) and classifies the sign pattern: any sign transition, tangency (a scan point touching zero flanked by the same sign on both sides), or extra boundary root beyond a single clean crossing returns `IVErrorCode::MultipleRoots` instead of guessing. Exactly one transition narrows Brent to that subinterval and adds a post-hoc slope check on convergence; no transition falls through to the unscreened `BracketingFailed` path. This is a **screen, not a proof of uniqueness**: it guarantees detection of any sign excursion spanning at least one bracket/16 cell and of tangency at a scan point, but a narrower fold that also leaves the post-hoc slope positive can still pass. `detect_multiple_roots = false` restores the pre-screen behavior exactly (C API callers always get the default-on screen; the toggle is C++/Python only).
 
 This is the production path. You pay a one-time pre-computation cost (see next section), then amortize it over millions of queries.
 
@@ -219,7 +221,7 @@ The `PriceTable` exposes `delta()`, `gamma()`, `theta()`, and `rho()` alongside 
 
 **For the full template composition architecture, see [INTERPOLATION_FRAMEWORK.md](INTERPOLATION_FRAMEWORK.md).**
 
-A softplus floor (`log1p(exp(100·x))/100`) enforces non-negativity of the EEP during tensor construction, preventing B-spline ringing near τ→0 where the premium vanishes.
+An exact nonnegative projection, `eep_floor(x) = max(0, x)`, enforces non-negativity of the EEP during tensor construction, clamping the (rare, small) negative PDE-residual noise that would otherwise seed B-spline ringing near τ→0 where the premium vanishes. An earlier debiased-softplus floor (`log1p(exp(100·x))/100`) approximated this projection smoothly but introduced its own bias; the exact projection is now used everywhere the EEP is written into the tensor.
 
 **Accuracy improvement** (grid sweep benchmark, SPY-like parameters):
 
@@ -254,6 +256,51 @@ The builder supports automatic grid estimation via `from_grid_auto_profile()` wi
 | Rate (r) | 0.6x | Nearly linear discounting |
 
 The default (High) targets ~20 bps average IV error. For tighter tolerance, `AdaptiveGridBuilder` iteratively refines grid density until a target error is met — typically achieving <5 bps IV error in the core region (ATM ±30%, T ≥ 0.25).
+
+### Adaptive Refinement Safety Contract
+
+The shared refinement loop (`run_refinement`) measures quality and picks a
+result under a safety contract, not just a stopping rule:
+
+- **User-domain measurement.** Both the per-iteration fresh validation
+  samples and a fixed holdout set are drawn from the *user's* requested
+  domain (`sample_bounds`), never from the wider fit-domain headroom a
+  B-spline needs for interpolation support. A surface's published, queryable
+  bounds equal `sample_bounds` — the headroom band is support only and is
+  rejected by `is_in_bounds` at query time.
+- **Fixed holdout + best-viable retention.** One holdout set is drawn once
+  (before iteration 0) and reused, unchanged, to score every candidate the
+  loop builds, so candidates are compared on a common yardstick. The loop
+  never returns whichever iteration happened to run last: it retains the
+  best-scoring *viable* candidate across the whole run, including candidates
+  from mid-loop build failures, and rebuilds it once at the end if a later,
+  worse iteration was actually built last.
+- **Measured backtracking walk.** Refinement axes (moneyness, τ, σ, r) are
+  tried by a greedy coordinate descent: refine the highest-scoring untried
+  axis from the best-evaluated candidate; only a ≥2% relative holdout
+  improvement clears the tried-axis set and restarts the walk, so a hairline
+  improvement can't burn the iteration budget re-trying every axis. The walk
+  stops when all axes are exhausted or the iteration budget runs out.
+- **Viability gate.** A candidate is *viable* only if every sample evaluated
+  for it (holdout and fresh) produced a finite, nonnegative error and its
+  holdout max error is below an absolute operational bound
+  (`kViabilityBound`, independent of the accuracy target — it flags
+  catastrophically broken surfaces, not merely off-target ones). If no
+  candidate built during a run is viable, the build fails with
+  `PriceTableErrorCode::NoViableSurface` rather than silently returning
+  garbage.
+- **Build diagnostics.** Every adaptive build records a `BuildDiagnostics`
+  struct — `target_met`, achieved max/avg error, which iteration was
+  returned, monotonicity-violation statistics, and per-iteration forensics —
+  retrievable via `build_diagnostics()` on the built `PriceTable` /
+  `InterpolatedIVSolver` (C++ and Python). Diagnostics never enter
+  serialization (`to_data()` / Parquet); a manually-built or Parquet-loaded
+  table reports `nullopt`.
+
+This closes the failure mode where an adaptive build silently returned a
+degraded final iteration whose error, measured honestly against the user
+domain, was orders of magnitude worse than an earlier candidate already in
+hand.
 
 ---
 
