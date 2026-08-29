@@ -24,6 +24,13 @@ struct BSplineAdaptiveResult {
     double achieved_avg_error = 0.0;
     bool target_met = false;
     size_t total_pde_solves = 0;
+
+    /// Build diagnostics (spec D7) and the user-facing measurement domain
+    /// (spec D2).  Callers publishing this surface must use `sample_bounds`
+    /// as the queryable bounds, not the spline's own knot span (which
+    /// includes B-spline support headroom).
+    BuildDiagnostics diagnostics;
+    SurfaceBounds sample_bounds{};
 };
 
 /// Result of adaptive segmented B-spline surface construction
@@ -32,14 +39,38 @@ struct BSplineSegmentedAdaptiveResult {
     IVGrid grid;
     int tau_points_per_segment;
 
-    // Convergence stats (aggregated across probe K_refs)
-    std::vector<IterationStats> iterations;  ///< Per-probe worst-case iterations
+    // Convergence stats.  The achieved errors and `target_met` describe the
+    // **returned** assembled surface as measured by the final validation
+    // (spec D9), not the probe loops -- including when the bumped-grid retry
+    // is the surface returned.
+    std::vector<IterationStats> iterations;  ///< Per-probe loop forensics
     double achieved_max_error = 0.0;         ///< Max error from final LHS validation
     double achieved_avg_error = 0.0;
     bool target_met = false;
     size_t total_pde_solves = 0;
-    bool used_retry = false;                 ///< True if bumped-grid retry was used
+    bool used_retry = false;                 ///< True if bumped-grid retry was returned
+
+    /// Diagnostics for the returned final surface (spec D7/D9), with the
+    /// per-probe iterations appended for forensics.
+    ///
+    /// `picked_iteration` is left at 0 and carries no meaning here: the
+    /// segmented builder runs one refinement loop per probe and then
+    /// assembles a surface none of them built, so there is no single picked
+    /// iteration to name.
+    BuildDiagnostics diagnostics;
+
+    /// User-facing measurement domain (spec D2).  Callers publishing this
+    /// surface must use this as the queryable bounds, not the aggregated
+    /// grids' own span (which includes fit-domain support headroom).
+    SurfaceBounds sample_bounds{};
 };
+
+/// Create a RefineFn that does B-spline midpoint insertion, targeted at the
+/// physical focus intervals the loop passes (empty => uniform refinement
+/// over the whole axis). Returns changed=false when the requested axis is
+/// at max_points_per_dim or no midpoint could be inserted; never redirects
+/// to a different axis.
+[[nodiscard]] RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params);
 
 /// Build B-spline price table with adaptive grid refinement.
 ///
@@ -53,8 +84,11 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
 
 /// Builder for segmented B-spline surfaces (discrete dividends, multi-K_ref).
 ///
-/// Performs shared setup (K_ref resolution, domain expansion, headroom)
-/// once in create(), then builds via adaptive refinement.
+/// Performs shared setup (K_ref resolution, domain expansion) once in
+/// create(), then builds via adaptive refinement.  Support headroom is *not*
+/// baked in at create() time: the headroom scale depends on
+/// `AdaptiveGridParams::min_moneyness_points` (spec D3), so `build_adaptive()`
+/// derives the fit domain from the sample domain.
 class BSplineSegmentedBuilder {
 public:
     /// Create builder, performing shared setup.
@@ -62,6 +96,8 @@ public:
     create(const SegmentedAdaptiveConfig& config, const IVGrid& domain);
 
     /// Build with adaptive grid refinement.
+    /// The fit domain (sample domain + D3 headroom) is derived from `params`
+    /// locally, so the builder itself stays immutable.
     [[nodiscard]] std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
     build_adaptive(const AdaptiveGridParams& params) const;
 
@@ -69,7 +105,8 @@ private:
     BSplineSegmentedBuilder(
         SegmentedAdaptiveConfig config,
         std::vector<double> K_refs,
-        SurfaceBounds domain,
+        SurfaceBounds sample_domain,
+        SurfaceBounds support_domain,
         IVGrid initial_grid);
 
     /// Assemble multi-K_ref surface from per-K_ref segmented surfaces.
@@ -78,7 +115,8 @@ private:
 
     SegmentedAdaptiveConfig config_;
     std::vector<double> K_refs_;
-    SurfaceBounds domain_;
+    SurfaceBounds sample_domain_;   ///< user-facing measurement domain (D2)
+    SurfaceBounds support_domain_;  ///< sample domain + discrete-dividend span
     IVGrid initial_grid_;
 };
 

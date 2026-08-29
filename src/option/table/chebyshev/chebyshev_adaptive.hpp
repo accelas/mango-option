@@ -17,6 +17,66 @@
 
 namespace mango {
 
+namespace detail {
+
+/// State for Chebyshev CC-level refinement.
+///
+/// All 4 dimensions use Clenshaw-Curtis levels for nested node placement;
+/// node count at level l = 2^l + 1.  The refiners mutate nothing outside this
+/// struct and the four working grid vectors, so a copy of it is the complete
+/// backend refinement state for the loop's snapshot/restore hooks (spec D6).
+///
+/// Exposed for testing the refiner/hook contract without a full table build.
+struct ChebyshevRefinementState {
+    size_t m_level = 5;       ///< CC level for moneyness (initial: 33 nodes)
+    size_t tau_level = 3;     ///< CC level for tau (initial: 9 nodes)
+    size_t sigma_level = 2;   ///< CC level for sigma (initial: 5 nodes)
+    size_t rate_level = 1;    ///< CC level for rate (initial: 3 nodes)
+    size_t max_level = 7;     ///< ceiling per dimension (2^7+1 = 129 nodes)
+    // Frozen extended domain bounds
+    double m_lo = 0.0, m_hi = 0.0, tau_lo = 0.0, tau_hi = 0.0;
+    double sigma_lo = 0.0, sigma_hi = 0.0, rate_lo = 0.0, rate_hi = 0.0;
+    std::vector<double> seg_boundaries;  ///< empty = vanilla (no segmentation)
+    std::vector<bool> seg_is_gap;        ///< true for synthetic dividend gaps
+};
+
+/// Generate per-segment CC-level tau nodes, sorted and deduplicated.
+/// Gap segments are skipped.
+[[nodiscard]] std::vector<double> generate_segmented_tau_nodes(
+    size_t tau_level,
+    const std::vector<double>& seg_bounds,
+    const std::vector<bool>& seg_is_gap);
+
+/// RefineFn for Chebyshev CC-level refinement (spec D6).
+///
+/// Advances EXACTLY the requested axis by one CC level, or reports
+/// `changed = false` when that axis is already at `state.max_level`.  No
+/// redirection to another axis: the coordinate-descent walk owns axis
+/// selection and must be able to measure the axis it picked.
+/// `focus_intervals` is ignored -- CC nodes sit at fixed nested positions and
+/// cannot be steered by physical intervals.
+///
+/// `state` is captured by reference: it must outlive the returned callable.
+[[nodiscard]] RefineFn make_chebyshev_refine_fn(ChebyshevRefinementState& state);
+
+/// RefineFn for segmented Chebyshev CC-level refinement.
+/// Same contract as `make_chebyshev_refine_fn`; tau refinement generates
+/// per-segment CC nodes instead of nodes over a single range.
+///
+/// `state` is captured by reference: it must outlive the returned callable.
+[[nodiscard]] RefineFn make_segmented_chebyshev_refine_fn(
+    ChebyshevRefinementState& state);
+
+/// Snapshot/restore hooks over `state` for the loop's backtracking reset
+/// (spec D6).  The snapshot is a full copy, so restoring reinstates the level
+/// counters (and the segmentation metadata) exactly.
+///
+/// `state` is captured by reference: it must outlive the returned hooks.
+[[nodiscard]] RefineStateHooks make_chebyshev_state_hooks(
+    ChebyshevRefinementState& state);
+
+}  // namespace detail
+
 /// Tau-segmented Chebyshev surface (one leaf per inter-dividend interval)
 using ChebyshevTauSegmented = SplitSurface<ChebyshevSegmentedLeaf, TauSegmentSplit>;
 
@@ -34,6 +94,13 @@ struct ChebyshevAdaptiveResult {
     double achieved_avg_error = 0.0;
     bool target_met = false;
     size_t total_pde_solves = 0;
+
+    /// Build diagnostics (spec D7) and the user-facing measurement domain
+    /// (spec D2).  Not consumed by the factory today (the continuous
+    /// Chebyshev factory path always uses the fixed builder), exposed for
+    /// direct callers of `build_adaptive_chebyshev`.
+    BuildDiagnostics diagnostics;
+    SurfaceBounds sample_bounds{};
 };
 
 /// Build Chebyshev surface with adaptive CC-level refinement.
@@ -69,6 +136,10 @@ build_chebyshev_segmented_pieces(
     std::span<const double> rate_nodes);
 
 /// Result of adaptive segmented Chebyshev surface construction.
+///
+/// The achieved errors and `target_met` describe the **assembled all-K_ref
+/// surface** as measured by the mandatory final validation (spec D9), not the
+/// single-K_ref sizing loop.
 struct ChebyshevSegmentedAdaptiveResult {
     ChebyshevMultiKRefSurface surface;
     std::vector<IterationStats> iterations;
@@ -76,6 +147,16 @@ struct ChebyshevSegmentedAdaptiveResult {
     double achieved_avg_error = 0.0;
     bool target_met = false;
     size_t total_pde_solves = 0;
+
+    /// Diagnostics for the returned final surface (spec D7/D9), with the
+    /// sizing-loop iterations appended for forensics.  `picked_iteration`
+    /// names the sizing loop's pick, not a build of the assembled surface.
+    BuildDiagnostics diagnostics;
+
+    /// User-facing measurement domain (spec D2).  Callers publishing this
+    /// surface must use this as the queryable bounds, not the node domain
+    /// (which includes CC-level support headroom).
+    SurfaceBounds sample_bounds{};
 };
 
 /// Builder for segmented Chebyshev surfaces (discrete dividends, multi-K_ref).
@@ -106,15 +187,20 @@ private:
         SegmentedAdaptiveConfig config,
         std::vector<double> K_refs,
         SurfaceBounds domain,
+        SurfaceBounds sample_domain,
         std::vector<double> seg_bounds,
         std::vector<bool> seg_is_gap);
 
     /// Build all K_ref surfaces (includes per-K_ref PDE solves) and compose.
+    /// `bounds` is the published `SurfaceBounds` for the assembled surface:
+    /// `build()` passes the node/support domain, `build_adaptive()` passes
+    /// the user-facing sample domain (spec D2).
     [[nodiscard]] std::expected<AssembleResult, PriceTableError>
     build_all_krefs(std::span<const double> m_nodes,
                     std::span<const double> tau_nodes,
                     std::span<const double> sigma_nodes,
-                    std::span<const double> rate_nodes) const;
+                    std::span<const double> rate_nodes,
+                    const SurfaceBounds& bounds) const;
 
     [[nodiscard]] std::vector<double> generate_tau_nodes(size_t tau_level) const;
 
@@ -126,7 +212,8 @@ private:
 
     SegmentedAdaptiveConfig config_;
     std::vector<double> K_refs_;
-    SurfaceBounds domain_;
+    SurfaceBounds domain_;         ///< node/support domain (incl. dividend span)
+    SurfaceBounds sample_domain_;  ///< user-facing measurement domain (D2)
     std::vector<double> seg_bounds_;
     std::vector<bool> seg_is_gap_;
 };

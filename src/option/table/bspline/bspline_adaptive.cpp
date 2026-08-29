@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
@@ -14,12 +15,12 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/dividend_utils.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
-#include "mango/math/latin_hypercube.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <span>
 
@@ -47,22 +48,25 @@ SegmentedPriceTableBuilder::Config make_seg_config(
     };
 }
 
+}  // anonymous namespace
+
 // ============================================================================
 // B-spline refinement strategy
 // ============================================================================
 
-/// Create a RefineFn that does B-spline midpoint insertion in problematic bins.
-static RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params) {
-    return [&params](size_t worst_dim, const ErrorBins& error_bins,
-                     std::vector<double>& moneyness,
-                     std::vector<double>& tau,
-                     std::vector<double>& vol,
-                     std::vector<double>& rate) -> bool
+RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params) {
+    return [params](size_t requested_dim,
+                    std::span<const std::pair<double, double>> focus_intervals,
+                    std::vector<double>& moneyness,
+                    std::vector<double>& tau,
+                    std::vector<double>& vol,
+                    std::vector<double>& rate) -> RefineOutcome
     {
-        auto problematic = error_bins.problematic_bins(worst_dim);
-
-        auto refine_grid_targeted = [&params, &problematic](
-            std::vector<double>& grid, double lo, double hi)
+        // Insert midpoints in `grid` within the target intervals (empty
+        // focus_intervals => the whole [lo, hi] axis, i.e. uniform
+        // refinement). Returns true iff at least one midpoint was inserted.
+        auto refine_grid_targeted = [&params, focus_intervals](
+            std::vector<double>& grid, double lo, double hi) -> bool
         {
             size_t target_size = std::min(
                 static_cast<size_t>(grid.size() * params.refinement_factor),
@@ -70,23 +74,17 @@ static RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params) {
             );
 
             // Already at or beyond the limit - no refinement possible
-            if (target_size <= grid.size()) return;
+            if (target_size <= grid.size()) return false;
 
             size_t max_new_points = target_size - grid.size();
 
-            // Build set of intervals to refine based on problematic bins
+            // Build set of intervals to refine: caller-supplied focus
+            // intervals, or the whole axis when none were given.
             std::vector<std::pair<double, double>> refine_intervals;
-            if (problematic.empty()) {
-                // No concentrated errors - uniform refinement
+            if (focus_intervals.empty()) {
                 refine_intervals.push_back({lo, hi});
             } else {
-                // Only refine within problematic bins
-                constexpr double N_BINS = static_cast<double>(ErrorBins::N_BINS);
-                for (size_t bin : problematic) {
-                    double bin_lo = lo + (hi - lo) * bin / N_BINS;
-                    double bin_hi = lo + (hi - lo) * (bin + 1) / N_BINS;
-                    refine_intervals.push_back({bin_lo, bin_hi});
-                }
+                refine_intervals.assign(focus_intervals.begin(), focus_intervals.end());
             }
 
             // Insert midpoints only in intervals that need refinement
@@ -111,10 +109,13 @@ static RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params) {
                 }
             }
 
+            if (points_added == 0) return false;
+
             std::sort(new_grid.begin(), new_grid.end());
             new_grid.erase(std::unique(new_grid.begin(), new_grid.end()),
                            new_grid.end());
             grid = std::move(new_grid);
+            return true;
         };
 
         // Need domain bounds for targeted refinement
@@ -123,15 +124,23 @@ static RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params) {
         double v_lo = vol.front(), v_hi = vol.back();
         double r_lo = rate.front(), r_hi = rate.back();
 
-        switch (worst_dim) {
-            case 0: refine_grid_targeted(moneyness, m_lo, m_hi); break;
-            case 1: refine_grid_targeted(tau, t_lo, t_hi); break;
-            case 2: refine_grid_targeted(vol, v_lo, v_hi); break;
-            case 3: refine_grid_targeted(rate, r_lo, r_hi); break;
+        bool changed = false;
+        switch (requested_dim) {
+            case 0: changed = refine_grid_targeted(moneyness, m_lo, m_hi); break;
+            case 1: changed = refine_grid_targeted(tau, t_lo, t_hi); break;
+            case 2: changed = refine_grid_targeted(vol, v_lo, v_hi); break;
+            case 3: changed = refine_grid_targeted(rate, r_lo, r_hi); break;
+            default: break;
         }
-        return true;
+        // Never redirects: changed_dim == requested_dim whenever changed.
+        return RefineOutcome{
+            .changed = changed,
+            .changed_dim = changed ? static_cast<int>(requested_dim) : -1,
+        };
     };
 }
+
+namespace {
 
 // ============================================================================
 // Segmented surface helpers
@@ -441,7 +450,10 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
     // Create a fresh BSplinePDECache for this build
     BSplinePDECache cache;
 
-    auto domain = extract_chain_domain(chain);
+    // Headroom scale comes from the expected seeded moneyness density
+    // (spec D3), not from the raw strike count.
+    auto domain = extract_chain_domain(
+        chain, std::max(chain.strikes.size(), params.min_moneyness_points));
     if (!domain.has_value()) {
         return std::unexpected(domain.error());
     }
@@ -473,12 +485,15 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
 
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
 
-    auto compute_error_fn = make_fd_vega_error_fn(params, validate_fn, type);
+    auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+    auto score_fn = make_iv_score_fn(params, type);
 
     auto refine_fn = make_bspline_refine_fn(params);
-    auto grid_result = run_refinement(params, build_fn, validate_fn,
-                                      refine_fn, ctx, compute_error_fn,
-                                      extract_initial_grids(chain));
+    // No state hooks: the B-spline refiner's whole state is the grids (D6).
+    auto grid_result = run_refinement(params, build_fn,
+                                      refine_fn, ctx, prepare_refs_fn, score_fn,
+                                      extract_initial_grids(chain),
+                                      RefineStateHooks{});
     if (!grid_result.has_value()) {
         return std::unexpected(grid_result.error());
     }
@@ -494,6 +509,8 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
     result.achieved_max_error = grids.achieved_max_error;
     result.achieved_avg_error = grids.achieved_avg_error;
     result.target_met = grids.target_met;
+    result.diagnostics = std::move(grids.diagnostics);
+    result.sample_bounds = ctx.sample_bounds;
     result.total_pde_solves = 0;
     for (auto& it : result.iterations) {
         // Standard path uses FD American vega: 1 base solve + 2 vega bump solves = 3x
@@ -515,27 +532,41 @@ BSplineSegmentedBuilder::create(const SegmentedAdaptiveConfig& config,
     auto K_refs = resolve_k_refs(config.kref_config, config.spot);
     if (!K_refs) return std::unexpected(K_refs.error());
 
-    auto dom = expand_segmented_domain(
+    // Support domain: the user's ranges widened for the cumulative discrete
+    // dividend spot shifts, so the fitted surface covers post-dividend
+    // spots.  That widening is interpolation *support*, not something the
+    // user asked to be able to query.
+    auto support = expand_segmented_domain(
         domain, config.maturity, config.dividend_yield,
         config.discrete_dividends, K_refs->front());
-    if (!dom) return std::unexpected(dom.error());
+    if (!support) return std::unexpected(support.error());
 
-    // B-spline support headroom on moneyness
-    double h = spline_support_headroom(dom->m_max - dom->m_min, domain.moneyness.size());
-    dom->m_min -= h;
-    dom->m_max += h;
+    // Sample (measurement) domain: the same construction *without* the
+    // dividend widening (spec D2 -- accuracy is never measured in the
+    // unqueryable support band).  With a 20%-of-spot dividend schedule the
+    // two differ by more than a factor of two in strike, and measuring the
+    // wider one condemns surfaces on strikes the user never asked for.
+    auto sample = expand_segmented_domain(
+        domain, config.maturity, config.dividend_yield, {}, K_refs->front());
+    if (!sample) return std::unexpected(sample.error());
 
-    return BSplineSegmentedBuilder(config, std::move(*K_refs), *dom, domain);
+    // Support headroom is deliberately NOT applied here: its scale depends
+    // on AdaptiveGridParams::min_moneyness_points (spec D3), which is only
+    // available at build_adaptive() time.
+    return BSplineSegmentedBuilder(config, std::move(*K_refs), *sample,
+                                   *support, domain);
 }
 
 BSplineSegmentedBuilder::BSplineSegmentedBuilder(
     SegmentedAdaptiveConfig config,
     std::vector<double> K_refs,
-    SurfaceBounds domain,
+    SurfaceBounds sample_domain,
+    SurfaceBounds support_domain,
     IVGrid initial_grid)
     : config_(std::move(config))
     , K_refs_(std::move(K_refs))
-    , domain_(domain)
+    , sample_domain_(sample_domain)
+    , support_domain_(support_domain)
     , initial_grid_(std::move(initial_grid))
 {}
 
@@ -553,12 +584,102 @@ BSplineSegmentedBuilder::assemble(std::vector<BSplineSegmentedSurface> surfaces)
 std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
 BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
 {
+    // 0. Derive the fit domain from the sample domain (spec D3): headroom
+    //    scale is the expected seeded moneyness density, not the user's
+    //    knot count.
+    SurfaceBounds fit_domain = support_domain_;
+    {
+        double h = spline_support_headroom(
+            sample_domain_.m_max - sample_domain_.m_min,
+            std::max(initial_grid_.moneyness.size(),
+                     params.min_moneyness_points));
+        fit_domain.m_min -= h;
+        fit_domain.m_max += h;
+    }
+
     // 1. Select probe values (up to 3: front, back, nearest ATM)
     auto probes = select_probes(K_refs_, config_.spot);
 
-    // 2. Run adaptive refinement per probe
+    // The strike range the user can actually query (m = ln(spot/K)).
+    const double user_k_lo = config_.spot * std::exp(-sample_domain_.m_max);
+    const double user_k_hi = config_.spot * std::exp(-sample_domain_.m_min);
+
+    // The strike band a probe dominates in the assembled surface.  The
+    // assembly blends the two K_refs bracketing a query's strike linearly
+    // (MultiKRefSplit::bracket), so a probe's weight is largest between the
+    // midpoints to its neighbours; we take geometric midpoints since K_refs
+    // are log-spaced.  This scopes a sizing measurement, not a safety gate —
+    // the assembled surface's own final validation queries the true blend.
+    // The outermost bands run out to the user's strike range, and a single
+    // K_ref serves all of it.
+    const auto strike_band = [this, user_k_lo, user_k_hi](double k) {
+        const size_t n = K_refs_.size();
+        const size_t idx = static_cast<size_t>(
+            std::ranges::lower_bound(K_refs_, k) - K_refs_.begin());
+        double lo = (idx == 0)
+            ? user_k_lo : std::sqrt(K_refs_[idx - 1] * K_refs_[idx]);
+        double hi = (idx + 1 >= n)
+            ? user_k_hi : std::sqrt(K_refs_[idx] * K_refs_[idx + 1]);
+        return std::pair{std::max(lo, user_k_lo), std::min(hi, user_k_hi)};
+    };
+
+    InitialGrids initial_grids;
+    initial_grids.moneyness = initial_grid_.moneyness;
+    initial_grids.vol = initial_grid_.vol;
+    initial_grids.rate = initial_grid_.rate;
+
+    // 2. Run adaptive refinement per probe, measured over its own band
     std::vector<RefinementResult> probe_results;
     for (double probe_ref : probes) {
+        // Measurement domain for this probe: the user's tau/vol/rate ranges,
+        // moneyness restricted to the band this probe serves.
+        SurfaceBounds probe_sample = sample_domain_;
+        bool band_usable = false;
+        if (auto [k_lo, k_hi] = strike_band(probe_ref);
+            k_lo > 0.0 && k_hi > k_lo) {
+            probe_sample.m_min = std::log(config_.spot / k_hi);
+            probe_sample.m_max = std::log(config_.spot / k_lo);
+            // A band too thin for the loop's non-degeneracy check is widened
+            // about its midpoint, never past the user's own range.
+            constexpr double kMinBandWidth = 1e-3;
+            if (probe_sample.m_max - probe_sample.m_min < kMinBandWidth) {
+                const double mid =
+                    0.5 * (probe_sample.m_min + probe_sample.m_max);
+                probe_sample.m_min = std::max(sample_domain_.m_min,
+                                              mid - 0.5 * kMinBandWidth);
+                probe_sample.m_max = std::min(sample_domain_.m_max,
+                                              mid + 0.5 * kMinBandWidth);
+            }
+            band_usable = probe_sample.m_max > probe_sample.m_min;
+        }
+
+        if (!band_usable) {
+            // Nothing measurable: this probe serves no strike the user can
+            // query.  It still contributes its seed sizes to the aggregate.
+            RefinementContext seed_ctx{
+                .spot = config_.spot,
+                .dividend_yield = config_.dividend_yield,
+                .option_type = config_.option_type,
+                .bounds = fit_domain,
+                .sample_bounds = sample_domain_,
+            };
+            auto seeded = seed_refinement_grids(params, seed_ctx,
+                                                initial_grids);
+            RefinementResult skipped;
+            skipped.tau_points = static_cast<int>(seeded.tau.size());
+            IterationStats stats;
+            stats.refined_dim = -3;  // marker: probe skipped, empty band
+            stats.grid_sizes = {seeded.moneyness.size(), seeded.tau.size(),
+                                seeded.vol.size(), seeded.rate.size()};
+            skipped.iterations.push_back(stats);
+            skipped.moneyness = std::move(seeded.moneyness);
+            skipped.tau = std::move(seeded.tau);
+            skipped.vol = std::move(seeded.vol);
+            skipped.rate = std::move(seeded.rate);
+            probe_results.push_back(std::move(skipped));
+            continue;
+        }
+
         BuildFn build_fn = [this, probe_ref](
             std::span<const double> m_grid,
             std::span<const double> tau_grid,
@@ -576,9 +697,22 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             if (!surface) return std::unexpected(surface.error());
             auto shared = std::make_shared<BSplineSegmentedSurface>(std::move(*surface));
             return SurfaceHandle{
-                .price = [shared](double spot, double strike,
-                                  double tau, double sigma, double rate) -> double {
-                    return shared->price(spot, strike, tau, sigma, rate);
+                // A probe surface is a single-K_ref object: TauSegmentSplit
+                // *discards* the query strike and prices at K_ref, so calling
+                // it with the validation strike would compare a K_ref-struck
+                // price against a K-struck reference (errors of several IV
+                // points on a healthy surface).  Map the query onto the
+                // probe's own K_ref problem instead -- and measure it against
+                // a reference solved at the *same* scaled coordinates (see
+                // the PrepareRefsFn below), so what the loop scores is this
+                // probe's interpolation error and nothing else.
+                .price = [shared, probe_ref](double spot, double strike,
+                                             double tau, double sigma,
+                                             double rate) -> double {
+                    const double scale =
+                        (strike > 0.0) ? strike / probe_ref : 1.0;
+                    return scale * shared->price(spot / scale, probe_ref,
+                                                 tau, sigma, rate);
                 },
                 .pde_solves = 0
             };
@@ -588,25 +722,47 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             config_.dividend_yield, config_.option_type,
             config_.discrete_dividends);
 
-        auto compute_error_fn = make_fd_vega_error_fn(
-            params, validate_fn, config_.option_type);
+        // The probe's references live on the probe's own problem.  A query
+        // (S, K) reaches the surface as scale * probe(S/scale, K_ref) with
+        // scale = K/K_ref, so the reference is the FD solve at
+        // (S/scale, K_ref) under the same dividend schedule, scaled the same
+        // way.  Rescaling the *option* rather than the query -- pricing
+        // (S, K) and comparing against a K_ref-struck surface, or leaning on
+        // P(lambda S, lambda K) homogeneity -- does not hold here: absolute
+        // discrete dividends are not scaled by lambda, so
+        // scale * P(S/scale, K_ref; D) is P(S, K; scale * D), and the
+        // (scale - 1) * D * dP/dD residual would be scored as interpolation
+        // error.  Price and vega scale together, so the IV error the loop
+        // sees is unaffected by the scaling itself.
+        auto base_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+        PrepareRefsFn prepare_refs_fn =
+            [base_refs_fn, probe_ref](double spot, double strike, double tau,
+                                      double sigma, double rate)
+            -> std::expected<ErrorRefs, SolverError> {
+            const double scale = (strike > 0.0) ? strike / probe_ref : 1.0;
+            auto refs = base_refs_fn(spot / scale, probe_ref, tau, sigma, rate);
+            if (!refs) return std::unexpected(refs.error());
+            return ErrorRefs{.ref_price = scale * refs->ref_price,
+                             .vega = scale * refs->vega};
+        };
+        auto score_fn = make_iv_score_fn(params, config_.option_type);
 
+        // Grids still span the whole fit domain; only the *measurement* is
+        // band-scoped (spec D2: measure where the surface is used).
         RefinementContext ctx{
             .spot = config_.spot,
             .dividend_yield = config_.dividend_yield,
             .option_type = config_.option_type,
-            .bounds = domain_,
+            .bounds = fit_domain,
+            .sample_bounds = probe_sample,
         };
 
-        InitialGrids initial_grids;
-        initial_grids.moneyness = initial_grid_.moneyness;
-        initial_grids.vol = initial_grid_.vol;
-        initial_grids.rate = initial_grid_.rate;
-
         auto refine_fn = make_bspline_refine_fn(params);
-        auto sizes = run_refinement(params, build_fn, validate_fn,
+        // No state hooks: the B-spline refiner's whole state is the grids.
+        auto sizes = run_refinement(params, build_fn,
                                     refine_fn, ctx,
-                                    compute_error_fn, initial_grids);
+                                    prepare_refs_fn, score_fn, initial_grids,
+                                    RefineStateHooks{});
         if (!sizes) return std::unexpected(sizes.error());
         probe_results.push_back(std::move(*sizes));
     }
@@ -625,9 +781,9 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     }
 
     // 4. Build final uniform grids and all surfaces
-    auto final_m = linspace(domain_.m_min, domain_.m_max, gsz.moneyness);
-    auto final_v = linspace(domain_.sigma_min, domain_.sigma_max, gsz.vol);
-    auto final_r = linspace(domain_.rate_min, domain_.rate_max, gsz.rate);
+    auto final_m = linspace(fit_domain.m_min, fit_domain.m_max, gsz.moneyness);
+    auto final_v = linspace(fit_domain.sigma_min, fit_domain.sigma_max, gsz.vol);
+    auto final_r = linspace(fit_domain.rate_min, fit_domain.rate_max, gsz.rate);
     int max_tau_pts = gsz.tau_points;
 
     auto seg_template = make_seg_config(config_, final_m, final_v, final_r, max_tau_pts);
@@ -638,92 +794,144 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     auto surface = assemble(std::move(*seg_surfaces));
     if (!surface) return std::unexpected(surface.error());
 
-    // 6. Final multi-K_ref validation at arbitrary strikes
+    // 6. Final multi-K_ref validation at arbitrary strikes (spec D9).
+    //
+    // The probe loops measured single-K_ref surfaces on their own bands; the
+    // object the caller receives is the blend of *all* K_refs on the uniform
+    // aggregated grids, so it gets its own references and its own gate.
+    RefinementContext final_ctx{
+        .spot = config_.spot,
+        .dividend_yield = config_.dividend_yield,
+        .option_type = config_.option_type,
+        .bounds = fit_domain,
+        // Final validation measures the user-facing domain (spec D2), not
+        // the interpolation support band.
+        .sample_bounds = sample_domain_,
+    };
+
     auto final_validate_fn = make_validate_fn(
         config_.dividend_yield, config_.option_type,
         config_.discrete_dividends);
-    auto final_error_fn = make_fd_vega_error_fn(
-        params, final_validate_fn, config_.option_type);
+    auto final_prepare_refs_fn = make_fd_vega_refs_fn(params, final_validate_fn);
+    auto final_score_fn = make_iv_score_fn(params, config_.option_type);
 
-    auto final_samples = latin_hypercube_4d(
-        params.validation_samples, params.lhs_seed + 999);
+    // References are computed ONCE here and reused for the retry, so the two
+    // assembled surfaces are compared on identical coordinates.
+    auto validation = detail::prepare_final_validation(
+        params, final_ctx, final_prepare_refs_fn, params.lhs_seed + 999);
+    if (!validation) return std::unexpected(validation.error());
 
-    std::array<std::pair<double, double>, 4> final_bounds = {{
-        {domain_.m_min, domain_.m_max},
-        {domain_.tau_min, domain_.tau_max},
-        {domain_.sigma_min, domain_.sigma_max},
-        {domain_.rate_min, domain_.rate_max},
-    }};
-    auto scaled = scale_lhs_samples(final_samples, final_bounds);
+    // The final validation is not free: every reference is a base solve plus
+    // two sigma bumps, and the caller's PDE budget should say so.
+    total_pde += validation->ref_attempts * 3;
 
-    double final_max_error = 0.0;
-    double final_sum_error = 0.0;
-    size_t valid = 0;
+    // The lambda captures the surface by pointer, not by reference to the
+    // parameter: a reference capture would dangle the moment `handle_for`
+    // returns, even though the referent outlives every use.
+    const auto handle_for = [](const BSplineMultiKRefInner& s) {
+        return SurfaceHandle{
+            .price = [p = &s](double query_spot, double strike, double tau,
+                              double sigma, double rate) -> double {
+                return p->price(query_spot, strike, tau, sigma, rate);
+            },
+            .pde_solves = 0,
+        };
+    };
 
-    for (const auto& sample : scaled) {
-        double m = sample[0], tau = sample[1], sigma = sample[2], rate = sample[3];
-        double strike = config_.spot * std::exp(-m);
+    // `orig_handle` points into `*surface`, which is moved from below when
+    // the original is the pick.  It must not be used past that move: the
+    // scoring here and the retry comparison are its only uses, and the
+    // monotonicity scan deliberately re-derives a handle from
+    // `picked_surface` rather than reusing this one.
+    const SurfaceHandle orig_handle = handle_for(*surface);
+    const auto orig_score = detail::score_final_surface(
+        validation->points, orig_handle, final_score_fn, final_ctx);
 
-        double interp = surface->price(config_.spot, strike, tau, sigma, rate);
+    // 7. Optional retry with bumped grids -- triggered when the original
+    //    misses the target OR is not viable at all (spec D9 step 2).
+    std::optional<BSplineMultiKRefInner> retry_surface;
+    std::optional<detail::FinalScore> retry_score;
+    IVGrid retry_grid;
+    int retry_tau_pts = 0;
 
-        auto fd = final_validate_fn(config_.spot, strike, tau, sigma, rate);
-        if (!fd.has_value()) continue;
-
-        double ref_price = fd.value();
-        double err = final_error_fn(
-            interp, ref_price,
-            config_.spot, strike, tau, sigma, rate,
-            config_.dividend_yield);
-
-        final_max_error = std::max(final_max_error, err);
-        final_sum_error += err;
-        if (err > 0.0) valid++;
-    }
-    double final_avg_error = valid > 0 ? final_sum_error / static_cast<double>(valid) : 0.0;
-
-    // 7. Optional retry with bumped grids
-    if (valid > 0 && final_max_error > params.target_iv_error) {
+    if (detail::needs_final_retry(orig_score, params.target_iv_error)) {
         size_t bumped_m = std::min(gsz.moneyness + 2, params.max_points_per_dim);
         size_t bumped_v = std::min(gsz.vol + 1, params.max_points_per_dim);
         size_t bumped_r = std::min(gsz.rate + 1, params.max_points_per_dim);
         int bumped_tau = std::min(gsz.tau_points + 2,
             static_cast<int>(params.max_points_per_dim));
 
-        auto retry_m = linspace(domain_.m_min, domain_.m_max, bumped_m);
-        auto retry_v = linspace(domain_.sigma_min, domain_.sigma_max, bumped_v);
-        auto retry_r = linspace(domain_.rate_min, domain_.rate_max, bumped_r);
+        auto retry_m = linspace(fit_domain.m_min, fit_domain.m_max, bumped_m);
+        auto retry_v = linspace(fit_domain.sigma_min, fit_domain.sigma_max, bumped_v);
+        auto retry_r = linspace(fit_domain.rate_min, fit_domain.rate_max, bumped_r);
 
         auto retry_template = make_seg_config(config_, retry_m, retry_v, retry_r, bumped_tau);
         auto retry_segs = build_segmented_surfaces(retry_template, K_refs_);
         if (retry_segs) {
-            auto retry_surface = assemble(std::move(*retry_segs));
-            if (retry_surface) {
-                return BSplineSegmentedAdaptiveResult{
-                    .surface = std::move(*retry_surface),
-                    .grid = {.moneyness = retry_m, .vol = retry_v, .rate = retry_r},
-                    .tau_points_per_segment = bumped_tau,
-                    .iterations = std::move(all_iterations),
-                    .achieved_max_error = final_max_error,
-                    .achieved_avg_error = final_avg_error,
-                    .target_met = false,  // retry means target wasn't met
-                    .total_pde_solves = total_pde,
-                    .used_retry = true,
-                };
+            auto assembled = assemble(std::move(*retry_segs));
+            if (assembled) {
+                retry_surface = std::move(*assembled);
+                // Scored on the SAME cached refs -- no second reference pass.
+                retry_score = detail::score_final_surface(
+                    validation->points, handle_for(*retry_surface),
+                    final_score_fn, final_ctx);
+                retry_grid = retry_template.grid;
+                retry_tau_pts = bumped_tau;
             }
         }
     }
 
-    bool met = (valid == 0) || (final_max_error <= params.target_iv_error);
+    // 8. Return the lower-error viable surface; neither viable => refuse.
+    const auto pick = detail::select_final_surface(orig_score, retry_score);
+    if (pick == detail::FinalPick::None) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::NoViableSurface});
+    }
+
+    const bool use_retry = (pick == detail::FinalPick::Retry);
+    const detail::FinalScore& final_score = use_retry ? *retry_score : orig_score;
+    BSplineMultiKRefInner picked_surface =
+        use_retry ? std::move(*retry_surface) : std::move(*surface);
+
+    BuildDiagnostics diagnostics;
+    diagnostics.target_met =
+        final_score.measured > 0 &&
+        final_score.max_error <= params.target_iv_error;
+    diagnostics.achieved_max_error = final_score.max_error;
+    diagnostics.achieved_avg_error = final_score.avg_error;
+    // Iterations actually built across the probe loops: the retention final
+    // rebuild (-2) and the skipped-probe marker (-3) are not builds charged
+    // to a budget (spec D7).
+    diagnostics.total_iterations = static_cast<size_t>(std::ranges::count_if(
+        all_iterations,
+        [](const IterationStats& it) { return it.refined_dim >= -1; }));
+    // Same meaning as the loop's (spec D7): `holdout_points` is the usable
+    // reference set, `holdout_points_measured` how much of it actually scored
+    // the returned surface -- the difference is what the score fn filtered.
+    diagnostics.holdout_points = validation->points.size();
+    diagnostics.holdout_points_measured = final_score.measured;
+    diagnostics.holdout_points_invalid = validation->invalid + final_score.skipped;
+    for (const auto& pr : probe_results) {
+        diagnostics.build_failure_fallback |=
+            pr.diagnostics.build_failure_fallback;
+    }
+    detail::scan_monotonicity(validation->points, handle_for(picked_surface),
+                              final_ctx, params.target_iv_error,
+                              params.vega_floor, diagnostics);
+    diagnostics.iterations = all_iterations;
+
     return BSplineSegmentedAdaptiveResult{
-        .surface = std::move(*surface),
-        .grid = seg_template.grid,
-        .tau_points_per_segment = max_tau_pts,
+        .surface = std::move(picked_surface),
+        .grid = use_retry ? retry_grid : seg_template.grid,
+        .tau_points_per_segment = use_retry ? retry_tau_pts : max_tau_pts,
         .iterations = std::move(all_iterations),
-        .achieved_max_error = final_max_error,
-        .achieved_avg_error = final_avg_error,
-        .target_met = met,
+        .achieved_max_error = final_score.max_error,
+        .achieved_avg_error = final_score.avg_error,
+        .target_met = diagnostics.target_met,
         .total_pde_solves = total_pde,
-        .used_retry = false,
+        .used_retry = use_retry,
+        .diagnostics = std::move(diagnostics),
+        .sample_bounds = sample_domain_,
     };
 }
 

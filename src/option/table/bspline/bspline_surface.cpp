@@ -14,13 +14,6 @@ make_bspline_surface(
     OptionType type)
 {
     if (!spline) return std::unexpected(std::string("null spline"));
-    if (K_ref <= 0.0) return std::unexpected(std::string("invalid K_ref"));
-
-    SharedBSplineInterp<4> interp(spline);
-    StandardTransform4D xform;
-    AnalyticalEEP eep(type, dividend_yield);
-    BSplineTransformLeaf tleaf(std::move(interp), xform, K_ref);
-    BSplineLeaf leaf(std::move(tleaf), eep);
 
     SurfaceBounds bounds{
         .m_min = spline->grid(0).front(),
@@ -32,6 +25,27 @@ make_bspline_surface(
         .rate_min = spline->grid(3).front(),
         .rate_max = spline->grid(3).back(),
     };
+
+    return make_bspline_surface(
+        std::move(spline), K_ref, dividend_yield, type, bounds);
+}
+
+std::expected<BSplinePriceTable, std::string>
+make_bspline_surface(
+    std::shared_ptr<const BSplineND<double, 4>> spline,
+    double K_ref,
+    double dividend_yield,
+    OptionType type,
+    const SurfaceBounds& bounds)
+{
+    if (!spline) return std::unexpected(std::string("null spline"));
+    if (K_ref <= 0.0) return std::unexpected(std::string("invalid K_ref"));
+
+    SharedBSplineInterp<4> interp(spline);
+    StandardTransform4D xform;
+    AnalyticalEEP eep(type, dividend_yield);
+    BSplineTransformLeaf tleaf(std::move(interp), xform, K_ref);
+    BSplineLeaf leaf(std::move(tleaf), eep);
 
     return BSplinePriceTable(std::move(leaf), bounds, type, dividend_yield);
 }

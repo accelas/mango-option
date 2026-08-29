@@ -335,7 +335,14 @@ let iv = solver.solve(&query)?;
 ### Adaptive grid refinement
 
 Set `adaptive: Some(AdaptiveGridParams { .. })` to have the builder refine the
-grid until it meets a target IV error, instead of using the fixed grid as-is:
+grid toward a target IV error instead of using the fixed grid as-is. The
+builder does not simply stop when the target is met: it measures every
+candidate grid it builds against a fixed holdout and returns the best *viable*
+one it saw, which may be an earlier candidate than the last. If no candidate
+is viable — every one of them scored above an absolute garbage bound, or none
+could be measured at all — the build fails rather than returning a broken
+surface, so treat a build error here as "this configuration cannot be fit",
+not as a transient failure:
 
 ```rust
 use mango_option::AdaptiveGridParams;
@@ -397,7 +404,7 @@ All fallible functions return `Result<_, Error>`. `Error` carries:
 | `Validation` | Invalid parameters (e.g. negative spot, maturity ≤ 0) |
 | `Arbitrage` | Market price violates no-arbitrage bounds |
 | `NoConvergence` | PDE or Newton solver did not converge |
-| `Bracketing` | Root-finder could not bracket the solution |
+| `Bracketing` | Root-finder could not bracket the solution, or the surface had multiple roots in the sigma bracket (the C++ `MultipleRoots` screen maps here) |
 | `Solver` | Other solver-level failure |
 
 `Error` implements `std::error::Error` and `Display`:

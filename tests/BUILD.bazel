@@ -177,12 +177,16 @@ cc_test(
 
 cc_test(
     name = "price_table_factory_test",
-    size = "medium",
+    # 87s measured: the adaptive factory paths build real surfaces, which a
+    # "medium" (300s soft budget, 60s warning) target reports as oversized.
+    size = "large",
     srcs = ["price_table_factory_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
+        "//src/option:option_grid",
         "//src/option:price_table_factory",
+        "//src/option/table:adaptive_refinement",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -1102,21 +1106,43 @@ cc_test(
 )
 
 cc_test(
+    name = "adaptive_refinement_unit_test",
+    size = "small",
+    srcs = ["adaptive_refinement_unit_test.cc"],
+    deps = [
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_metrics",
+        "//src/option/table:adaptive_refinement",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/support:error_types",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "adaptive_grid_builder_test",
     size = "large",
     timeout = "long",
+    # The suite runs ~10 min under -c dbg on CI (see ci.yml's dedicated dbg
+    # step) and grew past the 900s budget with the adaptive-safety work;
+    # sharding gives each shard its own timeout and parallelism.
+    shard_count = 4,
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_metrics",
         "//src/option/table:adaptive_refinement",
         "//src/option/table:tau_segment_split",
         "//src/option/table/bspline:bspline_adaptive",
         "//src/option/table/bspline:bspline_pde_cache",
+        "//src/option/table/bspline:bspline_segmented_builder",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option/table/chebyshev:chebyshev_surface",
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:american_option_batch",
+        "//src/option:interpolated_iv_solver",
         "//src/option:option_grid",
         "//src/pde/core:grid",
         "@googletest//:gtest",
@@ -1240,6 +1266,17 @@ cc_test(
     srcs = ["simple_databento_test.cc"],
     deps = [
         "//src/simple",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "eep_decomposer_test",
+    size = "small",
+    srcs = ["eep_decomposer_test.cc"],
+    deps = [
+        "//src/option/table:eep_decomposer",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

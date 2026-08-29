@@ -440,6 +440,54 @@ auto iv_solver = mango::InterpolatedIVSolver<mango::BSplinePriceTable>::create(
 auto iv_result = iv_solver.solve(iv_query);
 ```
 
+### Adaptive Build Diagnostics
+
+An adaptive-built table records honest quality diagnostics that survive retention and backtracking. `build_diagnostics()` lives on the factory-returned handles — `AnyPriceTable` (from `make_price_table` with `.adaptive` set) and `AnyInterpIVSolver` (from `make_interpolated_iv_solver` with `.adaptive` set) — and describes the *returned* candidate, not necessarily the last one built:
+
+```cpp
+auto solver = mango::make_interpolated_iv_solver(config).value();
+
+if (auto diag = solver.build_diagnostics(); diag.has_value()) {
+    std::cout << "Target met: " << diag->target_met << "\n";
+    std::cout << "Achieved max/avg IV error: "
+               << diag->achieved_max_error << " / "
+               << diag->achieved_avg_error << "\n";
+    std::cout << "Picked iteration " << diag->picked_iteration
+               << " of " << diag->total_iterations << "\n";
+    std::cout << "Monotonicity violations: "
+               << diag->monotonicity_violations << "\n";
+}
+```
+
+`build_diagnostics()` returns `std::nullopt` for a manually-built (non-adaptive) table, a table loaded from Parquet, or a build on a factory path that does not honor `.adaptive` — the continuous (non-segmented) Chebyshev path and `DimensionlessBackend`. Diagnostics are never persisted to `PriceTableData`/Parquet. Python exposes the same data via the `build_diagnostics` property (a dict) on `PriceTable` and `InterpolatedIVSolver`.
+
+If every candidate built during refinement fails the internal viability gate (holdout error above an absolute, target-independent garbage-detection bound — or no holdout point could be measured at all, e.g. a domain where implied vol is everywhere undefined), the build itself fails with `ValidationErrorCode::NoViableSurface` rather than silently returning a broken surface — check for it alongside the usual validation errors.
+
+### Multiple-Root Screening
+
+Because the fitted surface is not certified monotone in σ (unconstrained least squares can wiggle slightly wherever vega is small), `InterpolatedIVSolver` screens for multiple roots before running Brent's method. It is on by default:
+
+```cpp
+mango::InterpolatedIVSolverConfig config{
+    .detect_multiple_roots = true,  // default; set false to restore the
+                                     // pre-screen, unscreened path exactly
+};
+```
+
+A query whose bracket contains more than one sign transition, a tangency, or an ambiguous boundary root returns `mango::IVErrorCode::MultipleRoots` instead of an arbitrary root:
+
+```cpp
+auto iv_result = solver.solve(query);
+if (!iv_result.has_value()) {
+    if (iv_result.error().code == mango::IVErrorCode::MultipleRoots) {
+        // The 17-point bracket screen found more than one candidate root —
+        // treat the surface as ambiguous here rather than trusting a guess.
+    }
+}
+```
+
+This is a **screen, not a proof of uniqueness**: it is guaranteed to catch any sign excursion spanning at least one bracket/16 cell and any tangency at a scan point, but a narrower fold that also passes the post-hoc slope check can slip through. `detect_multiple_roots = false` disables the screen (Python: same-named config field); C API callers always get the default-on screen (the toggle is not exposed through the C ABI).
+
 ### Build Diagnostics
 
 **Access performance and quality metrics:**
@@ -545,7 +593,7 @@ mango::IVSolverFactoryConfig config{
     .spot = 100.0,
     .dividend_yield = 0.01,
     .grid = mango::IVGrid{
-        .moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
+        .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
         .vol = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
         .rate = {0.02, 0.03, 0.05, 0.07},
     },
@@ -557,19 +605,22 @@ mango::IVSolverFactoryConfig config{
         .discrete_dividends = {
             mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
             mango::Dividend{.calendar_time = 0.50, .amount = 1.50}},
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                   102.5, 105.0, 107.5, 110.0}},
     },
 };
 
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
+The moneyness grid and the `K_refs` must agree: the assembled surface blends K_ref-struck prices linearly in strike, so the K_refs must span **and resolve** the strike range the moneyness grid implies — `S/K ∈ [0.92, 1.08]` means strikes in `[92.6, 108.7]`, served by K_refs at 2.5% spacing across `[90, 110]`. This manual path has no viability gate (that arrives with `.adaptive`), so config coherence is the caller's job here: an incoherent pairing builds a surface and prices off it rather than refusing.
+
 The factory dispatches on two orthogonal variants:
 
 - **`backend`**: `BSplineBackend`, `ChebyshevBackend`, or `DimensionlessBackend`
 - **`discrete_dividends`**: When set, uses the segmented surface path (tau splits + K_ref blending)
 
-With optional `adaptive` for automatic grid density tuning to a target IV accuracy.
+With optional `adaptive` for automatic grid density tuning to a target IV accuracy. It is honored on three of the factory's paths — continuous `BSplineBackend`, and both segmented (discrete-dividend) paths, B-spline and Chebyshev. The continuous `ChebyshevBackend` and `DimensionlessBackend` paths ignore it and build their fixed grids, reporting no build diagnostics.
 
 **Query-time dividend schedule validation.** `IVQuery::discrete_dividends` is
 optional at query time: leaving it empty against a segmented surface is
@@ -642,21 +693,55 @@ mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.01,
-    .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
-    .backend = mango::BSplineBackend{
-        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+    .grid = mango::IVGrid{
+        .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
+        .vol = {0.10, 0.15, 0.20, 0.30},
+        .rate = {0.02, 0.03, 0.05, 0.07},
     },
+    .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
+    .backend = mango::ChebyshevBackend{},
     .discrete_dividends = mango::DiscreteDividendConfig{
         .maturity = 1.0,
         .discrete_dividends = {
             mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
             mango::Dividend{.calendar_time = 0.50, .amount = 1.50}},
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                   102.5, 105.0, 107.5, 110.0}},
     },
 };
 
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
+
+**Use `ChebyshevBackend` for adaptive discrete-dividend surfaces.** The
+B-spline segmented adaptive path currently refuses realistic dividend
+configs — this one included — with `NoViableSurface` under complete
+measurement. Its multi-K_ref segmented fit degrades badly at low volatility on
+the tau segments following a dividend: on the config above it measures
+15,500 bps against the 2,000 bps viability bound, with the worst points at
+σ ≤ 0.13 and τ ∈ (0.64, 0.94), and because denser grids make the fit *worse*
+rather than better the builder's bumped-grid retry cannot rescue it. Pending
+the MultiKRefSplit blend and segmented-fit follow-ups, Chebyshev is the
+supported backend for this shape; it measures 549 bps on the same config.
+Both facts are pinned:
+`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig` for the
+Chebyshev config, and
+`IVSolverFactorySegmented.DocumentedConfigOnBSplineBackendRefuses` for the
+B-spline refusal.
+
+**The moneyness grid and the K_refs must agree.** The assembled surface routes
+a query to the K_refs bracketing its strike and blends their prices linearly
+in strike, so the K_refs must both *span* and *resolve* the strike range the
+moneyness grid implies. Here `S/K ∈ [0.92, 1.08]` means strikes in
+`[92.6, 108.7]`, served by K_refs at 2.5% spacing across `[90, 110]`. Pairing
+the same K_refs with the default ±30% moneyness grid puts most queried
+strikes outside the K_ref span, where the blend clamps to a single K_ref, and
+the build fails with `NoViableSurface` rather than returning it.
+
+Note that `BSplineBackend::maturity_grid` is **ignored** whenever
+`discrete_dividends` is set, on both the manual and the adaptive segmented
+paths: tau comes from the dividend dates and `DiscreteDividendConfig::maturity`,
+not from the backend's knots.
 
 ### Querying the Solver
 
@@ -679,7 +764,8 @@ if (result.has_value()) {
 
 ### Configuration Notes
 
-- **`kref_config`** is optional. When omitted, the builder selects reference strikes automatically at log-spaced intervals around the spot. Explicit K_refs are useful when you know the strike range of interest.
+- **`kref_config`** is optional. When omitted, the builder selects reference strikes automatically at log-spaced intervals around the spot. Explicit K_refs are useful when you know the strike range of interest — but they must span and resolve the strike range your moneyness grid implies (see above).
+- **Adaptive builds are gated on measured accuracy.** After assembling the final surface the builder re-measures it against fresh PDE solves over your own moneyness/vol/rate ranges and refuses to return one whose IV error exceeds 2,000 bps (`PriceTableErrorCode::NoViableSurface`). A surface that misses `target_iv_error` but stays inside that bound is returned as best-effort.
 - **Continuous yield** applies inside each segment's PDE. Discrete dividends operate at segment boundaries. Both can be used together.
 
 ---

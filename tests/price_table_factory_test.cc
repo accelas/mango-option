@@ -15,7 +15,9 @@
 #endif
 
 #include "mango/option/price_table_factory.hpp"
+#include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/table/serialization/price_table_data.hpp"
+#include "mango/option/option_grid.hpp"
 
 namespace mango {
 namespace {
@@ -111,6 +113,16 @@ IVQuery yield_curve_iv_query(const PricingParams& params, double market_price) {
     auto query = off_grid_iv_query(params, market_price);
     query.rate = YieldCurve::flat(0.037);
     return query;
+}
+
+IVSolverFactoryConfig bspline_4d_adaptive_config() {
+    auto config = bspline_4d_config();
+    config.adaptive = AdaptiveGridParams{
+        .target_iv_error = 0.002,
+        .max_iter = 3,
+        .validation_samples = 16,
+    };
+    return config;
 }
 
 TEST(PriceTableFactoryTest, BuildsContinuous4DBSplineAndEvaluatesOffGridPoint) {
@@ -220,6 +232,120 @@ TEST(PriceTableFactoryTest, InterpolatedIVSolverConvenienceStillWorks) {
     auto iv = solver_result->solve(query);
     ASSERT_TRUE(iv.has_value()) << "solver.solve failed";
     EXPECT_NEAR(iv->implied_vol, params.volatility, 0.08);
+}
+
+// ===========================================================================
+// Build diagnostics (spec D7) through the factory
+// ===========================================================================
+
+TEST(PriceTableFactoryTest, ManualBuildHasNoBuildDiagnostics) {
+    auto table_result = make_price_table(bspline_4d_config());
+    ASSERT_TRUE(table_result.has_value()) << "make_price_table failed";
+    auto table = std::move(*table_result);
+
+    EXPECT_FALSE(table.build_diagnostics().has_value());
+
+    auto solver = table.make_iv_solver();
+    ASSERT_TRUE(solver.has_value()) << "make_iv_solver failed";
+    EXPECT_FALSE(solver->build_diagnostics().has_value());
+}
+
+TEST(PriceTableFactoryTest, AdaptiveBuildExposesBuildDiagnostics) {
+    auto table_result = make_price_table(bspline_4d_adaptive_config());
+    ASSERT_TRUE(table_result.has_value()) << "make_price_table (adaptive) failed";
+    auto table = std::move(*table_result);
+
+    auto diag = table.build_diagnostics();
+    ASSERT_TRUE(diag.has_value());
+    EXPECT_GE(diag->total_iterations, 1u);
+
+    // make_iv_solver() propagates the same diagnostics.
+    auto solver = table.make_iv_solver();
+    ASSERT_TRUE(solver.has_value()) << "make_iv_solver failed";
+    auto solver_diag = solver->build_diagnostics();
+    ASSERT_TRUE(solver_diag.has_value());
+    EXPECT_EQ(solver_diag->total_iterations, diag->total_iterations);
+    EXPECT_EQ(solver_diag->target_met, diag->target_met);
+    EXPECT_EQ(solver_diag->achieved_max_error, diag->achieved_max_error);
+}
+
+TEST(PriceTableFactoryTest, ParquetRoundTripDropsBuildDiagnostics) {
+    auto table_result = make_price_table(bspline_4d_adaptive_config());
+    ASSERT_TRUE(table_result.has_value()) << "make_price_table (adaptive) failed";
+    auto table = std::move(*table_result);
+    ASSERT_TRUE(table.build_diagnostics().has_value());
+
+    TempDirectory temp_dir;
+    auto path = temp_dir.path() / "adaptive_price_table.parquet";
+    ASSERT_TRUE(table.save(path).has_value()) << "save failed";
+
+    auto loaded_result = load_price_table(path);
+    ASSERT_TRUE(loaded_result.has_value()) << "load failed";
+    auto loaded = std::move(*loaded_result);
+
+    EXPECT_FALSE(loaded.build_diagnostics().has_value());
+
+    // The surface itself round-trips correctly regardless.
+    auto params = off_grid_pricing_params();
+    EXPECT_NEAR(loaded.price(params), table.price(params), 1e-8);
+}
+
+// ===========================================================================
+// Published bounds = sample domain for adaptive builds (spec D2/D9)
+// ===========================================================================
+
+TEST(PriceTableFactoryTest, AdaptivePublishesSampleDomainNotFitHeadroom) {
+    auto config = bspline_4d_adaptive_config();
+    BSplineBackend backend = std::get<BSplineBackend>(config.backend);
+
+    // Reproduce exactly the chain + expected_m_knots the factory builds
+    // internally (see build_bspline_continuous_table), so the domain we
+    // compute here matches the one used to build/publish the real table.
+    OptionGrid chain;
+    chain.spot = config.spot;
+    chain.dividend_yield = config.dividend_yield;
+    chain.strikes.reserve(config.grid.moneyness.size());
+    for (double m : config.grid.moneyness) {
+        chain.strikes.push_back(config.spot / m);
+    }
+    chain.maturities = backend.maturity_grid;
+    chain.implied_vols = config.grid.vol;
+    chain.rates = config.grid.rate;
+
+    auto domain = extract_chain_domain(
+        chain, std::max(chain.strikes.size(),
+                        config.adaptive->min_moneyness_points));
+    ASSERT_TRUE(domain.has_value());
+
+    const double fit_m_min = domain->bounds.m_min;
+    const double sample_m_min = domain->sample_bounds.m_min;
+    // The headroom fix (spec D3) guarantees the fit domain strictly extends
+    // past the sample domain on the low side.
+    ASSERT_LT(fit_m_min, sample_m_min);
+
+    auto table_result = make_price_table(config);
+    ASSERT_TRUE(table_result.has_value()) << "make_price_table (adaptive) failed";
+    auto table = std::move(*table_result);
+
+    auto params = off_grid_pricing_params();
+    params.dividend_yield = config.dividend_yield;
+
+    // A query in the old headroom band (below the sample domain, but still
+    // within the old published fit-domain bounds) must now be rejected:
+    // published bounds are the sample domain, not the fit domain (D2).
+    const double headroom_log_m = 0.5 * (fit_m_min + sample_m_min);
+    params.strike = config.spot * std::exp(-headroom_log_m);
+    auto headroom_check = table.validate_pricing_params(params);
+    ASSERT_FALSE(headroom_check.has_value())
+        << "query in the old headroom band should be rejected";
+    EXPECT_EQ(headroom_check.error().code, ValidationErrorCode::OutOfRange);
+
+    // A query just inside the sample-domain edge must be accepted.
+    const double edge_log_m = sample_m_min + 1e-6;
+    params.strike = config.spot * std::exp(-edge_log_m);
+    auto edge_check = table.validate_pricing_params(params);
+    EXPECT_TRUE(edge_check.has_value())
+        << "query at the sample-domain edge should be accepted";
 }
 
 // Regression: freshly built segmented tables lost their schedule on the

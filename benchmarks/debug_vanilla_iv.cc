@@ -454,15 +454,9 @@ int main() {
         std::printf("  European at m=1, tau=1: %.6f\n", eu_at_1.value());
         std::printf("  EEP raw: %.6f\n", eep_raw);
 
-        // Apply softplus
-        constexpr double kSharpness = 100.0;
-        double stored;
-        if (kSharpness * eep_raw > 500.0) {
-            stored = eep_raw;
-        } else {
-            stored = std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
-        }
-        std::printf("  After softplus: %.6f\n", stored);
+        // Apply the exact nonnegative projection (eep_floor: max(0, x))
+        double stored = std::max(0.0, eep_raw);
+        std::printf("  After projection: %.6f\n", stored);
         std::printf("  Surface stores: %.6f\n", raw_value);
     }
 
