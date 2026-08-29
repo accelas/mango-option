@@ -911,6 +911,7 @@ cc_test(
     name = "iv_error_types_test",
     srcs = ["iv_error_types_test.cc"],
     deps = [
+        "//src/option:iv_result",
         "//src/support:error_types",
         "@googletest//:gtest_main",
     ],
@@ -1369,6 +1370,16 @@ cc_test(
     srcs = ["error_types_test.cc"],
     deps = [
         "//src/support:error_types",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "price_table_error_mapping_test",
+    size = "small",
+    srcs = ["price_table_error_mapping_test.cc"],
+    deps = [
+        "//src/option:price_table_error_mapping",
         "@googletest//:gtest_main",
     ],
 )

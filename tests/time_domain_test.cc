@@ -70,3 +70,28 @@ TEST(TimeDomainTest, MandatoryPointsOutOfRangeIgnored) {
     auto td = mango::TimeDomain::with_mandatory_points(0.0, 1.0, 0.25, {-0.5, 1.5});
     EXPECT_EQ(td.n_steps(), 4u);
 }
+
+// ===========================================================================
+// Regression tests for bugs found during code review (issue #441)
+// ===========================================================================
+
+// Regression: TimeDomain(t_start, t_end, dt) must not overshoot t_end
+// Bug: n_steps was ceil'd but dt kept at the requested value, so
+//      time_points() ended at t_start + n_steps*dt > t_end
+//      (e.g. (0, 1, 0.3) -> last point 1.2, integrating past maturity).
+TEST(TimeDomainTest, DtCtorLandsOnTEnd) {
+    mango::TimeDomain td(0.0, 1.0, 0.3);
+    EXPECT_EQ(td.n_steps(), 4u);          // ceil(1.0 / 0.3)
+    EXPECT_DOUBLE_EQ(td.dt(), 0.25);      // shrunk from 0.3
+    auto pts = td.time_points();
+    ASSERT_EQ(pts.size(), 5u);
+    EXPECT_NEAR(pts.back(), 1.0, 1e-12);  // tolerance, not bit-exact
+}
+
+// Regression: dt larger than the whole span must still produce one step
+// Bug: same root cause; ceil(span/dt) < 1 would make an empty time grid.
+TEST(TimeDomainTest, DtCtorDtLargerThanSpan) {
+    mango::TimeDomain td(0.0, 0.1, 1.0);
+    EXPECT_EQ(td.n_steps(), 1u);
+    EXPECT_DOUBLE_EQ(td.dt(), 0.1);
+}

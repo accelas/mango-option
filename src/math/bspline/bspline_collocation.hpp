@@ -70,12 +70,19 @@ struct BSplineCollocationConfig {
 /// Space: O(n) for banded storage
 ///
 /// @tparam T Floating point type (float, double, long double)
-/// @tparam Bandwidth Number of non-zero entries per row (degree + 1)
+/// @tparam Bandwidth Reserved; must be 4 (cubic) until basis evaluation is
+///     generalized
 template<std::floating_point T, size_t Bandwidth = 4>
 class BSplineCollocation1D {
 public:
-    /// Bandwidth for B-splines (degree + 1, default 4 for cubic)
+    /// Bandwidth for B-splines (reserved; only 4 = cubic is supported)
     static constexpr size_t BANDWIDTH = Bandwidth;
+
+    // Reserved parameter: only cubic (Bandwidth == 4) is supported —
+    // cubic_basis_nonuniform unconditionally writes 4 entries, so any
+    // smaller Bandwidth is a stack buffer overflow (issue #441 item 9).
+    static_assert(Bandwidth == 4,
+                  "BSplineCollocation1D supports only Bandwidth == 4 (cubic)");
 
     /// mdspan type for internal band storage (n × Bandwidth, row-major)
     using band_extents_type = std::experimental::extents<size_t, std::dynamic_extent, BANDWIDTH>;

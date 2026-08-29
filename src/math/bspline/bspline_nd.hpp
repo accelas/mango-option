@@ -264,6 +264,32 @@ public:
         return coeffs_;
     }
 
+    /// Copy ops re-point coeffs_view_ into this object's own coeffs_;
+    /// the defaulted copies would alias the source's buffer.  Moves are
+    /// safe defaulted (vector move preserves data()).  A moved-from
+    /// object supports only destruction and reassignment.
+    BSplineND(const BSplineND& other)
+        : grids_(other.grids_)
+        , knots_(other.knots_)
+        , coeffs_(other.coeffs_)
+        , coeffs_view_(nullptr, CoeffExtents{})
+        , dims_(other.dims_)
+    {
+        coeffs_view_ = create_coeffs_view(coeffs_.data(), dims_);
+    }
+
+    BSplineND& operator=(const BSplineND& other) {
+        if (this != &other) {
+            BSplineND tmp(other);   // strong exception safety
+            *this = std::move(tmp);
+        }
+        return *this;
+    }
+
+    BSplineND(BSplineND&&) noexcept = default;
+    BSplineND& operator=(BSplineND&&) noexcept = default;
+    ~BSplineND() = default;
+
 private:
     GridArray grids_;        ///< Grid points for each dimension
     KnotArray knots_;        ///< Knot vectors for each dimension

@@ -21,14 +21,28 @@ struct RootFindingConfig {
     /// Maximum iterations for any method
     size_t max_iter = 100;
 
-    /// Relative convergence tolerance
+    /// Absolute residual convergence tolerance: Newton stops when
+    /// |f(x)| < tolerance.  NOT relative — callers must scale it to
+    /// their objective's units.
     double tolerance = 1e-6;
 
     // Newton-specific parameters
     double jacobian_fd_epsilon = 1e-7;  ///< Finite difference step for Jacobian
 
     // Brent-specific parameters
-    double brent_tol_abs = 1e-6;  ///< Absolute tolerance for Brent's method
+
+    /// Absolute tolerance on f-values for Brent's method: the endpoint
+    /// root checks and the |f(b)| stopping test.  Also the fallback for
+    /// x-distance comparisons when brent_tol_x is unset (historical
+    /// behavior: one knob served both units).
+    double brent_tol_abs = 1e-6;
+
+    /// Optional absolute tolerance on x-distances for Brent's method:
+    /// the |b - a| bracket-width stopping test and the
+    /// interpolation-vs-bisection safeguard comparisons (|b - c|, |c - d|).
+    /// Unset: falls back to brent_tol_abs, preserving legacy behavior.
+    /// MUST be declared after brent_tol_abs (designated-initializer order).
+    std::optional<double> brent_tol_x = std::nullopt;
 
     // Future methods can add parameters here
 };
@@ -144,6 +158,10 @@ concept BrentObjective = ObjectiveFunction<F>;
 template<BrentObjective F>
 RootFindingResult brent_find_root(F&& f, double a, double b,
                                   const RootFindingConfig& config) {
+    // x-distance tolerance: falls back to brent_tol_abs when unset,
+    // preserving legacy behavior (one knob served both |f| and x-distance).
+    const double tol_x = config.brent_tol_x.value_or(config.brent_tol_abs);
+
     // Evaluate endpoints
     double fa = f(a);
     double fb = f(b);
@@ -208,7 +226,7 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
 
         // Check convergence criteria
         if (std::abs(fb) < config.brent_tol_abs ||
-            std::abs(b - a) < config.brent_tol_abs) {
+            std::abs(b - a) < tol_x) {
             MANGO_TRACE_BRENT_COMPLETE(b, iter + 1, 1);
             return RootFindingSuccess{
                 .root = b,
@@ -243,10 +261,10 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
         bool condition3 = !mflag && std::abs(s - b) >= std::abs(c - d) / 2.0;
 
         // Condition 4: mflag is set and |b-c| < tolerance
-        bool condition4 = mflag && std::abs(b - c) < config.brent_tol_abs;
+        bool condition4 = mflag && std::abs(b - c) < tol_x;
 
         // Condition 5: mflag is not set and |c-d| < tolerance
-        bool condition5 = !mflag && std::abs(c - d) < config.brent_tol_abs;
+        bool condition5 = !mflag && std::abs(c - d) < tol_x;
 
         if (condition1 || condition2 || condition3 || condition4 || condition5) {
             // Use bisection
