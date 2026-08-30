@@ -28,9 +28,7 @@
 #pragma once
 
 #include "mango/math/bspline/bspline_collocation.hpp"
-#include "mango/math/bspline/bspline_collocation_workspace.hpp"
 #include "mango/support/parallel.hpp"
-#include "mango/support/thread_workspace.hpp"
 #include <experimental/mdspan>
 #include <expected>
 #include <span>
@@ -293,7 +291,10 @@ private:
     /// Iterates over all (N-1)-dimensional slices perpendicular to this axis,
     /// performs 1D B-spline fitting on each slice, and writes back coefficients.
     ///
-    /// Uses ThreadWorkspaceBuffer for zero-allocation parallel fitting.
+    /// The collocation matrix for this axis depends only on the grid, so it
+    /// is factorized once (race-free, see `BSplineCollocation1D::factorize`)
+    /// before the parallel region; each thread then only calls the read-only
+    /// `solve_factored()` on its own per-slice buffers (issue #435).
     ///
     /// @tparam Axis Which axis to fit (0 to N-1)
     /// @param coeffs Coefficient array (modified in-place)
@@ -310,76 +311,63 @@ private:
         std::array<size_t, N>& failed)
     {
         static_assert(Axis < N, "Axis index out of bounds");
-
         const size_t n_axis = dims_[Axis];
         const size_t n_slices = total_slices<Axis>();
 
-        // Per-axis statistics (thread-safe reduction targets)
-        T max_residual = T{0};
-        T max_condition = T{0};
-        size_t failed_count = 0;
+        // Factor once per axis (issue #435): the collocation matrix depends only
+        // on the grid, so threads below share the read-only factorization.
+        auto fact = solvers_[Axis]->factorize();
+        if (!fact.has_value()) {
+            max_residuals[Axis] = T{0};
+            conditions[Axis] = T{0};
+            failed[Axis] = n_slices;  // one singular matrix fails every slice
+            return;
+        }
 
-        // Calculate workspace size for this axis
-        const size_t ws_bytes = BSplineCollocationWorkspace<T>::required_bytes(n_axis);
+        T max_residual = T{0};
+        size_t failed_count = 0;
 
         MANGO_PRAGMA_PARALLEL
         {
-            // Create workspace buffer ONCE per thread
-            ThreadWorkspaceBuffer buffer(ws_bytes);
-            auto ws = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis).value();
-
-            // Temporary buffer for slice extraction (per-thread)
             std::vector<T> slice_buffer(n_axis);
-
-            // Thread-local accumulators
+            std::vector<T> coeff_buffer(n_axis);
             T local_max_residual = T{0};
-            T local_max_condition = T{0};
             size_t local_failed = 0;
 
             MANGO_PRAGMA_FOR
             for (size_t slice_idx = 0; slice_idx < n_slices; ++slice_idx) {
-                // Calculate base offset for this slice
                 size_t base_offset = slice_idx_to_offset<Axis>(slice_idx);
-
-                // Extract 1D slice along this axis (SIMD-optimized)
                 const size_t stride = strides_[Axis];
                 MANGO_PRAGMA_SIMD
                 for (size_t i = 0; i < n_axis; ++i) {
                     slice_buffer[i] = coeffs[base_offset + i * stride];
                 }
 
-                // Fit using workspace
-                auto result = solvers_[Axis]->fit_with_workspace(
-                    std::span<const T>{slice_buffer},
-                    ws,
+                auto result = solvers_[Axis]->solve_factored(
+                    *fact, std::span<const T>{slice_buffer},
+                    std::span<T>{coeff_buffer},
                     BSplineCollocationConfig<T>{.tolerance = tolerance});
 
                 if (result.has_value()) {
-                    local_max_residual = std::max(local_max_residual, result->max_residual);
-                    local_max_condition = std::max(local_max_condition, result->condition_estimate);
-
-                    // Copy coefficients from ws.coeffs() back to output (SIMD-optimized)
-                    auto fitted_coeffs = ws.coeffs();
+                    local_max_residual = std::max(local_max_residual, *result);
                     MANGO_PRAGMA_SIMD
                     for (size_t i = 0; i < n_axis; ++i) {
-                        coeffs[base_offset + i * stride] = fitted_coeffs[i];
+                        coeffs[base_offset + i * stride] = coeff_buffer[i];
                     }
                 } else {
                     ++local_failed;
                 }
             }
 
-            // Reduction via critical section
             MANGO_PRAGMA_CRITICAL
             {
                 max_residual = std::max(max_residual, local_max_residual);
-                max_condition = std::max(max_condition, local_max_condition);
                 failed_count += local_failed;
             }
         }
 
         max_residuals[Axis] = max_residual;
-        conditions[Axis] = max_condition;
+        conditions[Axis] = fact->condition_estimate;  // one matrix, one estimate
         failed[Axis] = failed_count;
     }
 
