@@ -203,3 +203,25 @@ TEST(BSplineNDSeparableTest, WrongValueSize) {
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::ValueSizeMismatch);
 }
+
+// ===========================================================================
+// Regression tests for issue #443 item 4
+// ===========================================================================
+
+// Regression: create() must attribute a failure to the correct axis.
+// Bug context: create() used to validate by constructing and discarding a
+// BSplineCollocation1D per axis, then the private ctor constructed all N
+// again. The refactor constructs each solver once; this test pins that the
+// per-axis error attribution (error().index) survived the refactor.
+TEST(BSplineNDSeparableTest, FactoryFailureReportsFailingAxisIndex) {
+    std::array<std::vector<double>, 3> grids = {
+        std::vector<double>{0.0, 1.0, 2.0, 3.0},        // valid
+        std::vector<double>{0.0, 1.0, 2.0, 3.0},        // valid
+        std::vector<double>{0.0, 1.0, 2.0}};             // axis 2: < 4 points
+    auto result = mango::BSplineNDSeparable<double, 3>::create(std::move(grids));
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code,
+              mango::InterpolationErrorCode::InsufficientGridPoints);
+    EXPECT_EQ(result.error().index, 2u);
+}

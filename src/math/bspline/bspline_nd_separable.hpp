@@ -125,19 +125,24 @@ public:
     [[nodiscard]] static std::expected<BSplineNDSeparable, InterpolationError> create(
         std::array<std::vector<T>, N> grids)
     {
-        // Validate each grid via 1D solver creation
+        // Validate and build each axis solver exactly once; the grid moves
+        // into its solver (BSplineCollocation1D::create takes it by value).
+        std::array<size_t, N> dims;
+        std::array<std::unique_ptr<BSplineCollocation1D<T>>, N> solvers;
         for (size_t i = 0; i < N; ++i) {
-            auto solver_result = BSplineCollocation1D<T>::create(grids[i]);
+            dims[i] = grids[i].size();
+            auto solver_result = BSplineCollocation1D<T>::create(std::move(grids[i]));
             if (!solver_result.has_value()) {
                 // Propagate error with axis index
                 auto err = solver_result.error();
                 err.index = i;
                 return std::unexpected(err);
             }
+            solvers[i] = std::make_unique<BSplineCollocation1D<T>>(
+                std::move(*solver_result));
         }
 
-        // All grids valid, create fitter
-        return BSplineNDSeparable(std::move(grids));
+        return BSplineNDSeparable(dims, std::move(solvers));
     }
 
     /// Fit B-spline coefficients via separable collocation (lvalue overload)
@@ -171,8 +176,8 @@ public:
     {
         // Verify size
         size_t expected_size = 1;
-        for (size_t i = 0; i < grids_.size(); ++i) {
-            expected_size *= grids_[i].size();
+        for (size_t i = 0; i < N; ++i) {
+            expected_size *= dims_[i];
         }
 
         if (values.size() != expected_size) {
@@ -240,29 +245,19 @@ public:
 private:
     /// Private constructor - use factory method create() instead
     ///
-    /// @param grids N-dimensional grids (validation done by factory)
-    explicit BSplineNDSeparable(std::array<std::vector<T>, N> grids)
-        : grids_(std::move(grids))
+    /// @param dims Grid size per axis
+    /// @param solvers Per-axis 1D collocation solvers (built by create())
+    BSplineNDSeparable(
+        std::array<size_t, N> dims,
+        std::array<std::unique_ptr<BSplineCollocation1D<T>>, N> solvers)
+        : dims_(dims)
+        , solvers_(std::move(solvers))
     {
-        // Store dimensions
-        for (size_t i = 0; i < N; ++i) {
-            dims_[i] = grids_[i].size();
-        }
-
         // Compute strides for row-major layout
         // Memory layout: ((i*N₁ + j)*N₂ + k)*N₃ + l
         strides_[N-1] = 1;
         for (size_t i = N-1; i > 0; --i) {
             strides_[i-1] = strides_[i] * dims_[i];
-        }
-
-        // Create 1D solvers for each axis
-        for (size_t i = 0; i < N; ++i) {
-            auto solver_result = BSplineCollocation1D<T>::create(grids_[i]);
-            // Should never fail (already validated in factory method)
-            assert(solver_result.has_value() && "Solver creation failed after validation");
-            solvers_[i] = std::make_unique<BSplineCollocation1D<T>>(
-                std::move(solver_result.value()));
         }
     }
 
@@ -414,7 +409,6 @@ private:
     }
 
 
-    std::array<std::vector<T>, N> grids_;
     std::array<size_t, N> dims_;
     std::array<size_t, N> strides_;
     std::array<std::unique_ptr<BSplineCollocation1D<T>>, N> solvers_;
