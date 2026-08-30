@@ -48,8 +48,8 @@ bool run_gamma_oscillation_case(const SweepCase& test_case) {
     operators::CenteredDifference<double> diff(grid->spacing());
     std::vector<double> dv_dx(n, 0.0);
     std::vector<double> d2v_dx2(n, 0.0);
-    diff.compute_first_derivative(solution, dv_dx, 1, n - 2);
-    diff.compute_second_derivative(solution, d2v_dx2, 1, n - 2);
+    diff.compute_first_derivative(solution, dv_dx, 1, n - 1);
+    diff.compute_second_derivative(solution, d2v_dx2, 1, n - 1);
 
     size_t total = 0;
     size_t sign_flips = 0;
