@@ -95,7 +95,7 @@ double AmericanOptionResult::gamma() const {
 
 double AmericanOptionResult::theta() const {
     // Theta = ∂V/∂t via backward finite difference
-    // solution() = V at τ=0 (current), solution_prev() = V at τ=dt
+    // solution() = V at τ=T (final step), solution_prev() = V at τ=T-dt_last
     // θ ≈ (V_prev - V_current) / dt  (negative for time decay)
     //
     // The divisor is the *actual* final time step: solution_prev is exactly

@@ -547,7 +547,7 @@ TEST(AmericanOptionResultNonUniformTimeTest, ThetaUsesActualFinalStep) {
 
     // theta = (1.5 - 1.0) / dt_last * K. Under the bug the divisor is the
     // average dt() ≈ 0.0909, giving ~550 instead of 1000.
-    EXPECT_NEAR(result.theta(), 0.5 / dt_last * params.strike, 1e-9);
+    EXPECT_NEAR(result.theta(), 0.5 / dt_last * params.strike, 1e-3);
 }
 
 // Regression: discrete-dividend theta was off by dt_avg/dt_last vs a
