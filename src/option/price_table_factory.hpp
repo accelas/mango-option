@@ -56,6 +56,10 @@ public:
     /// never enter serialization.
     [[nodiscard]] std::optional<BuildDiagnostics> build_diagnostics() const;
 
+    /// Convenience one-shot IV solve. Constructs a fresh solver (bounds
+    /// extraction + variant dispatch) on every call — not intended for
+    /// repeated or hot-path queries. For those, create the solver once
+    /// via make_iv_solver() and reuse it.
     [[nodiscard]] std::expected<IVSuccess, IVError>
     solve_iv(const IVQuery& query,
              const InterpolatedIVSolverConfig& config = {}) const;
