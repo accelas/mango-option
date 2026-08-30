@@ -30,6 +30,15 @@ TEST(GridSpecExpectedTest, UniformInvalidTooFewPoints) {
     EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
 }
 
+// Regression: n=2 used to pass (old floor was n_points < 2). Every spatial
+// stencil in this codebase is 3-point, so a 2-point grid has no interior
+// node and must be rejected too.
+TEST(GridSpecExpectedTest, UniformInvalidTwoPoints) {
+    auto result = GridSpec<>::uniform(0.0, 1.0, 2);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
+}
+
 TEST(GridSpecExpectedTest, UniformInvalidMinMax) {
     auto result = GridSpec<>::uniform(1.0, 0.0, 10);
     EXPECT_FALSE(result.has_value());
@@ -88,6 +97,12 @@ TEST(GridSpecExpectedTest, LogSpacedInvalidTooFewPoints) {
     EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
 }
 
+TEST(GridSpecExpectedTest, LogSpacedInvalidTwoPoints) {
+    auto result = GridSpec<>::log_spaced(1.0, 10.0, 2);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
+}
+
 // Test sinh-spaced grid creation with expected pattern
 TEST(GridSpecExpectedTest, SinhSpacedValid) {
     auto result = GridSpec<>::sinh_spaced(0.0, 1.0, 11, 2.0);
@@ -128,6 +143,12 @@ TEST(GridSpecExpectedTest, SinhSpacedInvalidMinMax) {
 
 TEST(GridSpecExpectedTest, SinhSpacedInvalidTooFewPoints) {
     auto result = GridSpec<>::sinh_spaced(0.0, 1.0, 1);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
+}
+
+TEST(GridSpecExpectedTest, SinhSpacedInvalidTwoPoints) {
+    auto result = GridSpec<>::sinh_spaced(0.0, 1.0, 2);
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
 }

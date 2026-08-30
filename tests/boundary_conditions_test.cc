@@ -41,7 +41,7 @@ TEST(NeumannBCTest, LinearFunctionLeftBoundary) {
     // Neumann BC: du/dx = 2
     // Formula: u[0] = u[1] - g*dx
 
-    auto bc = mango::NeumannBC([](double, double) { return 2.0; }, 1.0);
+    auto bc = mango::NeumannBC([](double, double) { return 2.0; });
 
     const double dx = 0.1;
     const double u1 = 2.0 * dx + 3.0;  // u[1] = 3.2
@@ -59,7 +59,7 @@ TEST(NeumannBCTest, LinearFunctionRightBoundary) {
     // Neumann BC: du/dx = 2
     // Formula: u[n-1] = u[n-2] + g*dx
 
-    auto bc = mango::NeumannBC([](double, double) { return 2.0; }, 1.0);
+    auto bc = mango::NeumannBC([](double, double) { return 2.0; });
 
     const double dx = 0.1;
     const double u_n2 = 5.0 - 2.0 * dx;  // u[n-2] = 4.8
@@ -73,7 +73,7 @@ TEST(NeumannBCTest, LinearFunctionRightBoundary) {
 TEST(NeumannBCTest, InsulatedBoundary) {
     // Zero flux: du/dx = 0
     // Both boundaries should equal interior value
-    auto bc = mango::NeumannBC([](double, double) { return 0.0; }, 1.0);
+    auto bc = mango::NeumannBC([](double, double) { return 0.0; });
 
     const double dx = 0.1;
     const double u_interior = 7.5;
@@ -187,7 +187,7 @@ TEST(BoundaryConditionConceptTest, DirichletSatisfiesConcept) {
 }
 
 TEST(BoundaryConditionConceptTest, NeumannSatisfiesConcept) {
-    auto bc = mango::NeumannBC([](double, double) { return 0.0; }, 1.0);
+    auto bc = mango::NeumannBC([](double, double) { return 0.0; });
     static_assert(mango::BoundaryCondition<decltype(bc)>,
                   "NeumannBC must satisfy BoundaryCondition concept");
     SUCCEED();
@@ -202,7 +202,7 @@ TEST(BoundaryConditionConceptTest, RobinSatisfiesConcept) {
 
 TEST(BoundaryConditionConceptTest, TagTypesAreDistinct) {
     using DTag = typename decltype(mango::DirichletBC([](double, double) { return 0.0; }))::tag;
-    using NTag = typename decltype(mango::NeumannBC([](double, double) { return 0.0; }, 1.0))::tag;
+    using NTag = typename decltype(mango::NeumannBC([](double, double) { return 0.0; }))::tag;
     using RTag = typename decltype(mango::RobinBC([](double, double) { return 0.0; }, 1.0, 1.0))::tag;
 
     static_assert(std::is_same_v<DTag, mango::bc::dirichlet_tag>);
@@ -214,4 +214,24 @@ TEST(BoundaryConditionConceptTest, TagTypesAreDistinct) {
     static_assert(!std::is_same_v<DTag, RTag>);
 
     SUCCEED();
+}
+
+// Regression: the two-argument NeumannBC(func, diffusion_coeff) constructor
+// is retained (deprecated) for source compatibility — it must still compile
+// and behave identically to the one-argument form, since it silently drops
+// the unused second argument. Warning suppressed locally; every other call
+// site in the repo uses the one-argument constructor so the "no new
+// warnings" build gate holds everywhere else.
+TEST(NeumannBCTest, DeprecatedTwoArgConstructorStillCompiles) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    auto bc = mango::NeumannBC([](double, double) { return 2.0; }, 1.0);
+#pragma GCC diagnostic pop
+
+    const double dx = 0.1;
+    const double u_interior = 5.0;
+    double u = 999.0;
+    bc.apply(u, 0.0, 0.0, dx, u_interior, 1.0, mango::bc::BoundarySide::Left);
+
+    EXPECT_DOUBLE_EQ(u, u_interior - 2.0 * dx);
 }

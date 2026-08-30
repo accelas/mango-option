@@ -3,6 +3,7 @@
 
 #include "mango/pde/core/grid.hpp"
 #include "mango/pde/internal/pde_workspace.hpp"
+#include "mango/pde/internal/spatial_operator.hpp"
 #include "mango/pde/core/boundary_conditions.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include "mango/pde/core/trbdf2_config.hpp"
@@ -42,6 +43,13 @@ template<typename D>
 concept HasLcpActiveSide = requires {
     { D::lcp_active_side } -> std::convertible_to<LcpActiveSide>;
 };
+
+/// Always-false predicate that still depends on a template parameter, so it
+/// can only fire when the enclosing `if constexpr` branch is instantiated
+/// (a bare `static_assert(false, ...)` would fire unconditionally, even in
+/// the branch not taken). Used to give a deterministic, named diagnostic for
+/// unsupported BC-type/operator combinations instead of degenerate rows.
+template<typename> inline constexpr bool dependent_false_v = false;
 
 // Temporal event callback signature
 using TemporalEventCallback = std::function<void(double t,
@@ -327,28 +335,41 @@ private:
         }
     }
 
-    /// Apply boundary conditions (CRTP version)
+    /// Apply boundary conditions (CRTP version): Dirichlet sides only.
+    ///
+    /// Neumann (and Robin) sides are enforced by the solve itself — the
+    /// spatial operator's real ghost-eliminated boundary row
+    /// (`apply_spatial_operator`) plus the matching analytic Jacobian row
+    /// (`build_jacobian_boundaries`) and, on the projected path, the affine
+    /// RHS term, make the boundary value an outcome of the solve rather than
+    /// a value forced here. Applying a lagged post-hoc overwrite for those
+    /// sides (as this used to do for every BC type) would use the previous
+    /// iterate's neighbor value and destroy the restored accuracy —
+    /// `NeumannBC::apply()` / `RobinBC::apply()` remain public standalone
+    /// utilities for callers outside `PDESolver`, just not invoked here.
     void apply_boundary_conditions(std::span<double> u, double t) {
-        auto dx_span = workspace_.dx();
-
         // Get BCs from derived class via CRTP (use const auto& to avoid copies!)
         const auto& left_bc = derived().left_boundary();
         const auto& right_bc = derived().right_boundary();
+        using LeftBCType = std::remove_cvref_t<decltype(left_bc)>;
+        using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
 
-        // Left boundary
-        double x_left = grid_->x()[0];
-        double dx_left = (n_ > 1) ? dx_span[0] : 1.0;
-        double u_interior_left = (n_ > 1) ? u[1] : 0.0;
-        left_bc.apply(u[0], x_left, t, dx_left, u_interior_left, 0.0, bc::BoundarySide::Left);
-
-        // Right boundary
-        double x_right = grid_->x()[n_ - 1];
-        double dx_right = (n_ > 1) ? dx_span[n_ - 2] : 1.0;
-        double u_interior_right = (n_ > 1) ? u[n_ - 2] : 0.0;
-        right_bc.apply(u[n_ - 1], x_right, t, dx_right, u_interior_right, 0.0, bc::BoundarySide::Right);
+        if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
+            u[0] = left_bc.value(t, grid_->x()[0]);
+        }
+        if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
+            u[n_ - 1] = right_bc.value(t, grid_->x()[n_ - 1]);
+        }
     }
 
-    /// Apply spatial operator and zero boundary values
+    /// Apply spatial operator, filling boundary entries according to BC type.
+    ///
+    /// Dirichlet sides are zeroed here — `apply_boundary_conditions` sets the
+    /// actual value post-hoc, so `Lu` at those rows is unused. Neumann sides
+    /// get the real ghost-eliminated `L` value via
+    /// `SpatialOperator::eval_boundary_row`, so the generic Newton residual
+    /// `F = u - rhs - w·L(u)` and the explicit TR-BDF2 RHS `u^n + w·L(u^n)`
+    /// are both correct at those rows without post-hoc overwriting.
     void apply_spatial_operator(double t,
                                       std::span<const double> u,
                                       std::span<double> Lu) {
@@ -356,12 +377,45 @@ private:
 
         // Get spatial operator from derived class via CRTP (use const auto& to avoid copies!)
         const auto& spatial_op = derived().spatial_operator();
+        using SpatialOpType = std::remove_cvref_t<decltype(spatial_op)>;
 
         // Direct evaluation (no blocking)
         spatial_op.apply(t, u, Lu);
 
-        // Zero boundary values (BCs will override after)
-        Lu[0] = Lu[n-1] = 0.0;
+        using LeftBCType = std::remove_cvref_t<decltype(derived().left_boundary())>;
+        using RightBCType = std::remove_cvref_t<decltype(derived().right_boundary())>;
+
+        if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
+            Lu[0] = 0.0;
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::neumann_tag>) {
+            if constexpr (operators::HasBoundaryRows<SpatialOpType>) {
+                const double g = derived().left_boundary().gradient(t, grid_->x()[0]);
+                Lu[0] = spatial_op.eval_boundary_row(t, bc::BoundarySide::Left, g, u);
+            } else {
+                static_assert(dependent_false_v<SpatialOpType>,
+                    "Neumann left BC requires a spatial operator with boundary rows "
+                    "(HasBoundaryRows): the PDE must expose a/b/c coefficients");
+            }
+        } else {
+            static_assert(dependent_false_v<LeftBCType>,
+                "Unsupported left boundary condition type (Robin rows are not assembled)");
+        }
+
+        if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
+            Lu[n-1] = 0.0;
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::neumann_tag>) {
+            if constexpr (operators::HasBoundaryRows<SpatialOpType>) {
+                const double g = derived().right_boundary().gradient(t, grid_->x()[n-1]);
+                Lu[n-1] = spatial_op.eval_boundary_row(t, bc::BoundarySide::Right, g, u);
+            } else {
+                static_assert(dependent_false_v<SpatialOpType>,
+                    "Neumann right BC requires a spatial operator with boundary rows "
+                    "(HasBoundaryRows): the PDE must expose a/b/c coefficients");
+            }
+        } else {
+            static_assert(dependent_false_v<RightBCType>,
+                "Unsupported right boundary condition type (Robin rows are not assembled)");
+        }
     }
 
     /// TR-BDF2 Stage 1: Trapezoidal rule
@@ -603,17 +657,55 @@ private:
         auto rhs_with_bc = workspace_.reserved1();
         std::copy(rhs.begin(), rhs.end(), rhs_with_bc.begin());
 
-        // Apply Dirichlet boundary values to RHS
+        // Apply boundary terms to RHS: Dirichlet rows get the boundary
+        // value outright; Neumann rows keep the interior TR-BDF2 formula
+        // but need the affine (gradient-dependent, u-independent) term of
+        // the ghost-eliminated row folded in, since the direct solve
+        // A·u = rhs (A already carries the analytic Neumann Jacobian from
+        // build_jacobian_boundaries) is solving
+        //   (I - coeff_dt·∂L/∂u)·u = rhs + coeff_dt·affine
+        // — L(u) = jac·u + affine at that row, so moving the u-independent
+        // affine piece to the RHS is what makes A·u = rhs the true stage
+        // equation there. This MUST happen before the KKT validator below,
+        // which checks the exact system just solved.
         const auto& left_bc = derived().left_boundary();
         const auto& right_bc = derived().right_boundary();
         using LeftBCType = std::remove_cvref_t<decltype(left_bc)>;
         using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
+        const auto& spatial_op = derived().spatial_operator();
+        using SpatialOpType = std::remove_cvref_t<decltype(spatial_op)>;
 
         if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
             rhs_with_bc[0] = left_bc.value(t, grid_->x()[0]);
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::neumann_tag>) {
+            if constexpr (operators::HasBoundaryRows<SpatialOpType>) {
+                const double g = left_bc.gradient(t, grid_->x()[0]);
+                rhs_with_bc[0] += coeff_dt * spatial_op.boundary_row_affine(
+                    t, bc::BoundarySide::Left, g);
+            } else {
+                static_assert(dependent_false_v<SpatialOpType>,
+                    "Neumann left BC requires a spatial operator with boundary rows "
+                    "(HasBoundaryRows): the PDE must expose a/b/c coefficients");
+            }
+        } else {
+            static_assert(dependent_false_v<LeftBCType>,
+                "Unsupported left boundary condition type (Robin rows are not assembled)");
         }
         if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
             rhs_with_bc[n_-1] = right_bc.value(t, grid_->x()[n_-1]);
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::neumann_tag>) {
+            if constexpr (operators::HasBoundaryRows<SpatialOpType>) {
+                const double g = right_bc.gradient(t, grid_->x()[n_-1]);
+                rhs_with_bc[n_-1] += coeff_dt * spatial_op.boundary_row_affine(
+                    t, bc::BoundarySide::Right, g);
+            } else {
+                static_assert(dependent_false_v<SpatialOpType>,
+                    "Neumann right BC requires a spatial operator with boundary rows "
+                    "(HasBoundaryRows): the PDE must expose a/b/c coefficients");
+            }
+        } else {
+            static_assert(dependent_false_v<RightBCType>,
+                "Unsupported right boundary condition type (Robin rows are not assembled)");
         }
 
         // Get obstacle constraint via CRTP
@@ -904,6 +996,13 @@ private:
         const auto& left_bc = derived().left_boundary();
         const auto& right_bc = derived().right_boundary();
 
+        // Neumann rows need NO override here: apply_spatial_operator() now
+        // fills Lu[boundary] with the real ghost-eliminated L value, so the
+        // generic residual F(u) = u - rhs - coeff_dt·L(u) computed by
+        // compute_residual() above is already correct at those rows. Only
+        // Dirichlet rows need the F(u) = u - g override below (Dirichlet
+        // ignores the generic formula's rhs/L(u) entirely).
+        //
         // For Dirichlet BC: F(u) = u - g, so residual = u - g
         // Left boundary
         using LeftBCType = std::remove_cvref_t<decltype(left_bc)>;
@@ -979,14 +1078,25 @@ private:
         }
     }
 
+    /// Boundary rows of the Jacobian ∂F/∂u where F(u) = u - rhs - coeff_dt·L(u).
+    ///
+    /// Dirichlet rows are the identity row (F(u) = u - g, so ∂F/∂u = 1).
+    /// Neumann rows use the analytic ghost-eliminated coefficients from
+    /// SpatialOperator::boundary_row_jacobian() directly — no finite
+    /// differencing needed since eval_boundary_row() is itself already
+    /// linear in u (jac.diag·u[node] + jac.offdiag·u[neighbor] + affine).
     void build_jacobian_boundaries(double t, double coeff_dt,
-                                   std::span<const double> u, double eps,
+                                   [[maybe_unused]] std::span<const double> u,
+                                   [[maybe_unused]] double eps,
                                    TridiagonalMatrixView jac) {
-        // Get BCs from derived class via CRTP (use const auto& to avoid copies!)
+        // Get BCs and spatial operator from derived class via CRTP
+        // (use const auto& to avoid copies!)
         const auto& left_bc = derived().left_boundary();
         const auto& right_bc = derived().right_boundary();
         using LeftBCType = std::remove_cvref_t<decltype(left_bc)>;
         using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
+        const auto& spatial_op = derived().spatial_operator();
+        using SpatialOpType = std::remove_cvref_t<decltype(spatial_op)>;
 
         // Left boundary
         if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
@@ -994,18 +1104,19 @@ private:
             jac.diag()[0] = 1.0;
             jac.upper()[0] = 0.0;
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::neumann_tag>) {
-            // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
-            workspace_.u_stage()[0] = u[0] + eps;
-            apply_spatial_operator(t, workspace_.u_stage(), workspace_.reserved1());
-            double dL0_du0 = (workspace_.reserved1()[0] - workspace_.lu()[0]) / eps;
-            jac.diag()[0] = 1.0 - coeff_dt * dL0_du0;
-            workspace_.u_stage()[0] = u[0];
-
-            workspace_.u_stage()[1] = u[1] + eps;
-            apply_spatial_operator(t, workspace_.u_stage(), workspace_.reserved1());
-            double dL0_du1 = (workspace_.reserved1()[0] - workspace_.lu()[0]) / eps;
-            jac.upper()[0] = -coeff_dt * dL0_du1;
-            workspace_.u_stage()[1] = u[1];
+            if constexpr (operators::HasBoundaryRows<SpatialOpType>) {
+                // F(u) = u - rhs - coeff_dt·L(u), so ∂F/∂u = I - coeff_dt·∂L/∂u
+                const auto brj = spatial_op.boundary_row_jacobian(t, bc::BoundarySide::Left);
+                jac.diag()[0] = 1.0 - coeff_dt * brj.diag;
+                jac.upper()[0] = -coeff_dt * brj.offdiag;
+            } else {
+                static_assert(dependent_false_v<SpatialOpType>,
+                    "Neumann left BC requires a spatial operator with boundary rows "
+                    "(HasBoundaryRows): the PDE must expose a/b/c coefficients");
+            }
+        } else {
+            static_assert(dependent_false_v<LeftBCType>,
+                "Unsupported left boundary condition type (Robin rows are not assembled)");
         }
 
         // Right boundary
@@ -1014,18 +1125,18 @@ private:
             jac.diag()[n_ - 1] = 1.0;
             jac.lower()[n_ - 2] = 0.0;
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::neumann_tag>) {
-            // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
-            size_t i = n_ - 1;
-            workspace_.u_stage()[i] = u[i] + eps;
-            apply_spatial_operator(t, workspace_.u_stage(), workspace_.reserved1());
-            double dLi_dui = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
-            jac.diag()[i] = 1.0 - coeff_dt * dLi_dui;
-            workspace_.u_stage()[i] = u[i];
-            // apply_spatial_operator zeroes Lu at the boundaries, so the
-            // FD coupling dLi/du[i-1] evaluates to exactly 0. Write it
-            // explicitly: lower[n-2] is not covered by the interior
-            // assembly loop and must never be left uninitialized.
-            jac.lower()[n_ - 2] = 0.0;
+            if constexpr (operators::HasBoundaryRows<SpatialOpType>) {
+                const auto brj = spatial_op.boundary_row_jacobian(t, bc::BoundarySide::Right);
+                jac.diag()[n_ - 1] = 1.0 - coeff_dt * brj.diag;
+                jac.lower()[n_ - 2] = -coeff_dt * brj.offdiag;
+            } else {
+                static_assert(dependent_false_v<SpatialOpType>,
+                    "Neumann right BC requires a spatial operator with boundary rows "
+                    "(HasBoundaryRows): the PDE must expose a/b/c coefficients");
+            }
+        } else {
+            static_assert(dependent_false_v<RightBCType>,
+                "Unsupported right boundary condition type (Robin rows are not assembled)");
         }
     }
 
