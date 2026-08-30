@@ -14,9 +14,13 @@
 #include <expected>
 #include <functional>
 #include <limits>
+#include <cstdint>
+#include <memory>
 #include <numeric>
+#include <optional>
 #include <ranges>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace mango {
@@ -32,15 +36,38 @@ struct SurfaceHandle {
     size_t pde_solves = 0;
 };
 
-/// Domain bounds for the refinement loop
+/// Domain bounds for the refinement loop (spec D2).
+///
+/// Two domains are carried separately:
+///  - `bounds` is the **fit** domain: the span the grids/nodes handed to the
+///    builder cover, including any backend-specific support extension.
+///  - `sample_bounds` is the **measurement** domain the user actually asked
+///    for (their moneyness/tau/vol/rate ranges, after the minimum-spread
+///    widening in `expand_domain_bounds`, which is a usability floor rather
+///    than headroom).  Every validation sample and every error-bin
+///    normalization uses this domain, so accuracy is never measured in the
+///    unqueryable support band.
 struct RefinementContext {
     double spot;
     double dividend_yield;
     OptionType option_type;
-    SurfaceBounds bounds;
+    SurfaceBounds bounds;         ///< fit domain (support incl. headroom)
+    SurfaceBounds sample_bounds;  ///< user-facing measurement domain
 };
 
+/// Absolute holdout-error ceiling above which a candidate surface is treated
+/// as garbage and never returned (spec D5).  2,000 bps of IV: an operational
+/// garbage detector, deliberately independent of `target_iv_error`.
+inline constexpr double kViabilityBound = 0.20;
+
+/// Relative holdout improvement required to restart the axis walk (spec D6).
+inline constexpr double kMinRelImprovement = 0.02;
+
 /// Result of grid sizing from the refinement loop
+///
+/// `achieved_max_error` / `achieved_avg_error` / `target_met` describe the
+/// *returned* candidate measured on the fixed holdout (spec D5), not the last
+/// iteration's fresh samples.
 struct RefinementResult {
     std::vector<double> moneyness;
     std::vector<double> tau;
@@ -51,6 +78,7 @@ struct RefinementResult {
     double achieved_avg_error = 0.0;
     bool target_met = false;
     std::vector<IterationStats> iterations;
+    BuildDiagnostics diagnostics;
 };
 
 /// Aggregate max grid sizes across probe results
@@ -116,6 +144,12 @@ struct ErrorBins {
     ///
     /// Returns the dimension where errors are most localized (highest
     /// max bin count relative to total), indicating refinement will help.
+    ///
+    /// Retained as a diagnostic helper; it no longer drives axis selection
+    /// (spec D6 -- `pick_refinement_axis` walks every axis by concentration
+    /// alone, with a measured-improvement restart).  Kept because it weighs
+    /// concentration by error mass, which is the question to ask when reading
+    /// a build's bins by hand.
     [[nodiscard]] size_t worst_dimension() const {
         double best_score = -1.0;
         size_t best_dim = 0;
@@ -168,28 +202,72 @@ using BuildFn = std::function<std::expected<SurfaceHandle, PriceTableError>(
     std::span<const double> vol,
     std::span<const double> rate)>;
 
+/// Outcome of a single refinement attempt (spec D6).
+struct RefineOutcome {
+    bool changed = false;  ///< grids actually changed
+    int changed_dim = -1;  ///< the axis that actually changed (may differ
+                           ///< from the requested axis only if the backend
+                           ///< documents redirection)
+};
+
 /// Decides how to grow grids when error exceeds target.
-/// Called with the worst dimension, error bins (for targeted refinement),
-/// and current grids (mutable). Returns true if refinement was applied.
-using RefineFn = std::function<bool(
-    size_t worst_dim,
-    const ErrorBins& error_bins,
+///
+/// Called with the requested axis and physical focus intervals (D2:
+/// coordinates within sample_bounds identifying where refinement should
+/// concentrate; empty means unconstrained/uniform refinement over the
+/// whole axis) and the current grids (mutable). Returns the outcome:
+/// whether anything changed, and which axis actually changed.
+using RefineFn = std::function<RefineOutcome(
+    size_t requested_dim,
+    std::span<const std::pair<double, double>> focus_intervals,
     std::vector<double>& moneyness,
     std::vector<double>& tau,
     std::vector<double>& vol,
     std::vector<double>& rate)>;
+
+/// Opaque snapshot/restore hooks for backend refinement state (spec D6).
+///
+/// Restoring the grid vectors is not always enough: the Chebyshev refiners
+/// advance per-axis level counters held outside the grids.  Backends with
+/// such state provide both hooks; backends whose grids are the whole state
+/// (B-spline) leave them empty.  The loop takes a snapshot with every
+/// candidate it records and restores it together with the grids whenever the
+/// backtracking walk resets to the exploration base.
+struct RefineStateHooks {
+    std::function<std::shared_ptr<const void>()> snapshot;
+    std::function<void(const std::shared_ptr<const void>&)> restore;
+};
 
 /// Produces a fresh FD reference price for one validation point
 using ValidateFn = std::function<std::expected<double, SolverError>(
     double spot, double strike, double tau,
     double sigma, double rate)>;
 
-/// Compute IV error from interpolated/reference prices and option parameters.
-/// Signature: (interp, ref_price, spot, strike, tau, sigma, rate, div_yield) -> error
-using ComputeErrorFn = std::function<double(
-    double interp, double ref_price,
+/// Per-point reference data, computed once per validation/holdout point.
+struct ErrorRefs {
+    double ref_price = 0.0;  ///< FD American price
+    double vega = 0.0;       ///< FD central-difference American vega
+};
+
+/// Produce refs for one point (base solve + two sigma-bump solves).
+/// Any failed or non-finite solve => unexpected.
+using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
+    double spot, double strike, double tau, double sigma, double rate)>;
+
+/// Score one point from interpolated price + cached refs. Pure arithmetic.
+///
+/// Contract (spec D4, final-review amendment 2026-08-29):
+///  - `std::nullopt` means the point was **deliberately skipped** by a filter
+///    (TV/K or vega floor): the error metric is undefined there, so the point
+///    carries no evidence either way.  Skipped points are excluded from the
+///    max, the average, and the measured count -- they neither certify a
+///    surface nor condemn it.
+///  - An engaged value must be finite and nonnegative; anything else is a
+///    non-viable evaluation and disqualifies the candidate (D5).
+using ScoreErrorFn = std::function<std::optional<double>(
+    double interp, const ErrorRefs& refs,
     double spot, double strike, double tau,
-    double sigma, double rate, double div_yield)>;
+    double sigma, double rate)>;
 
 // ============================================================================
 // Shared helper function declarations
@@ -226,21 +304,11 @@ TauSegmentSplit make_tau_split_from_segments(
     const std::vector<bool>& is_gap,
     double K_ref);
 
-/// Compute IV error from price error and vega, with floor and cap.
-double compute_iv_error(double price_error, double vega,
-                        double vega_floor, double target_iv_error);
-
-/// Error function using FD American vega with TV/K filter.
-/// 2 extra PDE solves per validation sample — acceptable at build time.
-/// Skips points where TV/K < 1e-4 (IV undefined, error metric meaningless).
-ComputeErrorFn make_fd_vega_error_fn(const AdaptiveGridParams& params,
-                                      const ValidateFn& validate_fn,
-                                      OptionType option_type);
-
-/// Create a ValidateFn that solves a single American option via FD.
-ValidateFn make_validate_fn(double dividend_yield,
-                            OptionType option_type,
-                            const std::vector<Dividend>& discrete_dividends = {});
+// The option-aware implementations of ValidateFn / PrepareRefsFn /
+// ScoreErrorFn (`make_validate_fn`, `make_fd_vega_refs_fn`,
+// `make_iv_score_fn`) live in adaptive_metrics.hpp: the loop consumes the
+// callback types declared above but never depends on the American solver
+// behind them.
 
 /// Aggregate max grid sizes across probe results.
 MaxGridSizes aggregate_max_sizes(const std::vector<RefinementResult>& probe_results);
@@ -254,18 +322,160 @@ std::vector<double> linspace(double lo, double hi, size_t n);
 std::vector<double> seed_grid(const std::vector<double>& user_knots,
                                double lo, double hi, size_t fallback_n = 5);
 
-/// Run the iterative adaptive refinement loop.
+/// The four working grids the refinement loop starts from.
+struct SeededGrids {
+    std::vector<double> moneyness;
+    std::vector<double> tau;
+    std::vector<double> vol;
+    std::vector<double> rate;
+};
+
+/// Seed the working grids over the fit domain exactly as `run_refinement`
+/// does (user knots where given, linspace otherwise, moneyness padded to
+/// `params.min_moneyness_points`; `InitialGrids::exact` passes through).
+/// Exposed so callers can reproduce the loop's starting sizes without
+/// running it.
+SeededGrids seed_refinement_grids(const AdaptiveGridParams& params,
+                                  const RefinementContext& ctx,
+                                  const InitialGrids& initial_grids);
+
+/// Run the iterative adaptive refinement loop (spec D4-D7).
 ///
-/// Repeatedly builds a surface, validates against fresh FD solves, and refines
-/// the grid until the target IV error is met or max iterations are reached.
+/// Builds a surface, measures it against a fixed holdout (references cached
+/// once) *and* fresh per-iteration samples, records every candidate, and
+/// walks the four axes with greedy coordinate descent plus a measured
+/// walk-restart.  The best *viable* candidate is returned -- rebuilt once if
+/// it is not the surface most recently built -- or
+/// `PriceTableErrorCode::NoViableSurface` when no candidate is safe.
+///
+/// @param hooks Optional backend-state snapshot/restore (spec D6).  Backends
+///              whose refinement state lives entirely in the grids pass none.
 std::expected<RefinementResult, PriceTableError> run_refinement(
     const AdaptiveGridParams& params,
     BuildFn build_fn,
-    ValidateFn validate_fn,
     RefineFn refine_fn,
     const RefinementContext& ctx,
-    const ComputeErrorFn& compute_error,
-    const InitialGrids& initial_grids = {});
+    const PrepareRefsFn& prepare_refs,
+    const ScoreErrorFn& score,
+    const InitialGrids& initial_grids = {},
+    const RefineStateHooks& hooks = {});
+
+namespace detail {
+
+// ============================================================================
+// Final-surface validation for the segmented builders (spec D9)
+// ============================================================================
+//
+// The segmented builders assemble their *final* surface outside the
+// refinement loop (uniform grids aggregated across probes for B-spline, the
+// all-K_ref blend for Chebyshev), so the loop's holdout says nothing about
+// the object the caller receives.  These helpers give both builders the same
+// contract the loop applies to its candidates: references computed once, D4
+// validity rules, D5 viability, and an honest score for whichever surface is
+// returned.
+
+/// One validation point with its cached references (spec D4).
+struct ValidationPoint {
+    std::array<double, 4> coords{};  ///< m, tau, sigma, rate
+    double strike = 0.0;
+    ErrorRefs refs;
+};
+
+/// The final validation set: valid points plus the count that could not be
+/// referenced (spec D9 step 1).
+struct FinalValidationSet {
+    std::vector<ValidationPoint> points;
+    size_t invalid = 0;
+    /// `PrepareRefsFn` invocations made, valid and invalid alike.  Each costs
+    /// up to three FD solves (base plus two sigma bumps); an attempt that
+    /// fails on the base solve costs fewer, so `3 * ref_attempts` is an upper
+    /// bound on the build's validation cost.
+    size_t ref_attempts = 0;
+};
+
+/// Draw `params.validation_samples` LHS points over the **sample** domain
+/// (spec D2) and compute `ErrorRefs` for each exactly once.
+///
+/// Points whose refs fail or are non-finite are dropped and counted.  Fewer
+/// than `max(4, validation_samples / 4)` valid points ⇒
+/// `PriceTableErrorCode::ValidationFailed`: a validation set that cannot
+/// measure cannot certify the surface.
+///
+/// @param seed  LHS seed for this set, passed explicitly and deliberately
+///              *instead of* `params.lhs_seed`: the final validation must not
+///              land on the coordinates the refinement loop already fit and
+///              measured, so callers offset the configured seed (the
+///              segmented builders use `params.lhs_seed + 999`).
+[[nodiscard]] std::expected<FinalValidationSet, PriceTableError>
+prepare_final_validation(const AdaptiveGridParams& params,
+                         const RefinementContext& ctx,
+                         const PrepareRefsFn& prepare_refs,
+                         uint64_t seed);
+
+/// Score of one assembled surface over a cached `FinalValidationSet`.
+///
+/// `measured` counts every point whose score *engaged* and produced a finite,
+/// nonnegative error -- including exact zeros -- so `avg_error`'s denominator
+/// matches its numerator even for a surface that reproduces every reference
+/// exactly.  Points the `ScoreErrorFn` deliberately skipped are counted in
+/// `filtered` and enter no statistic: the metric is undefined there.
+struct FinalScore {
+    double max_error = 0.0;
+    double avg_error = 0.0;
+    size_t measured = 0;   ///< points that produced a usable error
+    size_t filtered = 0;   ///< points the score fn skipped (nullopt)
+    size_t skipped = 0;    ///< points with a non-finite/negative evaluation
+    bool all_finite = true;
+
+    /// D5 viability: every engaged evaluation finite and nonnegative, at
+    /// least one *measurement*, and the max error within the absolute garbage
+    /// bound.  `measured > 0` is what stops a surface whose every holdout
+    /// point was filtered from certifying itself with a vacuous max of 0.
+    [[nodiscard]] bool viable() const noexcept {
+        return all_finite && measured > 0 && std::isfinite(max_error) &&
+               max_error <= kViabilityBound;
+    }
+};
+
+/// Score `handle` on the cached references (interpolations plus arithmetic --
+/// no FD solves).  Mirrors the loop's holdout scoring: any non-finite price
+/// or score clears `all_finite` and makes the aggregate NaN, so a surface
+/// that produced garbage can never report a rosy number.
+[[nodiscard]] FinalScore score_final_surface(
+    const std::vector<ValidationPoint>& points,
+    const SurfaceHandle& handle,
+    const ScoreErrorFn& score,
+    const RefinementContext& ctx);
+
+/// Retry trigger (spec D9 step 2): the original assembled surface misses the
+/// target, or it is not viable at all.
+[[nodiscard]] bool needs_final_retry(const FinalScore& original,
+                                     double target_iv_error);
+
+/// Which assembled surface the builder returns (spec D9 step 3).
+enum class FinalPick { None, Original, Retry };
+
+/// Return the lower-error **viable** surface; `None` when neither is viable
+/// (⇒ `PriceTableErrorCode::NoViableSurface`).  A missing retry means the
+/// retry was never built (or its build failed).  Ties keep the original: the
+/// retry is strictly larger, so equal accuracy is not worth the extra knots.
+[[nodiscard]] FinalPick select_final_surface(
+    const FinalScore& original,
+    const std::optional<FinalScore>& retry);
+
+/// Monotonicity statistics for a returned surface (spec D7).
+///
+/// Diagnostics only, never a gate: at each validation point's (m, tau, r),
+/// scan 7 equally spaced sigma across `ctx.sample_bounds` and count steps
+/// where the price falls by more than the noise floor.
+void scan_monotonicity(const std::vector<ValidationPoint>& points,
+                       const SurfaceHandle& handle,
+                       const RefinementContext& ctx,
+                       double target_iv_error,
+                       double vega_floor,
+                       BuildDiagnostics& diag);
+
+}  // namespace detail
 
 /// Resolve K_ref values from a MultiKRefConfig.
 /// If config.K_refs is non-empty, returns them sorted.
@@ -293,9 +503,20 @@ expand_segmented_domain(const IVGrid& domain,
                         const std::vector<Dividend>& discrete_dividends,
                         double min_K_ref);
 
-/// Extract domain bounds from OptionGrid, expand, and add headroom.
+/// Extract domain bounds from OptionGrid (spec D2/D3).
+///
+/// Produces both the sample domain (user ranges + minimum-spread widening)
+/// and the B-spline fit domain (sample domain + `spline_support_headroom` on
+/// moneyness only).  `expected_m_knots` is the *expected seeded moneyness
+/// density* -- `max(user_moneyness_knots, params.min_moneyness_points)` --
+/// not the user strike count; passing the strike count makes the headroom an
+/// order of magnitude too wide.
+///
+/// Chebyshev callers must ignore `bounds` and build their own fit domain
+/// from `sample_bounds` via the CC-level extension (spec D3: no double
+/// headroom).
 std::expected<RefinementContext, PriceTableError>
-extract_chain_domain(const OptionGrid& chain);
+extract_chain_domain(const OptionGrid& chain, size_t expected_m_knots);
 
 /// Build InitialGrids from OptionGrid (log-moneyness from strikes).
 InitialGrids extract_initial_grids(const OptionGrid& chain);

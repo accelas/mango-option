@@ -106,8 +106,14 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, HandlesImpossibleTarget) {
     // Still have a surface
     EXPECT_NE(result->spline, nullptr);
 
-    // Should have reached max iterations
-    EXPECT_EQ(result->iterations.size(), params.max_iter);
+    // Should have reached max iterations.  Spec D5: when the retained
+    // candidate is not the surface most recently built it is rebuilt once,
+    // and that entry (refined_dim == -2) does not consume budget.
+    size_t built_iterations = 0;
+    for (const auto& it : result->iterations) {
+        if (it.refined_dim != -2) ++built_iterations;
+    }
+    EXPECT_EQ(built_iterations, params.max_iter);
 }
 
 TEST_F(AdaptiveGridBuilderIntegrationTest, DeterministicWithSameSeed) {

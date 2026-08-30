@@ -84,10 +84,102 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
         << " tolerance=" << tol;
 }
 
+TEST(EEPIntegrationTest, ControlledPremiumIsPreservedAcrossTypesAndExpiries) {
+    constexpr double kKRef = 100.0;
+    constexpr double kKnownPremium = 0.02;
+    constexpr double kSigma = 0.20;
+    constexpr double kRate = 0.05;
+
+    const std::vector<double> log_moneyness = {
+        std::log(0.90),
+        std::log(0.95),
+        0.0,
+        std::log(1.05),
+        std::log(1.10),
+    };
+    const std::vector<double> maturity = {0.04, 0.25, 0.50, 1.00};
+    const std::vector<double> volatility = {0.15, 0.20, 0.25, 0.30};
+    const std::vector<double> rate = {0.02, 0.03, 0.04, 0.05};
+
+    for (OptionType type : {OptionType::CALL, OptionType::PUT}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "option_type=" << static_cast<int>(type));
+
+        auto setup = PriceTableBuilder::from_vectors(
+            log_moneyness,
+            maturity,
+            volatility,
+            rate,
+            kKRef,
+            GridAccuracyParams{},
+            type,
+            0.0,
+            0.0);
+        ASSERT_TRUE(setup.has_value())
+            << "from_vectors failed: code="
+            << static_cast<int>(setup.error().code);
+
+        auto& [builder, axes] = *setup;
+        auto result = builder.build(
+            axes,
+            [=](PriceTensor& tensor, const PriceTableAxes& current_axes) {
+                const AnalyticalEEP analytical(type, 0.0);
+                for (size_t mi = 0; mi < current_axes.grids[0].size(); ++mi) {
+                    for (size_t ti = 0; ti < current_axes.grids[1].size(); ++ti) {
+                        for (size_t vi = 0; vi < current_axes.grids[2].size(); ++vi) {
+                            for (size_t ri = 0; ri < current_axes.grids[3].size(); ++ri) {
+                                const double spot =
+                                    std::exp(current_axes.grids[0][mi]) * kKRef;
+                                const double european = analytical.european_price(
+                                    spot,
+                                    kKRef,
+                                    current_axes.grids[1][ti],
+                                    current_axes.grids[2][vi],
+                                    current_axes.grids[3][ri]);
+                                tensor.view[mi, ti, vi, ri] =
+                                    (european + kKnownPremium) / kKRef;
+                            }
+                        }
+                    }
+                }
+
+                BSplineTensorAccessor accessor(
+                    tensor, current_axes, kKRef);
+                eep_decompose(accessor, analytical);
+            });
+        ASSERT_TRUE(result.has_value())
+            << "build failed: code="
+            << static_cast<int>(result.error().code);
+
+        auto surface = make_bspline_surface(
+            result->spline,
+            result->K_ref,
+            result->dividends.dividend_yield,
+            type);
+        ASSERT_TRUE(surface.has_value())
+            << "make_bspline_surface failed: " << surface.error();
+
+        const AnalyticalEEP analytical(type, 0.0);
+        for (double tau : {0.04, 1.00}) {
+            SCOPED_TRACE(::testing::Message() << "tau=" << tau);
+            const double european = analytical.european_price(
+                kKRef, kKRef, tau, kSigma, kRate);
+            const double reconstructed =
+                surface->price(kKRef, kKRef, tau, kSigma, kRate);
+
+            EXPECT_NEAR(
+                reconstructed,
+                european + kKnownPremium,
+                1.0e-8);
+            EXPECT_GE(reconstructed, european);
+        }
+    }
+}
+
 /// Build a price table and verify that the raw EEP
 /// surface produces non-negative values at all grid points.
-/// The softplus floor in extract_tensor should guarantee this.
-TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
+/// The construction-time projection should guarantee this.
+TEST(EEPIntegrationTest, ProjectionEnsuresNonNegative) {
     // Small grid — each axis needs >= 4 points for B-spline fitting
     std::vector<double> log_moneyness = {std::log(0.90), std::log(0.95), std::log(1.00), std::log(1.10)};
     std::vector<double> maturity  = {0.25, 0.50, 0.75, 1.00};
@@ -118,7 +210,7 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
 
 
     // Query the raw EEP spline at every grid point combination.
-    // The B-spline is fitted to softplus-floored data, so values at
+    // The B-spline is fitted to projected EEP data, so values at
     // grid points should be non-negative (or very close due to fitting error).
     const auto& spline = *result->spline;
 

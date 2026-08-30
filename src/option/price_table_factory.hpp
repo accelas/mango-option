@@ -4,6 +4,7 @@
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/iv_result.hpp"
 #include "mango/option/option_spec.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/greek_types.hpp"
 #include "mango/option/table/serialization/price_table_data.hpp"
 #include "mango/support/error_types.hpp"
@@ -11,6 +12,7 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace mango {
@@ -48,6 +50,11 @@ public:
     make_iv_solver(const InterpolatedIVSolverConfig& config = {},
                    std::optional<std::vector<Dividend>> build_dividends =
                        std::nullopt) const;
+
+    /// Diagnostics from adaptive grid refinement (spec D7).  `nullopt` for
+    /// manually-gridded tables and tables loaded from Parquet -- diagnostics
+    /// never enter serialization.
+    [[nodiscard]] std::optional<BuildDiagnostics> build_diagnostics() const;
 
     [[nodiscard]] std::expected<IVSuccess, IVError>
     solve_iv(const IVQuery& query,

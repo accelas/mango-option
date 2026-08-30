@@ -48,6 +48,7 @@ cc_library(
         "//src/option:dividend_utils",
         "//src/option:option_grid",
         "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_metrics",
         "//src/option/table:adaptive_refinement",
         "//src/option/table:eep_decomposer",
         "//src/option/table:multi_kref_split",

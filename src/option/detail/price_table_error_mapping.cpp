@@ -25,6 +25,17 @@ ValidationError to_validation_error(const PriceTableError& error) {
             return ValidationError{ValidationErrorCode::PriceTableBuildFailed,
                                    static_cast<double>(error.count),
                                    error.axis_index};
+        // An adaptive build that refuses (spec D5/D9) must reach the caller
+        // as a refusal, not as a generic build failure: these are the forward
+        // direction of the round trip pinned in error_types.hpp.
+        case PriceTableErrorCode::NoViableSurface:
+            return ValidationError{ValidationErrorCode::NoViableSurface,
+                                   static_cast<double>(error.count),
+                                   error.axis_index};
+        case PriceTableErrorCode::ValidationFailed:
+            return ValidationError{ValidationErrorCode::AdaptiveValidationFailed,
+                                   static_cast<double>(error.count),
+                                   error.axis_index};
     }
     // Unreachable: the switch is exhaustive (-Werror=switch enforces it).
     return ValidationError{ValidationErrorCode::PriceTableBuildFailed, 0.0, 0};

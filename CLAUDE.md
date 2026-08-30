@@ -205,7 +205,7 @@ mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .grid = mango::IVGrid{
-        .moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
+        .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
         .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate = {0.02, 0.03, 0.05, 0.07},
     },
@@ -215,14 +215,36 @@ mango::IVSolverFactoryConfig config{
     .discrete_dividends = mango::DiscreteDividendConfig{
         .maturity = 1.0,
         .discrete_dividends = {mango::Dividend{.calendar_time = 0.25, .amount = 1.50}},
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                   102.5, 105.0, 107.5, 110.0}},
     },
 };
 auto solver = mango::make_interpolated_iv_solver(config);
 auto result = solver->solve(query);
 ```
 
+The moneyness grid and the `K_refs` must agree: the assembled surface blends
+K_ref-struck prices linearly in strike, so the K_refs must span and resolve
+the strike range the moneyness grid implies (`S/K ∈ [0.92, 1.08]` means
+strikes in `[92.6, 108.7]`, served by K_refs at 2.5% spacing across
+`[90, 110]`).  Without `.adaptive` there is no viability gate to catch a
+mismatch, so on this manual path config coherence is the caller's job: an
+incoherent pairing builds a surface and prices off it instead of refusing.
+
+Note that `BSplineBackend::maturity_grid` is **ignored** whenever
+`discrete_dividends` is set: the segmented path derives its tau grid from the
+dividend dates and `DiscreteDividendConfig::maturity`, not from the backend's
+knots.
+
 **Pattern 4: Discrete Dividend IV with Adaptive Grid**
+
+With explicit `K_refs`, the moneyness grid and the K_refs must agree: the
+assembled surface blends K_ref-struck prices linearly in strike, so the
+K_refs must **span and resolve** the strike range the moneyness grid implies.
+Below, `S/K ∈ [0.92, 1.08]` means strikes in `[92.6, 108.7]`, served by K_refs
+at 2.5% spacing across `[90, 110]`. A mismatch is not silent: the build fails
+with `NoViableSurface`.
+
 ```cpp
 #include "mango/option/interpolated_iv_solver.hpp"
 
@@ -230,18 +252,39 @@ mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.01,
-    .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
-    .backend = mango::BSplineBackend{
-        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+    .grid = mango::IVGrid{
+        .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
+        .vol = {0.10, 0.15, 0.20, 0.30},
+        .rate = {0.02, 0.03, 0.05, 0.07},
     },
+    .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
+    .backend = mango::ChebyshevBackend{},
     .discrete_dividends = mango::DiscreteDividendConfig{
         .maturity = 1.0,
-        .discrete_dividends = {mango::Dividend{.calendar_time = 0.25, .amount = 1.50}},
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        .discrete_dividends = {
+            mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
+            mango::Dividend{.calendar_time = 0.50, .amount = 1.50}},
+        .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                   102.5, 105.0, 107.5, 110.0}},
     },
 };
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
+
+**Use `ChebyshevBackend` for adaptive discrete-dividend surfaces.** The
+B-spline segmented adaptive path currently refuses realistic dividend configs
+— including this one — with `NoViableSurface` under complete measurement: its
+multi-K_ref fit degrades badly at low vol on the tau segments after a
+dividend, and denser grids make it worse rather than better. Pending the
+MultiKRefSplit blend and segmented-fit follow-ups, Chebyshev is the supported
+backend here; it measures 549 bps against the 2,000 bps viability bound on
+the config above.
+
+Omit `kref_config` to let the builder pick log-spaced K_refs around the spot.
+This exact config is pinned by
+`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig`, and the
+B-spline refusal by
+`IVSolverFactorySegmented.DocumentedConfigOnBSplineBackendRefuses`.
 
 **Pattern 5: Probe-Based FDM IV Solver (Simple API)**
 ```cpp

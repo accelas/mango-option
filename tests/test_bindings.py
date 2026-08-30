@@ -190,6 +190,54 @@ def test_bspline_4d_price_table_workflow_and_persistence_paths():
         assert_finite_number(loaded.price(p))
 
 
+def test_build_diagnostics_property():
+    # Manual (non-adaptive) build: no diagnostics.
+    manual_table = mo.make_price_table(make_price_table_config())
+    assert manual_table.build_diagnostics is None
+    manual_solver = manual_table.make_iv_solver()
+    assert manual_solver.build_diagnostics is None
+
+    # Adaptive build: diagnostics dict with the documented keys.
+    config = make_price_table_config()
+    adaptive = mo.AdaptiveGridParams()
+    adaptive.target_iv_error = 0.002
+    adaptive.max_iter = 3
+    adaptive.validation_samples = 16
+    config.adaptive = adaptive
+
+    table = mo.make_price_table(config)
+    diag = table.build_diagnostics
+    assert diag is not None
+    expected_keys = {
+        "target_met", "achieved_max_error", "achieved_avg_error",
+        "picked_iteration", "total_iterations", "final_rebuild",
+        "build_failure_fallback", "holdout_points", "holdout_points_measured",
+        "holdout_points_invalid",
+        "monotonicity_violations", "monotonicity_points_invalid",
+        "worst_vega_slope", "n_iterations",
+    }
+    assert expected_keys <= diag.keys()
+    assert diag["total_iterations"] >= 1
+    # A surface measured nowhere is refused, so a build that returned one
+    # must report at least one measured holdout point (spec D4/D5).
+    assert diag["holdout_points_measured"] >= 1
+    assert diag["holdout_points_measured"] <= diag["holdout_points"]
+
+    # make_iv_solver() propagates the same diagnostics.
+    solver = table.make_iv_solver()
+    solver_diag = solver.build_diagnostics
+    assert solver_diag is not None
+    assert solver_diag["total_iterations"] == diag["total_iterations"]
+    assert solver_diag["target_met"] == diag["target_met"]
+
+    # Parquet round-trip drops diagnostics (never serialized).
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "adaptive_surface.parquet"
+        table.save(path)
+        loaded = mo.PriceTable.load(path)
+        assert loaded.build_diagnostics is None
+
+
 def test_price_table_validation_and_iv_error_parity():
     table = mo.make_price_table(make_price_table_config())
     p = make_bspline_4d_off_grid_params()
@@ -216,6 +264,23 @@ def test_price_table_validation_and_iv_error_parity():
         raise AssertionError("direct solve_iv should raise on IV failure")
     except mo.SolverException as e:
         assert hasattr(e, "code")
+
+
+def test_multiple_root_screen_is_configurable():
+    """The query-time multi-root screen is on by default and switchable."""
+    config = mo.InterpolatedIVSolverConfig()
+    assert config.detect_multiple_roots is True
+
+    config.detect_multiple_roots = False
+    assert config.detect_multiple_roots is False
+
+    # An unscreened solve on a monotone surface is unaffected.
+    table = mo.make_price_table(make_price_table_config())
+    price = table.price(make_pricing_params())
+    solver = table.make_iv_solver(config)
+    success, result, error = solver.solve(make_iv_query(price))
+    assert success, error.message if error else ""
+    assert isinstance(result, mo.IVSuccess)
 
 
 def test_legacy_interpolated_iv_solver_factory_still_works():

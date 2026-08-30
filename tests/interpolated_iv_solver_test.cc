@@ -6,6 +6,11 @@
 
 #include <gtest/gtest.h>
 #include <cmath>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <utility>
+#include <vector>
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
@@ -334,6 +339,423 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
     ASSERT_FALSE(iv_result.has_value())
         << "Solver should reject query with mismatched dividend_yield";
     EXPECT_EQ(iv_result.error().code, IVErrorCode::DividendYieldMismatch);
+}
+
+// ===========================================================================
+// D8: multiple-root screen and signed vega pre-check
+//
+// The screen is exercised against a stub surface rather than a fitted
+// B-spline table: the builder's EEP decomposition pushes a fitted sigma
+// profile back toward monotonicity, so an engineered fold does not survive
+// a real fit — and a screen must be tested on shapes it is meant to catch.
+// The stub implements exactly the duck-typed interface that
+// InterpolatedIVSolver::solve uses (price, vega, bounds, option_type,
+// dividend_yield) and records every evaluation so scan cost is assertable.
+// ===========================================================================
+
+class ScreenStubSurface {
+public:
+    using Fn = std::function<double(double)>;
+
+    ScreenStubSurface(Fn price_of_sigma, Fn vega_of_sigma,
+                      double sigma_lo = 0.10, double sigma_hi = 0.50)
+        : price_(std::move(price_of_sigma))
+        , vega_(std::move(vega_of_sigma))
+        , sigma_lo_(sigma_lo)
+        , sigma_hi_(sigma_hi)
+        , price_sigmas_(std::make_shared<std::vector<double>>())
+        , vega_sigmas_(std::make_shared<std::vector<double>>()) {}
+
+    /// Price depends on sigma only; the other axes are flat by construction.
+    [[nodiscard]] double price(double, double, double, double sigma, double) const {
+        price_sigmas_->push_back(sigma);
+        return price_(sigma);
+    }
+
+    [[nodiscard]] double vega(double, double, double, double sigma, double) const {
+        vega_sigmas_->push_back(sigma);
+        return vega_(sigma);
+    }
+
+    [[nodiscard]] double m_min() const noexcept { return std::log(0.5); }
+    [[nodiscard]] double m_max() const noexcept { return std::log(2.0); }
+    [[nodiscard]] double tau_min() const noexcept { return 0.05; }
+    [[nodiscard]] double tau_max() const noexcept { return 3.0; }
+    [[nodiscard]] double sigma_min() const noexcept { return sigma_lo_; }
+    [[nodiscard]] double sigma_max() const noexcept { return sigma_hi_; }
+    [[nodiscard]] double rate_min() const noexcept { return 0.0; }
+    [[nodiscard]] double rate_max() const noexcept { return 0.20; }
+    [[nodiscard]] OptionType option_type() const noexcept { return OptionType::PUT; }
+    [[nodiscard]] double dividend_yield() const noexcept { return 0.0; }
+
+    [[nodiscard]] size_t price_calls() const { return price_sigmas_->size(); }
+    [[nodiscard]] const std::vector<double>& price_sigmas() const { return *price_sigmas_; }
+    [[nodiscard]] const std::vector<double>& vega_sigmas() const { return *vega_sigmas_; }
+
+private:
+    Fn price_;
+    Fn vega_;
+    double sigma_lo_;
+    double sigma_hi_;
+    // shared_ptr so the counters survive the copy into the solver.
+    std::shared_ptr<std::vector<double>> price_sigmas_;
+    std::shared_ptr<std::vector<double>> vega_sigmas_;
+};
+
+constexpr double kMarketPrice = 8.0;
+
+/// ATM PUT query.  Time value == market price, so adaptive_bounds leaves the
+/// bracket at the surface's own sigma range.
+IVQuery screen_query() {
+    return IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                              .rate = 0.05, .option_type = OptionType::PUT},
+                   kMarketPrice);
+}
+
+/// Central-difference vega of a price profile (the stub's default).
+ScreenStubSurface::Fn fd_vega(ScreenStubSurface::Fn price) {
+    return [price](double sigma) {
+        constexpr double h = 1e-4;
+        return (price(sigma + h) - price(sigma - h)) / (2.0 * h);
+    };
+}
+
+/// Objective with three roots at 0.21 / 0.36 / 0.46, none on a scan node
+/// (the 17-point scan of [0.10, 0.50] has nodes every 0.025).
+ScreenStubSurface::Fn three_root_price() {
+    return [](double s) {
+        return kMarketPrice + 100.0 * (s - 0.21) * (s - 0.36) * (s - 0.46);
+    };
+}
+
+ScreenStubSurface make_stub(ScreenStubSurface::Fn price,
+                            double sigma_lo = 0.10, double sigma_hi = 0.50) {
+    return ScreenStubSurface(price, fd_vega(price), sigma_lo, sigma_hi);
+}
+
+// Regression: a surface with three roots in the bracket must be reported as
+// ambiguous instead of silently returning whichever root Brent lands on.
+TEST(IVScreenTest, ThreeCrossingsReportMultipleRoots) {
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(
+        make_stub(three_root_price()));
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::MultipleRoots);
+    EXPECT_DOUBLE_EQ(result.error().final_error, 3.0);
+    ASSERT_TRUE(result.error().last_vol.has_value());
+    // Low-sigma scan endpoint of the lowest transition interval [0.200, 0.225]
+    // — an interval bound, not a root.
+    EXPECT_NEAR(*result.error().last_vol, 0.200, 1e-12);
+}
+
+// Defended failure: with the screen off, the same query returns a single
+// implied vol with no indication that two other vols price identically.
+// This documents the bug class the screen exists to catch.
+TEST(IVScreenTest, ScreenDisabledSilentlyReturnsOneOfThreeRoots) {
+    InterpolatedIVSolverConfig config{};
+    config.detect_multiple_roots = false;
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(
+        make_stub(three_root_price()), config);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_TRUE(result.has_value()) << "unscreened Brent converges silently";
+
+    const double iv = result->implied_vol;
+    const bool is_a_root = std::abs(iv - 0.21) < 1e-4 ||
+                           std::abs(iv - 0.36) < 1e-4 ||
+                           std::abs(iv - 0.46) < 1e-4;
+    EXPECT_TRUE(is_a_root) << "returned " << iv;
+    // Brent's bracket walk lands on the *highest* root (0.46); the lowest
+    // (0.21) is the conventional answer.  Nothing in the result says the
+    // caller got one of three — that silence is the defended failure.
+    EXPECT_NEAR(iv, 0.46, 1e-4);
+    EXPECT_GT(std::abs(iv - 0.21), 1e-3)
+        << "unscreened solve happened to return the lowest root";
+}
+
+// A fold narrower than the old 9-point scan spacing (0.05) but at least one
+// 17-point cell wide (0.025) must be caught.
+TEST(IVScreenTest, FoldInsideFormerNinePointIntervalIsCaught) {
+    // Base objective rises through 0.21; a triangular notch centred on the
+    // scan node 0.325 dives negative and returns to zero at 0.30 and 0.35 —
+    // exactly the nodes a 9-point scan would have used.
+    auto price = [](double s) {
+        const double notch = std::max(0.0, 1.0 - std::abs(s - 0.325) / 0.025);
+        return kMarketPrice + (s - 0.21) - 0.3 * notch;
+    };
+
+    // A 9-point scan sees only these two, both positive: the fold is invisible.
+    EXPECT_GT(price(0.30) - kMarketPrice, 0.0);
+    EXPECT_GT(price(0.35) - kMarketPrice, 0.0);
+    EXPECT_LT(price(0.325) - kMarketPrice, 0.0);
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(make_stub(price));
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::MultipleRoots);
+    EXPECT_DOUBLE_EQ(result.error().final_error, 3.0);
+}
+
+// Tangency: the objective touches zero at a scan node with the same sign on
+// both sides.  Root selection is ambiguous, so the screen refuses.
+TEST(IVScreenTest, TangencyReportsMultipleRoots) {
+    auto price = [](double s) { return kMarketPrice + 4.0 * (s - 0.30) * (s - 0.30); };
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(make_stub(price));
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::MultipleRoots);
+    // An even-multiplicity contact is at least a double root.
+    EXPECT_DOUBLE_EQ(result.error().final_error, 2.0);
+    ASSERT_TRUE(result.error().last_vol.has_value());
+    EXPECT_NEAR(*result.error().last_vol, 0.30, 1e-12);
+}
+
+// Boundary root at sigma_min that also satisfies the configured tolerance.
+TEST(IVScreenTest, EndpointRootWithinToleranceIsReturned) {
+    auto price = [](double s) { return kMarketPrice + 10.0 * (s - 0.10); };
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(make_stub(price));
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_TRUE(result.has_value()) << "endpoint root must be honored";
+    EXPECT_NEAR(result->implied_vol, 0.10, 1e-12);
+    EXPECT_LE(result->final_error, 1e-6);
+}
+
+// zero_tol (1e-9 * spot = 1e-7 here) must never loosen a tighter configured
+// tolerance: the endpoint residual is a "zero" for the scan but not a
+// converged root for the caller.
+TEST(IVScreenTest, EndpointRootOutsideConfiguredToleranceFailsBracketing) {
+    auto price = [](double s) { return kMarketPrice + 5e-8 + 10.0 * (s - 0.10); };
+
+    InterpolatedIVSolverConfig config{};
+    config.tolerance = 1e-12;
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(
+        make_stub(price), config);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::BracketingFailed);
+    EXPECT_NEAR(result.error().final_error, 5e-8, 1e-12);
+}
+
+// Endpoint root plus an interior crossing: two roots, so MultipleRoots.
+TEST(IVScreenTest, EndpointRootPlusInteriorTransitionReportsMultipleRoots) {
+    auto price = [](double s) {
+        return kMarketPrice + 40.0 * (s - 0.10) * (0.4125 - s);
+    };
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(make_stub(price));
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::MultipleRoots);
+    EXPECT_DOUBLE_EQ(result.error().final_error, 2.0);
+    ASSERT_TRUE(result.error().last_vol.has_value());
+    EXPECT_NEAR(*result.error().last_vol, 0.10, 1e-12);
+}
+
+// Every sample a zero: an unresolved continuum of roots.
+TEST(IVScreenTest, AllZeroScanReportsMultipleRootsWithZeroError) {
+    auto price = [](double) { return kMarketPrice; };
+
+    InterpolatedIVSolverConfig config{};
+    config.vega_threshold = 0.0;  // a flat surface has zero vega by design
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(
+        ScreenStubSurface(price, [](double) { return 0.0; }), config);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::MultipleRoots);
+    EXPECT_DOUBLE_EQ(result.error().final_error, 0.0);
+    ASSERT_TRUE(result.error().last_vol.has_value());
+    EXPECT_NEAR(*result.error().last_vol, 0.10, 1e-12);
+}
+
+// A monotone surface must invert to the same root with and without the
+// screen, and the screen must cost exactly its 17 scan evaluations.
+TEST(IVScreenTest, MonotoneSurfaceUnchangedAndCostsSeventeenEvals) {
+    auto price = [](double s) { return kMarketPrice + 20.0 * (s - 0.2637); };
+
+    InterpolatedIVSolverConfig off{};
+    off.detect_multiple_roots = false;
+    auto stub_off = make_stub(price);
+    auto solver_off = InterpolatedIVSolver<ScreenStubSurface>::create(stub_off, off);
+    ASSERT_TRUE(solver_off.has_value());
+    auto result_off = solver_off->solve(screen_query());
+    ASSERT_TRUE(result_off.has_value());
+
+    auto stub_on = make_stub(price);
+    auto solver_on = InterpolatedIVSolver<ScreenStubSurface>::create(stub_on);
+    ASSERT_TRUE(solver_on.has_value());
+    auto result_on = solver_on->solve(screen_query());
+    ASSERT_TRUE(result_on.has_value());
+
+    EXPECT_NEAR(result_on->implied_vol, 0.2637, 1e-6);
+    EXPECT_NEAR(result_on->implied_vol, result_off->implied_vol, 1e-6);
+    EXPECT_EQ(stub_on.price_calls(), stub_off.price_calls() + 17)
+        << "screen must cost exactly its 17 scan evaluations";
+
+    // Those 17 evaluations are the uniform scan grid, endpoints included.
+    ASSERT_GE(stub_on.price_sigmas().size(), 17u);
+    for (size_t i = 0; i < 17; ++i) {
+        const double expected = 0.10 + (0.50 - 0.10) * static_cast<double>(i) / 16.0;
+        EXPECT_NEAR(stub_on.price_sigmas()[i], expected, 1e-12) << "scan point " << i;
+    }
+    EXPECT_DOUBLE_EQ(stub_on.price_sigmas()[16], 0.50) << "last sample lands on the bound";
+}
+
+// A converged root whose narrowed interval has a falling objective means the
+// surface is non-monotone there; the root is not trustworthy.
+TEST(IVScreenTest, NegativeNarrowedSlopeReportsMultipleRoots) {
+    auto price = [](double s) { return kMarketPrice + 20.0 * (0.31 - s); };
+
+    InterpolatedIVSolverConfig config{};
+    config.vega_threshold = 0.0;  // the pre-check would reject this first
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(
+        make_stub(price), config);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::MultipleRoots);
+    ASSERT_TRUE(result.error().last_vol.has_value());
+    EXPECT_NEAR(*result.error().last_vol, 0.30, 1e-12);
+}
+
+// A non-finite objective anywhere in the scan is a broken surface, not an
+// ambiguous one.
+TEST(IVScreenTest, NonFiniteScanSampleIsNumericalInstability) {
+    auto price = [](double s) {
+        return (std::abs(s - 0.325) < 1e-12)
+            ? std::numeric_limits<double>::quiet_NaN()
+            : kMarketPrice + 20.0 * (s - 0.30);
+    };
+    // Explicit finite vega so the pre-check cannot claim the failure first.
+    auto stub = ScreenStubSurface(price, [](double) { return 20.0; });
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(stub);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::NumericalInstability);
+    ASSERT_TRUE(result.error().last_vol.has_value());
+    EXPECT_NEAR(*result.error().last_vol, 0.325, 1e-12);
+    EXPECT_EQ(stub.price_calls(), 10u) << "must stop at the offending sample";
+}
+
+// Zero features: the screen must fall through to Brent on the full bracket
+// and report exactly what the unscreened path reports.
+TEST(IVScreenTest, NoTransitionFallsThroughToBracketingFailed) {
+    // Strictly positive across [0.10, 0.50]: the market price is below the
+    // surface everywhere, so there is no root to find.
+    auto price = [](double s) { return kMarketPrice + 1.0 + 20.0 * (s - 0.10); };
+
+    auto solver_on = InterpolatedIVSolver<ScreenStubSurface>::create(make_stub(price));
+    ASSERT_TRUE(solver_on.has_value());
+    auto result_on = solver_on->solve(screen_query());
+    ASSERT_FALSE(result_on.has_value());
+    EXPECT_EQ(result_on.error().code, IVErrorCode::BracketingFailed);
+
+    InterpolatedIVSolverConfig off{};
+    off.detect_multiple_roots = false;
+    auto solver_off = InterpolatedIVSolver<ScreenStubSurface>::create(make_stub(price), off);
+    ASSERT_TRUE(solver_off.has_value());
+    auto result_off = solver_off->solve(screen_query());
+    ASSERT_FALSE(result_off.has_value());
+    EXPECT_EQ(result_off.error().code, result_on.error().code)
+        << "screened and unscreened paths must agree when there is no root";
+}
+
+// ---------------------------------------------------------------------------
+// Signed vega pre-check (D8.1)
+// ---------------------------------------------------------------------------
+
+// Regression: the pre-check used std::abs(vega), so a strongly negative vega
+// counted as healthy sensitivity.
+TEST(IVScreenTest, AllNegativeProbeVegasRejected) {
+    auto price = [](double s) { return kMarketPrice + 20.0 * (s - 0.30); };
+    auto vega = [](double s) { return s < 0.25 ? -5.0 : (s < 0.35 ? -3.0 : -1.0); };
+
+    InterpolatedIVSolverConfig config{};
+    config.vega_threshold = 0.5;
+
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(
+        ScreenStubSurface(price, vega), config);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::VegaTooSmall);
+    EXPECT_DOUBLE_EQ(result.error().final_error, -1.0) << "signed maximum";
+}
+
+TEST(IVScreenTest, MixedSignProbeVegasPassToScreen) {
+    auto price = [](double s) { return kMarketPrice + 20.0 * (s - 0.30); };
+    auto vega = [](double s) { return s < 0.25 ? -5.0 : (s < 0.35 ? 2.0 : 1.0); };
+
+    InterpolatedIVSolverConfig config{};
+    config.vega_threshold = 0.5;
+
+    auto stub = ScreenStubSurface(price, vega);
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(stub, config);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->implied_vol, 0.30, 1e-6);
+    EXPECT_GE(stub.price_calls(), 17u) << "the screen must have run";
+}
+
+// Regression: probes were fixed at {0.10, 0.25, 0.50} and could fall entirely
+// outside a narrower bracket.  They must be the bracket's quartiles.
+TEST(IVScreenTest, ProbeVegasEvaluatedAtBracketQuartiles) {
+    auto price = [](double s) { return kMarketPrice + 20.0 * (s - 0.70); };
+
+    auto stub = make_stub(price, 0.60, 0.80);
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(stub);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_TRUE(result.has_value());
+
+    ASSERT_EQ(stub.vega_sigmas().size(), 3u);
+    EXPECT_NEAR(stub.vega_sigmas()[0], 0.65, 1e-12);
+    EXPECT_NEAR(stub.vega_sigmas()[1], 0.70, 1e-12);
+    EXPECT_NEAR(stub.vega_sigmas()[2], 0.75, 1e-12);
+}
+
+TEST(IVScreenTest, NonFiniteProbeVegaIsNumericalInstability) {
+    auto price = [](double s) { return kMarketPrice + 20.0 * (s - 0.30); };
+    auto vega = [](double s) {
+        return (s > 0.25 && s < 0.35) ? std::numeric_limits<double>::quiet_NaN() : 1.0;
+    };
+
+    auto stub = ScreenStubSurface(price, vega);
+    auto solver = InterpolatedIVSolver<ScreenStubSurface>::create(stub);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve(screen_query());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::NumericalInstability);
+    EXPECT_EQ(stub.price_calls(), 0u) << "must reject before any price eval";
 }
 
 // Regression: create()'s build_dividends default was known-empty, so direct

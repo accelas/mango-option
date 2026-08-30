@@ -59,7 +59,10 @@ cc_import(
 cc_library(
     name = "mango_c_api",
     srcs = ["mango_c_api.cpp"],
-    hdrs = ["mango_c_api.h"],
+    hdrs = [
+        "iv_error_mapping.hpp",
+        "mango_c_api.h",
+    ],
     strip_include_prefix = "/src/ffi",
     include_prefix = "mango/ffi",
     copts = ["-Wall", "-Wextra", "-Werror", "-O3", "-fopenmp", "-DHAVE_SYSTEMTAP_SDT"],

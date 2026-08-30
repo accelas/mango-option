@@ -139,7 +139,13 @@ expand_log_moneyness_grid(
     double m_min_expanded = std::max(m_min - total_div / K_ref, 0.01);
     double x_min_expanded = std::log(m_min_expanded);
 
-    if (x_min_expanded < expanded_log_m_grid.front()) {
+    // Only expand when the shift is materially below the current lower edge.
+    // With no dividends (total_div == 0) the exp/log round trip can land one
+    // ULP under x_min, and the unguarded comparison then inserts three knots
+    // separated by ~1e-17 -- which the cubic collocation solver rejects as an
+    // unsorted (near-duplicate) grid.
+    constexpr double kMinExpansion = 1e-9;
+    if (x_min_expanded < expanded_log_m_grid.front() - kMinExpansion) {
         double step = (expanded_log_m_grid.front() - x_min_expanded) / 3.0;
         for (int i = 2; i >= 0; --i) {
             double x = x_min_expanded + step * static_cast<double>(i);

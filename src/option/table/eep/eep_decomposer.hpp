@@ -5,28 +5,17 @@
 #include "mango/option/table/surface_concepts.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <concepts>
 #include <cstddef>
 
 namespace mango {
 
-/// Debiased softplus floor for EEP non-negativity.
+/// Exact projection of a raw EEP value onto the nonnegative domain.
 ///
-/// Smoothly clamps eep_raw = (American - European) to non-negative values.
-/// Zero-bias correction ensures eep_floor(0) == 0 exactly.
-///
-/// Use directly when the European price comes from a non-analytical source
-/// (e.g. numerical PDE). For analytical Black-Scholes, use
-/// eep_decompose() with AnalyticalEEP.
+/// Preserves every valid nonnegative premium and maps negative numerical
+/// residuals to zero.
 inline double eep_floor(double eep_raw) {
-    constexpr double kSharpness = 100.0;
-    if (kSharpness * eep_raw > 500.0) {
-        return eep_raw;
-    }
-    double softplus = std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
-    double bias = std::log(2.0) / kSharpness;
-    return std::max(0.0, softplus - bias);
+    return std::max(0.0, eep_raw);
 }
 
 /// Accessor concept for EEP decomposition.
@@ -86,7 +75,7 @@ void analytical_eep_decompose(A&& accessor,
     eep_decompose(std::forward<A>(accessor), eep);
 }
 
-/// Per-point analytical EEP: European via Black-Scholes + softplus floor.
+/// Per-point analytical EEP: European via Black-Scholes + nonnegative projection.
 ///
 /// Use for call sites that don't fit the accessor pattern (e.g. cache-based
 /// extraction with per-slice spline lookup).

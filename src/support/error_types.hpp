@@ -47,7 +47,14 @@ enum class ValidationErrorCode {
     OptionTypeMismatch,
     DividendYieldMismatch,
     DiscreteDividendMismatch,
-    PriceTableBuildFailed      ///< Price table construction failed (non-grid cause)
+    PriceTableBuildFailed,     ///< Price table construction failed (non-grid cause)
+
+    // Adaptive price-table build errors (surfaced from PriceTableErrorCode;
+    // see PriceTableErrorCode::NoViableSurface / ValidationFailed).
+    // Appended after PriceTableBuildFailed: merged ordinals stay stable
+    // (Python exposes the numeric value; see ADR 0001).
+    NoViableSurface,           ///< No adaptive-build candidate passed the D5 viability gate
+    AdaptiveValidationFailed   ///< Adaptive build's holdout validation set could not measure error
 };
 
 /// Detailed validation error for parameter validation failures
@@ -138,7 +145,10 @@ enum class IVErrorCode {
     VegaTooSmall,           ///< Vega below threshold — IV undefined
 
     // Solver errors
-    PDESolveFailed
+    PDESolveFailed,
+
+    // Query-time screening errors
+    MultipleRoots           ///< IV inversion screen (D8) found more than one root
 };
 
 /// Detailed IV solver error with diagnostics
@@ -148,6 +158,36 @@ struct IVError {
     double final_error = 0.0;        ///< Residual at failure
     std::optional<double> last_vol;  ///< Last volatility candidate tried
 };
+
+/// Human-readable message for an IVErrorCode. Returns a stable string
+/// literal (no allocation). Deliberately exhaustive (no default case) so
+/// appending a new IVErrorCode value without a matching arm here is a
+/// build failure (-Wswitch under -Werror) rather than a silent gap.
+inline const char* iv_error_message(IVErrorCode code) {
+    const char* msg;
+    switch (code) {
+        case IVErrorCode::NegativeSpot: msg = "Negative spot price"; break;
+        case IVErrorCode::NegativeStrike: msg = "Negative strike price"; break;
+        case IVErrorCode::NegativeMaturity: msg = "Negative maturity"; break;
+        case IVErrorCode::NegativeMarketPrice: msg = "Negative market price"; break;
+        case IVErrorCode::ArbitrageViolation: msg = "Arbitrage violation"; break;
+        case IVErrorCode::InvalidGridConfig: msg = "Invalid grid configuration"; break;
+        case IVErrorCode::OptionTypeMismatch: msg = "Option type mismatch"; break;
+        case IVErrorCode::DividendYieldMismatch: msg = "Dividend yield mismatch"; break;
+        case IVErrorCode::DiscreteDividendMismatch:
+            msg = "Discrete dividend schedule mismatch";
+            break;
+        case IVErrorCode::MaxIterationsExceeded: msg = "Maximum iterations exceeded"; break;
+        case IVErrorCode::BracketingFailed: msg = "Bracketing failed"; break;
+        case IVErrorCode::NumericalInstability: msg = "Numerical instability"; break;
+        case IVErrorCode::VegaTooSmall: msg = "Vega too small"; break;
+        case IVErrorCode::PDESolveFailed: msg = "PDE solve failed"; break;
+        case IVErrorCode::MultipleRoots:
+            msg = "Multiple roots detected during IV inversion";
+            break;
+    }
+    return msg;
+}
 
 /// Error codes for price table operations
 enum class PriceTableErrorCode {
@@ -167,7 +207,11 @@ enum class PriceTableErrorCode {
     // Serialization errors
     SerializationFailed,       ///< Arrow serialization failed
     ArenaAllocationFailed,     ///< Failed to allocate PMR arena
-    TensorCreationFailed       ///< Failed to create price tensor
+    TensorCreationFailed,      ///< Failed to create price tensor
+
+    // Adaptive build errors (see design D5)
+    ValidationFailed,          ///< Holdout validation set could not measure error
+    NoViableSurface            ///< No candidate surface passed the viability gate
 };
 
 /// Detailed price table error with axis information
@@ -302,6 +346,10 @@ inline IVError convert_to_iv_error(const ValidationError& err) {
             code = IVErrorCode::DiscreteDividendMismatch;
             break;
         case ValidationErrorCode::PriceTableBuildFailed:
+        case ValidationErrorCode::NoViableSurface:
+        case ValidationErrorCode::AdaptiveValidationFailed:
+            // Adaptive-build failures are grid/config-shaped problems, not a
+            // bad market input — same bucket as the other grid-config codes.
             code = IVErrorCode::InvalidGridConfig;
             break;
     }
@@ -388,6 +436,18 @@ inline PriceTableError convert_to_price_table_error(const ValidationError& err) 
             break;
         case ValidationErrorCode::PriceTableBuildFailed:
             code = PriceTableErrorCode::SurfaceBuildFailed;
+            break;
+        case ValidationErrorCode::NoViableSurface:
+            // Mirrors the forward mapping in
+            // detail/price_table_error_mapping.cpp's to_validation_error():
+            // PriceTableErrorCode::NoViableSurface ->
+            // ValidationErrorCode::NoViableSurface.
+            code = PriceTableErrorCode::NoViableSurface;
+            break;
+        case ValidationErrorCode::AdaptiveValidationFailed:
+            // Mirrors PriceTableErrorCode::ValidationFailed ->
+            // ValidationErrorCode::AdaptiveValidationFailed.
+            code = PriceTableErrorCode::ValidationFailed;
             break;
     }
     return PriceTableError{code, err.index, 0};

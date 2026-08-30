@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/ffi/mango_c_api.h"
+#include "mango/ffi/iv_error_mapping.hpp"
+#include "mango/support/error_types.hpp"
 #include <cmath>
 #include <vector>
 
@@ -107,6 +109,45 @@ TEST(MangoCApi, NonFiniteIvRateIsValidationError) {
   // Must be Validation, not Arbitrage (the C++ IV path would otherwise map
   // InvalidRate -> ArbitrageViolation).
   EXPECT_EQ(mango_solve_iv(&q, nullptr, &out, &err), MANGO_ERR_VALIDATION);
+}
+
+// Regression: the query-time multiple-root screen (spec D8) can return
+// IVErrorCode::MultipleRoots from the interpolated solver.  Without an
+// explicit arm it falls through map_iv_error's default to MANGO_ERR_SOLVER,
+// so C and Rust callers see a solver failure instead of the bracketing
+// category the error belongs to.
+//
+// Tested at the mapping rather than through mango_interp_iv_solve: producing
+// MultipleRoots end-to-end needs a price surface that is non-monotone in
+// sigma, and the C API only builds surfaces from the real PDE solver.
+TEST(MangoCApiIvErrorMapping, MultipleRootsIsBracketingCategory) {
+  mango::IVError e{};
+  e.code = mango::IVErrorCode::MultipleRoots;
+  e.final_error = 3.0;
+  e.last_vol = 0.20;
+  EXPECT_EQ(mango::ffi::map_iv_error(e), MANGO_ERR_BRACKETING);
+
+  e.code = mango::IVErrorCode::BracketingFailed;
+  EXPECT_EQ(mango::ffi::map_iv_error(e), MANGO_ERR_BRACKETING)
+      << "MultipleRoots must share the BracketingFailed category";
+}
+
+TEST(MangoCApiIvErrorMapping, ValidationAndSolverCategories) {
+  mango::IVError e{};
+  for (auto code : {mango::IVErrorCode::InvalidGridConfig,
+                    mango::IVErrorCode::OptionTypeMismatch,
+                    mango::IVErrorCode::DividendYieldMismatch,
+                    mango::IVErrorCode::NegativeSpot}) {
+    e.code = code;
+    EXPECT_EQ(mango::ffi::map_iv_error(e), MANGO_ERR_VALIDATION)
+        << "code " << static_cast<int>(code);
+  }
+  e.code = mango::IVErrorCode::ArbitrageViolation;
+  EXPECT_EQ(mango::ffi::map_iv_error(e), MANGO_ERR_ARBITRAGE);
+  e.code = mango::IVErrorCode::MaxIterationsExceeded;
+  EXPECT_EQ(mango::ffi::map_iv_error(e), MANGO_ERR_NO_CONVERGENCE);
+  e.code = mango::IVErrorCode::VegaTooSmall;
+  EXPECT_EQ(mango::ffi::map_iv_error(e), MANGO_ERR_SOLVER);
 }
 
 }  // namespace

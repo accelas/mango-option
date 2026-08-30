@@ -316,7 +316,7 @@ return shape.
 | `InterpolatedIVSolver` | Fast interpolation IV solver (created via `make_interpolated_iv_solver`) |
 | `IVSolverFactoryConfig` | Configuration for IV solver factory (grid, backend, solver params) |
 | `PriceTableConfig` | Alias for `IVSolverFactoryConfig` when building reusable price tables |
-| `InterpolatedIVSolverConfig` | Interpolated IV config (`max_iter`, `tolerance`, `sigma_min`, `sigma_max`, `vega_threshold`) |
+| `InterpolatedIVSolverConfig` | Interpolated IV config (`max_iter`, `tolerance`, `sigma_min`, `sigma_max`, `vega_threshold`, `detect_multiple_roots`) |
 | `IVGrid` | Grid specification (moneyness, vol, rate arrays) |
 | `BSplineBackend` | B-spline interpolation backend config (maturity_grid) |
 | `ChebyshevBackend` | Chebyshev interpolation backend config (maturity, num_pts) |
@@ -327,6 +327,47 @@ return shape.
 | `OptionGrid` | Container for chain data (spot, strikes, maturities, vols, rates) |
 | `PriceTable` | Reusable price table with `price`, `delta`, `gamma`, `vega`, IV solving, and save/load |
 | `SolverError` | Error detail with `code`, `iterations`, `residual` |
+
+### Adaptive Build Diagnostics and Root Screening
+
+Two safety features of the C++ solver are exposed to Python.
+
+**`detect_multiple_roots`** (on `InterpolatedIVSolverConfig`, default `True`)
+screens the sigma bracket for more than one root before inverting the surface.
+When the 17-point scan finds several root features, the solve fails with
+`IVErrorCode.MultipleRoots` instead of returning whichever root Brent happened
+to land on. It is a screen, not a proof of uniqueness: a fold narrower than one
+bracket/16 cell can still slip through. Set it to `False` to restore the older
+first-root-wins behavior.
+
+```python
+config = mo.IVSolverFactoryConfig()
+# ... grid / backend / adaptive setup ...
+config.solver_config.detect_multiple_roots = True   # default
+```
+
+**`build_diagnostics`** is a read-only property on both `PriceTable` and
+`InterpolatedIVSolver`. It is `None` for a manually-gridded table, a table
+loaded from Parquet, and the factory paths that ignore `adaptive`
+(`DimensionlessBackend` and the continuous `ChebyshevBackend`). Otherwise it is
+a dict describing the surface that was actually returned:
+
+```python
+table = mo.make_price_table(config)
+diag = table.build_diagnostics
+if diag is not None:
+    print(diag["target_met"], diag["achieved_max_error"])
+    print(diag["holdout_points_measured"], "of", diag["holdout_points"],
+          "holdout points measured")
+    print("monotonicity violations:", diag["monotonicity_violations"])
+```
+
+Keys: `target_met`, `achieved_max_error`, `achieved_avg_error`,
+`picked_iteration`, `total_iterations`, `final_rebuild`,
+`build_failure_fallback`, `holdout_points`, `holdout_points_measured`,
+`holdout_points_invalid`, `monotonicity_violations`,
+`monotonicity_points_invalid`, `worst_vega_slope`, `n_iterations`.
+`make_iv_solver()` carries the same dict onto the solver it returns.
 
 ### Functions
 
