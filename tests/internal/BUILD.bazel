@@ -104,6 +104,20 @@ cc_test(
 )
 
 cc_test(
+    name = "spatial_operator_boundary_test",
+    srcs = ["spatial_operator_boundary_test.cc"],
+    deps = [
+        "//src/pde/internal:workspace",
+        "//src/pde/operators:black_scholes_pde",
+        "//src/pde/operators:laplacian_pde",
+        "//src/pde/core:grid",
+        "//src/pde/core:boundary_conditions",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "obstacle_test",
     size = "small",
     srcs = ["obstacle_test.cc"],
