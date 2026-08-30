@@ -430,5 +430,28 @@ TEST(AmericanOptionTest, ZeroRateDeepITMPutEqualsEuropean) {
     EXPECT_NEAR(american, european, 0.05);
 }
 
+// Regression/spec test for the public complementarity report (issue #439).
+// An ATM put solve is an M-matrix regime end-to-end, so a clean solve must
+// report zero KKT violations. This is the strongest single assertion that
+// the new put sweep is exact; if it fails, the sweep is still wrong and the
+// assertion must not be loosened.
+TEST(AmericanOptionTest, ComplementarityReportCleanForATMPut) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    auto solver = AmericanOptionSolver::create(params);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+
+    EXPECT_EQ(solver->complementarity_report().violation_count, 0u)
+        << "max_violation=" << solver->complementarity_report().max_violation
+        << " worst_kind=" << solver->complementarity_report().worst_kind;
+}
+
 }  // namespace
 }  // namespace mango

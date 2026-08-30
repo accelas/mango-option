@@ -362,6 +362,11 @@ AmericanOptionSolver::AmericanOptionSolver(
 }
 
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
+    // Reset before every solve() attempt, including early setup failures
+    // that never reach the PDE solver below — the report always reflects
+    // only the most recent solve() call.
+    lcp_report_ = LcpKktReport{};
+
     auto& [grid_spec, time_domain] = grid_config_;
     size_t n = grid_spec.n_points();
 
@@ -436,7 +441,11 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                 std::remove_reference_t<decltype(pde_solver)>::payoff);
         }
         pde_solver.set_config(trbdf2_config_);
-        return pde_solver.solve();
+        auto result = pde_solver.solve();
+        // Copy the report out before the variant (and its pde_solver) is
+        // destroyed at scope exit — on both success and failure paths.
+        lcp_report_ = pde_solver.lcp_report();
+        return result;
     }, solver);
 
     if (!solve_result.has_value()) {
