@@ -120,9 +120,13 @@ jobs:
 
       - name: Run test suite
         run: |
-          bazel test //tests/... --test_output=errors --test_tag_filters=-manual -- -//tests:adaptive_grid_builder_test
+          bazel test //tests/... --test_output=errors --test_tag_filters=-manual
 
-      - name: Run adaptive grid builder test (dbg)
+      # Assertion coverage for the adaptive-refinement logic. The target holds
+      # only fast seam-level tests (no PDE builds — those run in the opt suite
+      # via adaptive_surface_build_integration_test), so the dbg re-run costs
+      # seconds plus the incremental dbg compile.
+      - name: Run adaptive logic tests (dbg)
         run: |
           bazel test //tests:adaptive_grid_builder_test -c dbg --test_output=errors
 

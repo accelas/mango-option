@@ -193,10 +193,12 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, SurfaceInterpolatesWithinBounds) {
 
     auto spline = result->spline;
 
-    // Query the surface at interior points
-    // Moneyness from chain: S/K = 100/90 to 100/110 ~= 0.91 to 1.11
-    // Use a middle point
-    double m = 1.0;    // ATM
+    // Query the surface at interior points.  The spline's moneyness axis is
+    // LOG-moneyness ln(S/K); the chain spans ln(100/110)..ln(100/90), so ATM
+    // is 0.0.  (This test previously queried 1.0 — S/K = e, far outside the
+    // data — where the true value is ~0 and the strict positivity assertion
+    // passed only on a +1e-18 rounding artifact of -march=native FMA codegen.)
+    double m = 0.0;    // ATM in log-moneyness
     double tau = 0.5;  // 6 months
     double sigma = 0.20;
     double rate = 0.05;
