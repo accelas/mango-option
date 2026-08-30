@@ -6,7 +6,10 @@
 
 #include "mango/math/bspline/bspline_collocation.hpp"
 #include <gtest/gtest.h>
+#include <bit>
 #include <cmath>
+#include <cstdint>
+#include <thread>
 #include <vector>
 
 using namespace mango;
@@ -532,4 +535,70 @@ TEST_F(BSplineCollocation1DTest, FactoryUnsortedErrorMessage) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::GridNotSorted);
+}
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: shared-solver mutation + per-slice refactorization (#435)
+// Bug: fit_with_workspace rebuilt shared members from every OpenMP thread
+// and re-ran dgbtrf/dgbcon per slice; factorize()/solve_factored() split
+// the work into one const factorization + race-free per-slice solves.
+TEST_F(BSplineCollocation1DTest, SolveFactoredMatchesFitBitForBit) {
+    std::vector<double> grid{-1.5, -0.8, -0.2, 0.1, 0.6, 1.4, 2.3};
+    std::vector<double> values{0.3, -0.1, 0.45, 0.9, -0.6, 0.2, 1.1};
+    auto solver = mango::BSplineCollocation1D<double>::create(grid).value();
+    auto fit_result = solver.fit(values);
+    ASSERT_TRUE(fit_result.has_value());
+    auto fact = solver.factorize();
+    ASSERT_TRUE(fact.has_value());
+    std::vector<double> coeffs(grid.size());
+    auto res = solver.solve_factored(*fact, values, coeffs);
+    ASSERT_TRUE(res.has_value());
+    for (size_t i = 0; i < coeffs.size(); ++i) {
+        EXPECT_EQ(std::bit_cast<std::uint64_t>(coeffs[i]),
+                  std::bit_cast<std::uint64_t>(fit_result->coefficients[i]));
+    }
+    EXPECT_EQ(*res, fit_result->max_residual);
+    EXPECT_EQ(fact->condition_estimate, fit_result->condition_estimate);
+}
+
+TEST_F(BSplineCollocation1DTest, SolveFactoredRejectsMalformedFactorization) {
+    std::vector<double> grid{-1.5, -0.8, -0.2, 0.1, 0.6, 1.4, 2.3};
+    std::vector<double> values(grid.size(), 1.0);
+    std::vector<double> coeffs(grid.size());
+    auto solver = mango::BSplineCollocation1D<double>::create(grid).value();
+    mango::BSplineCollocationFactorization<double> empty{};
+    auto r1 = solver.solve_factored(empty, values, coeffs);
+    ASSERT_FALSE(r1.has_value());
+    EXPECT_EQ(r1.error().code, mango::InterpolationErrorCode::BufferSizeMismatch);
+    auto fact = solver.factorize().value();
+    fact.pivots.pop_back();  // truncated
+    auto r2 = solver.solve_factored(fact, values, coeffs);
+    ASSERT_FALSE(r2.has_value());
+    EXPECT_EQ(r2.error().code, mango::InterpolationErrorCode::BufferSizeMismatch);
+}
+
+TEST_F(BSplineCollocation1DTest, ConcurrentSolveFactoredMatchesSerial) {
+    std::vector<double> grid{-1.5, -0.8, -0.2, 0.1, 0.6, 1.4, 2.3};
+    auto solver = mango::BSplineCollocation1D<double>::create(grid).value();
+    auto fact = solver.factorize().value();
+    constexpr int kThreads = 8;
+    // Each thread its own RHS; serial answers first.
+    std::vector<std::vector<double>> rhs(kThreads), serial(kThreads, std::vector<double>(grid.size()));
+    for (int t = 0; t < kThreads; ++t) {
+        rhs[t].resize(grid.size());
+        for (size_t i = 0; i < grid.size(); ++i) rhs[t][i] = std::sin(0.7 * i + t);
+        ASSERT_TRUE(solver.solve_factored(fact, rhs[t], serial[t]).has_value());
+    }
+    std::vector<std::vector<double>> parallel(kThreads, std::vector<double>(grid.size()));
+    std::vector<std::thread> threads;
+    for (int t = 0; t < kThreads; ++t)
+        threads.emplace_back([&, t] { (void)solver.solve_factored(fact, rhs[t], parallel[t]); });
+    for (auto& th : threads) th.join();
+    for (int t = 0; t < kThreads; ++t)
+        for (size_t i = 0; i < grid.size(); ++i)
+            EXPECT_EQ(std::bit_cast<std::uint64_t>(parallel[t][i]),
+                      std::bit_cast<std::uint64_t>(serial[t][i]));
 }

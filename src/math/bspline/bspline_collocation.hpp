@@ -24,6 +24,7 @@
 #pragma once
 
 #include "mango/math/banded_matrix_solver.hpp"
+#include "mango/math/lapack_banded_layout.hpp"
 #include "mango/math/bspline/bspline_basis.hpp"
 #include "mango/math/bspline/bspline_collocation_workspace.hpp"
 #include "mango/support/error_types.hpp"
@@ -53,6 +54,18 @@ struct BSplineCollocationResult {
 template<std::floating_point T>
 struct BSplineCollocationConfig {
     T tolerance = T{1e-9};  ///< Maximum allowed residual
+};
+
+/// Result of a one-time banded LU factorization of the collocation matrix.
+///
+/// Produced by `BSplineCollocation1D::factorize()` and consumed by
+/// `solve_factored()`. Default-constructible so callers can hold an
+/// "empty"/malformed instance (e.g. to exercise error paths).
+template<std::floating_point T>
+struct BSplineCollocationFactorization {
+    std::vector<T> lu;               ///< LDAB*n LAPACK banded LU factors
+    std::vector<lapack_int> pivots;  ///< n pivots from dgbtrf
+    T condition_estimate{};          ///< dgbcon 1-norm estimate (inf on failure)
 };
 
 /// 1D Cubic B-spline collocation solver
@@ -390,6 +403,94 @@ public:
         };
     }
 
+    /// Factorize the collocation matrix once (const, race-free).
+    ///
+    /// The collocation matrix depends only on the grid, which is fixed at
+    /// construction, so a single factorization may be shared read-only
+    /// across concurrent `solve_factored()` calls on this instance (e.g.
+    /// one per OpenMP thread solving a different right-hand side/slice).
+    /// This method itself allocates a private LU buffer and touches no
+    /// solver state, so concurrent calls to `factorize()` are also safe.
+    ///
+    /// @return Factorization (LU factors + pivots + condition estimate) or
+    ///     error if the matrix is singular
+    [[nodiscard]] std::expected<BSplineCollocationFactorization<T>, InterpolationError>
+    factorize() const
+    {
+        static_assert(std::same_as<T, double>,
+                      "LAPACKE banded solvers currently only support double precision");
+        using Workspace = BSplineCollocationWorkspace<T, BANDWIDTH>;
+
+        BSplineCollocationFactorization<T> fact;
+        fact.lu.assign(Workspace::LDAB * n_, T{0});
+        fact.pivots.resize(n_);
+        fill_lapack_band(std::span<T>{fact.lu});
+
+        const lapack_int info = LAPACKE_dgbtrf(
+            LAPACK_COL_MAJOR, static_cast<lapack_int>(n_), static_cast<lapack_int>(n_),
+            Workspace::KL, Workspace::KU, fact.lu.data(),
+            static_cast<lapack_int>(Workspace::LDAB), fact.pivots.data());
+        if (info != 0) {
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed, n_});
+        }
+
+        const T norm_A = compute_matrix_norm1();
+        fact.condition_estimate = estimate_condition_from(fact, norm_A);
+        return fact;
+    }
+
+    /// Solve the collocation system using a pre-computed factorization.
+    ///
+    /// Thread-safety: `fact` is read-only here and `values`/`coeffs_out`
+    /// are caller-owned per-call buffers, so concurrent calls on the same
+    /// `BSplineCollocation1D` instance (and even the same `fact`) with
+    /// distinct `values`/`coeffs_out` buffers are race-free. It is the
+    /// caller's responsibility to pass a `fact` produced by a
+    /// `factorize()` call on *this* solver (or another solver built from
+    /// the same grid) — a factorization from a differently-sized or
+    /// differently-gridded solver is not detected beyond a size check.
+    ///
+    /// @param fact Factorization from `factorize()`
+    /// @param values Function values at grid points (size n_)
+    /// @param coeffs_out Pre-allocated buffer for coefficients (size n_)
+    /// @param config Solver configuration
+    /// @return Max residual or error
+    [[nodiscard]] std::expected<T, InterpolationError> solve_factored(
+        const BSplineCollocationFactorization<T>& fact,
+        std::span<const T> values, std::span<T> coeffs_out,
+        const BSplineCollocationConfig<T>& config = {}) const
+    {
+        using Workspace = BSplineCollocationWorkspace<T, BANDWIDTH>;
+        if (values.size() != n_) return std::unexpected(InterpolationError{
+            InterpolationErrorCode::ValueSizeMismatch, values.size()});
+        if (coeffs_out.size() != n_) return std::unexpected(InterpolationError{
+            InterpolationErrorCode::BufferSizeMismatch, coeffs_out.size()});
+        if (fact.lu.size() != Workspace::LDAB * n_ || fact.pivots.size() != n_) {
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::BufferSizeMismatch, fact.lu.size()});
+        }
+        for (size_t i = 0; i < n_; ++i) {
+            if (std::isnan(values[i])) return std::unexpected(InterpolationError{
+                InterpolationErrorCode::NaNInput, n_, i});
+            if (std::isinf(values[i])) return std::unexpected(InterpolationError{
+                InterpolationErrorCode::InfInput, n_, i});
+        }
+        std::copy(values.begin(), values.end(), coeffs_out.begin());
+        const lapack_int info = LAPACKE_dgbtrs(
+            LAPACK_COL_MAJOR, 'N', static_cast<lapack_int>(n_),
+            Workspace::KL, Workspace::KU, 1,
+            fact.lu.data(), static_cast<lapack_int>(Workspace::LDAB),
+            fact.pivots.data(), coeffs_out.data(), static_cast<lapack_int>(n_));
+        if (info != 0) return std::unexpected(InterpolationError{
+            InterpolationErrorCode::FittingFailed, n_});
+        const T max_residual = compute_residual_from_span(coeffs_out, values);
+        if (max_residual > config.tolerance) return std::unexpected(InterpolationError{
+            InterpolationErrorCode::FittingFailed, n_, 0,
+            static_cast<double>(max_residual)});
+        return max_residual;
+    }
+
     /// Get grid size
     [[nodiscard]] size_t size() const noexcept { return n_; }
 
@@ -533,18 +634,27 @@ private:
         return *std::max_element(col_sums.begin(), col_sums.end());
     }
 
-    /// Build collocation matrix into workspace band storage
+    /// Fill an arbitrary LDAB*n_ buffer with the collocation matrix in
+    /// LAPACK banded format.
     ///
-    /// Writes matrix directly to workspace in LAPACK banded format.
-    /// For bandwidth=4 cubic B-splines, LAPACK uses ldab=10 storage.
-    void build_collocation_matrix_to_workspace(BSplineCollocationWorkspace<T, BANDWIDTH>& ws) const {
-        // Zero the workspace band storage
-        auto ws_band_storage = ws.band_storage();
-        std::fill(ws_band_storage.begin(), ws_band_storage.end(), T{0});
+    /// Shared layout helper behind both `build_collocation_matrix_to_workspace`
+    /// (writes into a `BSplineCollocationWorkspace`'s band storage) and
+    /// `factorize()` (writes into `BSplineCollocationFactorization::lu`
+    /// before LU-factorizing it in place). `out` must have exactly
+    /// `BSplineCollocationWorkspace<T, BANDWIDTH>::LDAB * n_` elements.
+    void fill_lapack_band(std::span<T> out) const {
+        using Workspace = BSplineCollocationWorkspace<T, BANDWIDTH>;
+        using extents_type = typename Workspace::extents_type;
+        using band_view_type = typename Workspace::band_view_type;
+        using mapping_type = lapack_banded_layout::mapping<extents_type>;
+
+        // Zero the destination band storage
+        std::fill(out.begin(), out.end(), T{0});
 
         // Get mdspan views for clean indexing
         auto internal_band = band_view();
-        auto ws_band = ws.band_view();
+        band_view_type out_band(
+            out.data(), mapping_type(extents_type{n_, n_}, Workspace::KL, Workspace::KU));
 
         // Copy from internal format to LAPACK banded format via mdspan
         for (size_t i = 0; i < n_; ++i) {
@@ -555,10 +665,18 @@ private:
                 const size_t band_idx = static_cast<size_t>(j - col_start);
                 const T value = internal_band[i, band_idx];
 
-                // ws_band handles LAPACK banded format offset calculation
-                ws_band[i, static_cast<size_t>(j)] = value;
+                // out_band handles LAPACK banded format offset calculation
+                out_band[i, static_cast<size_t>(j)] = value;
             }
         }
+    }
+
+    /// Build collocation matrix into workspace band storage
+    ///
+    /// Writes matrix directly to workspace in LAPACK banded format.
+    /// For bandwidth=4 cubic B-splines, LAPACK uses ldab=10 storage.
+    void build_collocation_matrix_to_workspace(BSplineCollocationWorkspace<T, BANDWIDTH>& ws) const {
+        fill_lapack_band(ws.band_storage());
     }
 
     /// Factorize banded matrix using workspace storage
@@ -673,6 +791,47 @@ private:
             ws.lapack_storage().data(),
             ldab,
             ws.pivots().data(),
+            norm_A,
+            &rcond
+        );
+
+        if (info != 0 || rcond == 0.0) {
+            return std::numeric_limits<T>::infinity();
+        }
+
+        return static_cast<T>(1.0 / rcond);
+    }
+
+    /// Estimate condition number from a `BSplineCollocationFactorization`
+    ///
+    /// Uses LAPACK dgbcon to estimate condition number from LU factors.
+    /// Same body as `estimate_banded_condition_workspace`, with the LU
+    /// storage swapped from a workspace's `lapack_storage()` to the
+    /// factorization's `lu` vector.
+    [[nodiscard]] T estimate_condition_from(
+        const BSplineCollocationFactorization<T>& fact,
+        T norm_A) const
+    {
+        using Workspace = BSplineCollocationWorkspace<T, BANDWIDTH>;
+
+        if (norm_A == T{0}) {
+            return std::numeric_limits<T>::infinity();
+        }
+
+        const lapack_int n = static_cast<lapack_int>(n_);
+        const lapack_int kl = Workspace::KL;
+        const lapack_int ku = Workspace::KU;
+        const lapack_int ldab = static_cast<lapack_int>(Workspace::LDAB);
+
+        double rcond = 0.0;  // Reciprocal condition number (output)
+
+        const lapack_int info = LAPACKE_dgbcon(
+            LAPACK_COL_MAJOR,
+            '1',  // 1-norm
+            n, kl, ku,
+            fact.lu.data(),
+            ldab,
+            fact.pivots.data(),
             norm_A,
             &rcond
         );
