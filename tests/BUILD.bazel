@@ -717,6 +717,7 @@ cc_test(
     name = "bspline_banded_solver_test",
     srcs = ["bspline_banded_solver_test.cc"],
     deps = [
+        "//src/math:banded_matrix_solver",
         "//src/math/bspline:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
@@ -879,6 +880,17 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
+)
+
+cc_test(
+    name = "lapack_banded_backend_test",
+    size = "small",
+    srcs = ["lapack_banded_backend_test.cc"],
+    deps = [
+        "//src/math:lapack_banded_backend",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-Wall", "-Wextra"],
 )
 
 cc_test(

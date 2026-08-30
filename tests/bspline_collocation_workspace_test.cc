@@ -22,7 +22,7 @@ static_assert(std::same_as<Pivot, lapack_int>);
 TEST(BSplineCollocationWorkspaceTest, RequiredBytesCalculation) {
     // For n=100, bandwidth=4:
     // band_storage: 10*100*8 = 8000 bytes + padding
-    // lapack_storage: 10*100*8 = 8000 bytes + padding
+    // factor_storage: 10*100*8 = 8000 bytes + padding
     // pivots: 100*sizeof(lapack_int) = 400 bytes + padding
     // coeffs: 100*8 = 800 bytes + padding
     size_t bytes = BSplineCollocationWorkspace<double>::required_bytes(100);
@@ -44,7 +44,7 @@ TEST(BSplineCollocationWorkspaceTest, FromBytesSuccess) {
 
     EXPECT_EQ(ws.size(), n);
     EXPECT_EQ(ws.band_storage().size(), 10 * n);  // LDAB=10
-    EXPECT_EQ(ws.lapack_storage().size(), 10 * n);
+    EXPECT_EQ(ws.factor_storage().size(), 10 * n);
     EXPECT_EQ(ws.pivots().size(), n);
     EXPECT_EQ(ws.coeffs().size(), n);
 }
@@ -71,7 +71,7 @@ TEST(BSplineCollocationWorkspaceTest, SpansAre64ByteAligned) {
 
     // All spans should start at 64-byte aligned addresses
     EXPECT_EQ(reinterpret_cast<std::uintptr_t>(ws.band_storage().data()) % 64, 0u);
-    EXPECT_EQ(reinterpret_cast<std::uintptr_t>(ws.lapack_storage().data()) % 64, 0u);
+    EXPECT_EQ(reinterpret_cast<std::uintptr_t>(ws.factor_storage().data()) % 64, 0u);
     EXPECT_EQ(reinterpret_cast<std::uintptr_t>(ws.pivots().data()) % 64, 0u);
     EXPECT_EQ(reinterpret_cast<std::uintptr_t>(ws.coeffs().data()) % 64, 0u);
 }
@@ -83,17 +83,17 @@ TEST(BSplineCollocationWorkspaceTest, SpansNonOverlapping) {
     auto ws = BSplineCollocationWorkspace<double>::from_bytes(buffer.bytes(), n).value();
 
     auto* band_end = ws.band_storage().data() + ws.band_storage().size();
-    auto* lapack_start = ws.lapack_storage().data();
-    auto* lapack_end = ws.lapack_storage().data() + ws.lapack_storage().size();
+    auto* lapack_start = ws.factor_storage().data();
+    auto* lapack_end = ws.factor_storage().data() + ws.factor_storage().size();
     auto* pivots_start = ws.pivots().data();
     auto* pivots_end = reinterpret_cast<double*>(
         reinterpret_cast<std::byte*>(ws.pivots().data()) + ws.pivots().size() * sizeof(lapack_int));
     auto* coeffs_start = ws.coeffs().data();
 
-    // band_storage < lapack_storage
+    // band_storage < factor_storage
     EXPECT_LE(reinterpret_cast<std::byte*>(band_end),
               reinterpret_cast<std::byte*>(lapack_start));
-    // lapack_storage < pivots
+    // factor_storage < pivots
     EXPECT_LE(reinterpret_cast<std::byte*>(lapack_end),
               reinterpret_cast<std::byte*>(pivots_start));
     // pivots < coeffs
