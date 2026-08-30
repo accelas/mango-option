@@ -1178,12 +1178,14 @@ cc_test(
 
 # Heavy end-to-end adaptive builds (real PDE solves through the full
 # refinement loop), split out of :adaptive_grid_builder_test so the CI dbg
-# assertion pass stays fast.  Runs in the regular opt test suite; each case
-# takes seconds-to-minutes, so shards carry their own timeouts.
+# assertion pass stays fast.  Runs in the regular test suite in the default
+# compilation mode (fastbuild: slowest shard ~140s local, ~580s CPU total;
+# the dbg-mode ~8x blowup that used to time CI out never applies here).
+# No explicit timeout: size = "enormous" grants each shard the 3600s
+# default, giving structural headroom on slow runners.
 cc_test(
     name = "adaptive_surface_build_integration_test",
     size = "enormous",
-    timeout = "long",
     shard_count = 6,
     srcs = ["adaptive_surface_build_integration_test.cc"],
     deps = [
