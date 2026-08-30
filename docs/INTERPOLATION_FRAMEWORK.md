@@ -102,7 +102,7 @@ The tradeoff is in Greek accuracy. Because sigma appears in both tau' and ln_kap
 
 Use the 3D path when build speed matters more than accuracy, and when q=0 is acceptable (index options, for example).
 
-The leaf also exposes `raw_value()` — the unscaled interpolant output before K_ref scaling and clamping. This seems like a leaky abstraction, but the next layer needs it for an important optimization.
+The leaf also exposes `raw_value()` — the unscaled interpolant output before K_ref scaling and clamping. It is not used by the deep-OTM optimization (that lives inside the leaf's own `greek()`/`gamma()`, see below); it remains public for diagnostics and tests.
 
 ### Layer 2a: EEPLayer
 
