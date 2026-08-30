@@ -36,8 +36,8 @@
 #include <concepts>
 #include <optional>
 #include <algorithm>
-#include <functional>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <lapacke.h>
 
@@ -470,12 +470,13 @@ public:
             InterpolationErrorCode::ValueSizeMismatch, values.size()});
         if (coeffs_out.size() != n_) return std::unexpected(InterpolationError{
             InterpolationErrorCode::BufferSizeMismatch, coeffs_out.size()});
-        // std::less gives a defined total order even for pointers into
-        // unrelated allocations (raw < would be unspecified there).
-        if (std::less<const T*>{}(values.data(),
-                                  coeffs_out.data() + coeffs_out.size()) &&
-            std::less<const T*>{}(coeffs_out.data(),
-                                  values.data() + values.size())) {
+        // Compare as uintptr_t for a total order: raw < on pointers into
+        // unrelated allocations is unspecified in C++.
+        const auto v_lo = reinterpret_cast<std::uintptr_t>(values.data());
+        const auto v_hi = reinterpret_cast<std::uintptr_t>(values.data() + values.size());
+        const auto c_lo = reinterpret_cast<std::uintptr_t>(coeffs_out.data());
+        const auto c_hi = reinterpret_cast<std::uintptr_t>(coeffs_out.data() + coeffs_out.size());
+        if (v_lo < c_hi && c_lo < v_hi) {
             return std::unexpected(InterpolationError{
                 InterpolationErrorCode::BufferSizeMismatch, coeffs_out.size()});
         }
