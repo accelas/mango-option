@@ -458,6 +458,20 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "thomas_solver_lcp_test",
+    srcs = ["thomas_solver_lcp_test.cc"],
+    deps = [
+        "//src/math:thomas_solver",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+    size = "small",
+)
+
 
 cc_test(
     name = "iv_solver_test",
