@@ -37,11 +37,9 @@
 #include <span>
 #include <vector>
 #include <concepts>
-#include <optional>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <limits>
 
 namespace mango {
 
