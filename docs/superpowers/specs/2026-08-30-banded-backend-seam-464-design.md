@@ -93,31 +93,34 @@ struct LapackBandedBackend {
     static constexpr std::size_t pivot_storage_size(std::size_t n, std::size_t)
     { return n; }
 
-    template<std::floating_point T>
-    static void pack(std::span<const T> band_rows, std::span<const int> col_start,
-                     std::size_t n, std::size_t bandwidth, std::span<T> factors);
+    static void pack(std::span<const double> band_rows, std::span<const int> col_start,
+                     std::size_t n, std::size_t bandwidth, std::span<double> factors);
     // zero factors; for each row i and j in [col_start[i],
     // min(col_start[i]+bandwidth, n)):
     //   factors[lapack_banded_layout offset (i,j)] = band_rows[i*bandwidth + (j-col_start[i])]
     // — byte-identical to the former fill_lapack_band / BandedMatrix fill.
 
-    template<std::floating_point T>
-    static BandedResult<T> factorize(std::span<T> factors,
-                                     std::span<lapack_int> pivots,
-                                     std::size_t n, std::size_t bandwidth);   // dgbtrf
-    template<std::floating_point T>
-    static BandedResult<T> solve(std::span<const T> factors,
-                                 std::span<const lapack_int> pivots,
-                                 std::span<T> x, std::size_t n, std::size_t bandwidth); // dgbtrs
-    template<std::floating_point T>
-    static T condition(std::span<const T> factors,
-                       std::span<const lapack_int> pivots,
-                       T norm, std::size_t n, std::size_t bandwidth);         // dgbcon
+    static BandedResult<double> factorize(std::span<double> factors,
+                                          std::span<lapack_int> pivots,
+                                          std::size_t n, std::size_t bandwidth);   // dgbtrf
+    static BandedResult<double> solve(std::span<const double> factors,
+                                      std::span<const lapack_int> pivots,
+                                      std::span<double> x, std::size_t n,
+                                      std::size_t bandwidth);                      // dgbtrs
+    static double condition(std::span<const double> factors,
+                            std::span<const lapack_int> pivots,
+                            double norm, std::size_t n, std::size_t bandwidth);    // dgbcon
 };
 ```
 
-Each templated member keeps the existing
-`static_assert(std::same_as<T, double>, ...)`. `pack` uses
+**The members are plain `double` functions, not templates** (round 2
+[P2] fold): a requires-expression never instantiates bodies, so a
+templated member with a body-level `static_assert(same_as<T, double>)`
+would make `BandedSolverBackend<LapackBandedBackend, float>` *true* and
+admit `BSplineCollocation1D<float>` only to explode at call time. With
+concrete `double` signatures the concept check fails naturally for any
+other `T` — the constraint tells the truth, and the old `static_assert`s
+disappear. `pack` uses
 `lapack_banded_layout::mapping` over `dextents<std::size_t, 2>{n, n}` with
 `kl = ku = bandwidth − 1` — the same single source of layout truth as
 today. Error strings and info-code handling are copied verbatim from the
@@ -149,6 +152,21 @@ clause; `std::floating_point<T>` with angle brackets in the concept. All
 existing `BSplineCollocation1D<double>` /
 `BSplineCollocationFactorization<double>` spellings compile unchanged via
 the defaults.)
+
+- **The Backend parameter threads through the factor-once API** (round 2
+  [P1] fold — without this a custom backend would silently get the LAPACK
+  factorization type and its pivot representation):
+
+  ```cpp
+  [[nodiscard]] std::expected<BSplineCollocationFactorization<T, Backend>,
+                              InterpolationError>
+  factorize() const;
+
+  [[nodiscard]] std::expected<T, InterpolationError> solve_factored(
+      const BSplineCollocationFactorization<T, Backend>& fact,
+      std::span<const T> values, std::span<T> coeffs_out,
+      const BSplineCollocationConfig<T>& config = {}) const;
+  ```
 
 - `factorize()` sizes `fact.lu` by `Backend::factor_storage_size(n_,
   BANDWIDTH)` and `fact.pivots` by `Backend::pivot_storage_size(n_,
@@ -221,10 +239,14 @@ through `lapack_banded_backend.hpp` instead of `<lapacke.h>` (review
 
 `src/math/BUILD.bazel`: new `cc_library` targets `banded_solver_backend`
 (hdr only) and `lapack_banded_backend` (deps: `banded_solver_backend`,
-`lapack_banded_layout`, the LAPACKE dep used by `banded_matrix_solver`).
-`banded_matrix_solver` gains dep `banded_solver_backend`;
-`//src/math/bspline:bspline_collocation` swaps `banded_matrix_solver` for
-the two new targets; `bspline_collocation_workspace` adds
+`lapack_banded_layout`; **carries `linkopts = ["-llapacke"]`** so every
+direct consumer links correctly — there is no reusable LAPACKE dep target
+today, `banded_matrix_solver` carries the same linkopt itself, round 2
+[P2]). `banded_matrix_solver` gains dep `banded_solver_backend` and keeps
+its linkopt; `//src/math/bspline:bspline_collocation` swaps
+`banded_matrix_solver` for the two new targets **and drops its own
+`-llapacke` linkopt** (implementation-specific linking belongs to the
+backend target); `bspline_collocation_workspace` adds
 `lapack_banded_backend`.
 
 ## Consumer audit (from the design review — verified against the tree)
@@ -246,8 +268,10 @@ the two new targets; `bspline_collocation_workspace` adds
 2. **Concept enforcement test** (compile-time, in
    `tests/bspline_collocation_1d_test.cc`):
    `static_assert(mango::BandedSolverBackend<mango::LapackBandedBackend, double>);`
-   and a negative check, e.g.
-   `static_assert(!mango::BandedSolverBackend<int, double>);`.
+   plus two negative checks:
+   `static_assert(!mango::BandedSolverBackend<int, double>);` and — the
+   honest-double-constraint guard from round 2 —
+   `static_assert(!mango::BandedSolverBackend<mango::LapackBandedBackend, float>);`.
 3. **Backend-unit regression** (new tests in the same file, with the
    standard regression header citing #464): `LapackBandedBackend::pack`
    output equals the former layout byte-for-byte for a small fixed band
