@@ -42,6 +42,14 @@ double ql_american(double spot, double strike, double maturity, double vol,
     ql::Date today = ql::Date::todaysDate();
     ql::Settings::instance().evaluationDate() = today;
     ql::Option::Type type = is_call ? ql::Option::Call : ql::Option::Put;
+    // int(maturity * 365) truncates to a whole number of days, so a
+    // maturity that isn't an exact multiple of 1/365 gets a QuantLib
+    // reference for a slightly different T than `maturity` itself. The
+    // T=0.25 row ("put OTM T.25") is the one case in kRows this bites:
+    // int(0.25*365) = 91 days = 91/365 = 0.24932 (not 0.25), so that row's
+    // reference is priced at T=0.24932 -- the resulting cross-convention
+    // mismatch (~3e-4 in T) is already folded into that row's measured
+    // abs_err and threshold, not a separate error source to account for.
     ql::Date mat = today + ql::Period(int(maturity * 365), ql::Days);
     auto exercise = ql::ext::make_shared<ql::AmericanExercise>(today, mat);
     auto payoff = ql::ext::make_shared<ql::PlainVanillaPayoff>(type, strike);

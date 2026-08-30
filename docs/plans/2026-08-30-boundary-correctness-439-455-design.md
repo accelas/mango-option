@@ -367,6 +367,10 @@ old sweep 6.9e-3 fails); the remaining scenarios ≤ 1.25× their measured
 mirrored-sweep error, exact numbers recorded in the test from the
 implementation run. Bit-identity goldens (`bspline_bit_identity_test`)
 regenerated — put prices legitimately move by 1e-4…2.6e-3 per $100 strike.
+(Erratum: goldens cover no FDM path; none needed regeneration.
+`bspline_bit_identity_test` pins B-spline collocation fitting coefficients
+only — it has no option-pricing or PDE-solver code in its call path, so
+the sweep-orientation change here cannot touch it.)
 
 **T3 — Dividend-call pricing** (QuantLib, same engine/conventions):
 continuous-dividend calls q = 8% > r = 5% swept

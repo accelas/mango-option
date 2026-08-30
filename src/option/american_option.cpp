@@ -308,6 +308,11 @@ public:
     /// (mirroring the dividend_spline_ lifetime pattern: the constructor
     /// stores a null-env placeholder, this rewires it post-placement).
     void init_dividends() {
+        // Cheap insurance against future solver reuse across solves: today
+        // each variant is constructed fresh per solve() call, so this is
+        // latent, but init_dividends() is the natural reset point if that
+        // ever changes.
+        n_events_applied_ = 0;
         right_bc_ = DirichletBC(RightBCFunction{&envelope_, &n_events_applied_});
         init_dividend_events(*this, params_, grid_, workspace_local_, 0.0, dividend_spline_,
                              &n_events_applied_);
