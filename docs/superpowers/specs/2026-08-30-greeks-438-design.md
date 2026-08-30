@@ -69,45 +69,73 @@ double theta_normalized = (v_prev - v_current) / dt;
 For uniform time grids `dt_at(n_steps - 1) == dt()`, so behavior there is
 bit-identical.
 
+**Known limitation (documented, not fixed here):** when `n_time == 1`, the
+American solver's unconditional Rannacher startup leaves `solution_prev` at the
+midpoint substep — only `dt/2` behind the final solution — so theta is ~2×
+off. This is pre-existing (the old average-dt divisor is the same full `dt`
+there) and unchanged by this fix; theta's doc comment gains a note that it
+assumes the final step is a plain TR-BDF2 step (`n_steps >= 2`, true for every
+production grid config). No validation is added — minimal-diff scope.
+
 ## Regression tests
 
-New tests in `tests/american_option_test.cc` (the existing home of
+New tests in `tests/american_option_result_test.cc` (the existing home of
 `AmericanOptionResult` behavior tests), in the repo's regression-test format
 (`// Regression:` / `// Bug:` comments).
 
-### Gamma: spot in the last interior interval
+Additionally, `tests/american_option_gamma_oscillation_test.cc:48` duplicates
+the defective `[1, n-2)` range in its own stencil computation and then examines
+node `n-2` — it reads a never-written zero. That range is corrected to
+`[1, n-1)` in the same commit (in scope: it is the same bug, copy-pasted).
 
-Solve an ATM-ish put on a custom narrow grid chosen so
-`x_spot = ln(S/K)` lands strictly inside the last interior interval
-`(x[n-2], x[n-1])` — e.g. solve with an explicit `GridSpec` whose x-range is
-asymmetric around 0. Assert the returned gamma matches a central-difference
-reference computed from `value_at`:
+### Gamma: interpolation touching node `n-2`
+
+Node `n-1` is a boundary node and stays zero even after the fix (the stencil
+range is interior-only), so gamma in the *last* interval `(x[n-2], x[n-1])` is
+deliberately tapered — that interval is NOT the test target. The interval where
+the bug is cleanly visible is `(x[n-3], x[n-2])`: pre-fix, `i_right = n-2`
+blends against a spurious zero; post-fix both ends are genuine values.
+
+Two assertions:
+
+1. **Exact-node guard (guaranteed RED):** choose spot so `x_spot` lands exactly
+   on node `n-2` (`find_grid_index` returns `{n-2, n-2}` via its 1e-14 snap).
+   Pre-fix gamma is exactly 0.0 there; assert it is nonzero and matches an FD
+   reference.
+2. **FD cross-check:** with spot strictly inside `(x[n-3], x[n-2])`, assert
+   gamma matches a central-difference reference computed from `value_at`:
 
 ```
-gamma_fd = (V(S+h) - 2 V(S) + V(S-h)) / h²,  h = 0.5% of S
+gamma_fd = (V(S+h) - 2 V(S) + V(S-h)) / h²,  h small enough that S±h stays
+           inside (exp(x[n-3])·K, exp(x[n-1])·K)  — no boundary clamping
 EXPECT_NEAR(result->gamma(), gamma_fd, tol)
 ```
 
-Under the bug, the interpolation blends with `d2v_dx2[n-2] == 0`, so gamma is
-biased low by construction; the test fails RED before the fix. `tol` is
-calibrated to the FD reference's own truncation error (loose, e.g. 15% relative
-or an absolute floor), not to machine precision — the point is catching a
-zero-blended value, which is off by ~alpha × 100%.
-
-Also add a cheap exactness guard that pins the convention: for a solved grid,
-gamma computed at a spot exactly on node `n-2` must be nonzero (under the bug it
-is exactly 0 when `i_left == i_right == n-2`).
+`tol` is calibrated to the FD reference's truncation error (loose, e.g. 15%
+relative or an absolute floor), not machine precision — the point is catching
+the zero-blended value.
 
 ### Theta: non-uniform time grid (discrete dividend)
 
 Price an option whose `PricingParams` carries a discrete dividend at a
 calendar time that forces `with_mandatory_points` to produce a non-uniform
 time grid where `dt_at(n_steps-1)` differs measurably from the average `dt()`
-(assert this precondition inside the test so it cannot silently pass vacuously).
-Compare `result->theta()` against a bumped-maturity FD reference:
+(assert this precondition inside the test so it cannot silently pass
+vacuously). A dividend with calendar time shortly after valuation (τ-event
+near t_end) makes the final segment's step size differ from the average by
+tens of percent — e.g. maturity 1.0, dt ≈ 0.09, dividend at calendar 0.05 →
+last segment [0.95, 1.0] steps at 0.05 vs average ≈ 0.091.
+
+Compare `result->theta()` against a **calendar** FD reference: advancing the
+valuation date by `h` shortens time-to-maturity to `T−h` AND brings every
+future dividend `h` closer — `Dividend::calendar_time` is measured from the
+valuation date, and the solver places the jump at `τ = maturity −
+calendar_time`. The bumped solve must therefore use maturity `T−h` **and**
+each dividend's `calendar_time` reduced by `h`; bumping maturity alone moves
+the dividend's τ-coordinate and measures a different sensitivity:
 
 ```
-theta_fd = (V_{T-h}(S) - V_T(S)) / h        (two full solves, h small)
+theta_fd = (V_{T-h, divs-h}(S) - V_{T, divs}(S)) / h    (two full solves)
 EXPECT_NEAR(result->theta(), theta_fd, tol)
 ```
 
@@ -135,3 +163,18 @@ to pass.
   touches node `n-2` (near the right grid edge); theta changes only affect
   non-uniform time grids. Uniform-time ATM paths — everything the existing
   test suite pins — are numerically identical.
+- **`n_time == 1` Rannacher edge documented, not fixed.** See the theta fix
+  section. Pre-existing, unreachable by production grid configs, and the fix
+  neither improves nor worsens it.
+- **`american_option_gamma_oscillation_test.cc` range corrected in scope.** It
+  copy-pastes the same `[1, n-2)` defect and reads node `n-2`; same bug, same
+  commit.
+
+## Design-review history
+
+Round 1 (Codex): confirmed both production edits correct for multi-step
+solves; three folds — (a) theta FD oracle must also shift dividend
+calendar_times by `h` (dividends anchor to the valuation date), (b) gamma test
+retargeted to `(x[n-3], x[n-2])` / exact node `n-2` since boundary node `n-1`
+stays zero by design, (c) `n_time == 1` Rannacher midpoint edge documented as
+a known pre-existing limitation.
