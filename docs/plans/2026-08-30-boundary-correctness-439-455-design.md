@@ -101,20 +101,31 @@ their coupling to the locked unknown — that retained coupling is what
 transfers the pinned value into the neighboring equations, in both
 factorization directions.
 
-**A4.** Single-interval assumption policy (flagged decision, see Decisions):
-after the one-pass solve, run an O(n) complementarity check at each clamped
-node (`u_i == psi_i` post-projection): `(A·u)_i ≥ rhs_i − tol_i` with a
-scale-aware tolerance `tol_i = atol + rtol·(|diag_i·u_i| + |rhs_i|)`. The
-check lives in a testable free function returning
-`{violation_count, max_violation}`; production code emits a USDT probe from
-that result (no printf, per repo policy). **On violation beyond tolerance
-the solve returns a `SolverError`** — once the solver has proof its result
-is not an LCP solution, returning it silently is not acceptable. For all
-single-interval regimes (r ≥ 0 puts, dividend calls) the check passes by
-construction; only genuinely pathological active-set topologies (e.g.
-r < 0 with q > 0) can trip it, and those prices were silently wrong before.
-A follow-up issue tracks an iterative (PSOR-style) fallback that would
-solve rather than refuse these regimes.
+**A4.** Exactness-assumption policy (flagged decision, see Decisions).
+Brennan-Schwartz one-pass exactness needs BOTH a single-interval active set
+on the chosen side AND the monotone (M-matrix) structure of the stage
+matrix. The second is not guaranteed by the current centered-drift
+discretization: at high cell Péclet (low vol on a coarse grid, e.g.
+sigma = 1%, h = 0.1: drift coefficient 0.25 vs diffusion 0.005) an
+off-diagonal flips sign on inputs the library accepts today. So violations
+are NOT confined to pathological active-set topologies, and a hard error
+would regress currently-working supported inputs (including low-vol IV
+probing).
+
+Policy: after the one-pass solve, run an O(n) complementarity check at each
+clamped node (`u_i == psi_i` post-projection): `(A·u)_i ≥ rhs_i − tol_i`
+with a full-row scale-aware tolerance
+`tol_i = atol + rtol·(|lower·u_{i−1}| + |diag·u_i| + |upper·u_{i+1}| +
+|rhs_i|)`. The check is a testable free function returning
+`{violation_count, max_violation}`. Production behavior: emit a USDT probe
+(no printf, per repo policy) AND record the report on the solver, queryable
+per solve (e.g. `last_complementarity_report()`), so the result is neither
+silent nor invisible to callers — but **no behavioral change and no hard
+error in this batch**: every input that prices today keeps pricing, with
+the diagnostic attached. Two follow-up issues: (1) drift upwinding /
+monotone discretization enforcement (removes the M-matrix hole at its
+root), (2) an iterative (PSOR-style) fallback for non-interval active-set
+topologies. Caller-facing failure policy, if any, comes with those.
 
 **A5.** Docs: rewrite the "Why This Works" subsection of
 `docs/MATHEMATICAL_FOUNDATIONS.md` with the orientation-correct argument
@@ -167,6 +178,12 @@ With q = 0 and no discrete dividends the envelope reduces to
 `max(e^x − 1, e^x − DF(t,0))` = today's formula for r ≥ 0. Cost: O((m+k)²)
 per BC call for m remaining dividends and k curve knots — negligible.
 
+Two pinned details: (a) `YieldCurve` tenors are calendar times — each knot
+maps to solver time `s = T − tenor` before entering the candidate set;
+(b) `YieldCurve` exposes no segment iteration today (`curve_` and
+`rate_between` are private) — an internal segment/knot accessor is added
+for the evaluator.
+
 The evaluator is a testable free function in an internal header
 (`mango::detail`, e.g. `src/option/detail/call_boundary_envelope.hpp`);
 the anonymous-namespace `RightBCFunction` in `american_option.cpp` becomes
@@ -196,8 +213,12 @@ point. Automatic grids include dividend taus, but a direct
 `AmericanOptionSolver` with a custom grid whose `mandatory_times` omit them
 does not. Fix: the American solver's grid-resolution path always merges
 filtered dividend taus into the mandatory times, including when the caller
-supplies their own nonempty list. Regression test: custom grid omitting the
-dividend date; assert event alignment, post-event boundary value, and
+supplies their own nonempty list. Floating-point landing must be exact:
+`TimeDomain::with_mandatory_points` computes segment sub-points as
+`seg_start + j·sub_dt`, while event dispatch compares times exactly — pin
+`points.back() = seg_end` per segment (or a shared tolerance) so rounding
+cannot defer an event by one step. Regression test: custom grid omitting
+the dividend date; assert event alignment, post-event boundary value, and
 snapshot values.
 
 ### C. Neumann ghost-point restoration (#455)
@@ -390,13 +411,16 @@ comment) and #455 on merge; file the PSOR-fallback follow-up issue.
   put → mirrored, call → current, per the verified reversal of the issue's
   premise. Batch proceeds as one PR despite put-price movement (measured
   small: ≤ 2.6e-3 per $100 strike).
-- **Non-interval active sets: validate + `SolverError`, no fallback
-  solver** (design-review round 2; FLAGGED for explicit user sign-off at
-  the plan gate): a result that provably fails complementarity must not be
-  returned as a price — refusing honestly beats both silence (those prices
-  were silently wrong before) and a PSOR fallback (new solver component,
-  real scope growth — filed as a follow-up issue instead). Check passes by
-  construction in every single-interval regime.
+- **Complementarity check: validate + trace + queryable report, no hard
+  error** (design-review round 3; FLAGGED for explicit user sign-off at the
+  plan gate): round 2 wanted `SolverError` on violation, but round 3
+  established the M-matrix assumption itself can fail on supported
+  high-Péclet inputs, so a hard error would regress working low-vol solves.
+  The check therefore reports (USDT + per-solve queryable stats) without
+  changing behavior; root fixes (drift upwinding; PSOR fallback) are filed
+  as follow-up issues where a caller-facing policy can be added
+  deliberately. (Alternatives: hard error — regresses supported inputs;
+  PSOR now — scope growth; silence — not diagnosable.)
 - **Neumann gating via tightened `HasJacobianCoefficients` + new
   `HasBoundaryRows` concept on `SpatialOperator`** (from design review):
   the solver cannot reach the PDE's private coefficients; boundary-row
