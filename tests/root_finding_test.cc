@@ -228,3 +228,91 @@ TEST(RootFindingTest, BrentTolXControlsXAccuracyIndependently) {
     EXPECT_GT(std::abs(r_loose->root - root), 1e-5);
     EXPECT_LT(std::abs(r_tight->root - root), 1e-6);
 }
+
+// ===========================================================================
+// Regression tests for issue #443 item 6
+// ===========================================================================
+
+// Regression: Newton re-evaluated f/df ~11 times stalled at a clamped bound
+// Bug: the overshoot check only fired when iter > 10, so a root outside
+// [x_min, x_max] pinned x to the bound and re-evaluated the identical point
+// for iterations 0..10 before returning NoProgress.
+TEST(RootFindingErrorTest, NewtonStallsImmediatelyWhenStartingAtBound) {
+    int f_calls = 0, df_calls = 0;
+    auto f = [&](double x) { ++f_calls; return x - 3.0; };   // root x=3, outside [0,2]
+    auto df = [&](double x) { ++df_calls; (void)x; return 1.0; };
+    mango::RootFindingConfig config{};
+
+    // x0 == upper bound: first step overshoots, clamps back onto the bound.
+    auto result = mango::newton_find_root(f, df, 2.0, 0.0, 2.0, config);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::NoProgress);
+    EXPECT_EQ(result.error().iterations, 1u);
+    ASSERT_TRUE(result.error().last_value.has_value());
+    EXPECT_EQ(*result.error().last_value, 2.0);
+    EXPECT_EQ(result.error().final_error, 1.0);  // |f(2)| = 1
+    EXPECT_EQ(f_calls, 1);
+    EXPECT_EQ(df_calls, 1);
+}
+
+TEST(RootFindingErrorTest, NewtonStallsOnSecondIterationFromInterior) {
+    int f_calls = 0, df_calls = 0;
+    auto f = [&](double x) { ++f_calls; return x - 3.0; };   // root x=3, outside [0,2]
+    auto df = [&](double x) { ++df_calls; (void)x; return 1.0; };
+    mango::RootFindingConfig config{};
+
+    // Iter 0: x=1 -> step to 3, clamped to 2 (moved, continue).
+    // Iter 1: x=2 -> step to 3, clamped to 2 (stall detected).
+    auto result = mango::newton_find_root(f, df, 1.0, 0.0, 2.0, config);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::NoProgress);
+    EXPECT_EQ(result.error().iterations, 2u);
+    ASSERT_TRUE(result.error().last_value.has_value());
+    EXPECT_EQ(*result.error().last_value, 2.0);
+    EXPECT_EQ(f_calls, 2);
+    EXPECT_EQ(df_calls, 2);
+}
+
+// Guard against over-eager stall detection: a step that overshoots the bound
+// once but whose root is interior must still converge.
+TEST(GenericRootFindingTest, NewtonRecoversAfterTransientClampToBound) {
+    // f(x) = (x-1)(x+0.2); interior root at x=1 within [0,2].
+    // Iter 0: x=0.5, f=-0.35, df=0.2 -> step to 2.25, clamped to 2 (moved).
+    // Iter 1: x=2, f=2.2, df=3.2 -> step to ~1.31 (interior), then converges.
+    auto f = [](double x) { return (x - 1.0) * (x + 0.2); };
+    auto df = [](double x) { return 2.0 * x - 0.8; };
+    mango::RootFindingConfig config{.max_iter = 100, .tolerance = 1e-12};
+
+    auto result = mango::newton_find_root(f, df, 0.5, 0.0, 2.0, config);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->root, 1.0, 1e-9);
+}
+
+// Regression: Newton step absorbed to zero (interior), changing stall
+// classification from MaxIterationsExceeded to NoProgress.
+// Bug: old code did not detect interior stalls (no bound clamping), only
+// bounds-based stalls. New behavior (spec D3): detect x_clamped == x
+// regardless of clamping source (bounds or underflow).
+// Construction: f constant (not a root), df huge (step ~ 1e-300).
+// Expect: NoProgress on iteration 1 (step absorbed by rounding against x = 1.0).
+TEST(RootFindingErrorTest, NewtonStallsOnZeroIncrementInterior) {
+    int f_calls = 0, df_calls = 0;
+    auto f = [&](double x) { ++f_calls; (void)x; return 1.0; };  // Constant, never converges
+    auto df = [&](double x) { ++df_calls; (void)x; return 1e300; };  // Huge derivative
+    mango::RootFindingConfig config{};
+
+    // Step: fx/dfx = 1.0/1e300 = 1e-300 (underflows against x=1.0).
+    // Result: x_new ≈ x (interior stall, no bound clamping).
+    auto result = mango::newton_find_root(f, df, 1.0, 0.0, 2.0, config);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::NoProgress);
+    EXPECT_EQ(result.error().iterations, 1u);
+    ASSERT_TRUE(result.error().last_value.has_value());
+    EXPECT_EQ(*result.error().last_value, 1.0);
+    EXPECT_EQ(f_calls, 1);
+    EXPECT_EQ(df_calls, 1);
+}
