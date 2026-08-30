@@ -625,6 +625,10 @@ struct LcpKktReport {
 /// sweep orientation (Task 1's motivating bug) as well as any other
 /// LCP-violating candidate.
 ///
+/// Dimension-mismatched input (e.g., u smaller than diag) yields a sentinel report:
+/// violation_count=1, max_violation=infinity, worst_kind=2, without attempting
+/// any validation that would risk out-of-bounds reads.
+///
 /// @tparam T Floating point type (float or double)
 /// @param lower Lower diagonal a[0..n-2]
 /// @param diag Main diagonal b[0..n-1]
@@ -635,7 +639,8 @@ struct LcpKktReport {
 /// @param active_mask Candidate active set, size n (1 = clamped to ψ[i])
 /// @param atol Absolute tolerance floor
 /// @param rtol Relative tolerance, scaled by the row's term magnitudes
-/// @return Report summarizing the worst violation found (if any)
+/// @return Report summarizing the worst violation found (if any), or sentinel
+///         report if dimensions are mismatched
 template<std::floating_point T>
 [[nodiscard]] LcpKktReport validate_lcp_kkt(
     std::span<const T> lower,
@@ -649,6 +654,17 @@ template<std::floating_point T>
 {
     LcpKktReport rep;
     const size_t n = diag.size();
+
+    // Validate input dimensions before any access
+    const size_t offdiag_size = (n == 0) ? 0 : n - 1;
+    if (lower.size() != offdiag_size || upper.size() != offdiag_size ||
+        rhs.size() != n || psi.size() != n || u.size() != n || active_mask.size() != n) {
+        return LcpKktReport{
+            .violation_count = 1,
+            .max_violation = std::numeric_limits<double>::infinity(),
+            .worst_kind = 2
+        };
+    }
     auto note = [&](double defect, int kind) {
         rep.violation_count++;
         if (defect > rep.max_violation) { rep.max_violation = defect; rep.worst_kind = kind; }

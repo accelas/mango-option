@@ -240,3 +240,23 @@ TEST(LcpSweep, TwoNodeRightActivePsiZeroOne) {
     EXPECT_NEAR(x[0], 0.5, 1e-9);
     EXPECT_NEAR(x[1], 1.0, 1e-9);
 }
+
+// Regression: validate_lcp_kkt indexed lower/upper/rhs/psi/u/active_mask by
+// diag.size() without validating span sizes, risking out-of-bounds reads on
+// malformed input.
+// Bug: Unlike adjacent Thomas solvers which validate dimensions first, this
+// function had no dimension checks, allowing it to dereference mismatched
+// spans.
+TEST(LcpKkt, MismatchedSpansYieldSentinelViolation) {
+    std::vector<double> lower{-1.0}, diag{2.0, 2.0}, upper{-1.0}, rhs{0.0, 0.0},
+        psi{0.0, 0.0};
+    std::vector<double> u{1.0};  // Too short: should have 2 elements
+    std::vector<uint8_t> mask{0, 0};
+    auto rep = mango::validate_lcp_kkt<double>(
+        std::span<const double>(lower), std::span<const double>(diag),
+        std::span<const double>(upper), std::span<const double>(rhs),
+        std::span<const double>(psi), std::span<const double>(u),
+        std::span<const uint8_t>(mask));
+    EXPECT_GE(rep.violation_count, 1u);
+    EXPECT_EQ(rep.max_violation, std::numeric_limits<double>::infinity());
+}
