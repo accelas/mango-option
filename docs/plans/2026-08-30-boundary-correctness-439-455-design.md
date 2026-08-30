@@ -95,20 +95,26 @@ the `HasObstacle` pattern: derived solvers with an obstacle must expose
 **A3.** Deep-ITM lock: logic unchanged (orientation-agnostic interior scan,
 `L(psi) < 0` subsolution test, identity-row conversion). Its interaction
 with both sweeps is covered by dedicated LCP unit tests with identity rows
-embedded in the active interval (see Tests). Note the identity-row
-factorizations: an identity row has zero off-diagonal couplings in both LU
-and UL elimination, so clamped values propagate to the continuation-side
-neighbor correctly under the corrected orientation.
+embedded in the active interval (see Tests). Precision on the mechanism:
+the identity row's own off-diagonals are zero, but the *adjacent* rows keep
+their coupling to the locked unknown — that retained coupling is what
+transfers the pinned value into the neighboring equations, in both
+factorization directions.
 
 **A4.** Single-interval assumption policy (flagged decision, see Decisions):
-after the one-pass solve, run an O(n) complementarity check — at each
-clamped node (`u_i == psi_i` post-projection) verify `(A·u)_i ≥ rhs_i −
-tol`. On violation, fire a USDT trace probe (count + max violation) and
-continue; the projection still guarantees `u ≥ psi` and the behavior
-matches what puts have silently done since PR #200. Exactness for
-non-interval active sets (e.g. r < 0 regimes) is explicitly out of scope;
-a follow-up issue will track an iterative (PSOR-style) fallback. No
-printf — USDT only, per repo policy.
+after the one-pass solve, run an O(n) complementarity check at each clamped
+node (`u_i == psi_i` post-projection): `(A·u)_i ≥ rhs_i − tol_i` with a
+scale-aware tolerance `tol_i = atol + rtol·(|diag_i·u_i| + |rhs_i|)`. The
+check lives in a testable free function returning
+`{violation_count, max_violation}`; production code emits a USDT probe from
+that result (no printf, per repo policy). **On violation beyond tolerance
+the solve returns a `SolverError`** — once the solver has proof its result
+is not an LCP solution, returning it silently is not acceptable. For all
+single-interval regimes (r ≥ 0 puts, dividend calls) the check passes by
+construction; only genuinely pathological active-set topologies (e.g.
+r < 0 with q > 0) can trip it, and those prices were silently wrong before.
+A follow-up issue tracks an iterative (PSOR-style) fallback that would
+solve rather than refuse these regimes.
 
 **A5.** Docs: rewrite the "Why This Works" subsection of
 `docs/MATHEMATICAL_FOUNDATIONS.md` with the orientation-correct argument
@@ -125,32 +131,47 @@ stages of the step ending exactly at `tau_j` (before the temporal event
 fires), the state is the post-dividend calendar side and strict `<`
 correctly excludes dividend `j`.
 
-**B2.** The boundary value is the deep-ITM stopping envelope. With
-`x = x_max`, continuous yield q, discount factor `DF(t, s)` from solver
-time `t` to solver time `s` (both in backward time, `DF` built from the
-existing rate-spec machinery), and remaining dividends `tau_j < t` sorted
-descending (earliest calendar first):
+**B2.** The boundary value is the deep-ITM (linear-regime) optimal-stopping
+value: `u(x_max, t) = max over stopping times s ∈ [0, t]` of
 
 ```
-stop now:        e^x − 1
-stop at tau_j⁺ (calendar d_j⁻, just before ex-date j):
-                 e^x·e^{−q·(t − tau_j)}
-                 − Σ_{tau_i > tau_j} (D_i/K)·DF(t, tau_i)·e^{−q·(tau_i − tau_j)}
-                 − DF(t, tau_j)
-stop at expiry:  e^x·e^{−q·t} − Σ_{all remaining} (D_i/K)·DF(t, tau_i)·e^{−q·tau_i}
-                 − DF(t, 0)
-u(x_max, t) = max over all candidates
+f(s) = e^x·e^{−q·(t − s)}
+       − Σ_{tau_i > s} (D_i/K)·DF(t, tau_i)·e^{−q·(tau_i − s)}
+       − DF(t, s)
 ```
 
-The sums run over remaining dividends strictly *earlier in calendar time*
-than the stopping date (`tau_i > tau_j`); each carries the discount to its
-ex-date and the lost proportional carry `e^{−q·(tau_i − tau_j)}` from
-ex-date to the stopping date. With q = 0 and no discrete dividends the
-envelope reduces to `max(e^x − 1, e^x − DF(t,0))` = today's formula for
-r ≥ 0. The envelope is the exact deep-ITM (linear-regime) value under the
-solver's own dividend-jump model; it is evaluated per BC call — O(m²) in
-the number of remaining dividends m, negligible (m is small, boundary rows
-are two per stage).
+with `x = x_max`, continuous yield q, `DF(t, s)` the discount factor from
+solver time `t` to solver time `s` (backward time; built from the existing
+rate-spec machinery), and the sum over remaining dividends strictly earlier
+in calendar time than the stopping date; each carries the discount to its
+ex-date and the lost proportional carry `e^{−q·(tau_i − s)}` from ex-date
+to stopping date.
+
+`f` is piecewise smooth with breakpoints at dividend taus and yield-curve
+tenor knots, so the maximum is found exactly by evaluating a finite
+candidate set: `s = t` (stop now), `s = 0` (expiry), each `tau_j⁺` (just
+before an ex-date), each curve knot inside `(0, t)`, and per flat-forward
+segment the analytic interior stationary point of
+`A·e^{−q·(t−s)} − K_eff·DF(t, s)` when it falls inside the segment (for a
+flat forward rate r_f: `q·A·e^{−q(t−s)} = r_f·DF·(K_eff-term)` has the
+closed-form root `s* = t − ln(q·A/(r_f·C))/(q − r_f)`, clamped to the
+segment; segments where q or r_f make the derivative one-signed contribute
+only endpoints — the plan pins the exact per-segment algebra including the
+dividend-sum contribution to the effective constant). Endpoint-only
+candidate sets ("now / ex-dates / expiry") are NOT sufficient: between
+breakpoints `f` can peak in the interior for supported `RateSpec` inputs,
+and on narrow table grids `x_max` is not asymptotically deep, which is
+precisely the regime item 2 matters in.
+
+With q = 0 and no discrete dividends the envelope reduces to
+`max(e^x − 1, e^x − DF(t,0))` = today's formula for r ≥ 0. Cost: O((m+k)²)
+per BC call for m remaining dividends and k curve knots — negligible.
+
+The evaluator is a testable free function in an internal header
+(`mango::detail`, e.g. `src/option/detail/call_boundary_envelope.hpp`);
+the anonymous-namespace `RightBCFunction` in `american_option.cpp` becomes
+a thin wrapper around it (the current nested type is untestable from a
+separate translation unit).
 
 **B3.** Event-phase rule: the dividend temporal event's jump interpolation
 already produces the pre-dividend boundary value at `tau_j` by construction.
@@ -166,6 +187,18 @@ event has fired.*
 `dividend_yield`, filtered/merged discrete dividends via the existing
 `filter_and_merge_dividends`, strike). Dividend-free calls: behavior
 unchanged (regression-tested).
+
+**B5.** Event/grid alignment precondition (adjacent latent bug, in scope
+because B3's phase rule depends on it): `process_temporal_events` applies
+an event after evolving to `t_new` even when `event.time < t_new`, so the
+jump sees the wrong-time state unless every dividend tau is a time-grid
+point. Automatic grids include dividend taus, but a direct
+`AmericanOptionSolver` with a custom grid whose `mandatory_times` omit them
+does not. Fix: the American solver's grid-resolution path always merges
+filtered dividend taus into the mandatory times, including when the caller
+supplies their own nonempty list. Regression test: custom grid omitting the
+dividend date; assert event alignment, post-event boundary value, and
+snapshot values.
 
 ### C. Neumann ghost-point restoration (#455)
 
@@ -214,7 +247,11 @@ checking those exact signatures) and uses it wherever a Neumann BC is
 configured. A Neumann BC with an operator lacking the concept, or any
 `RobinBC`, triggers a `static_assert` in the instantiated boundary path
 naming the BC type and side (deterministic diagnostic instead of degenerate
-or uninitialized rows).
+or uninitialized rows). Structure: each boundary path uses
+`if constexpr (HasBoundaryRows<Op>) { ...method calls... } else {
+static_assert(false_v<Op>, ...); }` so the diagnostic is the only error —
+a bare `static_assert` followed by unconditional method calls would bury it
+under substitution failures.
 
 Concept hygiene: `HasJacobianCoefficients` currently accepts nullary
 accessors while `assemble_jacobian` calls `first_derivative_coeff(t)` /
@@ -253,13 +290,19 @@ BC tag so Dirichlet-only instantiations are unchanged:
 **C4.** `NeumannBC` API: gradient function only. The stored
 `diffusion_coeff_` is vestigial; the two-argument constructor
 `NeumannBC(Func, double)` is retained as a `[[deprecated]]` overload that
-ignores the coefficient (source compatibility for existing tests/clients);
-new single-argument constructor added.
+ignores the coefficient (source compatibility); new single-argument
+constructor added. All in-repo uses migrate to the one-argument form so the
+"no new warnings" gate holds; one compatibility compile test keeps the
+deprecated overload covered with the warning locally suppressed.
 
-**C5.** Grid preconditions: `n ≥ 3` enforced at solver creation (today
-`interior_range` only asserts). Nonuniform grids: ghost spacing equals the
-adjacent interior spacing, which keeps the centered BC difference
-second-order in the local spacing.
+**C5.** Grid preconditions: `n ≥ 3` rejected in `Grid<T>::create` (it
+already returns `std::expected`, and every current spatial stencil is
+3-point; the plan verifies no legitimate 2-point `Grid` user exists before
+pinning the layer — fallback owner if one exists:
+`AmericanOptionSolver::create` plus a checked guard on the PDE-solver
+path). Nonuniform grids: ghost spacing equals the adjacent interior
+spacing, which keeps the centered BC difference second-order in the local
+spacing.
 
 ## Tests
 
@@ -268,36 +311,58 @@ reference by exhaustive active-set enumeration (exact for M-matrices; no
 PSOR tolerance ambiguity). Cases per sweep: left- and right-interval active
 sets, empty and full active sets, nonconstant obstacle, identity lock rows
 embedded inside the active interval, Dirichlet identity rows with RHS
-overrides, and a deliberately non-interval active set (asserts the
-complementarity check fires / documents the limitation). Full KKT assertions
+overrides, and a deliberately non-interval active set. Full KKT assertions
 (primal feasibility, dual feasibility at clamped nodes, complementarity).
+The complementarity validator is tested directly through its free-function
+API (`{violation_count, max_violation}` on known-bad and known-good
+solutions) — observability does not depend on USDT, which compiles to
+no-ops without tracing support.
 
-**T2 — Put pricing regression** (QuantLib live reference): the spike's put
-scenario set pinned as regression tests with tolerances reflecting the
-improved accuracy (ATM put bias must be ≤ the mirrored-sweep level, not the
-old one). Bit-identity goldens (`bspline_bit_identity_test`) regenerated —
-put prices legitimately move by 1e-4…2.6e-3 per $100 strike.
+**T2 — Put pricing regression** (QuantLib live reference at 8000 time
+steps × 801 grid nodes, `FdBlackScholesVanillaEngine`, Actual365Fixed): the
+spike's put scenario set pinned as regressions. Concrete acceptance
+thresholds (absolute error vs that reference, from the measured
+mirrored-sweep run): ATM S=K=100 r=5% T=1 |err| ≤ 5.5e-3 (measured 4.4e-3;
+old sweep 6.9e-3 fails); the remaining scenarios ≤ 1.25× their measured
+mirrored-sweep error, exact numbers recorded in the test from the
+implementation run. Bit-identity goldens (`bspline_bit_identity_test`)
+regenerated — put prices legitimately move by 1e-4…2.6e-3 per $100 strike.
 
-**T3 — Dividend-call pricing** (QuantLib): continuous-dividend calls
-q = 8% > r = 5% swept S/K ∈ {1.0, 1.2, 1.3, 1.5, 2.0, 3.0}, tight tolerance
-near the free boundary; a discrete-dividend call spanning an ex-div date;
-today's suite has exactly one ATM call (#444 gap).
+**T3 — Dividend-call pricing** (QuantLib, same engine/conventions):
+continuous-dividend calls q = 8% > r = 5% swept
+S/K ∈ {1.0, 1.2, 1.3, 1.5, 2.0, 3.0} with absolute tolerance 7.5e-3
+(1.5× the worst measured spike error, 4.7e-3 ATM); a discrete-dividend
+call spanning an ex-div date, referenced against QuantLib's
+`FdBlackScholesVanillaEngine` with a `DividendVanillaOption`-style discrete
+schedule (exact QuantLib API and date mapping pinned in the plan; tolerance
+set to 1.5× the measured error at implementation, recorded in the test).
+Today's suite has exactly one ATM call (#444 gap).
 
-**T4 — Right-BC unit tests** (direct `RightBCFunction` evaluation, no PDE):
-tau → 0 limit, both numerical sides of an ex-date (strict-`<` phase rule),
-multiple dividends where an intermediate stopping date dominates the
-envelope, combined q + discrete dividends, q = 0 no-div reduction to the
-current formula, and a table-tail-style regression on a deliberately
-narrow grid where the boundary bias reaches sampled nodes (the #437 corner).
+**T4 — Envelope evaluator unit tests** (direct calls to the extracted
+`mango::detail` evaluator; no PDE): tau → 0 limit, both numerical sides of
+an ex-date (strict-`<` phase rule), multiple dividends where stopping just
+before an *intermediate* ex-date dominates, a flat-rate case whose interior
+stationary point dominates all endpoint candidates (verified against a
+dense brute-force scan of f(s)), an upward/downward `YieldCurve` case with
+knots inside the horizon (same brute-force check), combined q + discrete
+dividends, q = 0 no-div reduction to the current formula, and a
+table-tail-style pricing regression on a deliberately narrow grid where
+the boundary value reaches sampled nodes (the #437 corner). Plus the B5
+custom-grid regression: dividend date omitted from user `mandatory_times`,
+asserting event alignment and post-event boundary value.
 
-**T5 — Neumann restoration** (heat equation via `LaplacianPDE`):
-mass conservation on the zero-flux Gaussian (issue #6 setup) to ~1e-10
-using trapezoidal quadrature (the quantity the ghost scheme conserves);
-manufactured-solution spatial convergence with inhomogeneous, time-varying
-Neumann data and nonzero boundary third derivative, asserting observed
-order ≥ 1.8; an obstacle+Neumann affine-term unit test at the linear-solve
-level; `n = 2` rejection and `n = 3` smoke; Newton-path Neumann solve
-converging in few iterations (the row is now genuinely solved).
+**T5 — Neumann restoration**: direct `SpatialOperator` boundary-row algebra
+tests with nonzero a, b, c, g on BOTH sides and on a nonuniform grid,
+asserting `eval_boundary_row == jacobian·u + affine` and the hand-derived
+closed forms (the heat-equation tests alone exercise only `a`); heat
+equation via `LaplacianPDE`: mass conservation on the zero-flux Gaussian
+(issue #6 setup) to ~1e-10 using trapezoidal quadrature (the quantity the
+ghost scheme conserves); manufactured-solution spatial convergence with
+inhomogeneous, time-varying Neumann data and nonzero boundary third
+derivative, asserting observed order ≥ 1.8; an obstacle+Neumann
+affine-term unit test at the linear-solve level; `n = 2` rejection and
+`n = 3` smoke; Newton-path Neumann solve converging in few iterations (the
+row is now genuinely solved).
 
 **T6 — Full gates**: `bazel test //...`, `bazel build //benchmarks/...`,
 `bazel build //src/python:mango_option`, no new warnings.
@@ -316,19 +381,22 @@ comment) and #455 on merge; file the PSOR-fallback follow-up issue.
   fully, decouples from #437. (Alternatives: defer item 2; continuous-q
   only.)
 - **Ghost-point elimination for #455** (user, after asking for the
-  mathematically sound option): textbook-correct, second-order, and the
-  restoration of the C-era validated fix; the first-order constraint row is
-  affirmatively ruled out — it *was* issue #6. (Alternatives: constraint
-  row; one-sided FD probing.)
+  mathematically sound option): textbook-correct (globally near-second-order
+  for parabolic problems; boundary-row LTE is O(h) generically — see C1's
+  qualification), and the restoration of the C-era validated fix; the
+  first-order constraint row is affirmatively ruled out — it *was* issue
+  #6. (Alternatives: constraint row; one-sided FD probing.)
 - **Sweep mapping corrected** (evidence-driven, user-approved direction):
   put → mirrored, call → current, per the verified reversal of the issue's
   premise. Batch proceeds as one PR despite put-price movement (measured
   small: ≤ 2.6e-3 per $100 strike).
-- **Non-interval active sets: validate + trace, no fallback solver**
-  (assistant recommendation, FLAGGED for explicit user sign-off at the plan
-  gate): O(n) complementarity check + USDT probe + follow-up issue for
-  PSOR. (Alternatives: hard error — breaks currently-working exotic
-  inputs; PSOR fallback — new solver component, real scope growth.)
+- **Non-interval active sets: validate + `SolverError`, no fallback
+  solver** (design-review round 2; FLAGGED for explicit user sign-off at
+  the plan gate): a result that provably fails complementarity must not be
+  returned as a price — refusing honestly beats both silence (those prices
+  were silently wrong before) and a PSOR fallback (new solver component,
+  real scope growth — filed as a follow-up issue instead). Check passes by
+  construction in every single-interval regime.
 - **Neumann gating via tightened `HasJacobianCoefficients` + new
   `HasBoundaryRows` concept on `SpatialOperator`** (from design review):
   the solver cannot reach the PDE's private coefficients; boundary-row
@@ -337,3 +405,14 @@ comment) and #455 on merge; file the PSOR-fallback follow-up issue.
   review): removing it is unrelated breakage.
 - **Robin BCs: compile-time rejection** with a named diagnostic; Robin row
   assembly is out of scope.
+- **Right BC is the exact piecewise stopping maximum, not an endpoint
+  approximation** (design-review round 2): endpoint-only candidate sets
+  miss interior stationary points under supported `RateSpec` inputs, and
+  narrow table grids — the one regime where item 2 matters — are exactly
+  where `x_max` is not asymptotically deep. Candidates = endpoints + curve
+  knots + per-segment analytic stationary points.
+- **Dividend taus always merged into custom time grids** (design-review
+  round 2): `process_temporal_events` fires events at completed steps, so
+  B3's phase semantics require every dividend tau to be a grid point; the
+  American solver's grid-resolution path enforces it even when the caller
+  supplies `mandatory_times`.
