@@ -186,24 +186,35 @@ TEST(Envelope, FlatRateInteriorStationaryPoint) {
     EXPECT_GT(got - f_tau, kMargin);
 }
 
-// Two-segment yield curve: forward rate 5% for calendar [0, 0.6] (the
-// "near-now" backward-time segment s in (0.4, 1.0]) and 2% for calendar
-// [0.6, 1.0] (the "near-expiry" segment s in [0, 0.4)). The winning
-// candidate is the near-now segment's own closed-form stationary point at
-// s* ~= 0.4587 -- strictly inside (0.4, 1.0), away from both the knot
-// breakpoint at s=0.4 and the endpoints -- which reproduces the isolated
-// flat-5%-rate result from FlatRateInteriorStationaryPoint exactly, because
-// DF(tau, s) for s in that segment never crosses the knot. The near-expiry
-// segment's 2% rate only affects f(0) (which must discount across the
-// knot), not the winning candidate: this is exactly the two-region
-// consistency that a mismapped knot (s = tenor instead of s = T - tenor)
-// would break, since the segment split would move (or the rate
-// attribution per segment would swap) and the closed form would then
-// disagree with the dense scan.
+// Two-segment yield curve: forward rate 10% for calendar [0, 0.6] (the
+// "near-now" backward-time segment s in (0.4, 1.0]) and 9% for calendar
+// [0.6, 1.0] (the "near-expiry" segment s in [0, 0.4)).
+//
+// The winning candidate is the NEAR-EXPIRY segment's own closed-form
+// stationary point, s* ~= 0.3007, strictly inside (0, 0.4) -- i.e. it uses
+// rho2 = 9%, not rho1 = 10%. This is deliberately the segment that does
+// *not* contain the overall [0, tau] midpoint (calendar 0.5, which falls in
+// the rho1 = 10% region): if the knot-insertion block were deleted, the
+// evaluator would collapse to a single segment [0, 1.0] and sample its rate
+// at that midpoint, i.e. rho1 = 10%, not rho2. Verified by hand (temporarily
+// disabling the knot-insertion block and rerunning): the single-segment
+// closed form's own analytic root (B = A*e^{-q*tau}, C = e^{-rho1*tau},
+// s* = ln(qB/(rho1 C))/(rho1-q)) comes out negative, so it's rejected by
+// the interior guard and the evaluator falls back to the endpoint value
+// f(0) = 1.466542070 -- missing the true optimum (1.466748352570813, from
+// the correctly-segmented rho2 = 9% region) by ~2.06e-4, four orders of
+// magnitude past the 1e-9 EXPECT_NEAR bound below, and also failing the
+// EXPECT_GT dominance margin against f(0) itself (0 vs required 5e-5). So
+// this specific pairing (winning rate != overall-midpoint rate) is what
+// makes the knot-insertion block load-bearing for this test: with it
+// deleted, both assertions below fail loudly rather than staying
+// accidentally bit-identical (as an earlier version of this test did, when
+// the winning segment's rate happened to coincide with the naive
+// whole-domain rate).
 TEST(Envelope, YieldCurveKnotsRespected) {
     double t_knot = 0.6;   // tenor (calendar time) of the curve knot
-    double rho1 = 0.05;    // forward rate for calendar [0, t_knot]
-    double rho2 = 0.02;    // forward rate for calendar [t_knot, T]
+    double rho1 = 0.10;    // forward rate for calendar [0, t_knot] (near now)
+    double rho2 = 0.09;    // forward rate for calendar [t_knot, T] (near expiry)
     std::vector<mango::TenorPoint> points = {
         {0.0, 0.0},
         {t_knot, -rho1 * t_knot},
@@ -212,7 +223,7 @@ TEST(Envelope, YieldCurveKnotsRespected) {
     auto curve = YieldCurve::from_points(points).value();
 
     double T = 1.0;
-    CallBoundaryEnvelope env{0.5, 0.03, T, RateSpec{curve}, {}};
+    CallBoundaryEnvelope env{0.9, 0.035, T, RateSpec{curve}, {}};
     double tau = 1.0;
 
     double got = env.value(tau, kTimeBased);
@@ -220,7 +231,7 @@ TEST(Envelope, YieldCurveKnotsRespected) {
     EXPECT_NEAR(got, want, 1e-9);
 
     // Dominance: the interior candidate beats both endpoints by a comfortable
-    // margin (measured: ~0.0116 over f(0), ~0.000145 over f(tau)=intrinsic).
+    // margin (measured: ~2.06e-4 over f(0), ~7.15e-3 over f(tau)=intrinsic).
     // See FlatRateInteriorStationaryPoint for why f(0)/f(tau) are evaluated
     // directly rather than via env.value(0, ...) / env.value(tau, ...).
     constexpr double kMargin = 5e-5;

@@ -87,8 +87,14 @@ struct CallBoundaryEnvelope {
             return discount_cal(maturity - b) / discount_cal(maturity - a);
         };
         // Local flat-forward rate over backward-time segment [lo, hi]
-        // (evaluated at the segment's calendar midpoint; safe because
-        // every curve knot in range is already a segment breakpoint).
+        // (evaluated at the segment's calendar midpoint). Midpoint sampling
+        // is *exact*, not an approximation: every curve knot mapped into
+        // (0, tau) is already a breakpoint (see below), so by construction
+        // no segment [lo, hi] can straddle a knot -- the whole segment's
+        // calendar interval lies inside one piecewise-constant forward-rate
+        // region, and any point in it (the midpoint is just a convenient
+        // one) gives the same rate. Correctness of this call rests entirely
+        // on the knot-insertion block that builds `breakpoints` below.
         auto local_forward_rate = [this](double lo, double hi) -> double {
             double t_cal = maturity - 0.5 * (lo + hi);
             return std::visit(
