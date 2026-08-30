@@ -507,6 +507,13 @@ TEST(AmericanOptionTest, CustomGridOmittingDividendDateStillAligns) {
 // discrete dividends and q=0 -- pinned to the value measured on this branch
 // immediately before the envelope wiring landed (bazel run of a throwaway
 // solve at the same params gave 10.447090628631905 both before and after).
+//
+// The 1e-12 pin is toolchain-sensitive (FP reassociation can shift the
+// last few ULPs of a solve this deep) -- same precedent as this repo's
+// other toolchain-pinned goldens (e.g. the x86-64-v3 pin from PR #468's
+// CI test split, and bspline_bit_identity_test's bit-identical goldens).
+// On an unexplained failure here, re-pin only after verifying the
+// toolchain (not the BC formula) is what changed.
 TEST(AmericanOptionTest, NoDivCallPriceUnchangedByEnvelopeBC) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
@@ -591,6 +598,79 @@ TEST(AmericanOptionTest, DiscreteDivCallRightBoundaryEnvelope) {
     EXPECT_LT(with_div_result->value_at(params.spot), no_div_result->value_at(params.spot));
     EXPECT_GE(with_div_result->value_at(params.spot),
               std::max(params.spot - params.strike, 0.0) - 1e-6);
+}
+
+// Regression: table-tail-style pricing accuracy on a narrow grid where the
+// call right-BC value reaches sampled nodes (#439 item 2 / T4, the #437
+// corner). Bug: the old right BC `u = e^x - forward_discount(t)` dropped
+// the continuous-yield factor `e^{-q*tau}` entirely, so on a grid narrow
+// enough that the Dirichlet boundary error reaches priced nodes (as
+// happens once `ensure_moneyness_coverage` clamps the domain near #437),
+// the mispriced boundary corrupts the interior solution, not just an
+// unused far-field node.
+//
+// Grid choice is deliberate, not arbitrary: the domain must be narrow
+// enough that the boundary is felt at S=K (half-width 0.30 in log-
+// moneyness is 1.5 sigma*sqrt(T) for sigma=0.20, T=1), AND coarse enough
+// that the deep-ITM lock (pde_solver.hpp, relative threshold
+// psi[i] > 0.95*max(psi)) does not pin the node adjacent to the boundary
+// to intrinsic -- which would fully decouple the interior from whatever
+// the right BC returns and make this test vacuous. That lock triggers
+// whenever dx is smaller than a gap of ~0.013 (the log-moneyness distance
+// from x_max at which psi falls below 95% of psi_max here); 41 points
+// over [-0.30, 0.30] (dx = 0.015) clears that gap with margin, confirmed
+// empirically: at 61/101 points (dx <= 0.010) the lock engages and the
+// narrow-grid price is bit-identical regardless of the right BC's return
+// value (verified by temporarily forcing the BC to a nonsense constant).
+//
+// Reference is a self-reference: the SAME params on the wide auto grid
+// (`solve_american_option`), which this branch's
+// QuantLibSweepRegression.PricingAccuracyAcrossPutsAndCalls test
+// (tests/quantlib_sweep_regression_test.cc, "call ATM q8" row) measures
+// at abs_err = 4.712e-3 against an 8000x801 QuantLib FD reference for
+// this exact (S=K=100, r=5%, q=8%, sigma=20%, T=1) scenario -- i.e. the
+// self-reference is itself accurate to sub-1bp-per-$100 vs the true
+// price, well below the threshold below. (american_option_test has no
+// QuantLib dependency, so a self-reference is used per the task's second
+// option rather than adding one here.)
+//
+// Counter-experiment (uncommitted local hack, per this branch's practice
+// -- see tests/internal/pde_neumann_test.cc): temporarily reverting
+// CallBoundaryEnvelope::value() to the old formula
+// `e^x_max - e^{-r*tau}` and rerunning this exact scenario/grid gave
+// narrow price 6.5847888033 (abs_err vs the same reference = 4.750e-2),
+// comfortably OVER the threshold below. The current (new, dividend/yield
+// -aware) BC gives narrow price 6.5287209983 (abs_err = 8.567e-3),
+// comfortably under it. Threshold set with margin on both sides.
+TEST(AmericanOptionTest, NarrowGridDividendCallBCPricingRegression) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.08,
+                   .option_type = OptionType::CALL},
+        0.20);
+
+    auto ref_result = solve_american_option(params);
+    ASSERT_TRUE(ref_result.has_value());
+    EXPECT_TRUE(ref_result->converged);
+    const double ref_price = ref_result->value_at(params.spot);
+
+    PDEGridConfig narrow{GridSpec<double>::uniform(-0.30, 0.30, 41).value(), 200};
+    auto narrow_solver = AmericanOptionSolver::create(params, PDEGridSpec{narrow});
+    ASSERT_TRUE(narrow_solver.has_value());
+    auto narrow_result = narrow_solver->solve();
+    ASSERT_TRUE(narrow_result.has_value());
+    EXPECT_TRUE(narrow_result->converged);
+    const double narrow_price = narrow_result->value_at(params.spot);
+
+    const double intrinsic = std::max(params.spot - params.strike, 0.0);
+    EXPECT_GE(narrow_price, intrinsic - 1e-6);
+
+    const double abs_err = std::abs(narrow_price - ref_price);
+    EXPECT_LE(abs_err, 2.5e-2)
+        << "ref=" << ref_price << " narrow=" << narrow_price
+        << " abs_err=" << abs_err
+        << " (old BC measured 4.750e-2 on this exact scenario -- FAILS "
+           "this bound; new BC measures 8.567e-3)";
 }
 
 }  // namespace
