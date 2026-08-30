@@ -282,3 +282,68 @@ TEST_F(TransformLeafGreeksTest, VegaConsistentWithFiniteDifference) {
     EXPECT_NEAR(analytical.value(), fd_vega, 0.1)
         << "Vega: analytical=" << analytical.value() << " fd=" << fd_vega;
 }
+
+// ===========================================================================
+// Zero-contract pinning tests (issue #443 item 2)
+// ===========================================================================
+
+// EEPLayer::greek()/gamma() call the leaf unconditionally and rely on this
+// contract: raw interpolant value <= 0 => the leaf Greek is exactly 0.0
+// (not an error), computed without any derivative evaluation.
+
+namespace {
+
+/// Fake interpolant returning a fixed value; counts eval/partial calls.
+struct CountingConstInterp {
+    double value = 0.0;
+    mutable int eval_calls = 0;
+    mutable int partial_calls = 0;
+
+    [[nodiscard]] double eval(const std::array<double, 4>&) const {
+        ++eval_calls;
+        return value;
+    }
+    [[nodiscard]] double partial(size_t, const std::array<double, 4>&) const {
+        ++partial_calls;
+        return 42.0;  // poison: must never leak into a zero-contract result
+    }
+};
+
+}  // namespace
+
+TEST(TransformLeafZeroContractTest, GreekIsExactlyZeroWithoutDerivativesWhenRawNonPositive) {
+    for (double raw : {0.0, -0.25}) {
+        TransformLeaf<CountingConstInterp, StandardTransform4D> leaf(
+            CountingConstInterp{.value = raw}, StandardTransform4D{}, 100.0);
+        PricingParams params(
+            OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
+                .rate = 0.05, .dividend_yield = 0.0,
+                .option_type = OptionType::PUT}, 0.20);
+
+        for (Greek g : {Greek::Delta, Greek::Vega, Greek::Theta, Greek::Rho}) {
+            auto result = leaf.greek(g, params);
+            ASSERT_TRUE(result.has_value());
+            EXPECT_EQ(*result, 0.0) << "raw=" << raw;
+        }
+        EXPECT_EQ(leaf.interpolant().partial_calls, 0) << "raw=" << raw;
+    }
+}
+
+TEST(TransformLeafZeroContractTest, GammaIsExactlyZeroWithoutDerivativesWhenRawNonPositive) {
+    for (double raw : {0.0, -0.25}) {
+        TransformLeaf<CountingConstInterp, StandardTransform4D> leaf(
+            CountingConstInterp{.value = raw}, StandardTransform4D{}, 100.0);
+        PricingParams params(
+            OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
+                .rate = 0.05, .dividend_yield = 0.0,
+                .option_type = OptionType::PUT}, 0.20);
+
+        auto result = leaf.gamma(params);
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(*result, 0.0) << "raw=" << raw;
+        // One eval for the guard; the FD second-derivative path (3 more
+        // evals) and partial(0) must not run.
+        EXPECT_EQ(leaf.interpolant().eval_calls, 1) << "raw=" << raw;
+        EXPECT_EQ(leaf.interpolant().partial_calls, 0) << "raw=" << raw;
+    }
+}
