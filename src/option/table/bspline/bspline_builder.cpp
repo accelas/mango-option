@@ -518,7 +518,7 @@ PriceTableBuilderND<N>::fit_coeffs(
         return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
     }
 
-    const auto& result = fit_result.value();
+    auto& result = fit_result.value();
 
     // Convert BSplineNDSeparableResult to BSplineFittingStats
     auto stats = result.to_stats();
