@@ -37,7 +37,6 @@
 #include <concepts>
 #include <string>
 #include <algorithm>
-#include <cassert>
 #include <limits>
 #include <memory>
 #include <numeric>

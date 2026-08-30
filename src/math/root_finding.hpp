@@ -424,7 +424,7 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
         const double x_clamped = std::clamp(x_new, x_min, x_max);
 
         // Stalled iterate: clamped back onto the point we're already at
-        // (root outside bounds), or the Newton increment underflowed to
+        // (root outside bounds), or the Newton increment was absorbed to
         // zero. Either way the next iteration would re-evaluate f/df at a
         // numerically identical x, so no further progress is possible.
         if (x_clamped == x) {

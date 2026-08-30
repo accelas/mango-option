@@ -37,7 +37,7 @@ public:
     }
 
     /// First-order Greek with EEP decomposition.
-    /// Deep OTM the leaf's Greek is exactly 0.0 (see leaf contract below),
+    /// Deep OTM the leaf's Greek is exactly 0.0 (see leaf contract in the class comment above),
     /// so the result degenerates to the European Greek.
     [[nodiscard]] std::expected<double, GreekError>
     greek(Greek g, const PricingParams& params) const {

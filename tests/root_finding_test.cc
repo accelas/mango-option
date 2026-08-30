@@ -291,13 +291,13 @@ TEST(GenericRootFindingTest, NewtonRecoversAfterTransientClampToBound) {
     EXPECT_NEAR(result->root, 1.0, 1e-9);
 }
 
-// Regression: Newton step underflowed to zero (interior), changing stall
+// Regression: Newton step absorbed to zero (interior), changing stall
 // classification from MaxIterationsExceeded to NoProgress.
 // Bug: old code did not detect interior stalls (no bound clamping), only
 // bounds-based stalls. New behavior (spec D3): detect x_clamped == x
 // regardless of clamping source (bounds or underflow).
-// Construction: f constant (not a root), df huge (step ~ 1e-300 underflows).
-// Expect: NoProgress on iteration 1 (increment underflowed, no progress).
+// Construction: f constant (not a root), df huge (step ~ 1e-300).
+// Expect: NoProgress on iteration 1 (step absorbed by rounding against x = 1.0).
 TEST(RootFindingErrorTest, NewtonStallsOnZeroIncrementInterior) {
     int f_calls = 0, df_calls = 0;
     auto f = [&](double x) { ++f_calls; (void)x; return 1.0; };  // Constant, never converges

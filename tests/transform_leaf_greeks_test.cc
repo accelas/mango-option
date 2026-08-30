@@ -326,6 +326,7 @@ TEST(TransformLeafZeroContractTest, GreekIsExactlyZeroWithoutDerivativesWhenRawN
             EXPECT_EQ(*result, 0.0) << "raw=" << raw;
         }
         EXPECT_EQ(leaf.interpolant().partial_calls, 0) << "raw=" << raw;
+        EXPECT_EQ(leaf.interpolant().eval_calls, 4) << "raw=" << raw;
     }
 }
 
