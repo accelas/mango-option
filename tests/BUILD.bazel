@@ -1518,6 +1518,16 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "call_boundary_envelope_test",
+    size = "small",
+    srcs = ["call_boundary_envelope_test.cc"],
+    deps = [
+        "//src/option:call_boundary_envelope",
+        "@googletest//:gtest_main",
+    ],
+)
+
 py_test(
     name = "python_bindings_test",
     size = "medium",
