@@ -245,6 +245,15 @@ TEST(PDENeumann, ZeroFluxMassConservedToRoundoff) {
 // Step 2: Convergence order with inhomogeneous, time-varying Neumann data
 // ===========================================================================
 
+// Counter-tested against the pre-#455 lagged treatment (Lu[boundary]=0,
+// identity Jacobian rows, post-hoc NeumannBC::apply() overwrite in
+// apply_boundary_conditions — temporarily reintroduced locally, run, then
+// reverted; not part of the committed solver): measured fitted order
+// -0.0106 with errors actually GROWING under refinement (n=81->161 and
+// 161->321 both regress), vs. 1.9961 (this test's asserted floor: 1.8) on
+// the fixed code below. The lagged treatment doesn't just lose an order of
+// accuracy here, it fails to converge at all on this boundary-sensitive
+// manufactured solution.
 TEST(PDENeumann, ManufacturedSolutionConvergesAtOrderAtLeast1_8) {
     const double D = 0.05;
     const double t_final = 0.1;
@@ -357,6 +366,14 @@ TEST(PDENeumann, NonuniformGridRefinementShrinksErrorAtLeast3x) {
 // stage (genuinely 2nd order, matching the interior TR-BDF2 scheme), so
 // its boundary-node error should shrink ~4x per halving. This test is the
 // discriminator: ~4x passes, ~2x (the old bug) fails.
+//
+// Counter-tested against the pre-#455 lagged treatment (temporarily
+// reintroduced locally in pde_solver.hpp, run against just this test, then
+// reverted — not part of the committed solver): measured ratios collapsed
+// to 1.027 and 1.051 (errors 0.1028, 0.1001, 0.0952 for n_steps=1,2,4) —
+// even flatter than the ~2x first-order guess, but decisively on the wrong
+// side of this test's >3.0 threshold — vs. 3.835/3.896 on the fixed code
+// below.
 TEST(PDENeumann, BoundaryNodeErrorScalesQuarticWithDtHalving) {
     const double D = 0.05;
     const double t_final = 2.0;
