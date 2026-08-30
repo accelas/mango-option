@@ -1407,6 +1407,12 @@ cc_test(
     name = "iv_solver_factory_test",
     size = "large",
     timeout = "long",
+    # 18 cases, ~346s CPU local / ~820s on CI runners — a 9% margin against
+    # the 900s budget that turned into a timeout on slower runners (run
+    # 33304140391).  Sharding gives each shard its own 900s; the slowest
+    # single case (DocumentedAdaptiveDiscreteDividendConfig, ~155s local)
+    # caps a shard well under half the budget.
+    shard_count = 4,
     srcs = ["iv_solver_factory_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
