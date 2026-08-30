@@ -882,6 +882,17 @@ cc_test(
 )
 
 cc_test(
+    name = "lapack_banded_backend_test",
+    size = "small",
+    srcs = ["lapack_banded_backend_test.cc"],
+    deps = [
+        "//src/math:lapack_banded_backend",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-Wall", "-Wextra"],
+)
+
+cc_test(
     name = "mdspan_integration_e2e_test",
     srcs = ["mdspan_integration_e2e_test.cc"],
     deps = [
