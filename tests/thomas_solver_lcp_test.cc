@@ -201,6 +201,26 @@ TEST(LcpSweep, LeftBranchRejectsSingularLastDiagonal) {
     EXPECT_FALSE(r.ok());
 }
 
+// Regression: pre-merge review of #439/#455 found that validate_lcp_kkt
+// checked active nodes only for dual feasibility ((Au)_i >= rhs_i), never
+// for obstacle equality (u[i] == psi[i]). A lying/buggy active_mask that
+// claims a node is active while u sits strictly above psi therefore passed
+// silently: identity system (rhs=psi=0), u=1, mask=1 validated clean before
+// this fix, even though complementarity requires u[i] == psi[i] on active
+// nodes.
+TEST(LcpKkt, ActiveNodeAbovePsiCountsAsViolation) {
+    std::vector<double> lower{}, diag{1.0}, upper{}, rhs{0.0}, psi{0.0};
+    std::vector<double> u{1.0};
+    std::vector<uint8_t> mask{1};  // claims active, but u != psi
+    auto rep = mango::validate_lcp_kkt<double>(
+        std::span<const double>(lower), std::span<const double>(diag),
+        std::span<const double>(upper), std::span<const double>(rhs),
+        std::span<const double>(psi), std::span<const double>(u),
+        std::span<const uint8_t>(mask));
+    EXPECT_GT(rep.violation_count, 0u);
+    EXPECT_EQ(rep.worst_kind, 0);
+}
+
 // Hand-verified 2-node cases from the issue #439 comment:
 // A = [[2,-1],[-1,2]], rhs = 0.
 TEST(LcpSweep, TwoNodeLeftActivePsiOneZero) {

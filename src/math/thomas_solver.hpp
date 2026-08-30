@@ -606,7 +606,8 @@ struct LcpKktReport {
     size_t violation_count = 0;
     /// Largest raw KKT defect observed (0 if no violations).
     double max_violation = 0.0;
-    /// Kind of the worst violation: 0=primal (u < ψ), 1=dual
+    /// Kind of the worst violation: 0=primal/complementarity (u vs ψ: either
+    /// u < ψ anywhere, or u != ψ on an active node), 1=dual
     /// ((Au)_i < rhs_i on an active node), 2=residual (|(Au)_i - rhs_i| too
     /// large on an inactive node, or a non-finite input). -1 if no
     /// violations were recorded.
@@ -615,6 +616,7 @@ struct LcpKktReport {
 
 /// Validates a candidate LCP solution against the full KKT conditions:
 ///   - primal feasibility: u[i] >= psi[i] for all i
+///   - complementarity:    u[i] == psi[i] for active i (active_mask[i]==1)
 ///   - dual feasibility:   (A u)[i] >= rhs[i] for active i (active_mask[i]==1)
 ///   - complementarity/residual: (A u)[i] == rhs[i] for inactive i
 ///
@@ -663,7 +665,10 @@ template<std::floating_point T>
             continue;
         }
         if (u[i] < psi[i] - tol) note(double(psi[i] - u[i]), 0);
-        if (active_mask[i]) { if (Au < rhs[i] - tol) note(double(rhs[i] - Au), 1); }
+        if (active_mask[i]) {
+            if (std::abs(u[i] - psi[i]) > tol) note(std::abs(double(u[i] - psi[i])), 0);
+            if (Au < rhs[i] - tol) note(double(rhs[i] - Au), 1);
+        }
         else                { if (std::abs(Au - rhs[i]) > tol) note(std::abs(double(Au - rhs[i])), 2); }
     }
     return rep;
