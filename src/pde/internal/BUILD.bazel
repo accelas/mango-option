@@ -27,6 +27,7 @@ cc_library(
         "//src/pde/core:trbdf2_config",
         "//src/pde/operators:centered_difference",
         "//src/support:error_types",
+        "//src/support:ivcalc_trace_hdr",
         "//src/support:lifetime",
         "//src/support:parallel",
     ],

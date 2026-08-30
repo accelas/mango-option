@@ -153,6 +153,11 @@ public:
     using PDEType = operators::BlackScholesPDE<double, RateFn>;
     using SpatialOpType = operators::SpatialOperator<PDEType, double>;
 
+    // Put payoff is a LEFT-interval obstacle (exercise region is at low
+    // spot / negative log-moneyness): the projected sweep must start from
+    // the left for the substitution to enforce the LCP exactly (#439).
+    static constexpr LcpActiveSide lcp_active_side = LcpActiveSide::Left;
+
     AmericanPutSolver(const PricingParams& params,
                      std::shared_ptr<Grid<double>> grid,
                      PDEWorkspace workspace)
@@ -236,6 +241,11 @@ public:
     using RateFn = std::function<double(double)>;
     using PDEType = operators::BlackScholesPDE<double, RateFn>;
     using SpatialOpType = operators::SpatialOperator<PDEType, double>;
+
+    // Call payoff is a RIGHT-interval obstacle (exercise region is at high
+    // spot / positive log-moneyness): the existing right-to-left sweep is
+    // already exact for this case.
+    static constexpr LcpActiveSide lcp_active_side = LcpActiveSide::Right;
 
     AmericanCallSolver(const PricingParams& params,
                       std::shared_ptr<Grid<double>> grid,

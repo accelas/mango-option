@@ -17,6 +17,10 @@ namespace {
 template<typename LeftBC, typename RightBC, typename SpatialOp, typename ObstacleFunc>
 class TestPDESolverWithObstacle : public mango::PDESolver<TestPDESolverWithObstacle<LeftBC, RightBC, SpatialOp, ObstacleFunc>> {
 public:
+    // Right reproduces the pre-existing (bit-identical) sweep; this test
+    // doesn't exercise the put/call orientation distinction (#439).
+    static constexpr LcpActiveSide lcp_active_side = LcpActiveSide::Right;
+
     TestPDESolverWithObstacle(std::shared_ptr<Grid<double>> grid,
                               PDEWorkspace workspace,
                               LeftBC left_bc,

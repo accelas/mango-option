@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "mango/pde/internal/pde_workspace.hpp"
 #include <gtest/gtest.h>
+#include <cstdint>
 #include <vector>
 
 namespace mango {
@@ -11,16 +12,42 @@ TEST(PDEWorkspaceTest, RequiredSize) {
     // - 12 arrays @ padded(100) = 12 × 104 = 1248
     // - 3 arrays @ padded(99) = 3 × 104 = 312
     // - tridiag @ padded(200) = 200
-    // Total = 1760
+    // - active_mask: 100 bytes -> 13 doubles -> padded(13) = 16 doubles
+    // Total = 1776
     size_t n = 100;
     size_t required = PDEWorkspace::required_size(n);
 
     size_t n_padded = PDEWorkspace::pad_to_simd(n);  // 104
     size_t n_minus_1_padded = PDEWorkspace::pad_to_simd(n - 1);  // 104
     size_t tridiag_padded = PDEWorkspace::pad_to_simd(2 * n);  // 200
+    size_t mask_doubles = PDEWorkspace::pad_to_simd(
+        (n + sizeof(double) - 1) / sizeof(double));  // 16
 
-    size_t expected = 12 * n_padded + 3 * n_minus_1_padded + tridiag_padded;
+    size_t expected = 12 * n_padded + 3 * n_minus_1_padded + tridiag_padded
+                     + mask_doubles;
     EXPECT_EQ(required, expected);
+}
+
+TEST(PDEWorkspaceTest, ActiveMaskSpanIsUsable) {
+    size_t n = 100;
+    size_t required = PDEWorkspace::required_size(n);
+
+    std::vector<double> buffer(required, 0.0);
+    auto workspace = PDEWorkspace::from_buffer(buffer, n).value();
+
+    auto mask = workspace.active_mask();
+    ASSERT_EQ(mask.size(), n);
+
+    for (size_t i = 0; i < n; ++i) {
+        mask[i] = static_cast<uint8_t>(i % 2);
+    }
+    for (size_t i = 0; i < n; ++i) {
+        EXPECT_EQ(mask[i], static_cast<uint8_t>(i % 2));
+    }
+
+    // Mask storage must not alias any other named span.
+    workspace.rhs()[0] = 42.0;
+    EXPECT_EQ(mask[0], 0);
 }
 
 TEST(PDEWorkspaceTest, CreateFromBuffer) {

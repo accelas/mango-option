@@ -2,6 +2,7 @@
 #pragma once
 
 #include <span>
+#include <cstdint>
 #include <expected>
 #include <string>
 #include <format>
@@ -34,6 +35,8 @@ namespace mango {
  * - d2u_scratch (n): Second derivative scratch (SpatialOperator)
  * - du_scratch (n): First derivative scratch (SpatialOperator)
  * - tridiag_workspace (2n): Thomas solver workspace
+ * - active_mask (n bytes): LCP active-set mask (uint8_t), carved from a
+ *   double-aligned tail block so PDEWorkspace stays a single span<double>
  */
 struct PDEWorkspace {
     static constexpr size_t SIMD_WIDTH = 8;
@@ -56,7 +59,13 @@ struct PDEWorkspace {
         // tridiag_workspace @ 2n (padded)
         size_t tridiag = pad_to_simd(2 * n);
 
-        return regular_n + arrays_n_minus_1 + tridiag;
+        // active_mask: n bytes (uint8_t), carved from the tail of this
+        // double array. Round up to whole doubles, then pad to the same
+        // SIMD-safe element boundary (in units of doubles) as every other
+        // array here.
+        size_t mask_doubles = pad_to_simd((n + sizeof(double) - 1) / sizeof(double));
+
+        return regular_n + arrays_n_minus_1 + tridiag + mask_doubles;
     }
 
     /// Create workspace spans from buffer (without grid, dx not initialized)
@@ -131,6 +140,17 @@ struct PDEWorkspace {
         // tridiag_workspace (2n, padded)
         size_t tridiag_padded = pad_to_simd(2 * n);
         workspace.tridiag_workspace_ = buffer.subspan(offset, tridiag_padded);
+        offset += tridiag_padded;
+
+        // active_mask: n bytes (uint8_t), carved from a double-aligned tail
+        // block. Reinterpreting a live double array's storage as
+        // unsigned-char-family bytes is well-defined (the aliasing
+        // exception for char types), so no lifetime start is needed.
+        size_t mask_doubles = pad_to_simd((n + sizeof(double) - 1) / sizeof(double));
+        auto mask_storage = buffer.subspan(offset, mask_doubles);
+        workspace.active_mask_ = std::span<uint8_t>(
+            reinterpret_cast<uint8_t*>(mask_storage.data()),
+            mask_doubles * sizeof(double));
 
         return workspace;
     }
@@ -211,6 +231,12 @@ struct PDEWorkspace {
     std::span<double> tridiag_workspace() { return tridiag_workspace_.subspan(0, 2 * n_); }
     std::span<const double> tridiag_workspace() const { return tridiag_workspace_.subspan(0, 2 * n_); }
 
+    /// LCP active-set mask: active_mask()[i] == 1 iff node i is clamped to
+    /// the obstacle. Written by solve_thomas_projected2, consumed by
+    /// validate_lcp_kkt.
+    std::span<uint8_t> active_mask() { return active_mask_.subspan(0, n_); }
+    std::span<const uint8_t> active_mask() const { return active_mask_.subspan(0, n_); }
+
     /// Get TridiagonalMatrixView providing unified access to tridiagonal Jacobian
     ///
     /// This is the preferred way to access the Jacobian matrix. It provides
@@ -239,6 +265,7 @@ private:
     std::span<double> reserved1_;
     std::span<double> d2u_scratch_;
     std::span<double> du_scratch_;
+    std::span<uint8_t> active_mask_;
 };
 
 }  // namespace mango

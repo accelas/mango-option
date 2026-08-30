@@ -8,6 +8,7 @@
 #include "mango/pde/core/trbdf2_config.hpp"
 #include "mango/math/thomas_solver.hpp"
 #include "mango/math/tridiagonal_matrix_view.hpp"
+#include "mango/support/ivcalc_trace.h"
 #include <expected>
 #include "mango/support/error_types.hpp"
 #include <memory>
@@ -31,6 +32,15 @@ concept HasAnalyticalJacobian = requires(const SpatialOp op, double t, double co
 template<typename Derived>
 concept HasObstacle = requires(const Derived& d, double t, std::span<const double> x, std::span<double> psi) {
     { d.obstacle(t, x, psi) } -> std::same_as<void>;
+};
+
+/// Concept to detect if derived class declares which side of the grid its
+/// LCP active set touches (see `LcpActiveSide` in thomas_solver.hpp).
+/// Only obstacle solvers need this — `solve_implicit_stage_projected` is
+/// only reachable when `HasObstacle<Derived>` holds.
+template<typename D>
+concept HasLcpActiveSide = requires {
+    { D::lcp_active_side } -> std::convertible_to<LcpActiveSide>;
 };
 
 // Temporal event callback signature
@@ -121,6 +131,8 @@ public:
     ///
     /// @return expected success or solver error diagnostic
     std::expected<void, SolverError> solve() {
+        lcp_report_ = LcpKktReport{};
+
         const auto& time = grid_->time();
         const auto time_pts = time.time_points();
         double t = time_pts[0];
@@ -191,6 +203,12 @@ public:
         return grid_->solution();
     }
 
+    /// Aggregated LCP KKT-violation report across every projected implicit
+    /// stage solved by the last solve() call (counts summed, worst kept).
+    /// Zero-valued for solvers without an obstacle (Newton path never
+    /// populates it).
+    const LcpKktReport& lcp_report() const { return lcp_report_; }
+
     /// Check if obstacle condition is present (compile-time concept check)
     static constexpr bool has_obstacle() {
         return HasObstacle<Derived>;
@@ -240,6 +258,9 @@ private:
     // Temporal event system
     std::vector<TemporalEvent> events_;
     size_t next_event_idx_ = 0;
+
+    // Aggregated LCP KKT-violation report (reset at the top of solve())
+    LcpKktReport lcp_report_{};
 
     /// Process temporal events in time interval (t_old, t_new]
     ///
@@ -535,6 +556,11 @@ private:
             double t, double coeff_dt,
             std::span<double> u,
             std::span<const double> rhs) {
+        static_assert(HasLcpActiveSide<Derived>,
+            "Obstacle solvers must declare `static constexpr LcpActiveSide "
+            "lcp_active_side` (Left for put-like, Right for call-like "
+            "obstacles) — see thomas_solver.hpp");
+
         // Apply boundary conditions to initial guess
         apply_boundary_conditions(u, t);
 
@@ -712,12 +738,15 @@ private:
         // CRITICAL: We pass u (solution), not δu (correction)!
         //   Newton would solve: J·δu = -F, then u ← u + δu
         //   Projected Thomas solves: A·u = rhs directly (u is the solution)
-        auto result = solve_thomas_projected<double>(
+        constexpr LcpActiveSide side = Derived::lcp_active_side;
+        auto active_mask = workspace_.active_mask();
+        auto result = solve_thomas_projected2<double, side>(
             workspace_.jacobian(),
             rhs_with_bc,  // Corrected RHS (FIX #1 and #2 applied)
             psi,          // Obstacle constraint ψ(x,t)
             u,            // OUTPUT: solution u (not correction δu)
-            workspace_.tridiag_workspace()
+            workspace_.tridiag_workspace(),
+            active_mask
         );
 
         if (!result.ok()) {
@@ -730,6 +759,24 @@ private:
 
         // No update step needed - u already contains the solution from Projected Thomas
         // (Unlike Newton where we'd do: u ← u + δu)
+
+        // KKT validation runs on the exact system just solved (rhs_with_bc,
+        // the jacobian, and the mask from solve_thomas_projected2), so it
+        // must happen BEFORE boundary conditions are re-applied below —
+        // re-applying first would validate a system that was never solved.
+        auto stage_rep = validate_lcp_kkt<double>(
+            workspace_.jacobian().lower(), workspace_.jacobian().diag(),
+            workspace_.jacobian().upper(), rhs_with_bc, psi, u, active_mask);
+        lcp_report_.violation_count += stage_rep.violation_count;
+        if (stage_rep.max_violation > lcp_report_.max_violation) {
+            lcp_report_.max_violation = stage_rep.max_violation;
+            lcp_report_.worst_kind = stage_rep.worst_kind;
+        }
+        if (stage_rep.violation_count > 0) {
+            MANGO_TRACE_LCP_KKT(
+                static_cast<int64_t>(stage_rep.violation_count),
+                stage_rep.max_violation);
+        }
 
         // Re-apply boundary conditions to ensure exact satisfaction
         apply_boundary_conditions(u, t);
