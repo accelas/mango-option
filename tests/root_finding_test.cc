@@ -290,3 +290,29 @@ TEST(GenericRootFindingTest, NewtonRecoversAfterTransientClampToBound) {
     ASSERT_TRUE(result.has_value());
     EXPECT_NEAR(result->root, 1.0, 1e-9);
 }
+
+// Regression: Newton step underflowed to zero (interior), changing stall
+// classification from MaxIterationsExceeded to NoProgress.
+// Bug: old code did not detect interior stalls (no bound clamping), only
+// bounds-based stalls. New behavior (spec D3): detect x_clamped == x
+// regardless of clamping source (bounds or underflow).
+// Construction: f constant (not a root), df huge (step ~ 1e-300 underflows).
+// Expect: NoProgress on iteration 1 (increment underflowed, no progress).
+TEST(RootFindingErrorTest, NewtonStallsOnZeroIncrementInterior) {
+    int f_calls = 0, df_calls = 0;
+    auto f = [&](double x) { ++f_calls; (void)x; return 1.0; };  // Constant, never converges
+    auto df = [&](double x) { ++df_calls; (void)x; return 1e300; };  // Huge derivative
+    mango::RootFindingConfig config{};
+
+    // Step: fx/dfx = 1.0/1e300 = 1e-300 (underflows against x=1.0).
+    // Result: x_new ≈ x (interior stall, no bound clamping).
+    auto result = mango::newton_find_root(f, df, 1.0, 0.0, 2.0, config);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::NoProgress);
+    EXPECT_EQ(result.error().iterations, 1u);
+    ASSERT_TRUE(result.error().last_value.has_value());
+    EXPECT_EQ(*result.error().last_value, 1.0);
+    EXPECT_EQ(f_calls, 1);
+    EXPECT_EQ(df_calls, 1);
+}
