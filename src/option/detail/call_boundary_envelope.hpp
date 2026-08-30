@@ -28,6 +28,16 @@
 
 namespace mango::detail {
 
+// Absolute tolerance shared by every "are these the same breakpoint / is
+// this candidate genuinely inside the open segment / are these two rates
+// distinct" comparison below. All quantities being compared here (backward
+// times bounded by `maturity`, and per-annum rates) are O(1e-3)-O(10) in
+// realistic inputs, so a single absolute 1e-12 tolerance is many orders of
+// magnitude above float noise (~1e-16 relative) while still far below any
+// economically meaningful distinction -- one constant keeps every
+// degeneracy check consistent instead of drifting between ad hoc values.
+inline constexpr double kEnvelopeEps = 1e-12;
+
 /// Stopping-value envelope for the American call's right boundary.
 ///
 /// `dividends` must be calendar-ascending (the output of
@@ -136,7 +146,7 @@ struct CallBoundaryEnvelope {
         std::sort(breakpoints.begin(), breakpoints.end());
         breakpoints.erase(
             std::unique(breakpoints.begin(), breakpoints.end(),
-                        [](double a, double b) { return std::abs(a - b) < 1e-12; }),
+                        [](double a, double b) { return std::abs(a - b) < kEnvelopeEps; }),
             breakpoints.end());
 
         double best = f(breakpoints.front());
@@ -147,7 +157,7 @@ struct CallBoundaryEnvelope {
         for (size_t k = 0; k + 1 < breakpoints.size(); ++k) {
             double lo = breakpoints[k];
             double hi = breakpoints[k + 1];
-            if (hi - lo < 1e-14) continue;
+            if (hi - lo < kEnvelopeEps) continue;
 
             // Active dividends throughout the open segment: tau_i >= hi
             // (breakpoints guarantee no remaining tau_i lies strictly
@@ -155,7 +165,7 @@ struct CallBoundaryEnvelope {
             double B = A * std::exp(-q * tau);
             for (size_t i : remaining) {
                 double tau_i = tau_of(i);
-                if (tau_i >= hi - 1e-12) {
+                if (tau_i >= hi - kEnvelopeEps) {
                     B -= dividends[i].amount * DF(tau, tau_i) * std::exp(-q * tau_i);
                 }
             }
@@ -164,9 +174,9 @@ struct CallBoundaryEnvelope {
             double C = DF(tau, hi) * std::exp(-r_f * hi);
 
             if (q > 0.0 && r_f > 0.0 && B > 0.0 && C > 0.0 &&
-                std::abs(r_f - q) > 1e-14) {
+                std::abs(r_f - q) > kEnvelopeEps) {
                 double s_star = std::log((q * B) / (r_f * C)) / (r_f - q);
-                if (s_star > lo + 1e-14 && s_star < hi - 1e-14) {
+                if (s_star > lo + kEnvelopeEps && s_star < hi - kEnvelopeEps) {
                     best = std::max(best, f(s_star));
                 }
             }

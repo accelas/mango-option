@@ -151,32 +151,84 @@ TEST(Envelope, IntermediateExDateDominates) {
     EXPECT_NEAR(got, want, 1e-9);
 }
 
+// Flat rate, no dividends: f(s) = A*e^{-q(tau-s)} - e^{-r(tau-s)}. With
+// r > q > 0 this is B*e^{qs} - C*e^{rs}, which has a genuine interior
+// maximum when B, C > 0. Parameters below (T=1.5, x=0.5, q=3%, r=5%,
+// tau=1.0) put that interior optimum at s* ~= 0.4587, strictly dominating
+// both endpoints: f(s*) ~= 0.648866 > f(0) ~= 0.648765 > f(tau) ~= 0.648721.
+// (An earlier version of this test used tau=1.6 with r < q effectively
+// reversed, for which s* fell outside (0, tau) and the envelope degenerated
+// to the endpoint candidate -- verified below via explicit margins so that
+// regression can't reoccur silently.)
 TEST(Envelope, FlatRateInteriorStationaryPoint) {
-    double T = 2.0;
-    CallBoundaryEnvelope env{0.15, 0.01, T, RateSpec{0.08}, {}};
-    double tau = 1.6;
+    double T = 1.5;
+    CallBoundaryEnvelope env{0.5, 0.03, T, RateSpec{0.05}, {}};
+    double tau = 1.0;
 
     double got = env.value(tau, kTimeBased);
     double want = dense_scan_max(env, tau, kTimeBased);
     EXPECT_NEAR(got, want, 1e-9);
+
+    // The interior stationary point must strictly dominate both endpoints
+    // -- otherwise this test would silently degenerate to an endpoint-only
+    // check and never exercise the closed-form stationary-point branch.
+    // f(s) is evaluated directly at the two candidate stopping times s=0
+    // (hold to expiry) and s=tau (exercise now); NOTE this is deliberately
+    // NOT `env.value(0, ...)` / `env.value(tau, ...)` -- those re-evaluate
+    // the whole envelope at a *different* outer solver time, which is a
+    // different quantity (e.g. value(0, ...) is always intrinsic by
+    // definition, not f(0) within *this* tau=1.0 evaluation).
+    constexpr double kMargin = 5e-5;
+    double f0 = std::exp(env.x_max) * std::exp(-env.dividend_yield * tau) -
+                DF_calendar(env.rate, env.maturity, tau, 0.0);
+    double f_tau = std::exp(env.x_max) - 1.0;  // DF(tau,tau)=1, sum term vanishes at s=tau
+    EXPECT_GT(got - f0, kMargin);
+    EXPECT_GT(got - f_tau, kMargin);
 }
 
+// Two-segment yield curve: forward rate 5% for calendar [0, 0.6] (the
+// "near-now" backward-time segment s in (0.4, 1.0]) and 2% for calendar
+// [0.6, 1.0] (the "near-expiry" segment s in [0, 0.4)). The winning
+// candidate is the near-now segment's own closed-form stationary point at
+// s* ~= 0.4587 -- strictly inside (0.4, 1.0), away from both the knot
+// breakpoint at s=0.4 and the endpoints -- which reproduces the isolated
+// flat-5%-rate result from FlatRateInteriorStationaryPoint exactly, because
+// DF(tau, s) for s in that segment never crosses the knot. The near-expiry
+// segment's 2% rate only affects f(0) (which must discount across the
+// knot), not the winning candidate: this is exactly the two-region
+// consistency that a mismapped knot (s = tenor instead of s = T - tenor)
+// would break, since the segment split would move (or the rate
+// attribution per segment would swap) and the closed form would then
+// disagree with the dense scan.
 TEST(Envelope, YieldCurveKnotsRespected) {
+    double t_knot = 0.6;   // tenor (calendar time) of the curve knot
+    double rho1 = 0.05;    // forward rate for calendar [0, t_knot]
+    double rho2 = 0.02;    // forward rate for calendar [t_knot, T]
     std::vector<mango::TenorPoint> points = {
         {0.0, 0.0},
-        {0.25, -0.25 * 0.03},
-        {0.5, -0.25 * 0.03 - 0.25 * 0.09},
-        {1.0, -0.25 * 0.03 - 0.25 * 0.09 - 0.5 * 0.05},
+        {t_knot, -rho1 * t_knot},
+        {1.0, -rho1 * t_knot - rho2 * (1.0 - t_knot)},
     };
     auto curve = YieldCurve::from_points(points).value();
 
     double T = 1.0;
-    CallBoundaryEnvelope env{0.2, 0.015, T, RateSpec{curve}, {}};
-    double tau = 0.9;
+    CallBoundaryEnvelope env{0.5, 0.03, T, RateSpec{curve}, {}};
+    double tau = 1.0;
 
     double got = env.value(tau, kTimeBased);
     double want = dense_scan_max(env, tau, kTimeBased);
     EXPECT_NEAR(got, want, 1e-9);
+
+    // Dominance: the interior candidate beats both endpoints by a comfortable
+    // margin (measured: ~0.0116 over f(0), ~0.000145 over f(tau)=intrinsic).
+    // See FlatRateInteriorStationaryPoint for why f(0)/f(tau) are evaluated
+    // directly rather than via env.value(0, ...) / env.value(tau, ...).
+    constexpr double kMargin = 5e-5;
+    double f0 = std::exp(env.x_max) * std::exp(-env.dividend_yield * tau) -
+                DF_calendar(env.rate, env.maturity, tau, 0.0);
+    double f_tau = std::exp(env.x_max) - 1.0;
+    EXPECT_GT(got - f0, kMargin);
+    EXPECT_GT(got - f_tau, kMargin);
 }
 
 TEST(Envelope, CombinedContinuousAndDiscrete) {
