@@ -65,7 +65,6 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
-        "-march=x86-64-v3",
         "-fopenmp",
     ],
     linkopts = ["-fopenmp"],

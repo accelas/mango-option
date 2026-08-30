@@ -631,7 +631,6 @@ cc_test(
         "-Wall",
         "-Wextra",
         "-O3",
-        "-march=x86-64-v3",
         "-fopenmp",
     ],
     linkopts = ["-fopenmp"],
