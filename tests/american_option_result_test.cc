@@ -449,4 +449,66 @@ TEST(AmericanOptionResultConcurrencyTest, ConcurrentFirstAccessMatchesSerial) {
     }
 }
 
+// ===========================================================================
+// Regression tests for bugs found during code review (issue #438)
+// ===========================================================================
+
+// Regression: gamma() never computed interior node n-2
+// Bug: CenteredDifference ranges are exclusive-end ([start, end)); gamma()
+// passed end = n-2, so d2v_dx2[n-2]/dv_dx[n-2] stayed 0.0 and any query
+// interpolating against node n-2 blended with a spurious zero.
+TEST_F(AmericanOptionResultTest, GammaAtLastInteriorNodeUsesComputedStencil) {
+    // Synthetic smooth solution V/K = x^2: d2V/dx2 = 2 (exact under central
+    // differences), dV/dx = 2x (exact on a uniform grid).
+    auto x_span = grid->x();
+    auto solution = grid->solution();
+    for (size_t i = 0; i < x_span.size(); ++i) {
+        solution[i] = x_span[i] * x_span[i];
+    }
+
+    const size_t n = x_span.size();
+    const double x_target = x_span[n - 2];  // last interior node
+    PricingParams p = params;
+    p.spot = p.strike * std::exp(x_target);  // spot exactly on node n-2
+
+    AmericanOptionResult result(grid, p);
+    const double gamma = result.gamma();
+
+    // gamma = (K/S^2) * (d2V/dx2 - dV/dx) = (K/S^2) * (2 - 2*x_target)
+    const double S = p.spot;
+    const double expected = p.strike / (S * S) * (2.0 - 2.0 * x_target);
+    // Under the bug both stencil values at n-2 are the unwritten 0.0, so
+    // gamma is exactly 0.
+    EXPECT_NEAR(gamma, expected, std::abs(expected) * 0.05)
+        << "gamma at node n-2 must use computed stencil values";
+}
+
+// Regression: gamma interpolation in (x[n-3], x[n-2]) blended a zero
+// Bug: with i_right = n-2 unwritten, the linear blend pulled gamma toward 0
+// by alpha * 100%.
+TEST_F(AmericanOptionResultTest, GammaNearRightEdgeMatchesAnalyticReference) {
+    auto x_span = grid->x();
+    auto solution = grid->solution();
+    for (size_t i = 0; i < x_span.size(); ++i) {
+        solution[i] = x_span[i] * x_span[i];
+    }
+
+    const size_t n = x_span.size();
+    const double x_mid = 0.5 * (x_span[n - 3] + x_span[n - 2]);
+    PricingParams p = params;
+    p.spot = p.strike * std::exp(x_mid);
+
+    AmericanOptionResult result(grid, p);
+
+    // For V/K = x^2 the stencil values are exact (central differences of a
+    // quadratic), and the linear blend of dV/dx = 2x is exact at x_mid, so
+    // gamma must equal the analytic (K/S^2) * (2 - 2*x_mid).
+    // Under the bug, i_right = n-2 held unwritten zeros and the blend gave
+    // gamma ~33% low.
+    const double S = p.spot;
+    const double expected = p.strike / (S * S) * (2.0 - 2.0 * x_mid);
+    EXPECT_NEAR(result.gamma(), expected, std::abs(expected) * 0.01)
+        << "gamma mid-interval blend must not include unwritten stencil zeros";
+}
+
 } // namespace

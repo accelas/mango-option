@@ -68,9 +68,9 @@ double AmericanOptionResult::gamma() const {
     std::vector<double> dv_dx(n);
     std::vector<double> d2v_dx2(n);
     operator_->compute_first_derivative(
-        solution, std::span(dv_dx), 1, n - 2);
+        solution, std::span(dv_dx), 1, n - 1);
     operator_->compute_second_derivative(
-        solution, std::span(d2v_dx2), 1, n - 2);
+        solution, std::span(d2v_dx2), 1, n - 1);
 
     // Linearly interpolate stencil output at x_spot
     auto [i_left, i_right] = find_grid_index(x_spot);
