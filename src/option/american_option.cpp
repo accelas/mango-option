@@ -18,6 +18,7 @@
 #include "mango/pde/operators/black_scholes_pde.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/dividend_utils.hpp"
+#include "mango/option/detail/call_boundary_envelope.hpp"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -65,10 +66,20 @@ std::pair<GridSpec<double>, TimeDomain> resolve_grid(
             return estimate_pde_grid(params, acc);
         },
         [&](const PDEGridConfig& eg) {
-            auto td = eg.mandatory_times.empty()
+            // Dividend taus are always merged in, even when the caller
+            // supplies their own mandatory_times: process_temporal_events
+            // fires an event only at a completed grid step, so a custom
+            // grid omitting the ex-date would apply the jump at the wrong
+            // state time (spec B5).
+            std::vector<double> mand = eg.mandatory_times;
+            for (const auto& d : filter_and_merge_dividends(
+                     params.discrete_dividends, params.maturity)) {
+                mand.push_back(params.maturity - d.calendar_time);
+            }
+            auto td = mand.empty()
                 ? TimeDomain::from_n_steps(0.0, params.maturity, eg.n_time)
                 : TimeDomain::with_mandatory_points(0.0, params.maturity,
-                    params.maturity / static_cast<double>(eg.n_time), eg.mandatory_times);
+                    params.maturity / static_cast<double>(eg.n_time), mand);
             return std::make_pair(eg.grid_spec, td);
         }
     }, *grid);
@@ -120,12 +131,20 @@ TemporalEventCallback make_dividend_event(
 /// Builds a cubic spline for solution interpolation and registers temporal events
 /// at each dividend time. The intrinsic_fallback is the normalized payoff value
 /// used when the shifted spot falls below the grid (1.0 for puts, 0.0 for calls).
+///
+/// `n_events_applied`, when non-null, is incremented AFTER each dividend jump
+/// fires (spec B3): `process_temporal_events` re-applies boundary conditions
+/// immediately after the callback returns, so bumping the counter first makes
+/// the right-BC evaluator see the pre-dividend side rather than re-deriving
+/// phase from the (ambiguous, at t == tau_j) event time alone. Puts have no
+/// phase-aware boundary and pass nullptr.
 template<typename Solver>
 void init_dividend_events(Solver& solver, const PricingParams& params,
                           std::shared_ptr<Grid<double>> grid,
                           PDEWorkspace& workspace,
                           double intrinsic_fallback,
-                          CubicSpline<double>& dividend_spline) {
+                          CubicSpline<double>& dividend_spline,
+                          size_t* n_events_applied = nullptr) {
     auto divs = filter_and_merge_dividends(params.discrete_dividends, params.maturity);
     if (divs.empty()) return;
 
@@ -137,9 +156,14 @@ void init_dividend_events(Solver& solver, const PricingParams& params,
 
     for (const auto& div : divs) {
         double tau = params.maturity - div.calendar_time;
+        auto jump = make_dividend_event(div.amount, params.strike, intrinsic_fallback,
+                                        &dividend_spline);
         solver.add_temporal_event(tau,
-            make_dividend_event(div.amount, params.strike, intrinsic_fallback,
-                                &dividend_spline));
+            [jump = std::move(jump), n_events_applied]
+            (double t, std::span<const double> xs, std::span<double> u) {
+                jump(t, xs, u);
+                if (n_events_applied) ++*n_events_applied;
+            });
     }
 }
 
@@ -257,6 +281,7 @@ public:
         , left_bc_(create_left_bc())
         , right_bc_(create_right_bc())
         , spatial_op_(create_spatial_op(workspace_local_))
+        , envelope_(build_envelope())
     {
         assert(grid_ != nullptr && "Grid cannot be null (programming error)");
     }
@@ -277,10 +302,15 @@ public:
     }
 
     /// Initialize dividend events. Must be called after the object is in its
-    /// final memory location (e.g. after placement into a std::variant) because
-    /// the event callbacks capture &dividend_spline_.
+    /// final memory location (e.g. after placement into a std::variant)
+    /// because the event callbacks capture &dividend_spline_, and because
+    /// right_bc_ is rebuilt here to point at &envelope_/&n_events_applied_
+    /// (mirroring the dividend_spline_ lifetime pattern: the constructor
+    /// stores a null-env placeholder, this rewires it post-placement).
     void init_dividends() {
-        init_dividend_events(*this, params_, grid_, workspace_local_, 0.0, dividend_spline_);
+        right_bc_ = DirichletBC(RightBCFunction{&envelope_, &n_events_applied_});
+        init_dividend_events(*this, params_, grid_, workspace_local_, 0.0, dividend_spline_,
+                             &n_events_applied_);
     }
 
     struct LeftBCFunction {
@@ -289,11 +319,20 @@ public:
         }
     };
 
+    // Deep-ITM stopping-value envelope (spec B2), dividend- and yield-curve-
+    // aware. `env` is null immediately after construction; init_dividends()
+    // wires it to &envelope_ once the solver is at its final address. The
+    // BC always evaluates the envelope at the fixed x_max baked into
+    // `envelope_` at construction, so the runtime `x` argument (always the
+    // grid's rightmost node) is unused (least-churn: keeps the uniform
+    // DirichletBC(t, x) call shape without threading x through the
+    // evaluator's phase-counter interface).
     struct RightBCFunction {
-        std::function<double(double)> forward_discount_fn;
+        const mango::detail::CallBoundaryEnvelope* env = nullptr;
+        const size_t* n_applied = nullptr;
 
-        double operator()(double t, double x) const {
-            return std::exp(x) - forward_discount_fn(t);
+        double operator()(double t, double /*x*/) const {
+            return env->value(t, *n_applied);
         }
     };
 
@@ -301,8 +340,24 @@ public:
         return DirichletBC(LeftBCFunction{});
     }
 
-    DirichletBC<RightBCFunction> create_right_bc() const {
-        return DirichletBC(RightBCFunction{make_forward_discount_fn(params_.rate, params_.maturity)});
+    static DirichletBC<RightBCFunction> create_right_bc() {
+        return DirichletBC(RightBCFunction{});
+    }
+
+    /// Build the right-boundary stopping envelope from params_/grid_.
+    /// Dividend amounts are normalized by strike here (CallBoundaryEnvelope
+    /// requires D_i/K, see its header comment); filter_and_merge_dividends
+    /// already restricts to (0, T) and merges same-date entries.
+    mango::detail::CallBoundaryEnvelope build_envelope() const {
+        auto divs = filter_and_merge_dividends(params_.discrete_dividends, params_.maturity);
+        for (auto& d : divs) d.amount /= params_.strike;
+        return mango::detail::CallBoundaryEnvelope{
+            .x_max = grid_->x().back(),
+            .dividend_yield = params_.dividend_yield,
+            .maturity = params_.maturity,
+            .rate = params_.rate,
+            .dividends = std::move(divs),
+        };
     }
 
     SpatialOpType create_spatial_op(PDEWorkspace& workspace) const {
@@ -321,6 +376,8 @@ public:
     DirichletBC<RightBCFunction> right_bc_;
     SpatialOpType spatial_op_;
     CubicSpline<double> dividend_spline_;
+    mango::detail::CallBoundaryEnvelope envelope_;
+    size_t n_events_applied_ = 0;
 };
 
 using AmericanSolverVariant = std::variant<AmericanPutSolver, AmericanCallSolver>;

@@ -562,6 +562,7 @@ cc_test(
     deps = [
         "//src/option:american_option",
         "//src/option:american_option_batch",
+        "//src/option:call_boundary_envelope",
         "//src/option:european_option",
         "@googletest//:gtest_main",
     ],

@@ -105,6 +105,12 @@ public:
             for (size_t j = 1; j <= n_sub; ++j) {
                 points.push_back(seg_start + j * sub_dt);
             }
+            // Force exact landing on the segment boundary: seg_start + n_sub*sub_dt
+            // can miss seg_end by a few ULPs (sub_dt itself is a rounded
+            // division), and event dispatch in process_temporal_events compares
+            // times exactly. A missed landing defers the dividend event by one
+            // full step (spec B5).
+            points.back() = seg_end;
         }
 
         TimeDomain td;

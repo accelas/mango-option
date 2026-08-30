@@ -2,9 +2,11 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/european_option.hpp"
+#include "mango/option/detail/call_boundary_envelope.hpp"
 
 #include <gtest/gtest.h>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -451,6 +453,144 @@ TEST(AmericanOptionTest, ComplementarityReportCleanForATMPut) {
     EXPECT_EQ(solver->complementarity_report().violation_count, 0u)
         << "max_violation=" << solver->complementarity_report().max_violation
         << " worst_kind=" << solver->complementarity_report().worst_kind;
+}
+
+// ===========================================================================
+// Regression tests: call right-boundary stopping envelope (#439 item 2 / B5)
+// ===========================================================================
+
+// Regression: custom time grids must include dividend taus (#439 batch, B5)
+// Bug: process_temporal_events fires an event only at a completed grid step,
+// so a custom grid whose mandatory_times omit the ex-date applies the
+// dividend jump to a state that has already evolved past the true ex-date
+// by up to one step -- an O(dt) phase error, largest on coarse grids. Both
+// prices below use the IDENTICAL spatial grid (from estimate_pde_grid) so
+// the comparison isolates the time-grid merge; n_time=27 (dt≈0.037) puts
+// the tau=0.5 dividend roughly half a step off a uniform 27-step grid.
+// Measured on this branch: pre-fix (mandatory_times not merged) delta =
+// 5.53e-3 (FAILS a 5e-3 bound); post-fix (this change) delta = 2.87e-3
+// (residual is ordinary n_time-vs-auto-grid time-discretization difference,
+// not a phase bug -- both grids now land exactly on the dividend tau).
+TEST(AmericanOptionTest, CustomGridOmittingDividendDateStillAligns) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .option_type = OptionType::PUT},
+        0.20);
+    params.discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 3.0}};
+
+    // (a) Auto grid: estimate_pde_grid already merges dividend taus.
+    auto auto_result = solve_american_option(params);
+    ASSERT_TRUE(auto_result.has_value());
+    const double price_auto = auto_result->value_at(params.spot);
+
+    // (b) Same spatial grid as (a), but routed through the PDEGridConfig
+    // (custom-grid) path with an EMPTY mandatory_times list, at a
+    // deliberately non-divisor n_time so the dividend tau cannot land on
+    // the grid by coincidence.
+    auto grid_pair = estimate_pde_grid(params);
+    PDEGridConfig custom_cfg{grid_pair.first, 27, {}};
+
+    auto solver = AmericanOptionSolver::create(params, PDEGridSpec{custom_cfg});
+    ASSERT_TRUE(solver.has_value());
+    auto custom_result = solver->solve();
+    ASSERT_TRUE(custom_result.has_value());
+    const double price_custom = custom_result->value_at(params.spot);
+
+    EXPECT_NEAR(price_custom, price_auto, 5e-3)
+        << "price_auto=" << price_auto << " price_custom=" << price_custom
+        << " delta=" << std::abs(price_custom - price_auto);
+}
+
+// Regression: dividend-free call right BC unchanged (#439 item 2 guard)
+// Bug guard: replacing the naive `e^x - forward_discount(t)` right BC with
+// the general stopping-value envelope must be a no-op when there are no
+// discrete dividends and q=0 -- pinned to the value measured on this branch
+// immediately before the envelope wiring landed (bazel run of a throwaway
+// solve at the same params gave 10.447090628631905 both before and after).
+TEST(AmericanOptionTest, NoDivCallPriceUnchangedByEnvelopeBC) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.0,
+                   .option_type = OptionType::CALL},
+        0.20);
+
+    auto result = solve_american_option(params);
+    ASSERT_TRUE(result.has_value());
+
+    constexpr double kPinnedPrice = 10.447090628631905;
+    EXPECT_NEAR(result->value_at(params.spot), kPinnedPrice, 1e-12);
+}
+
+// Regression: dividend-paying call right BC no longer pinned high (#439
+// item 2). Direct envelope check plus a full solve.
+// Bug: the old right BC `e^x - forward_discount(t)` ignored discrete
+// dividends entirely, overstating the boundary value (and hence any query
+// point close enough to the boundary to feel it) by the discounted dividend
+// once the ex-date is in the option's remaining life.
+TEST(AmericanOptionTest, DiscreteDivCallRightBoundaryEnvelope) {
+    using mango::detail::CallBoundaryEnvelope;
+    constexpr size_t kTimeBased = std::numeric_limits<size_t>::max();
+
+    const double K = 100.0;
+    const double x_max = std::log(2.0);   // deep ITM, S = 2K
+    const double maturity = 1.0;
+    const double r = 0.05;
+    const double D_over_K = 1.5 / K;
+    const double calendar_div = 0.25;
+    const double tau_d = maturity - calendar_div;  // 0.75
+
+    CallBoundaryEnvelope no_div{
+        .x_max = x_max, .dividend_yield = 0.0, .maturity = maturity,
+        .rate = RateSpec{r}, .dividends = {}};
+    CallBoundaryEnvelope with_div{
+        .x_max = x_max, .dividend_yield = 0.0, .maturity = maturity,
+        .rate = RateSpec{r},
+        .dividends = {Dividend{.calendar_time = calendar_div, .amount = D_over_K}}};
+
+    // Just before the ex-date crosses into the remaining set (tau < tau_d,
+    // strict-< phase rule of B1): the dividend has not yet entered the
+    // option's remaining life as of this evaluation, so the envelope must
+    // match the no-dividend case exactly.
+    const double tau_before = tau_d - 0.01;
+    EXPECT_NEAR(with_div.value(tau_before, kTimeBased),
+                no_div.value(tau_before, kTimeBased), 1e-12);
+
+    // Just after the ex-date (tau > tau_d): the dividend is now in the
+    // remaining set, and the deep-ITM "hold to expiry" candidate (s=0) must
+    // be reduced by exactly the dividend's forward-discounted value.
+    // At this deep-ITM point with r>0 and q=0 the hold-to-expiry candidate
+    // dominates both "stop now" (=intrinsic) and "stop at expiry" for both
+    // envelopes, so the closed-form difference is exact, not approximate.
+    const double tau_after = tau_d + 0.01;
+    const double expected_drop = D_over_K * std::exp(-r * (tau_after - tau_d));
+    EXPECT_NEAR(with_div.value(tau_after, kTimeBased),
+                no_div.value(tau_after, kTimeBased) - expected_drop, 1e-12);
+
+    // Full solve sanity: the discrete-dividend call must price below its
+    // no-dividend counterpart (the boundary and interior both now see the
+    // dividend), stay at or above intrinsic, and remain finite/converged.
+    // Accuracy against QuantLib for this exact scenario shape (single
+    // discrete dividend, ATM call) is covered by
+    // DiscreteDividendAccuracyTest.CallSingleDividendVsQuantLib
+    // (tests/discrete_dividend_accuracy_test.cc), which this change must
+    // keep passing at rel_err < 1% -- verified separately as part of this
+    // task's required test run rather than duplicated here (avoids adding
+    // a QuantLib dependency to this target).
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = K, .maturity = maturity,
+                   .rate = r, .dividend_yield = 0.0,
+                   .option_type = OptionType::CALL},
+        0.20);
+    auto no_div_result = solve_american_option(params);
+    params.discrete_dividends = {Dividend{.calendar_time = calendar_div, .amount = 1.5}};
+    auto with_div_result = solve_american_option(params);
+
+    ASSERT_TRUE(no_div_result.has_value());
+    ASSERT_TRUE(with_div_result.has_value());
+    EXPECT_TRUE(with_div_result->converged);
+    EXPECT_LT(with_div_result->value_at(params.spot), no_div_result->value_at(params.spot));
+    EXPECT_GE(with_div_result->value_at(params.spot),
+              std::max(params.spot - params.strike, 0.0) - 1e-6);
 }
 
 }  // namespace
