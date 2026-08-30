@@ -143,7 +143,7 @@ public:
     /// @return Fit result with coefficients and diagnostics
     [[nodiscard]] std::expected<BSplineCollocationResult<T>, InterpolationError> fit(
         const std::vector<T>& values,
-        const BSplineCollocationConfig<T>& config = {})
+        const BSplineCollocationConfig<T>& config = {}) const
     {
         if (values.size() != n_) {
             return std::unexpected(InterpolationError{
@@ -166,9 +166,6 @@ public:
                     i});
             }
         }
-
-        // Build collocation matrix
-        build_collocation_matrix();
 
         // Create banded matrix with bandwidth=4 for cubic B-splines
         BandedMatrix<T> A(n_, 4);
@@ -235,7 +232,7 @@ public:
     [[nodiscard]] std::expected<BSplineCollocationResult<T>, InterpolationError> fit_with_buffer(
         std::span<const T> values,
         std::span<T> coeffs_out,
-        const BSplineCollocationConfig<T>& config = {})
+        const BSplineCollocationConfig<T>& config = {}) const
     {
         if (values.size() != n_) {
             return std::unexpected(InterpolationError{
@@ -263,9 +260,6 @@ public:
                     i});
             }
         }
-
-        // Build collocation matrix
-        build_collocation_matrix();
 
         // Create banded matrix with bandwidth=4 for cubic B-splines
         BandedMatrix<T> A(n_, 4);
@@ -334,7 +328,7 @@ public:
     fit_with_workspace(
         std::span<const T> values,
         BSplineCollocationWorkspace<T, BANDWIDTH>& ws,
-        const BSplineCollocationConfig<T>& config = {})
+        const BSplineCollocationConfig<T>& config = {}) const
     {
         if (values.size() != n_) {
             return std::unexpected(InterpolationError{
@@ -411,13 +405,19 @@ private:
         // Pre-allocate banded storage (BANDWIDTH entries per row)
         band_values_.resize(n_ * BANDWIDTH, T{0});
         band_col_start_.resize(n_, 0);
+
+        // Build the collocation matrix once; it depends only on the grid.
+        build_collocation_matrix();
     }
 
     std::vector<T> grid_;               ///< Data grid points
     std::vector<T> knots_;              ///< Knot vector (clamped)
     size_t n_;                          ///< Number of grid points
 
-    // Banded storage: each row has exactly 4 non-zero entries
+    // Banded storage: each row has exactly 4 non-zero entries.
+    // Immutable after construction (issue #435) — built once in the
+    // constructor and never rewritten, so concurrent fit() calls on a
+    // shared instance never race on this state.
     std::vector<T> band_values_;        ///< Banded matrix values (n×4, row-major)
     std::vector<int> band_col_start_;   ///< First column index for each row's band
 
@@ -537,10 +537,7 @@ private:
     ///
     /// Writes matrix directly to workspace in LAPACK banded format.
     /// For bandwidth=4 cubic B-splines, LAPACK uses ldab=10 storage.
-    void build_collocation_matrix_to_workspace(BSplineCollocationWorkspace<T, BANDWIDTH>& ws) {
-        // First build into internal storage (same as regular method)
-        build_collocation_matrix();
-
+    void build_collocation_matrix_to_workspace(BSplineCollocationWorkspace<T, BANDWIDTH>& ws) const {
         // Zero the workspace band storage
         auto ws_band_storage = ws.band_storage();
         std::fill(ws_band_storage.begin(), ws_band_storage.end(), T{0});
@@ -567,7 +564,7 @@ private:
     /// Factorize banded matrix using workspace storage
     ///
     /// Performs LU factorization using LAPACK dgbtrf directly on workspace.
-    [[nodiscard]] BandedResult<T> factorize_banded_workspace(BSplineCollocationWorkspace<T, BANDWIDTH>& ws) {
+    [[nodiscard]] BandedResult<T> factorize_banded_workspace(BSplineCollocationWorkspace<T, BANDWIDTH>& ws) const {
         static_assert(std::same_as<T, double>,
                      "LAPACKE banded solvers currently only support double precision");
 
@@ -608,7 +605,7 @@ private:
     /// Solves LU·x = b using pre-computed factorization in workspace.
     [[nodiscard]] BandedResult<T> solve_banded_workspace(
         BSplineCollocationWorkspace<T, BANDWIDTH>& ws,
-        std::span<const T> b)
+        std::span<const T> b) const
     {
         using Result = BandedResult<T>;
         using Workspace = BSplineCollocationWorkspace<T, BANDWIDTH>;
