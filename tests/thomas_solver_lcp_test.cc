@@ -129,7 +129,14 @@ template <mango::LcpActiveSide Side>
 std::vector<double> solve_and_check(const Sys& s, double tol = 1e-9) {
     const size_t n = s.diag.size();
     std::vector<double> ref;
-    EXPECT_TRUE(lcp_reference(s.lower, s.diag, s.upper, s.rhs, s.psi, ref));
+    // A failed enumeration leaves `ref` empty; the EXPECT_NEAR loop below
+    // would then index it out of bounds, so fail and return early instead
+    // of continuing into UB (ASSERT_TRUE itself can't be used here since
+    // this helper returns non-void).
+    if (!lcp_reference(s.lower, s.diag, s.upper, s.rhs, s.psi, ref)) {
+        ADD_FAILURE() << "lcp_reference enumeration found no feasible solution";
+        return std::vector<double>(n, std::numeric_limits<double>::quiet_NaN());
+    }
 
     std::vector<double> x(n), ws(2 * n);
     std::vector<uint8_t> mask(n);
@@ -209,15 +216,26 @@ TEST(LcpSweep, NonconstantObstacle) {
 TEST(LcpSweep, IdentityLockRowsInsideActiveInterval) {
     // Convert two interior rows inside the active interval to identity
     // (lower/upper zeroed, diag=1, rhs=psi) as the deep-ITM lock does;
-    // the Left sweep must still be exact on the left-active system.
-    Sys s = mmatrix(12, 5.0, left_obstacle(12));
+    // both sweeps must still be exact on their own side.
+    Sys s_left = mmatrix(12, 5.0, left_obstacle(12));
     for (size_t i : {size_t(2), size_t(3)}) {
-        s.diag[i] = 1.0;
-        s.rhs[i] = s.psi[i];
-        if (i > 0) s.lower[i - 1] = 0.0;
-        if (i + 1 < s.diag.size()) s.upper[i] = 0.0;
+        s_left.diag[i] = 1.0;
+        s_left.rhs[i] = s_left.psi[i];
+        if (i > 0) s_left.lower[i - 1] = 0.0;
+        if (i + 1 < s_left.diag.size()) s_left.upper[i] = 0.0;
     }
-    solve_and_check<mango::LcpActiveSide::Left>(s);
+    solve_and_check<mango::LcpActiveSide::Left>(s_left);
+
+    // Mirror on the right-active side: lock rows well inside the interval
+    // touching the right boundary (n=12, right_obstacle active near i>=6).
+    Sys s_right = mmatrix(12, 5.0, right_obstacle(12));
+    for (size_t i : {size_t(8), size_t(9)}) {
+        s_right.diag[i] = 1.0;
+        s_right.rhs[i] = s_right.psi[i];
+        if (i > 0) s_right.lower[i - 1] = 0.0;
+        if (i + 1 < s_right.diag.size()) s_right.upper[i] = 0.0;
+    }
+    solve_and_check<mango::LcpActiveSide::Right>(s_right);
 }
 
 TEST(LcpSweep, DirichletIdentityBoundaryRows) {
@@ -290,6 +308,44 @@ TEST(LcpKkt, NonFiniteInputCountsAsViolation) {
         std::span<const uint8_t>(mask));
     EXPECT_GT(rep.violation_count, 0u);
     EXPECT_EQ(rep.worst_kind, 2);
+}
+
+// Regression: a NaN comparison is always false, so `u[i] < psi[i] - tol`
+// silently passes when psi[i] itself is NaN. Node 1 here is otherwise a
+// textbook-clean active node (Au == rhs exactly, dual condition holds at
+// equality) — without a psi finiteness check, this candidate validates
+// clean despite carrying a non-finite obstacle value.
+TEST(LcpKkt, NonFinitePsiCountsAsViolation) {
+    std::vector<double> lower{-1.0}, diag{2.0, 2.0}, upper{-1.0}, rhs{0.0, 0.0};
+    std::vector<double> psi{-100.0, std::numeric_limits<double>::quiet_NaN()};
+    std::vector<double> u{0.0, 0.0};
+    std::vector<uint8_t> mask{0, 1};  // node 1 marked active
+    auto rep = mango::validate_lcp_kkt<double>(
+        std::span<const double>(lower), std::span<const double>(diag),
+        std::span<const double>(upper), std::span<const double>(rhs),
+        std::span<const double>(psi), std::span<const double>(u),
+        std::span<const uint8_t>(mask));
+    EXPECT_GT(rep.violation_count, 0u);
+    EXPECT_EQ(rep.worst_kind, 2);
+}
+
+// Regression: the Left branch's starting division c_prime[n-1] =
+// lower[n-2]/diag[n-1] had no singularity guard, unlike every other
+// division in both branches. A degenerate diag[n-1] must be rejected with
+// an error result, not silently produce NaN through ok_result().
+TEST(LcpSweep, LeftBranchRejectsSingularLastDiagonal) {
+    const size_t n = 6;
+    Sys s = mmatrix(n, 5.0, left_obstacle(n));
+    s.diag[n - 1] = 1e-20;  // degenerate: below default singularity_tol
+
+    std::vector<double> x(n), ws(2 * n);
+    std::vector<uint8_t> mask(n);
+    auto r = mango::solve_thomas_projected2<double, mango::LcpActiveSide::Left>(
+        std::span<const double>(s.lower), std::span<const double>(s.diag),
+        std::span<const double>(s.upper), std::span<const double>(s.rhs),
+        std::span<const double>(s.psi), std::span<double>(x),
+        std::span<double>(ws), std::span<uint8_t>(mask));
+    EXPECT_FALSE(r.ok());
 }
 
 // Hand-verified 2-node cases from the issue #439 comment:

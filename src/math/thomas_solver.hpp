@@ -564,6 +564,9 @@ template<std::floating_point T, LcpActiveSide Side = LcpActiveSide::Right>
         }
     } else {
         // ===== UL elimination from row n-1 upward; c_prime[i] couples LEFT =====
+        if (std::abs(diag[n-1]) < config.singularity_tol) {
+            return Result::error_result("Singular matrix (last diagonal ≈ 0)");
+        }
         c_prime[n-1] = lower[n-2] / diag[n-1];
         d_prime[n-1] = rhs[n-1] / diag[n-1];
 
@@ -654,7 +657,8 @@ template<std::floating_point T>
         const T Au = lo + diag[i] * u[i] + hi;
         const T scale = std::abs(lo) + std::abs(diag[i] * u[i]) + std::abs(hi) + std::abs(rhs[i]);
         const T tol = atol + rtol * scale;
-        if (!std::isfinite(Au) || !std::isfinite(u[i]) || !std::isfinite(tol)) {
+        if (!std::isfinite(Au) || !std::isfinite(u[i]) || !std::isfinite(tol) ||
+            !std::isfinite(psi[i])) {
             note(std::numeric_limits<double>::infinity(), 2);
             continue;
         }
