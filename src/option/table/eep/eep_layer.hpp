@@ -10,6 +10,12 @@ namespace mango {
 
 /// Adds European price/vega/Greeks on top of any leaf with price()/vega().
 /// Used for EEP decomposition: American = leaf_price + European.
+///
+/// Leaf contract for greek()/gamma(): when the leaf's raw interpolant value
+/// is <= 0 (deep OTM, zero early-exercise premium) the leaf must return
+/// exactly 0.0 — not an error — without derivative work, so this layer can
+/// call it unconditionally and the sum degenerates to the European Greek.
+/// TransformLeaf satisfies this (pinned by TransformLeafZeroContractTest).
 template <typename Leaf, EEPStrategy EEP>
 class EEPLayer {
 public:
@@ -31,15 +37,14 @@ public:
     }
 
     /// First-order Greek with EEP decomposition.
-    /// When leaf EEP is zero (deep OTM), returns European Greek only.
+    /// Deep OTM the leaf's Greek is exactly 0.0 (see leaf contract below),
+    /// so the result degenerates to the European Greek.
     [[nodiscard]] std::expected<double, GreekError>
     greek(Greek g, const PricingParams& params) const {
         double spot = params.spot, strike = params.strike;
         double tau = params.maturity, sigma = params.volatility;
         double rate = get_zero_rate(params.rate, params.maturity);
 
-        // Early guard: if EEP surface reads zero, return European only
-        double raw = leaf_.raw_value(spot, strike, tau, sigma, rate);
         double european = [&] {
             switch (g) {
                 case Greek::Delta: return eep_.european_delta(spot, strike, tau, sigma, rate);
@@ -49,8 +54,6 @@ public:
             }
             __builtin_unreachable();
         }();
-
-        if (raw <= 0.0) return european;
 
         auto leaf_greek = leaf_.greek(g, params);
         if (!leaf_greek.has_value()) return std::unexpected(leaf_greek.error());
@@ -64,10 +67,7 @@ public:
         double tau = params.maturity, sigma = params.volatility;
         double rate = get_zero_rate(params.rate, params.maturity);
 
-        double raw = leaf_.raw_value(spot, strike, tau, sigma, rate);
         double european_gamma = eep_.european_gamma(spot, strike, tau, sigma, rate);
-
-        if (raw <= 0.0) return european_gamma;
 
         auto leaf_gamma = leaf_.gamma(params);
         if (!leaf_gamma.has_value()) return std::unexpected(leaf_gamma.error());

@@ -217,7 +217,7 @@ P_American = (K/K_ref) · EEP_interp(x, τ, σ, r) + P_European(S, K, τ, σ, r,
 
 Greeks follow the same decomposition: each Greek is the sum of the interpolated EEP Greek (computed via chain rule through the coordinate transform) and the closed-form European Greek. Gamma uses analytical B-spline second derivatives (not FD), giving O(h^2) accuracy. For Chebyshev surfaces, gamma falls back to central FD.
 
-The `PriceTable` exposes `delta()`, `gamma()`, `theta()`, and `rho()` alongside `price()` and `vega()`. All Greek methods return `std::expected<double, GreekError>`. An early-exit optimization in `EEPLayer` returns the European Greek directly when the EEP is zero (deep OTM), skipping interpolation derivatives.
+The `PriceTable` exposes `delta()`, `gamma()`, `theta()`, and `rho()` alongside `price()` and `vega()`. All Greek methods return `std::expected<double, GreekError>`. Deep OTM (zero EEP), the leaf's Greek short-circuits to exactly zero before any interpolation derivatives — the leaf evaluates the raw EEP once and returns `0.0` when it is non-positive — so `EEPLayer`'s sum degenerates to the analytical European Greek at the cost of a single interpolant evaluation.
 
 **For the full template composition architecture, see [INTERPOLATION_FRAMEWORK.md](INTERPOLATION_FRAMEWORK.md).**
 
