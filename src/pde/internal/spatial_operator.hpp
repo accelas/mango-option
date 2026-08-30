@@ -240,4 +240,17 @@ private:
     PDEWorkspace* workspace_;  // Non-owning; workspace outlives operator
 };
 
+/// Concept to detect spatial operators exposing analytic ghost-eliminated
+/// Neumann boundary rows (SpatialOperator::eval_boundary_row(),
+/// boundary_row_jacobian(), boundary_row_affine() above). PDESolver uses
+/// this to select the analytic boundary path, with a static_assert
+/// diagnostic when a Neumann BC is paired with an operator that lacks it.
+template<typename Op>
+concept HasBoundaryRows = requires(const Op op, double t, bc::BoundarySide s,
+                                   double g, std::span<const double> u) {
+    { op.eval_boundary_row(t, s, g, u) } -> std::convertible_to<double>;
+    { op.boundary_row_jacobian(t, s) };
+    { op.boundary_row_affine(t, s, g) } -> std::convertible_to<double>;
+};
+
 } // namespace mango::operators

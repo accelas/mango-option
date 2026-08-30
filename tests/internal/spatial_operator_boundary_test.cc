@@ -242,5 +242,19 @@ TEST(BoundaryRow, LaplacianSatisfiesConcept) {
     EXPECT_NEAR(right_actual, right_expected, 1e-12);
 }
 
+// ===========================================================================
+// TEST 6: HasBoundaryRows concept — SpatialOperator over PDEs satisfying
+//         HasJacobianCoefficients satisfies it; unrelated types don't.
+// ===========================================================================
+TEST(BoundaryRow, HasBoundaryRowsConceptStaticAsserts) {
+    static_assert(HasBoundaryRows<SpatialOperator<BlackScholesPDE<double>, double>>,
+                  "SpatialOperator<BlackScholesPDE<double>> must satisfy HasBoundaryRows");
+    static_assert(HasBoundaryRows<SpatialOperator<LaplacianPDE<double>, double>>,
+                  "SpatialOperator<LaplacianPDE<double>> must satisfy HasBoundaryRows");
+    static_assert(!HasBoundaryRows<int>,
+                  "A type without boundary-row methods must not satisfy HasBoundaryRows");
+    SUCCEED();
+}
+
 } // namespace
 } // namespace mango::operators
