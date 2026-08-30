@@ -119,7 +119,8 @@ public:
         std::vector<MultiSinhCluster<T>> clusters,
         bool auto_merge = true) {
 
-        if (n_points < 2) {
+        // Grid needs >= 3 points (3-point stencil).
+        if (n_points < 3) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::InvalidGridSize,
                 static_cast<double>(n_points)));

@@ -782,8 +782,12 @@ private:
             if (first_candidate < n_ - 1) {
                 // L(ψ): newton_u_old is free here — it is only used by the
                 // Newton path (solve_implicit_stage), never by this projected
-                // path. Boundary entries of L(ψ) are zeroed by
-                // apply_spatial_operator; the loop below is interior-only.
+                // path. The loop below only reads lpsi[first_candidate..n-2],
+                // an interior-only range by construction (first_candidate is
+                // found by a scan over [1, n-2]), so whatever
+                // apply_spatial_operator() writes at the boundary entries
+                // (Dirichlet zero or the real Neumann L value) is never
+                // touched here.
                 auto lpsi = workspace_.newton_u_old();
                 apply_spatial_operator(t, psi, lpsi);
 
