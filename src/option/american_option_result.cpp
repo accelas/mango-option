@@ -97,6 +97,13 @@ double AmericanOptionResult::theta() const {
     // Theta = ∂V/∂t via backward finite difference
     // solution() = V at τ=0 (current), solution_prev() = V at τ=dt
     // θ ≈ (V_prev - V_current) / dt  (negative for time decay)
+    //
+    // The divisor is the *actual* final time step: solution_prev is exactly
+    // one step behind solution, and on non-uniform time grids (discrete
+    // dividends) that step differs from the average TimeDomain::dt().
+    // Assumes the final step is a plain TR-BDF2 step (n_steps >= 2; with
+    // n_steps == 1 the Rannacher startup leaves solution_prev at the
+    // half-step midpoint — a pre-existing, unreachable-by-production edge).
 
     double x_spot = std::log(params_.spot / params_.strike);
 
@@ -108,7 +115,8 @@ double AmericanOptionResult::theta() const {
     build_spline(prev_spline, grid_->solution_prev());
     double v_prev = prev_spline.eval(x_spot);
 
-    double dt = grid_->dt();
+    const auto& time = grid_->time();
+    double dt = time.dt_at(time.n_steps() - 1);
     double theta_normalized = (v_prev - v_current) / dt;
 
     return theta_normalized * params_.strike;

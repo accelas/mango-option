@@ -511,4 +511,98 @@ TEST_F(AmericanOptionResultTest, GammaNearRightEdgeMatchesAnalyticReference) {
         << "gamma mid-interval blend must not include unwritten stencil zeros";
 }
 
+// Regression: theta() divided by the average dt, not the actual final step
+// Bug: Grid::dt() forwards TimeDomain::dt(), which is only an average for
+// non-uniform time grids (the discrete-dividend case). solution_prev is one
+// *actual* final step away, so theta was scaled by dt_avg / dt_last.
+TEST(AmericanOptionResultNonUniformTimeTest, ThetaUsesActualFinalStep) {
+    auto grid_spec = GridSpec<double>::uniform(-1.0, 1.0, 21);
+    ASSERT_TRUE(grid_spec.has_value());
+
+    // Segments: [0, 0.95] -> 10 steps of 0.095; [0.95, 1.0] -> 1 step of 0.05.
+    auto time_domain =
+        TimeDomain::with_mandatory_points(0.0, 1.0, 0.1, {0.95});
+    const size_t n_steps = time_domain.n_steps();
+    const double dt_last = time_domain.dt_at(n_steps - 1);
+    // Precondition: grid actually non-uniform (guard against vacuous pass)
+    ASSERT_GT(std::abs(dt_last - time_domain.dt()), 1e-3);
+
+    auto grid_result = Grid<double>::create(*grid_spec, time_domain);
+    ASSERT_TRUE(grid_result.has_value());
+    auto grid = grid_result.value();
+
+    auto solution = grid->solution();
+    auto solution_prev = grid->solution_prev();
+    for (size_t i = 0; i < grid->n_space(); ++i) {
+        solution[i] = 1.0;
+        solution_prev[i] = 1.5;
+    }
+
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.20);
+    AmericanOptionResult result(grid, params);
+
+    // theta = (1.5 - 1.0) / dt_last * K. Under the bug the divisor is the
+    // average dt() ≈ 0.0909, giving ~550 instead of 1000.
+    EXPECT_NEAR(result.theta(), 0.5 / dt_last * params.strike, 1e-9);
+}
+
+// Regression: discrete-dividend theta was off by dt_avg/dt_last vs a
+// calendar-time finite difference
+// Bug: same divisor bug, observed end-to-end. The FD reference advances the
+// valuation date: maturity T-h AND every dividend calendar_time reduced by h
+// (dividends anchor to the valuation date; the solver places the jump at
+// tau = maturity - calendar_time, so this keeps the event's tau fixed).
+TEST(AmericanOptionResultNonUniformTimeTest,
+     ThetaMatchesCalendarBumpWithDiscreteDividend) {
+    auto grid_spec = GridSpec<double>::uniform(-2.0, 2.0, 201);
+    ASSERT_TRUE(grid_spec.has_value());
+
+    // Dividend at calendar 0.043 -> tau event at 0.957. n_time = 11 makes
+    // the final segment [0.957, 1.0] one step of 0.043 vs average ~0.083.
+    const double div_time = 0.043;
+    const double tau_div = 1.0 - div_time;
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        0.20,
+        {Dividend{.calendar_time = div_time, .amount = 1.50}});
+    PDEGridConfig grid_config{.grid_spec = *grid_spec, .n_time = 11,
+                              .mandatory_times = {tau_div}};
+
+    auto solver = AmericanOptionSolver::create(params, PDEGridSpec{grid_config});
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+
+    // Precondition: final step differs measurably from the average
+    const auto& time = result->grid()->time();
+    ASSERT_GT(std::abs(time.dt_at(time.n_steps() - 1) - time.dt()), 1e-2);
+
+    // Calendar bump: shorten maturity AND shift the dividend
+    const double h = 0.02;
+    PricingParams bumped = params;
+    bumped.maturity -= h;
+    bumped.discrete_dividends[0].calendar_time -= h;
+    PDEGridConfig bumped_config{.grid_spec = *grid_spec, .n_time = 11,
+                                .mandatory_times = {tau_div}};
+    auto bumped_solver =
+        AmericanOptionSolver::create(bumped, PDEGridSpec{bumped_config});
+    ASSERT_TRUE(bumped_solver.has_value());
+    auto bumped_result = bumped_solver->solve();
+    ASSERT_TRUE(bumped_result.has_value());
+
+    const double theta_fd =
+        (bumped_result->value() - result->value()) / h;
+
+    // Bug error is ~50% (dt_avg/dt_last ≈ 1.9); 20% tolerance separates it
+    // while absorbing FD truncation + coarse-grid noise.
+    EXPECT_NEAR(result->theta(), theta_fd, std::abs(theta_fd) * 0.20)
+        << "theta must match the calendar-time FD reference";
+}
+
 } // namespace
