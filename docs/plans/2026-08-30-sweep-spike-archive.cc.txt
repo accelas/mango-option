@@ -1,0 +1,273 @@
+// SPDX-License-Identifier: MIT
+// SPIKE (throwaway): verify Brennan-Schwartz sweep orientation claims.
+//
+// Part 1: brute-force LCP reference on small tridiagonal M-matrices —
+//         which sweep is exact for left- vs right-interval active sets?
+// Part 2: A/B price American puts and dividend-paying calls with the
+//         current vs mirrored sweep against a high-resolution QuantLib
+//         reference. The env var MANGO_MIRRORED_SWEEP selects the sweep
+//         inside solve_implicit_stage_projected.
+
+#include <gtest/gtest.h>
+#include <cstdlib>
+#include <cstdio>
+#include <cmath>
+#include <vector>
+#include <span>
+#include <string>
+
+#include "mango/math/thomas_solver.hpp"
+#include "mango/option/american_option.hpp"
+
+#include <ql/quantlib.hpp>
+
+namespace ql = QuantLib;
+using namespace mango;
+
+// ---------------------------------------------------------------------------
+// Part 1 helpers: dense LCP reference by active-set enumeration
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Solve dense linear system via Gaussian elimination with partial pivoting.
+bool dense_solve(std::vector<std::vector<double>> A, std::vector<double> b,
+                 std::vector<double>& x) {
+    const size_t n = b.size();
+    for (size_t col = 0; col < n; ++col) {
+        size_t piv = col;
+        for (size_t r = col + 1; r < n; ++r)
+            if (std::abs(A[r][col]) > std::abs(A[piv][col])) piv = r;
+        if (std::abs(A[piv][col]) < 1e-14) return false;
+        std::swap(A[piv], A[col]);
+        std::swap(b[piv], b[col]);
+        for (size_t r = col + 1; r < n; ++r) {
+            double f = A[r][col] / A[col][col];
+            for (size_t c = col; c < n; ++c) A[r][c] -= f * A[col][c];
+            b[r] -= f * b[col];
+        }
+    }
+    x.assign(n, 0.0);
+    for (size_t i = n; i-- > 0;) {
+        double s = b[i];
+        for (size_t c = i + 1; c < n; ++c) s -= A[i][c] * x[c];
+        x[i] = s / A[i][i];
+    }
+    return true;
+}
+
+// Exact LCP solution: A x >= d, x >= psi, complementary; found by
+// enumerating all 2^n active sets (n small). Unique for M-matrices.
+bool lcp_reference(const std::vector<double>& lower,
+                   const std::vector<double>& diag,
+                   const std::vector<double>& upper,
+                   const std::vector<double>& rhs,
+                   const std::vector<double>& psi,
+                   std::vector<double>& x_out) {
+    const size_t n = diag.size();
+    auto Arow = [&](size_t i, size_t j) -> double {
+        if (i == j) return diag[i];
+        if (j + 1 == i) return lower[j];
+        if (j == i + 1) return upper[i];
+        return 0.0;
+    };
+    for (unsigned mask = 0; mask < (1u << n); ++mask) {
+        // Active set S: x_i = psi_i for i in S; solve A x = rhs on complement.
+        std::vector<std::vector<double>> A(n, std::vector<double>(n, 0.0));
+        std::vector<double> b(n, 0.0);
+        for (size_t i = 0; i < n; ++i) {
+            if (mask & (1u << i)) {
+                A[i][i] = 1.0;
+                b[i] = psi[i];
+            } else {
+                for (size_t j = 0; j < n; ++j) A[i][j] = Arow(i, j);
+                b[i] = rhs[i];
+            }
+        }
+        std::vector<double> x;
+        if (!dense_solve(A, b, x)) continue;
+        bool ok = true;
+        for (size_t i = 0; i < n && ok; ++i) {
+            double Ax = 0.0;
+            for (size_t j = 0; j < n; ++j) Ax += Arow(i, j) * x[j];
+            if (mask & (1u << i)) {
+                if (Ax < rhs[i] - 1e-9) ok = false;  // dual feasibility
+            } else {
+                if (x[i] < psi[i] - 1e-9) ok = false;  // primal feasibility
+            }
+        }
+        if (ok) {
+            x_out = x;
+            return true;
+        }
+    }
+    return false;
+}
+
+struct SweepErrors {
+    double current;
+    double mirrored;
+};
+
+SweepErrors run_lcp_case(const std::vector<double>& lower,
+                         const std::vector<double>& diag,
+                         const std::vector<double>& upper,
+                         const std::vector<double>& rhs,
+                         const std::vector<double>& psi) {
+    const size_t n = diag.size();
+    std::vector<double> ref;
+    EXPECT_TRUE(lcp_reference(lower, diag, upper, rhs, psi, ref));
+    std::vector<double> x(n), ws(2 * n);
+    auto linf = [&](const std::vector<double>& a) {
+        double m = 0.0;
+        for (size_t i = 0; i < n; ++i) m = std::max(m, std::abs(a[i] - ref[i]));
+        return m;
+    };
+    auto r1 = solve_thomas_projected<double>(
+        std::span<const double>(lower), std::span<const double>(diag),
+        std::span<const double>(upper), std::span<const double>(rhs),
+        std::span<const double>(psi), std::span<double>(x),
+        std::span<double>(ws));
+    EXPECT_TRUE(r1.ok());
+    double e_cur = linf(x);
+    auto r2 = solve_thomas_projected_mirrored<double>(
+        std::span<const double>(lower), std::span<const double>(diag),
+        std::span<const double>(upper), std::span<const double>(rhs),
+        std::span<const double>(psi), std::span<double>(x),
+        std::span<double>(ws));
+    EXPECT_TRUE(r2.ok());
+    double e_mir = linf(x);
+    return {e_cur, e_mir};
+}
+
+}  // namespace
+
+// Discrete obstacle problem shaped like an implicit put/call step:
+// A = I - w*L (M-matrix), obstacle = payoff, rhs mid-way between.
+TEST(SweepSpike, LcpOrientationSweep) {
+    const size_t n = 12;
+    const double w = 5.0;  // strong coupling so the defect is visible
+    std::vector<double> lower(n - 1, -w), upper(n - 1, -w),
+        diag(n, 1.0 + 2.0 * w);
+    std::vector<double> psi_left(n), psi_right(n), rhs(n);
+    // Left-interval active set: decreasing obstacle (put-like).
+    // Right-interval active set: increasing obstacle (call-like).
+    for (size_t i = 0; i < n; ++i) {
+        double xi = double(i) / double(n - 1);
+        psi_left[i] = std::max(0.5 - xi, 0.0);
+        psi_right[i] = std::max(xi - 0.5, 0.0);
+        rhs[i] = 0.02;  // small uniform source; unconstrained solution flat-ish
+    }
+    auto el = run_lcp_case(lower, diag, upper, rhs, psi_left);
+    auto er = run_lcp_case(lower, diag, upper, rhs, psi_right);
+    printf("SPIKE-LCP left-active : current=%.3e mirrored=%.3e\n", el.current,
+           el.mirrored);
+    printf("SPIKE-LCP right-active: current=%.3e mirrored=%.3e\n", er.current,
+           er.mirrored);
+    // Claims under test: mirrored exact for left-interval, current exact for
+    // right-interval.
+    EXPECT_LT(el.mirrored, 1e-10);
+    EXPECT_LT(er.current, 1e-10);
+}
+
+// ---------------------------------------------------------------------------
+// Part 2: A/B pricing vs high-resolution QuantLib
+// ---------------------------------------------------------------------------
+
+namespace {
+
+double ql_american(double spot, double strike, double maturity, double vol,
+                   double rate, double q, bool is_call) {
+    ql::Date today = ql::Date::todaysDate();
+    ql::Settings::instance().evaluationDate() = today;
+    ql::Option::Type type = is_call ? ql::Option::Call : ql::Option::Put;
+    ql::Date mat = today + ql::Period(int(maturity * 365), ql::Days);
+    auto exercise = ql::ext::make_shared<ql::AmericanExercise>(today, mat);
+    auto payoff = ql::ext::make_shared<ql::PlainVanillaPayoff>(type, strike);
+    ql::VanillaOption opt(payoff, exercise);
+    ql::Handle<ql::Quote> s(ql::ext::make_shared<ql::SimpleQuote>(spot));
+    ql::Handle<ql::YieldTermStructure> r_ts(
+        ql::ext::make_shared<ql::FlatForward>(today, rate,
+                                              ql::Actual365Fixed()));
+    ql::Handle<ql::YieldTermStructure> q_ts(
+        ql::ext::make_shared<ql::FlatForward>(today, q,
+                                              ql::Actual365Fixed()));
+    ql::Handle<ql::BlackVolTermStructure> v_ts(
+        ql::ext::make_shared<ql::BlackConstantVol>(today, ql::NullCalendar(),
+                                                   vol,
+                                                   ql::Actual365Fixed()));
+    auto proc = ql::ext::make_shared<ql::BlackScholesMertonProcess>(s, q_ts,
+                                                                    r_ts, v_ts);
+    // High-resolution reference: 4x the framework default.
+    opt.setPricingEngine(ql::ext::make_shared<ql::FdBlackScholesVanillaEngine>(
+        proc, 8000, 801));
+    return opt.NPV();
+}
+
+double mango_price(double spot, double strike, double maturity, double vol,
+                   double rate, double q, bool is_call, bool mirrored) {
+    if (mirrored)
+        setenv("MANGO_MIRRORED_SWEEP", "1", 1);
+    else
+        unsetenv("MANGO_MIRRORED_SWEEP");
+    PricingParams params(
+        OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+                   .rate = rate, .dividend_yield = q,
+                   .option_type = is_call ? OptionType::CALL : OptionType::PUT},
+        vol);
+    auto solver = AmericanOptionSolver::create(params).value();
+    auto res = solver.solve();
+    EXPECT_TRUE(res.has_value());
+    return res->value_at(spot);
+}
+
+struct Scenario {
+    const char* name;
+    double spot, strike, maturity, vol, rate, q;
+    bool is_call;
+};
+
+void run_ab(const std::vector<Scenario>& scenarios) {
+    printf(
+        "%-28s %12s %12s %12s %10s %10s %12s\n", "scenario", "quantlib",
+        "current", "mirrored", "err_cur", "err_mir", "cur-mir");
+    for (const auto& sc : scenarios) {
+        double ref = ql_american(sc.spot, sc.strike, sc.maturity, sc.vol,
+                                 sc.rate, sc.q, sc.is_call);
+        double pc = mango_price(sc.spot, sc.strike, sc.maturity, sc.vol,
+                                sc.rate, sc.q, sc.is_call, false);
+        double pm = mango_price(sc.spot, sc.strike, sc.maturity, sc.vol,
+                                sc.rate, sc.q, sc.is_call, true);
+        printf("%-28s %12.6f %12.6f %12.6f %10.6f %10.6f %12.3e\n", sc.name,
+               ref, pc, pm, pc - ref, pm - ref, pc - pm);
+    }
+}
+
+}  // namespace
+
+TEST(SweepSpike, PutsCurrentVsMirrored) {
+    std::vector<Scenario> scenarios = {
+        {"put ATM r5 T1", 100, 100, 1.0, 0.20, 0.05, 0.0, false},
+        {"put ITM S90 r5 T1", 90, 100, 1.0, 0.20, 0.05, 0.0, false},
+        {"put ITM S80 r5 T1", 80, 100, 1.0, 0.20, 0.05, 0.0, false},
+        {"put deepITM S70 r5 T1", 70, 100, 1.0, 0.20, 0.05, 0.0, false},
+        {"put nearFB S85 r8 T1", 85, 100, 1.0, 0.20, 0.08, 0.0, false},
+        {"put OTM S110 r5 T0.25", 110, 100, 0.25, 0.30, 0.05, 0.0, false},
+        {"put ITM S90 r5 T2 v25", 90, 100, 2.0, 0.25, 0.05, 0.0, false},
+        {"put ATM r5 q2 T1", 100, 100, 1.0, 0.20, 0.05, 0.02, false},
+        {"put lowvol S95 r5 T0.5", 95, 100, 0.5, 0.10, 0.05, 0.0, false},
+    };
+    run_ab(scenarios);
+}
+
+TEST(SweepSpike, DividendCallsCurrentVsMirrored) {
+    std::vector<Scenario> scenarios = {
+        {"call ATM q8 r5 T1", 100, 100, 1.0, 0.20, 0.05, 0.08, true},
+        {"call ITM S120 q8 r5 T1", 120, 100, 1.0, 0.20, 0.05, 0.08, true},
+        {"call ITM S150 q8 r5 T1", 150, 100, 1.0, 0.20, 0.05, 0.08, true},
+        {"call nearFB S130 q8 r5", 130, 100, 1.0, 0.20, 0.05, 0.08, true},
+        {"call ITM S120 q4 r2 T2", 120, 100, 2.0, 0.25, 0.02, 0.04, true},
+        {"call lowv S115 q8 r5 T.5", 115, 100, 0.5, 0.10, 0.05, 0.08, true},
+    };
+    run_ab(scenarios);
+}
