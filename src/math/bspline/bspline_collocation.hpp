@@ -10,9 +10,10 @@
  *
  * The banded structure (4-diagonal for cubic B-splines) is exploited
  * via a pluggable banded solver backend for O(n) complexity instead of
- * O(n³). The backend (default: LAPACK) owns the factor storage layout,
- * the pivot representation, and every call into the underlying
- * linear-algebra library — this header contains no LAPACK calls.
+ * O(n³). The backend (DefaultBandedBackend unless overridden) owns the
+ * factor storage layout, the pivot representation, and every call into
+ * the underlying linear-algebra library — this header names no concrete
+ * backend and makes no library calls of its own.
  *
  * This is a generic 1D solver used as a building block for separable
  * multi-dimensional tensor-product B-spline fitting.
@@ -27,7 +28,7 @@
 #pragma once
 
 #include "mango/math/banded_solver_backend.hpp"
-#include "mango/math/lapack_banded_backend.hpp"
+#include "mango/math/default_banded_backend.hpp"
 #include "mango/math/bspline/bspline_basis.hpp"
 #include "mango/math/bspline/bspline_collocation_workspace.hpp"
 #include "mango/support/error_types.hpp"
@@ -67,7 +68,7 @@ struct BSplineCollocationConfig {
 /// `Backend::factor_storage_size(n, bandwidth)` factor values and `pivots`
 /// holds `Backend::pivot_storage_size(n, bandwidth)` pivots in the
 /// backend's own pivot type.
-template<std::floating_point T, typename Backend = LapackBandedBackend>
+template<std::floating_point T, typename Backend = DefaultBandedBackend>
     requires BandedSolverBackend<Backend, T>
 struct BSplineCollocationFactorization {
     std::vector<T> lu;                                 ///< Backend factor storage
@@ -89,13 +90,15 @@ struct BSplineCollocationFactorization {
 /// Time:  O(n) for factorization and solve
 /// Space: O(n) for banded storage
 ///
-/// @tparam T Floating point type the Backend must support (double for
-///     LapackBandedBackend — the requires clause rejects other types)
+/// @tparam T Floating point type the Backend must support (the requires
+///     clause rejects any T the chosen backend cannot serve)
 /// @tparam Bandwidth Reserved; must be 4 (cubic) until basis evaluation is
 ///     generalized
-/// @tparam Backend Banded solver backend policy (default: LAPACK)
+/// @tparam Backend Banded solver backend policy satisfying
+///     BandedSolverBackend (default: DefaultBandedBackend, selected in
+///     default_banded_backend.hpp)
 template<std::floating_point T, std::size_t Bandwidth = 4,
-         typename Backend = LapackBandedBackend>
+         typename Backend = DefaultBandedBackend>
     requires BandedSolverBackend<Backend, T>
 class BSplineCollocation1D {
 public:
@@ -339,9 +342,9 @@ public:
     /// Uses BSplineCollocationWorkspace for all temporary storage.
     /// Coefficients are written to ws.coeffs().
     ///
-    /// Only available with the LAPACK backend: the workspace's byte
-    /// layout (LDAB band storage, lapack_int pivot region) is a contract
-    /// with LAPACK's banded format.
+    /// Only available when Backend matches the workspace's declared
+    /// backend_type: the workspace's byte layout is a contract with that
+    /// backend's factor format, so any other backend cannot consume it.
     ///
     /// @param values Function values at grid points (size n_)
     /// @param ws Pre-allocated workspace (must have size() == n_)
@@ -352,7 +355,9 @@ public:
         std::span<const T> values,
         BSplineCollocationWorkspace<T, BANDWIDTH>& ws,
         const BSplineCollocationConfig<T>& config = {}) const
-        requires std::same_as<Backend, LapackBandedBackend>
+        requires std::same_as<
+            Backend,
+            typename BSplineCollocationWorkspace<T, BANDWIDTH>::backend_type>
     {
         if (values.size() != n_) {
             return std::unexpected(InterpolationError{
@@ -380,13 +385,13 @@ public:
         // Build collocation matrix into workspace band_storage
         build_collocation_matrix_to_workspace(ws);
 
-        // Copy band_storage to lapack_storage (factorization is in-place)
+        // Copy band_storage to factor_storage (factorization is in-place)
         auto band_storage = ws.band_storage();
-        auto lapack_storage = ws.lapack_storage();
-        std::copy(band_storage.begin(), band_storage.end(), lapack_storage.begin());
+        auto factor_storage = ws.factor_storage();
+        std::copy(band_storage.begin(), band_storage.end(), factor_storage.begin());
 
-        // Factorize using workspace lapack_storage and pivots
-        if (!Backend::factorize(lapack_storage, ws.pivots(), n_, BANDWIDTH).ok()) {
+        // Factorize using workspace factor_storage and pivots
+        if (!Backend::factorize(factor_storage, ws.pivots(), n_, BANDWIDTH).ok()) {
             return std::unexpected(InterpolationError{
                 InterpolationErrorCode::FittingFailed, n_});
         }
@@ -394,7 +399,7 @@ public:
         // Solve into ws.coeffs() (in-place on a copy of the RHS)
         auto coeffs = ws.coeffs();
         std::copy(values.begin(), values.end(), coeffs.begin());
-        if (!Backend::solve(lapack_storage, ws.pivots(), coeffs, n_, BANDWIDTH).ok()) {
+        if (!Backend::solve(factor_storage, ws.pivots(), coeffs, n_, BANDWIDTH).ok()) {
             return std::unexpected(InterpolationError{
                 InterpolationErrorCode::FittingFailed, n_});
         }
@@ -411,7 +416,7 @@ public:
         // Estimate condition number
         const T norm_A = compute_matrix_norm1();
         const T cond_est = Backend::condition(
-            lapack_storage, ws.pivots(), norm_A, n_, BANDWIDTH);
+            factor_storage, ws.pivots(), norm_A, n_, BANDWIDTH);
 
         return BSplineCollocationResult<T>{
             .coefficients = {},  // Caller uses ws.coeffs()
@@ -668,7 +673,7 @@ private:
     /// Build collocation matrix into workspace band storage
     ///
     /// Packs the internal band representation into the workspace's
-    /// LAPACK-banded band_storage via the backend.
+    /// backend-format band_storage via the backend.
     void build_collocation_matrix_to_workspace(BSplineCollocationWorkspace<T, BANDWIDTH>& ws) const {
         Backend::pack(std::span<const T>{band_values_},
                       std::span<const int>{band_col_start_},

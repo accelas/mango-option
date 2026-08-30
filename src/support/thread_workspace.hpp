@@ -42,7 +42,7 @@ namespace mango {
 /// - from_bytes() starts object lifetimes via start_array_lifetime()
 /// - Workspace is created ONCE per thread, NOT per iteration
 /// - Solver methods overwrite workspace arrays each iteration
-/// - For B-spline fitting: band_storage, lapack_storage, pivots, coeffs
+/// - For B-spline fitting: band_storage, factor_storage, pivots, coeffs
 ///   are all written fresh each fit - no stale state accumulates
 ///
 class ThreadWorkspaceBuffer {
