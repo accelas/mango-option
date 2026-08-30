@@ -1,4 +1,10 @@
 # SPDX-License-Identifier: MIT
+
+# Shared LCP enumeration/reference-solve test helpers (Task 1 + Task 9,
+# issues #439/#455): used by thomas_solver_lcp_test here and by
+# //tests/internal:pde_neumann_test.
+exports_files(["lcp_test_util.hpp"])
+
 cc_test(
     name = "black_scholes_analytics_test",
     size = "small",
@@ -460,9 +466,10 @@ cc_test(
 
 cc_test(
     name = "thomas_solver_lcp_test",
-    srcs = ["thomas_solver_lcp_test.cc"],
+    srcs = ["thomas_solver_lcp_test.cc", "lcp_test_util.hpp"],
     deps = [
         "//src/math:thomas_solver",
+        "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
     copts = [

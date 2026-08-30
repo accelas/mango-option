@@ -118,6 +118,27 @@ cc_test(
 )
 
 cc_test(
+    name = "pde_neumann_test",
+    srcs = ["pde_neumann_test.cc", "//tests:lcp_test_util.hpp"],
+    deps = [
+        "//src/pde/internal:workspace",
+        "//src/pde/core:grid",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/core:time_domain",
+        "//src/pde/core:trbdf2_config",
+        "//src/pde/operators:laplacian_pde",
+        "//src/math:thomas_solver",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-fopenmp-simd",
+    ],
+)
+
+cc_test(
     name = "obstacle_test",
     size = "small",
     srcs = ["obstacle_test.cc"],
