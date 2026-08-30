@@ -56,7 +56,10 @@ cc_library(
         "-Wextra",
         "-Werror",
         "-O3",
-        "-march=native",
+        # v3, not native: CI shares the Bazel cache across heterogeneous runners and
+        # native objects SIGILL on ISA mismatch; not plain x86-64: hot paths here
+        # lack target_clones and the SSE2 baseline times out CI (iv_solver_factory).
+        "-march=x86-64-v3",
         "-fopenmp-simd",
         "-ftree-vectorize",
     ],
@@ -103,7 +106,10 @@ cc_library(
         "-Wextra",
         "-Werror",
         "-O3",
-        "-march=native",
+        # v3, not native: CI shares the Bazel cache across heterogeneous runners and
+        # native objects SIGILL on ISA mismatch; not plain x86-64: hot paths here
+        # lack target_clones and the SSE2 baseline times out CI (iv_solver_factory).
+        "-march=x86-64-v3",
         "-fopenmp",
     ],
     linkopts = ["-fopenmp"],
@@ -166,7 +172,10 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
-        "-march=native",
+        # v3, not native: CI shares the Bazel cache across heterogeneous runners and
+        # native objects SIGILL on ISA mismatch; not plain x86-64: hot paths here
+        # lack target_clones and the SSE2 baseline times out CI (iv_solver_factory).
+        "-march=x86-64-v3",
         "-fopenmp",
     ],
     linkopts = ["-fopenmp"],
@@ -227,7 +236,10 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
-        "-march=native",
+        # v3, not native: CI shares the Bazel cache across heterogeneous runners and
+        # native objects SIGILL on ISA mismatch; not plain x86-64: hot paths here
+        # lack target_clones and the SSE2 baseline times out CI (iv_solver_factory).
+        "-march=x86-64-v3",
         "-fopenmp",
     ],
     linkopts = [
