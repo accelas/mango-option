@@ -1146,15 +1146,46 @@ cc_test(
     ],
 )
 
+# Fast logic/unit tests for the adaptive grid builder: refinement-loop
+# decisions, segmentation, caching, error binning.  No real PDE builds —
+# those live in :adaptive_surface_build_integration_test.  This target is
+# the one ci.yml re-runs under -c dbg for assertion coverage, so keep it
+# free of PDE-solve-driven tests.
 cc_test(
     name = "adaptive_grid_builder_test",
-    size = "large",
-    timeout = "long",
-    # The suite runs ~10 min under -c dbg on CI (see ci.yml's dedicated dbg
-    # step) and grew past the 900s budget with the adaptive-safety work;
-    # sharding gives each shard its own timeout and parallelism.
-    shard_count = 4,
+    size = "medium",
     srcs = ["adaptive_grid_builder_test.cc"],
+    deps = [
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_metrics",
+        "//src/option/table:adaptive_refinement",
+        "//src/option/table:tau_segment_split",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/option/table/bspline:bspline_pde_cache",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/option:american_option_batch",
+        "//src/option:interpolated_iv_solver",
+        "//src/option:option_grid",
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Heavy end-to-end adaptive builds (real PDE solves through the full
+# refinement loop), split out of :adaptive_grid_builder_test so the CI dbg
+# assertion pass stays fast.  Runs in the regular opt test suite; each case
+# takes seconds-to-minutes, so shards carry their own timeouts.
+cc_test(
+    name = "adaptive_surface_build_integration_test",
+    size = "enormous",
+    timeout = "long",
+    shard_count = 6,
+    srcs = ["adaptive_surface_build_integration_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:adaptive_metrics",
