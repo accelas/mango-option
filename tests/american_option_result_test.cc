@@ -449,4 +449,160 @@ TEST(AmericanOptionResultConcurrencyTest, ConcurrentFirstAccessMatchesSerial) {
     }
 }
 
+// ===========================================================================
+// Regression tests for bugs found during code review (issue #438)
+// ===========================================================================
+
+// Regression: gamma() never computed interior node n-2
+// Bug: CenteredDifference ranges are exclusive-end ([start, end)); gamma()
+// passed end = n-2, so d2v_dx2[n-2]/dv_dx[n-2] stayed 0.0 and any query
+// interpolating against node n-2 blended with a spurious zero.
+TEST_F(AmericanOptionResultTest, GammaAtLastInteriorNodeUsesComputedStencil) {
+    // Synthetic smooth solution V/K = x^2: d2V/dx2 = 2 (exact under central
+    // differences), dV/dx = 2x (exact on a uniform grid).
+    auto x_span = grid->x();
+    auto solution = grid->solution();
+    for (size_t i = 0; i < x_span.size(); ++i) {
+        solution[i] = x_span[i] * x_span[i];
+    }
+
+    const size_t n = x_span.size();
+    const double x_target = x_span[n - 2];  // last interior node
+    PricingParams p = params;
+    p.spot = p.strike * std::exp(x_target);  // spot exactly on node n-2
+
+    AmericanOptionResult result(grid, p);
+    const double gamma = result.gamma();
+
+    // gamma = (K/S^2) * (d2V/dx2 - dV/dx) = (K/S^2) * (2 - 2*x_target)
+    const double S = p.spot;
+    const double expected = p.strike / (S * S) * (2.0 - 2.0 * x_target);
+    // Under the bug both stencil values at n-2 are the unwritten 0.0, so
+    // gamma is exactly 0.
+    EXPECT_NEAR(gamma, expected, std::abs(expected) * 0.05)
+        << "gamma at node n-2 must use computed stencil values";
+}
+
+// Regression: gamma interpolation in (x[n-3], x[n-2]) blended a zero
+// Bug: with i_right = n-2 unwritten, the linear blend pulled gamma toward 0
+// by alpha * 100%.
+TEST_F(AmericanOptionResultTest, GammaNearRightEdgeMatchesAnalyticReference) {
+    auto x_span = grid->x();
+    auto solution = grid->solution();
+    for (size_t i = 0; i < x_span.size(); ++i) {
+        solution[i] = x_span[i] * x_span[i];
+    }
+
+    const size_t n = x_span.size();
+    const double x_mid = 0.5 * (x_span[n - 3] + x_span[n - 2]);
+    PricingParams p = params;
+    p.spot = p.strike * std::exp(x_mid);
+
+    AmericanOptionResult result(grid, p);
+
+    // For V/K = x^2 the stencil values are exact (central differences of a
+    // quadratic), and the linear blend of dV/dx = 2x is exact at x_mid, so
+    // gamma must equal the analytic (K/S^2) * (2 - 2*x_mid).
+    // Under the bug, i_right = n-2 held unwritten zeros and the blend gave
+    // gamma ~33% low.
+    const double S = p.spot;
+    const double expected = p.strike / (S * S) * (2.0 - 2.0 * x_mid);
+    EXPECT_NEAR(result.gamma(), expected, std::abs(expected) * 0.01)
+        << "gamma mid-interval blend must not include unwritten stencil zeros";
+}
+
+// Regression: theta() divided by the average dt, not the actual final step
+// Bug: Grid::dt() forwards TimeDomain::dt(), which is only an average for
+// non-uniform time grids (the discrete-dividend case). solution_prev is one
+// *actual* final step away, so theta was scaled by dt_avg / dt_last.
+TEST(AmericanOptionResultNonUniformTimeTest, ThetaUsesActualFinalStep) {
+    auto grid_spec = GridSpec<double>::uniform(-1.0, 1.0, 21);
+    ASSERT_TRUE(grid_spec.has_value());
+
+    // Segments: [0, 0.95] -> 10 steps of 0.095; [0.95, 1.0] -> 1 step of 0.05.
+    auto time_domain =
+        TimeDomain::with_mandatory_points(0.0, 1.0, 0.1, {0.95});
+    const size_t n_steps = time_domain.n_steps();
+    const double dt_last = time_domain.dt_at(n_steps - 1);
+    // Precondition: grid actually non-uniform (guard against vacuous pass)
+    ASSERT_GT(std::abs(dt_last - time_domain.dt()), 1e-3);
+
+    auto grid_result = Grid<double>::create(*grid_spec, time_domain);
+    ASSERT_TRUE(grid_result.has_value());
+    auto grid = grid_result.value();
+
+    auto solution = grid->solution();
+    auto solution_prev = grid->solution_prev();
+    for (size_t i = 0; i < grid->n_space(); ++i) {
+        solution[i] = 1.0;
+        solution_prev[i] = 1.5;
+    }
+
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.20);
+    AmericanOptionResult result(grid, params);
+
+    // theta = (1.5 - 1.0) / dt_last * K. Under the bug the divisor is the
+    // average dt() ≈ 0.0909, giving ~550 instead of 1000.
+    EXPECT_NEAR(result.theta(), 0.5 / dt_last * params.strike, 1e-3);
+}
+
+// Regression: discrete-dividend theta was off by dt_avg/dt_last vs a
+// calendar-time finite difference
+// Bug: same divisor bug, observed end-to-end. The FD reference advances the
+// valuation date: maturity T-h AND every dividend calendar_time reduced by h
+// (dividends anchor to the valuation date; the solver places the jump at
+// tau = maturity - calendar_time, so this keeps the event's tau fixed).
+TEST(AmericanOptionResultNonUniformTimeTest,
+     ThetaMatchesCalendarBumpWithDiscreteDividend) {
+    auto grid_spec = GridSpec<double>::uniform(-2.0, 2.0, 201);
+    ASSERT_TRUE(grid_spec.has_value());
+
+    // Dividend at calendar 0.043 -> tau event at 0.957. n_time = 11 makes
+    // the final segment [0.957, 1.0] one step of 0.043 vs average ~0.083.
+    const double div_time = 0.043;
+    const double tau_div = 1.0 - div_time;
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        0.20,
+        {Dividend{.calendar_time = div_time, .amount = 1.50}});
+    PDEGridConfig grid_config{.grid_spec = *grid_spec, .n_time = 11,
+                              .mandatory_times = {tau_div}};
+
+    auto solver = AmericanOptionSolver::create(params, PDEGridSpec{grid_config});
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+
+    // Precondition: final step differs measurably from the average
+    const auto& time = result->grid()->time();
+    ASSERT_GT(std::abs(time.dt_at(time.n_steps() - 1) - time.dt()), 1e-2);
+
+    // Calendar bump: shorten maturity AND shift the dividend
+    const double h = 0.02;
+    PricingParams bumped = params;
+    bumped.maturity -= h;
+    bumped.discrete_dividends[0].calendar_time -= h;
+    PDEGridConfig bumped_config{.grid_spec = *grid_spec, .n_time = 11,
+                                .mandatory_times = {tau_div}};
+    auto bumped_solver =
+        AmericanOptionSolver::create(bumped, PDEGridSpec{bumped_config});
+    ASSERT_TRUE(bumped_solver.has_value());
+    auto bumped_result = bumped_solver->solve();
+    ASSERT_TRUE(bumped_result.has_value());
+
+    const double theta_fd =
+        (bumped_result->value() - result->value()) / h;
+
+    // Bug error is ~50% (dt_avg/dt_last ≈ 1.9); 20% tolerance separates it
+    // while absorbing FD truncation + coarse-grid noise.
+    EXPECT_NEAR(result->theta(), theta_fd, std::abs(theta_fd) * 0.20)
+        << "theta must match the calendar-time FD reference";
+}
+
 } // namespace
