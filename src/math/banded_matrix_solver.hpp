@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "mango/math/banded_solver_backend.hpp"
 #include "mango/math/lapack_banded_layout.hpp"
 #include "mango/support/parallel.hpp"
 #include <experimental/mdspan>
@@ -29,34 +30,6 @@
 #include <lapacke.h>
 
 namespace mango {
-
-/// Result type for banded matrix operations
-template<std::floating_point T>
-struct BandedResult {
-    bool success;
-    std::optional<std::string_view> error;
-
-    /// Implicit conversion to bool for easy checking
-    constexpr explicit operator bool() const noexcept { return success; }
-
-    /// Check if operation succeeded
-    [[nodiscard]] constexpr bool ok() const noexcept { return success; }
-
-    /// Get error message (empty if successful)
-    [[nodiscard]] constexpr std::string_view message() const noexcept {
-        return error.value_or("");
-    }
-
-    /// Create success result
-    [[nodiscard]] static constexpr BandedResult ok_result() noexcept {
-        return BandedResult{.success = true, .error = std::nullopt};
-    }
-
-    /// Create error result
-    [[nodiscard]] static constexpr BandedResult error_result(std::string_view msg) noexcept {
-        return BandedResult{.success = false, .error = msg};
-    }
-};
 
 /// Banded matrix with LAPACK-compatible storage
 ///

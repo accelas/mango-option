@@ -71,9 +71,18 @@ cc_library(
 )
 
 cc_library(
+    name = "banded_solver_backend",
+    hdrs = ["banded_solver_backend.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math",
+    include_prefix = "mango/math",
+)
+
+cc_library(
     name = "banded_matrix_solver",
     hdrs = ["banded_matrix_solver.hpp"],
     deps = [
+        ":banded_solver_backend",
         ":lapack_banded_layout",
         "//src/support:parallel",
         "@mdspan//:mdspan",
