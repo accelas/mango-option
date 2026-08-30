@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
+#include "mango/math/banded_matrix_solver.hpp"
 #include "mango/math/bspline/bspline_nd_separable.hpp"
 #include <vector>
 #include <cmath>

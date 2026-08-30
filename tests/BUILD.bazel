@@ -717,6 +717,7 @@ cc_test(
     name = "bspline_banded_solver_test",
     srcs = ["bspline_banded_solver_test.cc"],
     deps = [
+        "//src/math:banded_matrix_solver",
         "//src/math/bspline:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],

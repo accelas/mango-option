@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "mango/math/lapack_banded_backend.hpp"
 #include "mango/math/lapack_banded_layout.hpp"
 #include "mango/support/lifetime.hpp"
 #include <experimental/mdspan>
@@ -12,7 +13,6 @@
 #include <cstddef>
 #include <algorithm>    // for std::max
 #include <type_traits>
-#include <lapacke.h>
 
 namespace mango {
 
@@ -28,13 +28,16 @@ namespace mango {
 /// Required arrays (derived from bandwidth):
 /// - band_storage: LDAB*n elements (LAPACK banded format)
 /// - lapack_storage: LDAB*n elements (LU factorization copy)
-/// - pivots: n lapack_int (pivot indices)
+/// - pivots: n LapackBandedBackend::pivot_type (pivot indices)
 /// - coeffs: n elements (result buffer)
 ///
 /// All storage regions are aligned to 64-byte boundaries for SIMD.
 ///
 template<typename T, size_t Bandwidth = 4>
 struct BSplineCollocationWorkspace {
+    /// Pivot representation matching the LAPACK backend
+    using pivot_type = LapackBandedBackend::pivot_type;
+
     static constexpr size_t ALIGNMENT = 64;  // Cache line / AVX-512
     static constexpr size_t BANDWIDTH = Bandwidth;
     static_assert(Bandwidth > 0,
@@ -54,7 +57,7 @@ struct BSplineCollocationWorkspace {
 
     /// Effective alignment for each block (max of SIMD alignment and type alignment)
     static constexpr size_t block_alignment_T = std::max(ALIGNMENT, alignof(T));
-    static constexpr size_t block_alignment_pivot = std::max(ALIGNMENT, alignof(lapack_int));
+    static constexpr size_t block_alignment_pivot = std::max(ALIGNMENT, alignof(pivot_type));
 
     /// Calculate required buffer size in BYTES
     static size_t required_bytes(size_t n) {
@@ -68,9 +71,9 @@ struct BSplineCollocationWorkspace {
         offset = align_up(offset, block_alignment_T);
         offset += LDAB * n * sizeof(T);
 
-        // pivots: n × sizeof(lapack_int), 64-byte aligned
+        // pivots: n × sizeof(pivot_type), 64-byte aligned
         offset = align_up(offset, block_alignment_pivot);
-        offset += n * sizeof(lapack_int);
+        offset += n * sizeof(pivot_type);
 
         // coeffs: n × sizeof(T), 64-byte aligned
         offset = align_up(offset, block_alignment_T);
@@ -110,11 +113,11 @@ struct BSplineCollocationWorkspace {
             start_array_lifetime<T>(ptr + offset, LDAB * n), LDAB * n);
         offset += LDAB * n * sizeof(T);
 
-        // pivots - start lifetime of lapack_int[n]
+        // pivots - start lifetime of pivot_type[n]
         offset = align_up(offset, block_alignment_pivot);
-        ws.pivots_ = std::span<lapack_int>(
-            start_array_lifetime<lapack_int>(ptr + offset, n), n);
-        offset += n * sizeof(lapack_int);
+        ws.pivots_ = std::span<pivot_type>(
+            start_array_lifetime<pivot_type>(ptr + offset, n), n);
+        offset += n * sizeof(pivot_type);
 
         // coeffs - start lifetime of T[n]
         offset = align_up(offset, block_alignment_T);
@@ -127,13 +130,13 @@ struct BSplineCollocationWorkspace {
     // Accessors - return typed spans (lifetime started by from_bytes)
     std::span<T> band_storage() { return band_storage_; }
     std::span<T> lapack_storage() { return lapack_storage_; }
-    std::span<lapack_int> pivots() { return pivots_; }  // Properly typed lapack_int span
+    std::span<pivot_type> pivots() { return pivots_; }  // Properly typed pivot span
     std::span<T> coeffs() { return coeffs_; }
 
     // Const accessors
     std::span<const T> band_storage() const { return band_storage_; }
     std::span<const T> lapack_storage() const { return lapack_storage_; }
-    std::span<const lapack_int> pivots() const { return pivots_; }
+    std::span<const pivot_type> pivots() const { return pivots_; }
     std::span<const T> coeffs() const { return coeffs_; }
 
     /// mdspan view of band storage in LAPACK banded format
@@ -165,7 +168,7 @@ private:
     size_t n_ = 0;
     std::span<T> band_storage_;
     std::span<T> lapack_storage_;
-    std::span<lapack_int> pivots_;  // lapack_int, not T
+    std::span<pivot_type> pivots_;  // pivot_type, not T
     std::span<T> coeffs_;
 };
 
