@@ -17,9 +17,11 @@ AmericanOptionResult::AmericanOptionResult(
     const PricingParams& params)
     : grid_(std::move(grid))
     , params_(params)
-    , operator_(nullptr)
 {
     assert(grid_ && "Grid must not be null");
+    build_spline(spline_, grid_->solution());
+    operator_ = std::make_unique<operators::CenteredDifference<double>>(
+        grid_->spacing());
 }
 
 double AmericanOptionResult::value() const {
@@ -27,8 +29,6 @@ double AmericanOptionResult::value() const {
 }
 
 double AmericanOptionResult::value_at(double spot_price) const {
-    ensure_spline();
-
     // Convert to log-moneyness: x = ln(S/K)
     double x = std::log(spot_price / params_.strike);
 
@@ -49,8 +49,6 @@ double AmericanOptionResult::value_at(double spot_price) const {
 }
 
 double AmericanOptionResult::delta() const {
-    ensure_spline();
-
     // Evaluate spline derivative at spot in log-moneyness
     double x_spot = std::log(params_.spot / params_.strike);
     double dv_norm_dx = spline_.eval_derivative(x_spot);
@@ -60,8 +58,6 @@ double AmericanOptionResult::delta() const {
 }
 
 double AmericanOptionResult::gamma() const {
-    ensure_operator();
-
     auto solution = grid_->solution();
     auto x_grid = grid_->x();
     const size_t n = x_grid.size();
@@ -98,8 +94,6 @@ double AmericanOptionResult::gamma() const {
 }
 
 double AmericanOptionResult::theta() const {
-    ensure_spline();
-
     // Theta = ∂V/∂t via backward finite difference
     // solution() = V at τ=0 (current), solution_prev() = V at τ=dt
     // θ ≈ (V_prev - V_current) / dt  (negative for time decay)
@@ -148,20 +142,6 @@ void AmericanOptionResult::build_spline(CubicSpline<double>& spline,
     auto error = spline.build(x_grid, solution);
     assert(!error.has_value() && "Cubic spline build should not fail on valid grid data");
     (void)error;
-}
-
-void AmericanOptionResult::ensure_spline() const {
-    if (!spline_built_) {
-        build_spline(spline_, grid_->solution());
-        spline_built_ = true;
-    }
-}
-
-void AmericanOptionResult::ensure_operator() const {
-    if (!operator_) {
-        const auto& spacing = grid_->spacing();
-        operator_ = std::make_unique<operators::CenteredDifference<double>>(spacing);
-    }
 }
 
 } // namespace mango

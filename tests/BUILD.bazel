@@ -562,6 +562,7 @@ cc_test(
     size = "small",
     srcs = ["american_option_result_test.cc"],
     deps = [
+        "//src/option:american_option",
         "//src/option:american_option_result",
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
@@ -633,6 +634,19 @@ cc_test(
         "-march=native",
         "-fopenmp",
     ],
+    linkopts = ["-fopenmp"],
+)
+
+cc_test(
+    name = "bspline_bit_identity_test",
+    size = "small",
+    srcs = ["bspline_bit_identity_test.cc"],
+    deps = [
+        "//src/math/bspline:bspline_collocation",
+        "//src/math/bspline:bspline_nd_separable",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-Wall", "-Wextra", "-fopenmp"],
     linkopts = ["-fopenmp"],
 )
 

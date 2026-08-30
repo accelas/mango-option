@@ -32,8 +32,10 @@ namespace mango {
  * - Snapshot query delegation
  * - Direct grid access for advanced users
  *
- * Thread-safety: Const methods are thread-safe (read-only access).
- * Non-const methods should not be called concurrently.
+ * Thread-safety: const methods are thread-safe provided no thread mutates
+ * the underlying Grid concurrently (grid() exposes it mutably). The value
+ * spline and gamma operator are built eagerly at construction; the spline
+ * snapshots grid solution values at construction time.
  */
 class AmericanOptionResult {
 public:
@@ -133,15 +135,9 @@ public:
     std::shared_ptr<Grid<double>> grid() const { return grid_; }
 
 private:
-    /// Build cubic spline from solution on first use
-    void ensure_spline() const;
-
     /// Build cubic spline on an arbitrary solution array
     void build_spline(CubicSpline<double>& spline,
                       std::span<const double> solution) const;
-
-    /// Lazy initialize CenteredDifference operator (for gamma stencil)
-    void ensure_operator() const;
 
     /// Find grid index for linear interpolation of stencil output
     std::pair<size_t, size_t> find_grid_index(double x) const;
@@ -149,12 +145,12 @@ private:
     std::shared_ptr<Grid<double>> grid_;
     PricingParams params_;
 
-    // Lazy-initialized cubic spline for value/delta interpolation
-    mutable CubicSpline<double> spline_;
-    mutable bool spline_built_ = false;
+    // Cubic spline for value/delta interpolation, built eagerly at
+    // construction from a snapshot of the grid solution.
+    CubicSpline<double> spline_;
 
-    // Lazy-initialized operator for gamma stencil
-    mutable std::unique_ptr<operators::CenteredDifference<double>> operator_;
+    // Operator for gamma stencil, built eagerly at construction.
+    std::unique_ptr<operators::CenteredDifference<double>> operator_;
 };
 
 static_assert(OptionResult<AmericanOptionResult>);
