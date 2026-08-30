@@ -265,8 +265,9 @@ backend target); `bspline_collocation_workspace` adds
 1. **Goldens are the proof:** `//tests:bspline_bit_identity_test` (every
    coefficient, bit-pattern-exact, pinned pre-refactor in #457) must pass
    unchanged, plus the full suite (`bazel test //...`, 137-test baseline).
-2. **Concept enforcement test** (compile-time, in
-   `tests/bspline_collocation_1d_test.cc`):
+2. **Concept enforcement test** (compile-time, in the dedicated
+   `tests/lapack_banded_backend_test.cc` — the plan moved items 2–3 out of
+   `bspline_collocation_1d_test.cc` into this backend-scoped file):
    `static_assert(mango::BandedSolverBackend<mango::LapackBandedBackend, double>);`
    plus two negative checks:
    `static_assert(!mango::BandedSolverBackend<int, double>);` and — the

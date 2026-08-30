@@ -89,7 +89,8 @@ struct BSplineCollocationFactorization {
 /// Time:  O(n) for factorization and solve
 /// Space: O(n) for banded storage
 ///
-/// @tparam T Floating point type (float, double, long double)
+/// @tparam T Floating point type the Backend must support (double for
+///     LapackBandedBackend — the requires clause rejects other types)
 /// @tparam Bandwidth Reserved; must be 4 (cubic) until basis evaluation is
 ///     generalized
 /// @tparam Backend Banded solver backend policy (default: LAPACK)

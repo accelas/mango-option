@@ -22,7 +22,8 @@ namespace mango {
 /// Uses start_array_lifetime to start object lifetimes, avoiding strict-aliasing UB.
 ///
 /// Template parameters:
-/// - T: Floating point type (double, float)
+/// - T: Floating point type (double in practice — the workspace is sized
+///   for LapackBandedBackend, which is double-only)
 /// - Bandwidth: Number of non-zero entries per row (default 4 for cubic B-splines)
 ///
 /// Required arrays (derived from bandwidth):
