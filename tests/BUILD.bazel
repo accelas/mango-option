@@ -809,6 +809,21 @@ cc_test(
 )
 
 cc_test(
+    name = "quantlib_sweep_regression_test",
+    size = "large",
+    srcs = ["quantlib_sweep_regression_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+    linkopts = ["-lQuantLib"],
+)
+
+cc_test(
     name = "american_option_auto_api_test",
     size = "small",
     srcs = ["american_option_auto_api_test.cc"],
