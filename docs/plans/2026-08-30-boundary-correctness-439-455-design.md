@@ -112,20 +112,39 @@ are NOT confined to pathological active-set topologies, and a hard error
 would regress currently-working supported inputs (including low-vol IV
 probing).
 
-Policy: after the one-pass solve, run an O(n) complementarity check at each
-clamped node (`u_i == psi_i` post-projection): `(A·u)_i ≥ rhs_i − tol_i`
-with a full-row scale-aware tolerance
+Policy — principle: *the validator must be able to prove or disprove that
+the returned vector solves the LCP; a check that can miss a violation class
+is not a validator.* Concretely, an O(n) **full KKT check over every row**
+of the exact system passed to the projected solve (post Dirichlet and
+deep-lock row modifications, run before those buffers are reused):
+
+- primal feasibility `u_i ≥ psi_i − tol_i` everywhere;
+- dual feasibility `(A·u)_i ≥ rhs_i − tol_i` on active nodes;
+- residual equality `|(A·u)_i − rhs_i| ≤ tol_i` on inactive nodes —
+  clamped-node-only checking would miss continuation-row residuals,
+  precisely the failure mode of non-interval active sets;
+
+with the full-row scale-aware tolerance
 `tol_i = atol + rtol·(|lower·u_{i−1}| + |diag·u_i| + |upper·u_{i+1}| +
-|rhs_i|)`. The check is a testable free function returning
-`{violation_count, max_violation}`. Production behavior: emit a USDT probe
-(no printf, per repo policy) AND record the report on the solver, queryable
-per solve (e.g. `last_complementarity_report()`), so the result is neither
-silent nor invisible to callers — but **no behavioral change and no hard
-error in this batch**: every input that prices today keeps pricing, with
-the diagnostic attached. Two follow-up issues: (1) drift upwinding /
-monotone discretization enforcement (removes the M-matrix hole at its
-root), (2) an iterative (PSOR-style) fallback for non-interval active-set
-topologies. Caller-facing failure policy, if any, comes with those.
+|rhs_i|)`, non-finite values in u/residual/scale counting as violations.
+Activity comes from an explicit active mask produced by the projected
+solve (which knows where it clamped), not from floating-point `u == psi`
+inference. The check is a testable free function returning a report
+`{violation_count, max_violation (raw KKT defect), worst_kind
+(primal / dual / residual)}`.
+
+Production behavior: emit a USDT probe (no printf, per repo policy) AND
+record the report, aggregated across all implicit stages and time steps of
+a solve (reset at solve start; kept on aborted solves), queryable from the
+public `AmericanOptionSolver` (the internal CRTP solver dies inside
+`solve()`) — so the result is neither silent nor invisible to callers. But
+**no behavioral change and no hard error in this batch**: every input that
+prices today keeps pricing, with the diagnostic attached. The report
+diagnoses the modified stage LCP (post deep-lock), which is the system the
+sweep actually solved. Two follow-up issues: (1) drift upwinding / monotone
+discretization enforcement (removes the M-matrix hole at its root), (2) an
+iterative (PSOR-style) fallback for non-interval active-set topologies.
+Caller-facing failure policy, if any, comes with those.
 
 **A5.** Docs: rewrite the "Why This Works" subsection of
 `docs/MATHEMATICAL_FOUNDATIONS.md` with the orientation-correct argument
