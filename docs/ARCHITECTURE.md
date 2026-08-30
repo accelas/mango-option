@@ -139,7 +139,7 @@ public:
 };
 ```
 
-Greeks are computed lazily on first access. Delta and gamma use centered finite differences on the spatial grid. Theta uses a backward difference between the last two time steps (stored as snapshots in the Grid).
+The interpolation spline and Greeks machinery are built eagerly at construction (issue #436: const accessors are thread-safe provided the underlying grid is not mutated concurrently). Delta and gamma use centered finite differences on the spatial grid. Theta uses a backward difference between the last two time steps (stored as snapshots in the Grid).
 
 ### Error Handling with std::expected
 

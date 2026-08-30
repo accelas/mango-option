@@ -2,6 +2,12 @@
 // Bit-identity goldens for B-spline collocation fitting (issue #435).
 // Pinned from the pre-refactor implementation; the factor-once refactor
 // must reproduce every coefficient bit-for-bit.
+//
+// The goldens are toolchain-pinned: they depend on the LAPACK/BLAS
+// implementation and this target's optimization flags. A failure after a
+// BLAS upgrade or copt change is environmental, not a fit regression —
+// re-generate by emptying the golden arrays and pasting the printed
+// literals (see expect_bits).
 #include <gtest/gtest.h>
 #include <array>
 #include <bit>

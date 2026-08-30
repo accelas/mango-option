@@ -159,7 +159,8 @@ auto result = solver.solve();
 auto result = solver.solve();
 
 if (result.has_value()) {
-    // Lazy evaluation (computed on first access, then cached)
+    // Greeks machinery is built eagerly at construction; const accessors
+    // are thread-safe while the underlying grid is not mutated
     double delta = result->delta();  // ∂V/∂S
     double gamma = result->gamma();  // ∂²V/∂S²
 

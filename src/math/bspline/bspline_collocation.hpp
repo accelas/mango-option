@@ -466,9 +466,13 @@ public:
             InterpolationErrorCode::ValueSizeMismatch, values.size()});
         if (coeffs_out.size() != n_) return std::unexpected(InterpolationError{
             InterpolationErrorCode::BufferSizeMismatch, coeffs_out.size()});
-        if (fact.lu.size() != Workspace::LDAB * n_ || fact.pivots.size() != n_) {
+        if (fact.lu.size() != Workspace::LDAB * n_) {
             return std::unexpected(InterpolationError{
                 InterpolationErrorCode::BufferSizeMismatch, fact.lu.size()});
+        }
+        if (fact.pivots.size() != n_) {
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::BufferSizeMismatch, fact.pivots.size()});
         }
         for (size_t i = 0; i < n_; ++i) {
             if (std::isnan(values[i])) return std::unexpected(InterpolationError{
