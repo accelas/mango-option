@@ -580,6 +580,25 @@ TEST_F(BSplineCollocation1DTest, SolveFactoredRejectsMalformedFactorization) {
     EXPECT_EQ(r2.error().code, mango::InterpolationErrorCode::BufferSizeMismatch);
 }
 
+// Regression: solve_factored silently mis-validated with aliasing buffers
+// Bug: dgbtrs solves in place in coeffs_out, so overlapping values would be
+// clobbered before the residual check, which then compared B*c against the
+// coefficients instead of the RHS and reported FittingFailed for a valid
+// solve. Overlap is now rejected up front.
+TEST_F(BSplineCollocation1DTest, SolveFactoredRejectsAliasedBuffers) {
+    std::vector<double> grid{-1.5, -0.8, -0.2, 0.1, 0.6, 1.4, 2.3};
+    std::vector<double> buffer(grid.size(), 1.0);
+    auto solver = mango::BSplineCollocation1D<double>::create(grid).value();
+    auto fact = solver.factorize().value();
+    // Identical spans
+    auto r1 = solver.solve_factored(fact, buffer, buffer);
+    ASSERT_FALSE(r1.has_value());
+    EXPECT_EQ(r1.error().code, mango::InterpolationErrorCode::BufferSizeMismatch);
+    // Distinct buffers still work
+    std::vector<double> coeffs(grid.size());
+    EXPECT_TRUE(solver.solve_factored(fact, buffer, coeffs).has_value());
+}
+
 TEST_F(BSplineCollocation1DTest, ConcurrentSolveFactoredMatchesSerial) {
     std::vector<double> grid{-1.5, -0.8, -0.2, 0.1, 0.6, 1.4, 2.3};
     auto solver = mango::BSplineCollocation1D<double>::create(grid).value();

@@ -453,7 +453,10 @@ public:
     ///
     /// @param fact Factorization from `factorize()`
     /// @param values Function values at grid points (size n_)
-    /// @param coeffs_out Pre-allocated buffer for coefficients (size n_)
+    /// @param coeffs_out Pre-allocated buffer for coefficients (size n_);
+    ///     must not overlap `values` — the residual check needs the
+    ///     original RHS after the in-place solve, so aliasing buffers are
+    ///     rejected with BufferSizeMismatch
     /// @param config Solver configuration
     /// @return Max residual or error
     [[nodiscard]] std::expected<T, InterpolationError> solve_factored(
@@ -466,6 +469,11 @@ public:
             InterpolationErrorCode::ValueSizeMismatch, values.size()});
         if (coeffs_out.size() != n_) return std::unexpected(InterpolationError{
             InterpolationErrorCode::BufferSizeMismatch, coeffs_out.size()});
+        if (values.data() < coeffs_out.data() + coeffs_out.size() &&
+            coeffs_out.data() < values.data() + values.size()) {
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::BufferSizeMismatch, coeffs_out.size()});
+        }
         if (fact.lu.size() != Workspace::LDAB * n_) {
             return std::unexpected(InterpolationError{
                 InterpolationErrorCode::BufferSizeMismatch, fact.lu.size()});
