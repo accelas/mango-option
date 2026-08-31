@@ -174,9 +174,17 @@ BatchAmericanOptionResult solve_missing_slices(
     BatchAmericanOptionSolver& batch_solver,
     const std::vector<PricingParams>& missing_params,
     const std::vector<PricingParams>& all_params,
+    std::span<const double> m_grid,
     const PDEGridSpec& pde_grid,
     const std::vector<double>& tau_grid)
 {
+    // Precondition: the only caller already skips this call when
+    // missing_params is empty, but std::ranges::max below is UB over an
+    // empty range, so guard the file-local helper directly too.
+    if (missing_params.empty()) {
+        return {};
+    }
+
     if (const auto* explicit_grid = std::get_if<PDEGridConfig>(&pde_grid)) {
         const auto& grid_spec = explicit_grid->grid_spec;
         const size_t n_time = explicit_grid->n_time;
@@ -234,18 +242,37 @@ BatchAmericanOptionResult solve_missing_slices(
         const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
         constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
 
-        if (max_sigma_sqrt_tau >= 1e-10) {
-            double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
+        const double missing_max_sigma_sqrt_tau = std::ranges::max(
+            missing_params | std::views::transform(sigma_sqrt_tau));
+
+        if (missing_max_sigma_sqrt_tau >= 1e-10) {
+            double required_n_sigma =
+                (max_abs_x / missing_max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
             accuracy.n_sigma = std::max(5.0, required_n_sigma);
         }
 
-        batch_solver.set_grid_accuracy(accuracy);
-        return batch_solver.solve_batch(missing_params, true);
+        // A concrete covering grid, not set_grid_accuracy: gridless solves
+        // are routed per normalized (sigma, r) group and re-estimate a
+        // per-sigma-width grid there, undershooting the moneyness axis
+        // for every sub-max sigma (issue #437). Neither branch calls
+        // set_grid_accuracy any more, so the normalized-routing eligibility
+        // check reads the solver's default accuracy; that is
+        // behavior-neutral here because make_batch emits exactly one param
+        // per (sigma, r) group, so both routes solve the same normalized
+        // PDE on the same verbatim custom grid either way.
+        auto covering = detail::materialize_covering_grid(
+            accuracy, missing_params, m_grid);
+        return batch_solver.solve_batch(missing_params, true, nullptr,
+                                        covering);
     }
 
     if (const auto* accuracy_grid = std::get_if<GridAccuracyParams>(&pde_grid)) {
-        batch_solver.set_grid_accuracy(*accuracy_grid);
-        return batch_solver.solve_batch(missing_params, true);
+        // Same concrete-covering-grid reasoning as the explicit-grid
+        // fallback branch above.
+        auto covering = detail::materialize_covering_grid(
+            *accuracy_grid, missing_params, m_grid);
+        return batch_solver.solve_batch(missing_params, true, nullptr,
+                                        covering);
     }
 
     // Should not reach here -- PDEGridSpec is a variant with two alternatives
@@ -342,6 +369,21 @@ build_cached_surface(
 
     auto& [builder, axes] = builder_result.value();
 
+    // Upfront explicit-grid coverage check, mirroring
+    // PriceTableBuilderND::build(): an explicit grid narrower than the
+    // moneyness fit axis would be silently extrapolated by
+    // extract_tensor.  Auto-estimated grids are widened instead
+    // (solve_missing_slices).
+    if (const auto* explicit_grid = std::get_if<PDEGridConfig>(&pde_grid)) {
+        const auto& m_axis = axes.grids[0];
+        if (!m_axis.empty() &&
+            (m_axis.front() < explicit_grid->grid_spec.x_min() ||
+             m_axis.back() > explicit_grid->grid_spec.x_max())) {
+            return std::unexpected(
+                PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+    }
+
     // On first iteration, set the initial tau grid; subsequent iterations
     // compare against it and clear cache only if tau actually changed.
     if (build_iteration == 0) {
@@ -379,7 +421,8 @@ build_cached_surface(
         batch_solver.set_snapshot_times(std::span{tau_grid});
 
         fresh_results = solve_missing_slices(
-            batch_solver, missing_params, all_params, pde_grid, tau_grid);
+            batch_solver, missing_params, all_params, axes.grids[0], pde_grid,
+            tau_grid);
 
         // Add fresh results to cache
         for (size_t i = 0; i < fresh_results.results.size(); ++i) {

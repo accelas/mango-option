@@ -230,24 +230,24 @@ PriceTableBuilderND<N>::make_batch(const PriceTableAxesND<N>& axes) const {
     return batch;
 }
 
-/// Ensure n_sigma is large enough so the PDE domain covers [log(m_min), log(m_max)].
-/// The batch solves use spot=strike=K_ref (x0=0), so the grid half-width is
-/// n_sigma * max(σ√T).  If the moneyness axis extends beyond that, we bump n_sigma.
-template <size_t N>
-static void ensure_moneyness_coverage(
-    GridAccuracyParams& accuracy,
-    const std::vector<PricingParams>& batch,
-    const PriceTableAxesND<N>& axes)
+namespace detail {
+
+void ensure_moneyness_coverage(GridAccuracyParams& accuracy,
+                               std::span<const PricingParams> batch,
+                               std::span<const double> log_moneyness_grid)
 {
-    const double log_m_min = axes.grids[0].front();
-    const double log_m_max = axes.grids[0].back();
-    const double required_half_width = std::max(std::abs(log_m_min), std::abs(log_m_max));
+    if (batch.empty() || log_moneyness_grid.empty()) return;
+
+    const double log_m_min = log_moneyness_grid.front();
+    const double log_m_max = log_moneyness_grid.back();
+    const double required_half_width =
+        std::max(std::abs(log_m_min), std::abs(log_m_max));
 
     // Compute max σ√T across the batch (floor to avoid division by zero)
     double max_sigma_sqrt_T = 0.0;
     for (const auto& p : batch) {
         max_sigma_sqrt_T = std::max(max_sigma_sqrt_T,
-                                     p.volatility * std::sqrt(p.maturity));
+                                    p.volatility * std::sqrt(p.maturity));
     }
     max_sigma_sqrt_T = std::max(max_sigma_sqrt_T, 1e-10);
 
@@ -256,6 +256,17 @@ static void ensure_moneyness_coverage(
     accuracy.n_sigma = std::max(accuracy.n_sigma, required_n_sigma);
 }
 
+PDEGridSpec materialize_covering_grid(GridAccuracyParams accuracy,
+                                      std::span<const PricingParams> batch,
+                                      std::span<const double> log_moneyness_grid)
+{
+    ensure_moneyness_coverage(accuracy, batch, log_moneyness_grid);
+    auto [grid_spec, time_domain] = estimate_batch_pde_grid(batch, accuracy);
+    return PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
+}
+
+}  // namespace detail
+
 template <size_t N>
 std::pair<GridSpec<double>, TimeDomain>
 PriceTableBuilderND<N>::estimate_pde_grid(
@@ -263,7 +274,7 @@ PriceTableBuilderND<N>::estimate_pde_grid(
     const PriceTableAxesND<N>& axes) const
 {
     auto accuracy = std::get<GridAccuracyParams>(config_.pde_grid);
-    ensure_moneyness_coverage<N>(accuracy, batch, axes);
+    detail::ensure_moneyness_coverage(accuracy, batch, axes.grids[0]);
 
     auto [grid_spec, time_domain] = estimate_batch_pde_grid(
         std::span<const PricingParams>(batch), accuracy);
@@ -361,11 +372,14 @@ PriceTableBuilderND<N>::solve_batch(
                 double required_n_sigma = (max_abs_x / safe_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
                 accuracy.n_sigma = std::max(5.0, required_n_sigma);
 
-                // Also ensure coverage of the moneyness axis
-                ensure_moneyness_coverage<N>(accuracy, batch, axes);
-
-                solver.set_grid_accuracy(accuracy);
-                return solver.solve_batch(batch, true, nullptr);
+                // Materialize one concrete covering grid for the whole
+                // batch: a gridless solve is routed per normalized
+                // (sigma, r) group and would re-estimate per-sigma-width
+                // grids there, undershooting the moneyness axis for every
+                // sub-max sigma (issue #437).
+                auto covering = detail::materialize_covering_grid(
+                    accuracy, batch, axes.grids[0]);
+                return solver.solve_batch(batch, true, nullptr, covering);
             }
         }
     }, config_.pde_grid);
