@@ -696,6 +696,7 @@ PYBIND11_MODULE(mango_option, m) {
         .value("LinearSolveFailure", mango::SolverErrorCode::LinearSolveFailure)
         .value("InvalidConfiguration", mango::SolverErrorCode::InvalidConfiguration)
         .value("Unknown", mango::SolverErrorCode::Unknown)
+        .value("NonFiniteSolution", mango::SolverErrorCode::NonFiniteSolution)
         .export_values();
 
     // SolverError structure

@@ -514,9 +514,35 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         return std::unexpected(solve_result.error());
     }
 
+    if (auto err = detail::validate_finite_solution(
+            grid->solution(), grid->solution_prev())) {
+        return std::unexpected(*err);
+    }
+
     return AmericanOptionResult(grid, params_);
     // arena destructs here; any heap-fallback allocation is freed
 }
+
+namespace detail {
+
+std::optional<SolverError> validate_finite_solution(
+    std::span<const double> final_solution,
+    std::span<const double> prev_solution)
+{
+    for (double v : final_solution) {
+        if (!std::isfinite(v)) {
+            return SolverError{SolverErrorCode::NonFiniteSolution};
+        }
+    }
+    for (double v : prev_solution) {
+        if (!std::isfinite(v)) {
+            return SolverError{SolverErrorCode::NonFiniteSolution};
+        }
+    }
+    return std::nullopt;
+}
+
+}  // namespace detail
 
 std::expected<AmericanOptionResult, SolverError>
 solve_american_option(const PricingParams& params) {
