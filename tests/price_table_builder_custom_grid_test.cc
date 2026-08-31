@@ -344,17 +344,26 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
     EXPECT_FALSE(std::isnan(deep_otm));
 }
 
-// Regression (#437 / D6): the non-adaptive explicit-grid fallback should
-// materialize one concrete covering grid for the whole batch instead of
-// letting gridless solve re-estimate per-sigma-width grids per group.
-// NOTE: Test premise investigation found this configuration produces
-// grid [-0.66, 0.66] for all slices even with old fallback; this may not
-// trigger the undershooting bug as originally hypothesized. Grid bounds
-// recorded: all slices get [-0.66, 0.66] spanning axis [-0.51, 0.51].
+// Regression (#437 / D6): explicit-grid fallback must materialize one
+// concrete covering grid for the whole batch, not let gridless solve
+// re-estimate per-sigma-width grids that undercut the moneyness axis.
+// Why this triggers the bug:
+// - Fallback triggers: sinh ±0.6/15pts has max_dx > 0.05, and grid width
+//   1.2 < min_required_width = 6·σ_max·√T = 6·0.30·1 = 1.8.
+// - Old gridless path: fallback n_sigma = max(5, 0.6·1.1/0.30) = max(5, 2.2)
+//   = 5; moneyness coverage keeps it at 5 (0.51·1.1/0.30 = 1.87 < 5).
+// - Eligibility check: first param (σ=0.08, T=1) margin = 5·0.08 = 0.40 ≥
+//   0.35 → passes → normalized chain engages, one solve per (σ,r) group.
+// - σ=0.08 groups then get half-width 5·0.08 = 0.40 < 0.51 needed → their
+//   slice grids span only [-0.40, 0.40] → x.front() ≤ -0.51 assertion fails.
+// - σ ≥ 0.12 groups (5·0.12 = 0.60 ≥ 0.51) are covered, only min-σ slices fail.
+// - New code: materialized covering grid half-width 5·σ_max·√T = 1.5
+//   propagates to every group → all slices covered.
+// Pre-fix: sigma=0.08 slices spanned [-0.40, 0.40].
 TEST(PriceTableBuilderCustomGridTest, FallbackGridCoversAxisForAllSlices) {
     std::vector<double> m = {-0.51, -0.2, 0.0, 0.2, 0.51};
-    std::vector<double> tau = {0.025, 0.05, 0.075, 0.1};
-    std::vector<double> vol = {0.10, 0.15, 0.20, 0.30};
+    std::vector<double> tau = {0.25, 0.5, 0.75, 1.0};
+    std::vector<double> vol = {0.08, 0.12, 0.20, 0.30};
     std::vector<double> rate = {0.02, 0.03, 0.04, 0.05};
 
     // Covers the axis (passes build()'s upfront check) but 15 points over
