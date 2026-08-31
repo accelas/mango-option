@@ -31,7 +31,17 @@ So the sign condition is **per-side**: for `b > 0` the lower entry binds
 (`a ≥ |b|·dx_left/2`). Since both derivative stencils annihilate constants,
 `diag_L = c − lower_i − upper_i`, so once the off-diagonals of `L` are ≥ 0
 the stage matrix `A = I − w·L` is a **Z-matrix** (non-positive
-off-diagonals) with row sum `1 + w·r(t)`. If additionally
+off-diagonals) with row sum `1 + w·r(t)`, **provided the stage weight
+`w ≥ 0`**. The classic TR-BDF2 weights (`w1 = γ·Δt/2`,
+`w2 = (1−γ)·Δt/(2−γ)`) are both positive iff `0 < γ < 1`; the default
+`γ = 2−√2` qualifies, but `PDESolver::set_config` currently accepts any
+`TRBDF2Config` unvalidated, so a caller-supplied `γ ≤ 0` or `γ ≥ 1` would
+silently void the theorem. **This spec makes valid stage weights an
+enforced solver invariant**: `solve()` validates `γ` finite and in
+`(0, 1)` before stepping and returns
+`SolverErrorCode::InvalidConfiguration` otherwise (the enum value already
+exists). This is a deliberate, small exception to the "no PDESolver
+changes" scope statement below. If additionally
 `1 + w·r(t) > 0` (a **sufficient** condition, not a characterization —
 a Z-matrix can be a nonsingular M-matrix without strict row dominance),
 every non-identity row is strictly diagonally dominant with positive
@@ -86,7 +96,11 @@ theorem, on arbitrary non-uniform grids. In the convection-dominated limit
 behavior rather than oscillating. On well-resolved grids ρ ~ 1e-2–1e-3, so
 coefficients move by ~1e-4–1e-6 relative: inside every existing accuracy
 tolerance, but **not bit-identical** to current output (accepted; see
-Decisions; one absolute pin must move — see Testing item 3).
+Decisions; one absolute pin must move — see Testing item 3). The
+"ρ ~ 1e-2–1e-3, price movement ~1e-6" figures are *estimates to be
+measured and recorded during implementation*, not design guarantees —
+default non-uniform grids have larger outer-cell spacing than central
+spacing, so outer cells sit at higher ρ.
 
 **Smoothness.** `ρ·coth(ρ)` is analytic and even in ρ, so a_f is smooth in
 σ and h at fixed drift sign. At a `b = 0` crossing on a *non-uniform* cell
@@ -103,6 +117,11 @@ implementation):
 ```
 z = |b(t)| · h_binding(i) / 2
 if z == 0:            a_f = a                     (exact; covers b = 0, LaplacianPDE)
+if a == 0:            a_f = z                     (σ²/2 underflow limit: public
+                                                   validation checks σ > 0, but
+                                                   0.5·σ·σ can underflow to 0; this
+                                                   is the exact convection limit —
+                                                   pure upwind diffusion)
 ρ = z / a
 if ρ < 1e-4:          a_f = a · (1 + ρ²/3)        (series; rel. error ≤ ρ⁴/45 < 1e-17)
 else:                 a_f = z / tanh(ρ)           (tanh saturates to 1; no cosh/sinh
@@ -110,6 +129,20 @@ else:                 a_f = z / tanh(ρ)           (tanh saturates to 1; no cosh
 a_f = max(a_f, a, z)                              (so a_f − z ≥ 0 and a_f ≥ a hold
                                                    exactly in floating point)
 ```
+
+**Sampling discipline (binding law):** `a`, `b(t)`, and `r(t)` are sampled
+**once per `apply_interior` / `assemble_jacobian` invocation** and the
+sampled values passed into the per-cell helper — never re-queried per node
+— so the binding-side selection and the drift term can never disagree
+within one assembly. The `HasJacobianCoefficients` documentation states
+that coefficient accessors must be deterministic and side-effect-free at
+fixed `t` (true of both current PDE types, including callable rates).
+
+**Numerical domain:** the sign theorem is stated over finite, representable
+assembled coefficients. `a < 0` is rejected by contract (documented +
+debug assert); pathological magnitudes (rates/spacings near DBL_MAX) that
+overflow coefficient formation are outside the contract — non-finite
+*solutions* remain caught by the existing #478 `NonFiniteSolution` guards.
 
 The helper exposes **both `a_f` and `z`** (and the drift sign), because the
 clamp alone does not make the *assembled* off-diagonal non-negative:
@@ -121,7 +154,8 @@ construction** (binding law):
 ```
 lower_i = (a_f − b·dx_right/2) / (dx_left · dx_avg)
 upper_i = (a_f + b·dx_left/2)  / (dx_right · dx_avg)
-diag_i  = c − lower_i − upper_i        (row-sum identity preserved exactly)
+diag_i  = c − lower_i − upper_i        (row-sum identity preserved by
+                                        construction, subject to final rounding)
 ```
 
 where the binding-side numerator is computed literally as `a_f − z` (the
@@ -186,8 +220,11 @@ Changes, all inside `SpatialOperator`, gated on
    MATHEMATICAL_FOUNDATIONS.
 
 No changes to `BlackScholesPDE`, `LaplacianPDE`, `CenteredDifference`,
-`GridSpacing`, the `HasJacobianCoefficients`/`HasBoundaryRows` concepts, or
-`PDESolver`.
+`GridSpacing`, or the `HasJacobianCoefficients`/`HasBoundaryRows` concept
+*signatures* (documentation on the concept is strengthened — see item 3).
+One deliberate `PDESolver` change: γ validation at `solve()` entry
+(finite, `0 < γ < 1` → else `SolverErrorCode::InvalidConfiguration`), per
+the stage-weight premise above.
 
 ## Testing
 
@@ -226,7 +263,10 @@ No changes to `BlackScholesPDE`, `LaplacianPDE`, `CenteredDifference`,
      structure from a KKT-clean solve; the condition-violating regime
      (`r ≤ −1/w`) is documented as out of contract, not tested as a solve;
    - a test-only linear PDE whose `operator()` and coefficient expansion
-     agree, guarding the coefficient-authority dispatch contract.
+     agree, guarding the coefficient-authority dispatch contract;
+   - the `a == 0, b ≠ 0` underflow-limit branch (`a_f = z`);
+   - γ validation: `solve()` with `γ ∈ {0, 1, 1.5, NaN}` returns
+     `InvalidConfiguration`; default `γ = 2−√2` unaffected.
    - **Update expected values in `spatial_operator_jacobian_test.cc`**
      (currently computes expectations from the physical `a`; must use the
      fitted coefficient — its FD-consistency test stays and now guards the
@@ -363,3 +403,22 @@ solver-path assert; docs caveat narrowed to #473. Design approved by user
 - *Minors folded:* non-uniform extension wording for the classical claim;
   scale-aware apply/matrix tolerance; pin-audit wording narrowed to the
   demonstrated scope.
+
+**Design review round 3 (Codex) — resolutions folded above:**
+- *Critical:* theorem silently assumed stage weight `w ≥ 0`, but
+  `set_config` accepts any `TRBDF2Config`. **Resolution: enforce** —
+  unlike market-data rates (documented, not enforced), γ is a numerical
+  scheme parameter with a known valid range; `solve()` validates
+  `γ ∈ (0,1)` finite → `InvalidConfiguration`. "No PDESolver changes"
+  scope statement revised accordingly.
+- *σ underflow:* `a == 0, b ≠ 0` gets an explicit convection-limit branch
+  (`a_f = z`); `a < 0` rejected by contract.
+- *Numerical domain:* theorem stated over finite representable assembled
+  coefficients; overflow-scale inputs out of contract (#478 guards catch
+  non-finite solutions).
+- *Sampling discipline:* coefficients sampled once per invocation, passed
+  into the per-cell helper; accessor purity at fixed `t` documented on
+  the concept.
+- *Minors folded:* row-sum wording ("by construction, subject to final
+  rounding"); perturbation figures reframed as implementation-time
+  measurements.
