@@ -582,6 +582,33 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     EXPECT_GT(p, 0.0) << "ATM put price should be positive";
 }
 
+// Regression (#437): the adaptive cached path bypasses build()'s upfront
+// explicit-grid coverage validation (bspline_builder.cpp:73-84), so an
+// explicit PDE grid narrower than the moneyness fit axis was silently
+// accepted and its tails cubic-spline-extrapolated by extract_tensor.
+TEST(AdaptiveGridBuilderTest, RejectsExplicitGridNotCoveringMoneyness) {
+    OptionGrid chain;
+    chain.spot = 100.0;
+    chain.dividend_yield = 0.0;
+    chain.strikes = {60.0, 80.0, 100.0, 120.0, 140.0};
+    chain.maturities = {0.05, 0.1};
+    chain.implied_vols = {0.10, 0.15, 0.20};
+    chain.rates = {0.03, 0.05};
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.002;
+    params.max_iter = 1;
+    params.validation_samples = 4;
+
+    // Half-width 0.25 vs required |ln(100/60)| ~= 0.51 (+ headroom).
+    auto grid_spec = GridSpec<double>::sinh_spaced(-0.25, 0.25, 101, 2.0).value();
+    auto result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
 // Regression: a log-moneyness lower bound that does not survive an exp/log
 // round trip used to inject three near-duplicate knots.
 // Bug: expand_log_moneyness_grid compared log(exp(x_min) - total_div/K_ref)

@@ -342,6 +342,20 @@ build_cached_surface(
 
     auto& [builder, axes] = builder_result.value();
 
+    // Upfront explicit-grid coverage check, mirroring
+    // PriceTableBuilderND::build(): an explicit grid narrower than the
+    // moneyness fit axis would be silently extrapolated by
+    // extract_tensor.  Auto-estimated grids are widened instead
+    // (solve_missing_slices).
+    if (const auto* explicit_grid = std::get_if<PDEGridConfig>(&pde_grid)) {
+        if (!m_grid.empty() &&
+            (m_grid.front() < explicit_grid->grid_spec.x_min() ||
+             m_grid.back() > explicit_grid->grid_spec.x_max())) {
+            return std::unexpected(
+                PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+    }
+
     // On first iteration, set the initial tau grid; subsequent iterations
     // compare against it and clear cache only if tau actually changed.
     if (build_iteration == 0) {
