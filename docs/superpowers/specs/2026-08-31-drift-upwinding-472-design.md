@@ -31,15 +31,20 @@ So the sign condition is **per-side**: for `b > 0` the lower entry binds
 (`a ≥ |b|·dx_left/2`). Since both derivative stencils annihilate constants,
 `diag_L = c − lower_i − upper_i`, so once the off-diagonals of `L` are ≥ 0
 the stage matrix `A = I − w·L` is a **Z-matrix** (non-positive
-off-diagonals) with row sum `1 + w·r(t)`. `A` is then an M-matrix (strictly
-diagonally dominant with positive diagonal) **iff additionally
-`1 + w·r(t) > 0`** — automatic for `r ≥ 0`, and for negative rates
-violated only when `r(t) ≤ −1/w ≈ −2/Δt` (thousands of percent negative
-for practical step sizes; unreachable in practice, but the public API
-accepts any finite rate, so this stays a documented condition, not a
-theorem we own). Off-diagonal non-negativity of `L` is the property this
-issue enforces; the dominance condition is documented and tested, not
-enforced (the KKT validator reports it if it ever fails).
+off-diagonals) with row sum `1 + w·r(t)`. If additionally
+`1 + w·r(t) > 0` (a **sufficient** condition, not a characterization —
+a Z-matrix can be a nonsingular M-matrix without strict row dominance),
+every non-identity row is strictly diagonally dominant with positive
+diagonal, hence `A` is a nonsingular M-matrix. The condition is automatic
+for `r ≥ 0` and fails only when `r(t) ≤ −1/w ≈ −2/Δt` (thousands of
+percent negative for practical step sizes; unreachable in practice, but
+the public API accepts any finite rate, so when it fails the proof simply
+no longer applies — the matrix may or may not still be an M-matrix).
+Off-diagonal non-negativity of `L` is the property this issue enforces;
+the dominance condition is documented and covered by a direct matrix-row
+test (note: `validate_lcp_kkt` checks the *solution*, not matrix
+structure — it detects resulting solution defects, not the failed
+structural condition itself).
 
 Concrete failure (from the issue, confirmed against the code): σ = 1%,
 h = 0.1, r = 5% gives `a = 5e-5`, `b ≈ 0.05`; discrete diffusion
@@ -70,11 +75,15 @@ admissible for the Z-/M-matrix structure). The non-binding off-diagonal is
 the off-diagonal half unconditional, which is the half the drift can break.
 
 **Accuracy.** `ρ·coth(ρ) = 1 + ρ²/3 − ρ⁴/45 + …`, so the scheme adds
-numerical diffusion `a·O(ρ²)` — second-order consistent as `h → 0` for
-fixed `a > 0`; this is the classical Il'in/Allen–Southwell fitted scheme,
-uniformly convergent in the convection-dominated limit (where
+numerical diffusion `a·O(ρ²)` — second-order consistent as `h → 0` for a
+refining, suitably regular grid with fixed `a > 0`. On uniform grids this
+is the classical Il'in/Allen–Southwell fitted scheme (uniformly convergent
+for convection-dominated problems); our per-node binding-side choice is a
+monotone **non-uniform extension** of it — we claim local second-order
+consistency and the sign guarantee, not the full uniform-convergence
+theorem, on arbitrary non-uniform grids. In the convection-dominated limit
 `a_f − a → |b|h/2`, i.e. it degrades gracefully to upwind-like first-order
-behavior rather than oscillating). On well-resolved grids ρ ~ 1e-2–1e-3, so
+behavior rather than oscillating. On well-resolved grids ρ ~ 1e-2–1e-3, so
 coefficients move by ~1e-4–1e-6 relative: inside every existing accuracy
 tolerance, but **not bit-identical** to current output (accepted; see
 Decisions; one absolute pin must move — see Testing item 3).
@@ -98,14 +107,36 @@ if z == 0:            a_f = a                     (exact; covers b = 0, Laplacia
 if ρ < 1e-4:          a_f = a · (1 + ρ²/3)        (series; rel. error ≤ ρ⁴/45 < 1e-17)
 else:                 a_f = z / tanh(ρ)           (tanh saturates to 1; no cosh/sinh
                                                    overflow; a_f → z as ρ → ∞)
-a_f = max(a_f, a, z)                              (clamps 1-ulp rounding so the
-                                                   binding off-diagonal never goes
-                                                   negative in floating point)
+a_f = max(a_f, a, z)                              (so a_f − z ≥ 0 and a_f ≥ a hold
+                                                   exactly in floating point)
 ```
 
-`a ≤ 0` is outside the contract (public pricing enforces σ > 0; the `z == 0`
-early-out is what keeps `LaplacianPDE` and other zero-drift operators away
-from the division).
+The helper exposes **both `a_f` and `z`** (and the drift sign), because the
+clamp alone does not make the *assembled* off-diagonal non-negative:
+forming it as two independently rounded terms
+(`a_f/(dx_l·dx_avg) − b·dx_r/(dx_l·(dx_l+dx_r))`) can round to a tiny
+negative even when `a_f == z`. **Assembly is therefore sign-preserving by
+construction** (binding law):
+
+```
+lower_i = (a_f − b·dx_right/2) / (dx_left · dx_avg)
+upper_i = (a_f + b·dx_left/2)  / (dx_right · dx_avg)
+diag_i  = c − lower_i − upper_i        (row-sum identity preserved exactly)
+```
+
+where the binding-side numerator is computed literally as `a_f − z` (the
+same `z` the helper produced; ≥ 0 exactly by the clamp) and the
+non-binding numerator as `a_f + |b|·dx_other/2` (a sum of non-negatives).
+This replaces the current separate `d2_coeff + d1_coeff` accumulation in
+`assemble_jacobian` — algebraically identical (the existing
+`d1_coeff_im1 = −b·dx_r/(dx_l·(dx_l+dx_r))` is exactly
+`−(b·dx_r/2)/(dx_l·dx_avg)`), but with the sign guarantee carried through
+floating point. The high-ρ test asserts the *assembled* binding entry is
+≥ 0, including when `tanh(ρ) == 1`.
+
+`a ≤ 0` is outside the contract when `b ≠ 0` (public pricing enforces
+σ > 0; the `z == 0` early-out is what keeps `LaplacianPDE` and other
+zero-drift operators away from the division).
 
 ## Architecture: SpatialOperator-local shared helper
 
@@ -136,6 +167,14 @@ Changes, all inside `SpatialOperator`, gated on
    (The stencil's weighted first derivative already matches the Jacobian's
    `d1_coeff` algebra exactly — verified.) PDEs without coefficients keep
    the existing generic `pde_(t, d2u, du, u)` path unchanged.
+   **Contract strengthening (documented on the concept):** once a PDE
+   satisfies `HasJacobianCoefficients`, its coefficient methods become the
+   *authoritative definition* of the interior operator — `operator()` is
+   no longer consulted on this path, and fitted use additionally requires
+   `a > 0` whenever `b ≠ 0`. True for both current models
+   (`BlackScholesPDE::operator()` is exactly `a·d2u + b(t)·du − r(t)·u`;
+   `LaplacianPDE` has `b = r = 0`). A test-only PDE whose `operator()` and
+   coefficient expansion agree guards this dispatch contract.
 4. **Boundary rows stay unfitted.** The ghost-eliminated rows are
    `diag = c − 2a/h²`, `offdiag = +2a/h²` — the off-diagonal already has
    the required Z-matrix sign for any `b` (drift enters only the affine
@@ -153,25 +192,41 @@ No changes to `BlackScholesPDE`, `LaplacianPDE`, `CenteredDifference`,
 ## Testing
 
 1. **Regression test** (per acceptance criteria, in the #475 regression
-   style): σ = 1%, h ≈ 0.1 (coarse grid, r = 5%) full American solve via
-   the public API (`AmericanOptionSolver::create` with a custom
-   `PDEGridConfig` uniform grid); assert
-   `complementarity_report().violation_count == 0` (nonzero today). Sweep
-   a few nearby low-vol/coarse-grid configs.
+   style): full American solve via the public API
+   (`AmericanOptionSolver::create` with a custom `PDEGridConfig` uniform
+   grid); assert `complementarity_report().violation_count == 0`.
+   Canonical fixture (starting point): PUT, S = K = 100, T = 1, r = 5%,
+   q = 0, σ = 1%, uniform x-grid over ≈[−2, 2] with spacing h ≈ 0.1
+   (n ≈ 41), default time stepping. **Execution task 0 (binding): run this
+   fixture on unmodified code and record its nonzero
+   `violation_count`/`worst_kind` in the test comment before implementing
+   the fix; if it does not violate as-is, adjust within the sweep table
+   below until it does and pin the adjusted fixture.** The "nearby sweep"
+   is a fixed parameterized table (e.g. σ ∈ {0.5%, 1%, 2%} × h ∈ {0.05,
+   0.1} × r ∈ {2%, 5%}), not an informal instruction. A zero-KKT
+   assertion can in principle still fail for #473 (active-set) reasons —
+   the direct matrix-sign unit tests (item 2) are what attribute the
+   improvement specifically to the M-matrix repair.
 2. **Helper-invariant unit tests** (internal `SpatialOperator` fixture, in
    the style of `tests/internal/spatial_operator_jacobian_test.cc`):
    - assembled off-diagonal signs on deliberately **asymmetric non-uniform
      cells**, positive and negative drift (binding-side selection);
    - `b = 0` returns exactly `a` (and `LaplacianPDE` Jacobian unchanged);
    - small-ρ (series branch), and overflow-scale ρ (e.g. σ = 1e-4,
-     h = 1: a_f finite, binding off-diagonal ≥ 0 including the
-     exactly-zero limit);
+     h = 1: a_f finite, and the **assembled** binding off-diagonal ≥ 0
+     including when `tanh(ρ) == 1`, i.e. the exactly-zero limit);
    - fitted `apply()` vs `assemble_jacobian()` consistency on a
      non-uniform grid: `L·u` from the matrix equals `apply_interior`
-     output to ~1e-14 (the functional consistency the LCP path needs);
-   - row dominance report under r > 0 and a modest r < 0 (both satisfy
-     `1 + w·r > 0` → clean KKT report); the condition-violating regime
-     (`r ≤ −1/w`) is documented as out of contract, not tested as a solve.
+     output with a scale-aware tolerance (absolute floor plus a relative
+     term scaled by row-term magnitudes, as in `validate_lcp_kkt` — not a
+     bare 1e-14, which is brittle at coarse/high-ρ coefficients);
+   - direct matrix-row dominance inspection (row sum `1 + w·r`, positive
+     diagonal, non-positive off-diagonals) under r > 0 and a modest r < 0
+     satisfying `1 + w·r > 0` — inspecting the matrix, not inferring
+     structure from a KKT-clean solve; the condition-violating regime
+     (`r ≤ −1/w`) is documented as out of contract, not tested as a solve;
+   - a test-only linear PDE whose `operator()` and coefficient expansion
+     agree, guarding the coefficient-authority dispatch contract.
    - **Update expected values in `spatial_operator_jacobian_test.cc`**
      (currently computes expectations from the physical `a`; must use the
      fitted coefficient — its FD-consistency test stays and now guards the
@@ -182,10 +237,14 @@ No changes to `BlackScholesPDE`, `LaplacianPDE`, `CenteredDifference`,
    1e-12 with nonzero drift; always-on fitting moves it. It gets
    deliberately re-pinned in this PR with a comment citing this spec (this
    is a scheme change, not the toolchain drift its comment warns about).
-   All other 1e-12 pins audited: envelope closed-forms, stencil unit
-   tests, and analytic dimensionless-European comparisons — no FDM solve,
-   unaffected. `bspline_bit_identity_test` goldens fit synthetic arrays,
-   no FDM path — unaffected.
+   Other audited absolute-price goldens (search scope: `grep 1e-12
+   tests/*.cc`): envelope closed-forms, stencil unit tests, and analytic
+   dimensionless-European comparisons — no FDM solve, unaffected.
+   `bspline_bit_identity_test` goldens fit synthetic arrays, no FDM path —
+   unaffected. Integration tests with 1e-12 internal-identity assertions
+   compare quantities that move together and are expected to hold; any
+   that fail get individually justified in the PR. No serialized-format
+   change; newly generated price tables simply inherit the scheme change.
 4. **Existing suites otherwise unchanged:** QuantLib A/B pins (ATM put
    4.376e-3 bound 5.5e-3), spatial convergence order ≈ 2, mass
    conservation, narrow-grid BC regression. The fitting perturbs
@@ -284,3 +343,23 @@ solver-path assert; docs caveat narrowed to #473. Design approved by user
 - *Tests:* helper-invariant unit tests added;
   `spatial_operator_jacobian_test.cc` expected-value update called out;
   `NoDivCallPriceUnchangedByEnvelopeBC` named as deliberate re-pin.
+
+**Design review round 2 (Codex) — resolutions folded above:**
+- *Critical:* the clamp on `a_f` alone doesn't survive assembly — two
+  independently rounded terms can sum to a tiny negative at large ρ.
+  **Resolution: sign-preserving reduced assembly is binding law** (helper
+  exposes `a_f` and `z`; binding numerator computed literally as
+  `a_f − z`; `diag = c − lower − upper`); high-ρ test asserts the
+  assembled entry ≥ 0.
+- *Dominance wording:* `1 + w·r > 0` stated as sufficient (not iff);
+  `validate_lcp_kkt` acknowledged as a solution check, not a structural
+  one; direct matrix-row dominance test added.
+- *Regression fixture:* pinned concretely (PUT ATM, σ=1%, h≈0.1 uniform
+  over [−2,2], r=5%) with a binding execution task 0 to record the
+  pre-fix violation count, and a fixed sweep table.
+- *Concept contract:* coefficient methods documented as the authoritative
+  operator definition under `HasJacobianCoefficients` (+ `a > 0` when
+  `b ≠ 0`); test-only PDE dispatch guard added.
+- *Minors folded:* non-uniform extension wording for the classical claim;
+  scale-aware apply/matrix tolerance; pin-audit wording narrowed to the
+  demonstrated scope.
