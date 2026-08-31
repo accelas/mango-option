@@ -344,13 +344,13 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
     EXPECT_FALSE(std::isnan(deep_otm));
 }
 
-// Regression (#437 / D6): the non-adaptive explicit-grid fallback solved
-// gridless (set_grid_accuracy + solve_batch), so normalized routing
-// re-estimated per-sigma-width grids per group: with sigmas {0.10..0.30},
-// tau_max 0.1, axis +/-0.51 and explicit bounds +/-0.6, the widened
-// n_sigma ~= 6.96 gave the min-sigma group half-width ~0.22 < 0.51 and
-// its tails were extrapolated.  The fallback must materialize one
-// concrete covering grid for the whole batch.
+// Regression (#437 / D6): the non-adaptive explicit-grid fallback should
+// materialize one concrete covering grid for the whole batch instead of
+// letting gridless solve re-estimate per-sigma-width grids per group.
+// NOTE: Test premise investigation found this configuration produces
+// grid [-0.66, 0.66] for all slices even with old fallback; this may not
+// trigger the undershooting bug as originally hypothesized. Grid bounds
+// recorded: all slices get [-0.66, 0.66] spanning axis [-0.51, 0.51].
 TEST(PriceTableBuilderCustomGridTest, FallbackGridCoversAxisForAllSlices) {
     std::vector<double> m = {-0.51, -0.2, 0.0, 0.2, 0.51};
     std::vector<double> tau = {0.025, 0.05, 0.075, 0.1};
@@ -374,16 +374,9 @@ TEST(PriceTableBuilderCustomGridTest, FallbackGridCoversAxisForAllSlices) {
     auto results = Access::solve_batch(builder, batch, axes);
 
     ASSERT_EQ(results.results.size(), batch.size());
-
-    // Debug: print grid bounds
-    std::cout << "Moneyness axis: [" << axes.grids[0].front() << ", "
-              << axes.grids[0].back() << "]" << std::endl;
-
     for (size_t i = 0; i < results.results.size(); ++i) {
         ASSERT_TRUE(results.results[i].has_value()) << "slice " << i;
         auto x = results.results[i]->grid()->x();
-        std::cout << "Slice " << i << " grid: [" << x.front() << ", "
-                  << x.back() << "]" << std::endl;
         EXPECT_LE(x.front(), axes.grids[0].front()) << "slice " << i;
         EXPECT_GE(x.back(), axes.grids[0].back()) << "slice " << i;
     }
