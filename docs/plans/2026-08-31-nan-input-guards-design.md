@@ -245,11 +245,12 @@ indefinitely.)
 
 **Test seam:** `build_segment_leaves` is currently private to the `.cpp`.
 Declare it in `chebyshev_adaptive.hpp` under `namespace detail` (definition
-stays in the `.cpp`). `ChebyshevPDECache` is already a public header with a
-public `store_slice`, so the regression test can store a NaN slice (which the
-#425 guard marks invalid), call `detail::build_segment_leaves`, and assert
-`ExtractionFailed` — directly proving extraction no longer continues over
-zeros.
+stays in the `.cpp`; include or forward-declare `ChebyshevPDECache`, whose
+header is already public with a public `store_slice`). The regression test
+lives in `tests/chebyshev_pde_cache_test.cc` (add the adaptive library to
+that target's BUILD deps): store a NaN slice (which the #425 guard marks
+invalid), call `detail::build_segment_leaves`, and assert `ExtractionFailed`
+— directly proving extraction no longer continues over zeros.
 
 ### FDM output validation (D7)
 
@@ -259,7 +260,22 @@ entry → `std::unexpected(SolverError{SolverErrorCode::NonFiniteSolution, ...})
 New enum value appended after `Unknown`; one new `.value("NonFiniteSolution",
 ...)` line in `mango_bindings.cpp`. This closes the empty-spline 0.0 fallback
 described in the Problem section — `AmericanOptionResult` is never
-constructed from non-finite data.
+constructed from non-finite final/theta data.
+
+Scope note: D7 validates exactly the vectors used to construct the result's
+value/theta splines (final + previous-step snapshot). Arbitrary
+user-requested snapshots (`at_time()`) are *not* scanned here; their
+finiteness is enforced at the consuming interpolation boundaries
+(`CubicSpline::build` guard + D6).
+
+**Test seam (pinned):** a NaN cannot reliably be injected end-to-end through
+a successful PDE solve, so the validation lives in a directly testable
+internal free function, e.g.
+`detail::validate_finite_solution(std::span<const double> final, std::span<const double> prev) -> std::optional<SolverError>`,
+declared in a header the test can reach; `solve()` calls it at result
+finalization. Tests cover NaN and Inf in each span plus a finite success
+case; that `solve()` invokes the seam is enforced by code review and by the
+call being unconditional (not assert-based, so it holds in opt builds).
 
 ## Tests (regression-test format per CLAUDE.md)
 
@@ -276,7 +292,13 @@ constructed from non-finite data.
   (`ZeroWidthGrid`), `RejectsShapeProductOverflow` (enormous `num_pts`,
   empty values span — must fail before node generation or allocation);
 - `BuildRejectsNaNSampledFunction` (sampling overload);
-- `EvalPropagatesNaNQuery` (locks existing behavior).
+- sampling-overload validation-order tests: invalid `num_pts`, invalid
+  domain, and product overflow each reject **without ever invoking `f`**
+  (callback counter must stay zero);
+- `EvalPropagatesNaNQuery` (locks existing behavior);
+- all seven existing sampling-factory uses in this file unwrap the new
+  `std::expected` (every factory expression in every listed file gets
+  unwrapped, not just the representative sites named in the inventory).
 
 `tests/bspline_nd_test.cc`:
 - `EvalPropagatesNaNQuery` — `eval`, `eval_partial`, `eval_second_partial`
@@ -288,8 +310,10 @@ Surface/price layer:
 - `tests/eep_decomposer_test.cc`: `EEPFloorTest.NaNPropagates` (the existing
   signed-zero and finite-identity tests must keep passing unchanged).
 - `TransformLeaf::price` (or the cheapest wrapper test around it) returns NaN
-  for a NaN query coordinate; finite queries unchanged; an Inf coordinate
-  still clamps to the domain edge through the wrapper.
+  for a NaN query coordinate; finite queries unchanged; a `-0.0` raw value
+  still produces non-negative output (guards the inline floor copy against a
+  bare operand swap); an Inf coordinate still clamps to the domain edge
+  through the wrapper.
 - `AmericanOptionResult::value_at(NaN)` returns NaN.
 - D7: a solve whose PDE output contains NaN fails with `NonFiniteSolution`
   (unit-level, via whatever seam the solve path offers; must hold in opt
@@ -306,8 +330,10 @@ Surface/price layer:
    updated call sites; new regression tests pass.
 2. `bazel build //benchmarks/...` and `bazel build //src/python:mango_option`
    still build (CI parity) — includes the two benchmark call-site updates.
-3. `latency_sweep` surface-price timings and `bspline_template_vs_hardcoded`
-   raw-eval timings before/after within run-to-run noise (D4).
+3. Perf (D4, measurable): `latency_sweep` B-spline surface-query cases
+   before/after on the same idle machine, ≥3 repetitions each — median
+   regression < 3% on the price-query benchmarks. `bspline_template_vs_hardcoded`
+   raw-eval as a control (its code is unchanged; any delta is noise/toolchain).
 4. NaN input now yields an error (build paths) or NaN (query paths) — never a
    silent 0.0 or a fake success — at every boundary listed above, including
    in opt builds.
