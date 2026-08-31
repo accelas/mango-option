@@ -358,8 +358,8 @@
     },
     "@@rules_python~//python/extensions:pip.bzl%pip": {
       "general": {
-        "bzlTransitiveDigest": "gJutazNh8a55gHkw92b6OAmolrHFHGYABLiAwXmIg9c=",
-        "usagesDigest": "yoU2PaH0m24ZM1qUVXqUwGC9G8MU2I+nUUzhUByWoyc=",
+        "bzlTransitiveDigest": "cjKukmyOa1CB2K9/C5EKIrGT+zhGdrxiJ9IHpRX/jSo=",
+        "usagesDigest": "AXFsQtlqii1lr0iDxV526zUdwwYjRrvQLE2iB98aliY=",
         "recordedFileInputs": {
           "@@rules_python~//tools/publish/requirements_linux.txt": "8175b4c8df50ae2f22d1706961884beeb54e7da27bd2447018314a175981997d",
           "@@//third_party/requirements.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -3212,6 +3212,11 @@
             "rules_python~~python~pythons_hub",
             "python_3_12_host",
             "rules_python~~python~python_3_12_host"
+          ],
+          [
+            "rules_python~~python~pythons_hub",
+            "python_3_13_host",
+            "rules_python~~python~python_3_13_host"
           ],
           [
             "rules_python~~python~pythons_hub",
