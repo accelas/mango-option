@@ -1,6 +1,6 @@
 # NaN Input Guards — Design (issues #425, #426, #466)
 
-Date: 2026-08-31 (rev 2, after design review round 1)
+Date: 2026-08-31 (rev 3, after design review round 2)
 Issues: #425 (CubicSpline), #426 (ChebyshevInterpolant), #466 (silent NaN→0.0 at surface queries)
 Branch: one PR closes all three.
 
@@ -39,8 +39,18 @@ splines away from the fault.
    (`std::max(0.0, NaN)` returns its first argument, `0.0`, because every
    comparison with NaN is false.)
 
-### Additional gap surfaced in design review (part of the motivating story)
+### Additional gaps surfaced in design review (part of the motivating story)
 
+**Empty-spline fallback in AmericanOptionResult.**
+`AmericanOptionResult::build_spline()` (`american_option_result.cpp:146`)
+consumes the `CubicSpline::build()` error only through an `assert`; opt builds
+discard it. With the #425 guard, a NaN PDE solution makes `build()` return
+*before* storing anything, the spline stays empty, and `CubicSpline::eval()`
+on an empty spline returns `0` — so `value_at()` would still report a
+plausible 0.0. The guard must therefore be paired with solver-side validation
+(see D7), or #425 recreates the very failure it exists to prevent.
+
+**Zero-filled extraction in the adaptive cache.**
 `ChebyshevPDECache::store_slice()` (`chebyshev_pde_cache.hpp:23`) discards the
 `CubicSpline::build()` error and only clears a `valid` flag; both adaptive
 extraction loops (`chebyshev_adaptive.cpp:301` and `:410`) then do
@@ -59,20 +69,21 @@ surface out of finite zeros. The extraction loops must fail loudly instead.
   over an error return. *(Review refinement: no `BSplineND` code change is
   needed at all — raw eval already propagates NaN, verified empirically on the
   unmodified implementation (1D and 2D, all three eval methods returned NaN).
-  The fix moves to the masking boundaries: swap `std::max(0.0, v)` to
-  `std::max(v, 0.0)`, which returns identical results for all finite `v` and
-  NaN for NaN, at zero cost. Regression tests lock the raw-eval behavior so an
-  "optimization" cannot reintroduce zeroing there.)*
+  The fix moves to the masking boundaries via the NaN-preserving floor of D8.
+  Regression tests lock the raw-eval behavior so an "optimization" cannot
+  reintroduce zeroing there.)*
 - **D3 — Single branch/PR for all three.** Same theme, one review cycle.
 - **D4 — Performance constraint (user, explicit): no significant perf impact.**
   - #425/#426 guards are build-time-only O(n) scans over data those functions
     already traverse O(n); no query-path change.
-  - #466 is now a pure operand-order swap in `std::max` — same instruction
-    count, no new branches. The hot ~250ns eval path is untouched.
-  - Due diligence: run `benchmarks/bspline_template_vs_hardcoded` (which
-    actually calls `BSplineND<double,4>::eval`, unlike
-    `bspline_nd_optimization_bench` which benchmarks fitting) before/after;
-    timings must be within run-to-run noise.
+  - #466 adds one predictable never-taken `isnan` branch at each of three
+    masking boundaries (D8); raw `BSplineND` eval and the basis kernels are
+    untouched.
+  - Due diligence: benchmark the boundary that actually changed — a full
+    surface price path via `benchmarks/latency_sweep` (exercises
+    `TransformLeaf::price`) before/after, within run-to-run noise;
+    `bspline_template_vs_hardcoded` (raw `BSplineND<double,4>::eval`) as a
+    secondary check that the untouched path is untouched.
 - **D5 — Math-layer error type is `InterpolationError`** (from
   `src/support/error_types.hpp`, so no layering violation): the closest peer
   `BSplineND::create` already returns
@@ -82,7 +93,25 @@ surface out of finite zeros. The extraction loops must fail loudly instead.
   slice that is missing or invalid at extraction time is
   `PriceTableErrorCode::ExtractionFailed`, never a silent zero region. The
   intentional gap-segment placeholder (literal zeros, `Nt_seg == 0` branch)
-  remains a separate, explicit case.
+  remains a separate, explicit case. Generic `ExtractionFailed` (no per-slice
+  diagnostic payload) is intentionally sufficient — the goal is fail-loud, and
+  USDT tracing covers deeper diagnosis.
+- **D7 — The FDM solve path validates its own output** (review round 2). In
+  `AmericanOptionSolver::solve()`, after the PDE solve and before constructing
+  `AmericanOptionResult`, scan the final solution vector and the theta
+  snapshot for non-finite values; on failure return
+  `SolverError{SolverErrorCode::NonFiniteSolution}` — a new enum value
+  **appended after `Unknown`** so existing ordinals stay stable (the Python
+  binding exposes values by name; add the one `.value(...)` line in
+  `mango_bindings.cpp`). Cost: one O(n) scan per solve against a
+  millisecond-scale solve. `build_spline`'s assert stays as defense in depth.
+- **D8 — Positive-zero canonicalization stays contractual** (review round 2).
+  `EEPFloorTest.BothSignedZerosProducePositiveZero` pins `+0.0` output, and a
+  bare operand swap (`std::max(v, 0.0)`) would return `-0.0` for `-0.0`. So
+  the masking boundaries use a NaN-preserving floor
+  (`std::isnan(v) ? v : std::max(0.0, v)`) — identical to today for every
+  non-NaN input including signed zeros, NaN for NaN, one predictable
+  never-taken branch.
 
 ## Design
 
@@ -137,15 +166,21 @@ Validation order in `build_from_values` (all before node generation /
 sampling, then delegates):
 
 1. every `num_pts[d] >= 2` → `InsufficientGridPoints` (axis in error);
-2. every `domain.lo[d]`, `domain.hi[d]` finite and `lo[d] < hi[d]` →
-   `NaNInput`/`InfInput`/`ZeroWidthGrid` (axis in error);
-3. `values.size() == ∏ num_pts[d]`, product computed with overflow checking →
-   `ValueSizeMismatch`;
+2. every `domain.lo[d]`, `domain.hi[d]` finite → `NaNInput`/`InfInput`;
+   `lo[d] == hi[d]` → `ZeroWidthGrid`; `lo[d] > hi[d]` → `GridNotSorted`
+   (axis in error; reversed is not zero-width);
+3. `values.size() == ∏ num_pts[d]`, product computed with overflow checking
+   (fail before any node generation or allocation) → `ValueSizeMismatch`;
 4. every `values[i]` finite → `NaNInput` or `InfInput` with the offending
    index.
 
 These mirror the invariants `reconstruct.hpp` already enforces for the same
 type. Cost is one O(total) scan next to an existing O(total) copy.
+
+Mechanical companions: `ChebyshevInterpolant` gains `requires (N >= 1)` (the
+sampling overload indexes `strides[N-1]`); the header includes `<expected>`
+and `mango/support/error_types.hpp`, and the chebyshev Bazel target adds the
+direct `//src/support:error_types` dependency.
 
 **Call-site inventory** (all updated in this PR):
 
@@ -171,23 +206,25 @@ binding change.
 
 ### #466 — stop masking NaN as 0.0 at the surface boundaries
 
-No `BSplineND` change. Three one-token operand swaps, `std::max(0.0, v)` →
-`std::max(v, 0.0)`:
+No `BSplineND` change. Three boundaries switch from `std::max(0.0, v)` to the
+NaN-preserving floor of D8 (`std::isnan(v) ? v : std::max(0.0, v)`),
+preserving the `+0.0` canonicalization contract:
 
 1. `src/option/table/transform_leaf.hpp:32` (`TransformLeaf::price`) — the
-   query-time mask; after the swap, a NaN raw eval reaches the caller as NaN.
-2. `src/option/table/eep/eep_decomposer.hpp:18` (`eep_floor`) — the build-time
-   mask. Required for the #426 guard to ever fire on the motivating scenario:
-   without it, NaN PDE values are floored to 0.0 *before*
-   `build_from_values` sees them.
+   query-time mask; a NaN raw eval now reaches the caller as NaN.
+2. `src/option/table/eep/eep_decomposer.hpp:18` (`eep_floor`) — the
+   build-time mask. Required for the #426 guard to ever fire on the
+   motivating scenario: without it, NaN PDE values are floored to 0.0
+   *before* `build_from_values` sees them.
 3. `src/option/american_option_result.cpp:45` (`value_at`) — same family in
    the FDM result path; NaN spot queries now return NaN instead of 0.0.
 
-For all finite inputs `std::max(v, 0.0) == std::max(0.0, v)`; only NaN
-handling differs (`-0.0` vs `+0.0` ties are indistinguishable by value).
-`clamp_bspline_query` and the ±Inf clamp-to-edge behavior are untouched, and
-`ChebyshevInterpolant::eval` needs no change (`std::clamp` passes NaN through;
-the barycentric formula yields NaN — locked by a regression test).
+`eep_floor` is the named, tested home of this semantic; the other two sites
+use the same expression inline with a comment (three tiny sites don't justify
+a shared header). `clamp_bspline_query` and the ±Inf clamp-to-edge behavior
+are untouched, and `ChebyshevInterpolant::eval` needs no change (`std::clamp`
+passes NaN through; the barycentric formula yields NaN — locked by a
+regression test).
 
 Higher-level guards are unaffected: `validate_iv_query` still rejects
 non-finite queries at the `InterpolatedIVSolver` boundary; this change fixes
@@ -206,17 +243,38 @@ expected-valued after the #426 changes, so propagation is mechanical.
 acceptable: the build fails with a clear error rather than retrying
 indefinitely.)
 
+**Test seam:** `build_segment_leaves` is currently private to the `.cpp`.
+Declare it in `chebyshev_adaptive.hpp` under `namespace detail` (definition
+stays in the `.cpp`). `ChebyshevPDECache` is already a public header with a
+public `store_slice`, so the regression test can store a NaN slice (which the
+#425 guard marks invalid), call `detail::build_segment_leaves`, and assert
+`ExtractionFailed` — directly proving extraction no longer continues over
+zeros.
+
+### FDM output validation (D7)
+
+In `AmericanOptionSolver::solve()`: after the PDE solve, scan the final
+solution span and the theta snapshot with `std::isfinite`; any non-finite
+entry → `std::unexpected(SolverError{SolverErrorCode::NonFiniteSolution, ...})`.
+New enum value appended after `Unknown`; one new `.value("NonFiniteSolution",
+...)` line in `mango_bindings.cpp`. This closes the empty-spline 0.0 fallback
+described in the Problem section — `AmericanOptionResult` is never
+constructed from non-finite data.
+
 ## Tests (regression-test format per CLAUDE.md)
 
 `tests/thomas_cubic_spline_test.cc` (existing CubicSpline test home):
 - `BuildRejectsNaNY`, `BuildRejectsInfY`, `BuildRejectsNaNX`,
   `BuildRejectsInfX` (the X cases are the monotonicity blind spot),
-  `RebuildSameGridRejectsNaNY`.
+  `RebuildSameGridRejectsNaNY`, `RebuildSameGridRejectsInfY`.
 
 `tests/chebyshev_interpolant_test.cc`:
-- `BuildFromValuesRejectsNaN` / `RejectsInf` (checks code and index),
-  `RejectsSizeMismatch`, `RejectsNumPtsBelowTwo`, `RejectsNonFiniteDomain`,
-  `RejectsReversedDomain`;
+- `BuildFromValuesRejectsNaN` / `RejectsInf` (asserts the distinct code and
+  the offending index), `RejectsSizeMismatch`, `RejectsNumPtsBelowTwo`,
+  `RejectsNaNDomain` / `RejectsInfDomain` (distinct codes),
+  `RejectsReversedDomain` (`GridNotSorted`) and `RejectsZeroWidthDomain`
+  (`ZeroWidthGrid`), `RejectsShapeProductOverflow` (enormous `num_pts`,
+  empty values span — must fail before node generation or allocation);
 - `BuildRejectsNaNSampledFunction` (sampling overload);
 - `EvalPropagatesNaNQuery` (locks existing behavior).
 
@@ -227,12 +285,19 @@ indefinitely.)
 - `EvalStillClampsInfQuery` — ±Inf keeps clamp-to-edge behavior.
 
 Surface/price layer:
+- `tests/eep_decomposer_test.cc`: `EEPFloorTest.NaNPropagates` (the existing
+  signed-zero and finite-identity tests must keep passing unchanged).
 - `TransformLeaf::price` (or the cheapest wrapper test around it) returns NaN
-  for a NaN query coordinate; finite queries unchanged.
+  for a NaN query coordinate; finite queries unchanged; an Inf coordinate
+  still clamps to the domain edge through the wrapper.
 - `AmericanOptionResult::value_at(NaN)` returns NaN.
-- Adaptive path: a cache with an invalid (NaN-input) slice makes the segment
-  build return `ExtractionFailed` — proving a rejected spline can no longer
-  become a silently-zero surface (regression for the motivating incident).
+- D7: a solve whose PDE output contains NaN fails with `NonFiniteSolution`
+  (unit-level, via whatever seam the solve path offers; must hold in opt
+  builds, i.e. not assert-based).
+- Adaptive path (via the new `detail::build_segment_leaves` seam): a cache
+  holding an invalid (NaN-input) slice makes the segment build return
+  `ExtractionFailed` — proving a rejected spline can no longer become a
+  silently-zero surface (regression for the motivating incident).
 - Reconstruction: persisted segment with a non-finite value fails to load.
 
 ## Acceptance criteria
@@ -241,7 +306,8 @@ Surface/price layer:
    updated call sites; new regression tests pass.
 2. `bazel build //benchmarks/...` and `bazel build //src/python:mango_option`
    still build (CI parity) — includes the two benchmark call-site updates.
-3. `bspline_template_vs_hardcoded` eval timings before/after within
-   run-to-run noise (D4; expected trivially true — no eval-path code change).
+3. `latency_sweep` surface-price timings and `bspline_template_vs_hardcoded`
+   raw-eval timings before/after within run-to-run noise (D4).
 4. NaN input now yields an error (build paths) or NaN (query paths) — never a
-   silent 0.0 or a fake success — at every boundary listed above.
+   silent 0.0 or a fake success — at every boundary listed above, including
+   in opt builds.
