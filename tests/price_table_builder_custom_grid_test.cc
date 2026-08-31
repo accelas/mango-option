@@ -344,5 +344,50 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
     EXPECT_FALSE(std::isnan(deep_otm));
 }
 
+// Regression (#437 / D6): the non-adaptive explicit-grid fallback solved
+// gridless (set_grid_accuracy + solve_batch), so normalized routing
+// re-estimated per-sigma-width grids per group: with sigmas {0.10..0.30},
+// tau_max 0.1, axis +/-0.51 and explicit bounds +/-0.6, the widened
+// n_sigma ~= 6.96 gave the min-sigma group half-width ~0.22 < 0.51 and
+// its tails were extrapolated.  The fallback must materialize one
+// concrete covering grid for the whole batch.
+TEST(PriceTableBuilderCustomGridTest, FallbackGridCoversAxisForAllSlices) {
+    std::vector<double> m = {-0.51, -0.2, 0.0, 0.2, 0.51};
+    std::vector<double> tau = {0.025, 0.05, 0.075, 0.1};
+    std::vector<double> vol = {0.10, 0.15, 0.20, 0.30};
+    std::vector<double> rate = {0.02, 0.03, 0.04, 0.05};
+
+    // Covers the axis (passes build()'s upfront check) but 15 points over
+    // width 1.2 makes max_dx > 0.05 -> stability constraints fail ->
+    // fallback branch.
+    auto grid_spec = mango::GridSpec<double>::sinh_spaced(-0.6, 0.6, 15, 2.0).value();
+
+    auto setup = mango::PriceTableBuilder::from_vectors(
+        m, tau, vol, rate, /*K_ref=*/100.0,
+        mango::PDEGridSpec{mango::PDEGridConfig{grid_spec, 200, {}}},
+        mango::OptionType::PUT,
+        0.0);  // dividend_yield
+    ASSERT_TRUE(setup.has_value());
+    auto& [builder, axes] = setup.value();
+
+    auto batch = Access::make_batch(builder, axes);
+    auto results = Access::solve_batch(builder, batch, axes);
+
+    ASSERT_EQ(results.results.size(), batch.size());
+
+    // Debug: print grid bounds
+    std::cout << "Moneyness axis: [" << axes.grids[0].front() << ", "
+              << axes.grids[0].back() << "]" << std::endl;
+
+    for (size_t i = 0; i < results.results.size(); ++i) {
+        ASSERT_TRUE(results.results[i].has_value()) << "slice " << i;
+        auto x = results.results[i]->grid()->x();
+        std::cout << "Slice " << i << " grid: [" << x.front() << ", "
+                  << x.back() << "]" << std::endl;
+        EXPECT_LE(x.front(), axes.grids[0].front()) << "slice " << i;
+        EXPECT_GE(x.back(), axes.grids[0].back()) << "slice " << i;
+    }
+}
+
 } // namespace
 } // namespace mango
