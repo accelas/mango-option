@@ -5,6 +5,7 @@
 #include "mango/option/table/surface_concepts.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <concepts>
 #include <cstddef>
 
@@ -15,7 +16,10 @@ namespace mango {
 /// Preserves every valid nonnegative premium and maps negative numerical
 /// residuals to zero.
 inline double eep_floor(double eep_raw) {
-    return std::max(0.0, eep_raw);
+    // NaN-preserving (issue #466): max(0.0, NaN) would mask NaN as +0.0 and
+    // hide it from build-time finiteness guards. +0.0 canonicalization for
+    // finite input is contractual (EEPFloorTest.BothSignedZerosProducePositiveZero).
+    return std::isnan(eep_raw) ? eep_raw : std::max(0.0, eep_raw);
 }
 
 /// Accessor concept for EEP decomposition.

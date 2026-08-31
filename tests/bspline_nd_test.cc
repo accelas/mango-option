@@ -13,6 +13,7 @@
 #include <vector>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <numbers>
 
 // Verify BSplineND satisfies SurfaceInterpolant
@@ -498,4 +499,45 @@ TEST_F(BSplineNDTest, MoveKeepsCoefficientViewValid) {
     };
     auto [moved, expected] = make_moved();
     EXPECT_DOUBLE_EQ(moved.eval({0.37}), expected);
+}
+
+// ===========================================================================
+// Regression tests for issue #466 (NaN query coordinates)
+// ===========================================================================
+
+// Regression: issue #466 claimed eval returns 0.0 for NaN queries; empirical
+// check showed raw eval already propagates NaN (degree-1 Cox-de Boor terms
+// compute (NaN - t)/den * 0 = NaN). This locks that behavior against future
+// basis "optimizations" — the 0.0 masking was at the std::max boundaries above.
+TEST_F(BSplineNDTest, EvalPropagatesNaNQuery) {
+    auto grid = create_uniform_grid(0.0, 1.0, 10);
+    auto knots = create_clamped_knots(grid);
+    std::vector<double> coeffs(grid.size(), 1.5);
+    auto spline = BSplineND<double, 1>::create({grid}, {knots}, coeffs);
+    ASSERT_TRUE(spline.has_value());
+    const double nan = std::nan("");
+    EXPECT_TRUE(std::isnan(spline->eval({nan})));
+    EXPECT_TRUE(std::isnan(spline->eval_partial(0, {nan})));
+    EXPECT_TRUE(std::isnan(spline->eval_second_partial(0, {nan})));
+
+    // NaN in each coordinate position of a 2D spline
+    auto grid2 = create_uniform_grid(0.0, 2.0, 8);
+    auto knots2 = create_clamped_knots(grid2);
+    std::vector<double> c2(grid.size() * grid2.size(), 2.0);
+    auto sp2 = BSplineND<double, 2>::create({grid, grid2}, {knots, knots2}, c2);
+    ASSERT_TRUE(sp2.has_value());
+    EXPECT_TRUE(std::isnan(sp2->eval({nan, 0.5})));
+    EXPECT_TRUE(std::isnan(sp2->eval({0.5, nan})));
+}
+
+// ±Inf keeps clamp-to-edge semantics (only NaN propagates)
+TEST_F(BSplineNDTest, EvalStillClampsInfQuery) {
+    auto grid = create_uniform_grid(0.0, 1.0, 10);
+    auto knots = create_clamped_knots(grid);
+    std::vector<double> coeffs(grid.size(), 1.5);
+    auto spline = BSplineND<double, 1>::create({grid}, {knots}, coeffs);
+    ASSERT_TRUE(spline.has_value());
+    const double inf = std::numeric_limits<double>::infinity();
+    EXPECT_DOUBLE_EQ(spline->eval({inf}), spline->eval({1.0}));
+    EXPECT_DOUBLE_EQ(spline->eval({-inf}), spline->eval({0.0}));
 }

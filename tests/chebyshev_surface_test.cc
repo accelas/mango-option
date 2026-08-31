@@ -6,6 +6,9 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/table/surface_concepts.hpp"
 
+#include <cmath>
+#include <limits>
+
 using namespace mango;
 
 // Static assertions
@@ -95,4 +98,31 @@ TEST(ChebyshevTableBuilderTest, IVRoundTrip) {
     // Chebyshev price should be close to FDM
     double cheb_price = result->price(100.0, 100.0, 1.0, 0.20, 0.05);
     EXPECT_NEAR(cheb_price, ref->value(), 0.50);  // within $0.50 for initial integration
+}
+
+// ===========================================================================
+// Regression tests for issue #466 (TransformLeaf masked NaN as 0.0)
+// ===========================================================================
+
+// Regression: TransformLeaf::price returned 0.0 for NaN interpolant output
+// Bug: std::max(0.0, raw) returns 0.0 when raw is NaN
+TEST(TransformLeafNaNTest, PricePropagatesNaNAndKeepsFloor) {
+    auto f = [](std::array<double, 4>) { return -1.0; };  // always-negative raw
+    Domain<4> dom{.lo = {-0.7, 0.05, 0.1, 0.0}, .hi = {0.7, 2.0, 0.5, 0.08}};
+    std::array<size_t, 4> npts = {5, 5, 5, 5};
+    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build(f, dom, npts);
+    ChebyshevTransformLeaf leaf(std::move(interp),
+                                 StandardTransform4D{}, 100.0);
+
+    // Finite query over a negative raw value: floored to +0.0 (not -0.0)
+    double p = leaf.price(100.0, 100.0, 1.0, 0.2, 0.05);
+    EXPECT_DOUBLE_EQ(p, 0.0);
+    EXPECT_FALSE(std::signbit(p));
+
+    // NaN spot propagates instead of masking to 0.0
+    EXPECT_TRUE(std::isnan(leaf.price(std::nan(""), 100.0, 1.0, 0.2, 0.05)));
+
+    // Inf spot still clamps to the domain edge (finite output)
+    EXPECT_TRUE(std::isfinite(
+        leaf.price(std::numeric_limits<double>::infinity(), 100.0, 1.0, 0.2, 0.05)));
 }

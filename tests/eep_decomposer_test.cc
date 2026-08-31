@@ -121,6 +121,13 @@ TEST(EEPFloorTest, ProjectionIsPositivelyHomogeneous) {
     }
 }
 
+// Regression: eep_floor masked NaN as +0.0 at table-build time (issue #466)
+// Bug: std::max(0.0, NaN) returns its first argument, hiding NaN from the
+// downstream build_from_values finiteness guard
+TEST(EEPFloorTest, NaNPropagates) {
+    EXPECT_TRUE(std::isnan(eep_floor(std::nan(""))));
+}
+
 TEST(EEPDecomposerTest, BulkAndPerPointPathsUseExactProjection) {
     const std::vector american_prices{9.995, 10.0, 10.005, 10.02, 11.0};
     std::vector<double> stored_eep(american_prices.size(), -1.0);

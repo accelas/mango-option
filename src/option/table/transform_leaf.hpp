@@ -11,7 +11,8 @@
 namespace mango {
 
 /// Coordinate transform + raw interpolation + K/K_ref scaling.
-/// Produces: max(0, interp(coords)) * strike/K_ref.
+/// Produces: max(0, interp(coords)) * strike/K_ref, propagating NaN instead
+/// of masking it as 0.0 (issue #466).
 ///
 /// Used directly for segmented leaves (no EEP decomposition).
 /// Wrapped by EEPLayer for standard leaves (European add-back).
@@ -29,7 +30,10 @@ public:
                                 double tau, double sigma, double rate) const {
         auto coords = xform_.to_coords(spot, strike, tau, sigma, rate);
         double raw = interp_.eval(coords);
-        return std::max(0.0, raw) * strike / K_ref_;
+        // NaN-preserving floor (issue #466): keep +0.0 canonicalization for
+        // finite raw, propagate NaN instead of masking it as a 0.0 price
+        double floored = std::isnan(raw) ? raw : std::max(0.0, raw);
+        return floored * strike / K_ref_;
     }
 
     [[nodiscard]] double vega(double spot, double strike,

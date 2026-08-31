@@ -605,4 +605,17 @@ TEST(AmericanOptionResultNonUniformTimeTest,
         << "theta must match the calendar-time FD reference";
 }
 
+// Regression: value_at(NaN) returned 0.0 (issue #466 family)
+// Bug: std::max(0.0, spline eval) masked the NaN from log(NaN/K)
+TEST(AmericanOptionResultNaNTest, ValueAtNaNSpotReturnsNaN) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.20);
+    auto result = solve_american_option(params);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(std::isnan(result->value_at(std::nan(""))));
+}
+
 } // namespace
