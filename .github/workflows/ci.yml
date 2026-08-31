@@ -120,7 +120,7 @@ jobs:
 
       - name: Run test suite
         run: |
-          bazel test //tests/... --test_output=errors --test_tag_filters=-manual
+          bazel test //tests/... --test_output=errors --test_tag_filters=-manual,-slow
 
       # Assertion coverage for the adaptive-refinement logic. The target holds
       # only fast seam-level tests (no PDE builds — those run in the opt suite

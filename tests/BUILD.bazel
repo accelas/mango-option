@@ -1471,16 +1471,16 @@ cc_test(
     timeout = "eternal",
     # Accuracy pins (documented adaptive dividend config, B-spline refusal,
     # manual-vs-adaptive comparison): computation-stress tests, ~140s CPU
-    # local.  Excluded from per-PR CI (`manual`), run by the nightly
-    # slow-tests workflow (`slow`).  One shard per case.
+    # local.  Tagged `slow` only — NOT `manual`, because Bazel drops
+    # manual-tagged targets from `//tests/...` wildcard expansion before
+    # --test_tag_filters applies, which would hide this target from the
+    # nightly `--test_tag_filters=slow` run.  Per-PR CI excludes it with
+    # `--test_tag_filters=-manual,-slow`.  One shard per case.
     shard_count = 3,
     srcs = ["iv_solver_factory_slow_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
-    tags = [
-        "manual",
-        "slow",
-    ],
+    tags = ["slow"],
     deps = [
         "//src/option:interpolated_iv_solver",
         "//src/option:american_option",
