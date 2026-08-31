@@ -33,7 +33,8 @@ So the sign condition is **per-side**: for `b > 0` the lower entry binds
 the stage matrix `A = I − w·L` is a **Z-matrix** (non-positive
 off-diagonals) with row sum `1 + w·r(t)`, **provided the stage weight
 `w ≥ 0`**. The classic TR-BDF2 weights (`w1 = γ·Δt/2`,
-`w2 = (1−γ)·Δt/(2−γ)`) are both positive iff `0 < γ < 1`; the default
+`w2 = (1−γ)·Δt/(2−γ)`) are both positive, within the admissible TR-BDF2
+range (first stage inside the step), exactly when `0 < γ < 1`; the default
 `γ = 2−√2` qualifies, but `PDESolver::set_config` currently accepts any
 `TRBDF2Config` unvalidated, so a caller-supplied `γ ≤ 0` or `γ ≥ 1` would
 silently void the theorem. **This spec makes valid stage weights an
@@ -168,9 +169,13 @@ This replaces the current separate `d2_coeff + d1_coeff` accumulation in
 floating point. The high-ρ test asserts the *assembled* binding entry is
 ≥ 0, including when `tanh(ρ) == 1`.
 
-`a ≤ 0` is outside the contract when `b ≠ 0` (public pricing enforces
-σ > 0; the `z == 0` early-out is what keeps `LaplacianPDE` and other
-zero-drift operators away from the division).
+Zero-diffusion contract, stated once and consistently: **`a < 0` is
+outside the contract** (documented + debug assert; `SpatialOperator` has
+no error-return channel, so no runtime rejection); **`a == 0, b ≠ 0` is
+supported** only as the representable convection limit (`a_f = z`, the
+branch above); **`a == 0, b == 0`** returns through the `z == 0` branch.
+(Public pricing enforces σ > 0, but `0.5·σ·σ` may underflow — hence the
+explicit limit branch rather than an `a > 0` precondition.)
 
 ## Architecture: SpatialOperator-local shared helper
 
@@ -189,9 +194,12 @@ discretize `L` differently, the validator flags our own fix.
 Changes, all inside `SpatialOperator`, gated on
 `HasJacobianCoefficients<PDE>`:
 
-1. **Private helper** `fitted_second_coeff(t, i)` (name at implementer's
-   discretion) computing `a_f(i,t)` from `a`, `b(t)`, and the spacing
-   arrays, with the small-ρ series branch.
+1. **Private helper** (name at implementer's discretion) that receives the
+   *already-sampled* `a`, `b` plus the local spacings — per the sampling
+   discipline below, NOT a `(t, i)` signature that invites per-node
+   coefficient re-queries — and returns a small result `{a_f, z,
+   binding_side}` for sign-preserving assembly, with the small-ρ series
+   branch.
 2. **`assemble_jacobian`** uses `a_f(i,t)` in place of `a` in the three
    second-derivative coefficients. Drift and reaction terms unchanged.
 3. **`apply_interior`** gains a coefficient-combine path for
@@ -204,11 +212,15 @@ Changes, all inside `SpatialOperator`, gated on
    **Contract strengthening (documented on the concept):** once a PDE
    satisfies `HasJacobianCoefficients`, its coefficient methods become the
    *authoritative definition* of the interior operator — `operator()` is
-   no longer consulted on this path, and fitted use additionally requires
-   `a > 0` whenever `b ≠ 0`. True for both current models
+   no longer consulted on this path, and fitted use requires `a ≥ 0`
+   (`a < 0` out of contract; `a == 0` handled by the convection-limit
+   branch — see the floating-point contract). True for both current models
    (`BlackScholesPDE::operator()` is exactly `a·d2u + b(t)·du − r(t)·u`;
-   `LaplacianPDE` has `b = r = 0`). A test-only PDE whose `operator()` and
-   coefficient expansion agree guards this dispatch contract.
+   `LaplacianPDE` has `b = r = 0`). The dispatch guard test uses a
+   test-only coefficient PDE whose `operator()` is *observable* (call
+   counter or distinct sentinel value) and asserts `operator()` is NOT
+   invoked on this path — mere numerical agreement would pass whether or
+   not the dispatch happened.
 4. **Boundary rows stay unfitted.** The ghost-eliminated rows are
    `diag = c − 2a/h²`, `offdiag = +2a/h²` — the off-diagonal already has
    the required Z-matrix sign for any `b` (drift enters only the affine
@@ -262,11 +274,16 @@ the stage-weight premise above.
      satisfying `1 + w·r > 0` — inspecting the matrix, not inferring
      structure from a KKT-clean solve; the condition-violating regime
      (`r ≤ −1/w`) is documented as out of contract, not tested as a solve;
-   - a test-only linear PDE whose `operator()` and coefficient expansion
-     agree, guarding the coefficient-authority dispatch contract;
+   - dispatch guard: a test-only coefficient PDE with an *observable*
+     `operator()` (call counter / sentinel) asserting `operator()` is NOT
+     invoked on the coefficient-combine path;
    - the `a == 0, b ≠ 0` underflow-limit branch (`a_f = z`);
+   - near-zero-drift continuity: assemble at `b ∈ {−ε, 0, +ε}` on an
+     asymmetric cell; coefficients continuous with the expected quadratic
+     correction (guards the C¹ claim at the crossing);
    - γ validation: `solve()` with `γ ∈ {0, 1, 1.5, NaN}` returns
-     `InvalidConfiguration`; default `γ = 2−√2` unaffected.
+     `InvalidConfiguration` (error payload: `residual` carries the
+     supplied γ, `iterations = 0`); default `γ = 2−√2` unaffected.
    - **Update expected values in `spatial_operator_jacobian_test.cc`**
      (currently computes expectations from the physical `a`; must use the
      fitted coefficient — its FD-consistency test stays and now guards the
@@ -422,3 +439,18 @@ solver-path assert; docs caveat narrowed to #473. Design approved by user
 - *Minors folded:* row-sum wording ("by construction, subject to final
   rounding"); perturbation figures reframed as implementation-time
   measurements.
+
+**Design review round 4 (Codex) — clean round (no Critical); folded:**
+- zero-diffusion contract stated once, consistently (`a < 0` out of
+  contract / `a == 0, b ≠ 0` = convection limit / `a == 0, b == 0` via
+  the `z == 0` branch);
+- dispatch guard test made observable (sentinel/counter) — agreement
+  alone can't prove the dispatch;
+- γ "iff" qualified to the admissible TR-BDF2 range; helper receives
+  sampled coefficients and returns `{a_f, z, binding_side}`;
+  near-zero-drift C¹ continuity test added;
+- open-question resolutions: `InvalidConfiguration` payload carries the
+  supplied γ in `residual` with `iterations = 0`; `a < 0` stays a
+  documented/debug precondition (no error channel in `SpatialOperator`);
+  the pre-fix KKT measurement remains execution task 0. **Gate 1 passed
+  after round 4.**
