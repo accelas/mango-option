@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: MIT
+//
+// Per-PR CI tests for the IV solver factory: wiring, error paths, and
+// regression invariants.  Every case here exists to expose a software error,
+// not to measure computation results — the accuracy pins (documented-config
+// viability, manual-vs-adaptive comparison) live in
+// iv_solver_factory_slow_test.cc and run in the nightly slow suite.
 #include <gtest/gtest.h>
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/american_option.hpp"
@@ -6,8 +12,6 @@
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include <cmath>
-#include <iostream>
-#include <optional>
 
 using namespace mango;
 
@@ -64,40 +68,17 @@ std::vector<IVQuery> make_test_queries() {
 }
 
 // ---------------------------------------------------------------------------
-// Parametric test: manual vs adaptive on the standard path
+// Standard path: manual wiring, then one consolidated adaptive smoke
 // ---------------------------------------------------------------------------
 
-struct GridParam {
-    std::string name;
-    std::optional<AdaptiveGridParams> adaptive;
-};
-
-class IVSolverFactoryTest : public ::testing::TestWithParam<GridParam> {};
-
-TEST_P(IVSolverFactoryTest, Builds) {
-    auto config = make_base_config();
-    config.adaptive = GetParam().adaptive;
-
-    auto solver = make_interpolated_iv_solver(config);
-    // Note: This test can fail with FittingFailed (code 7) when run after
-    // IVSolverFactorySegmented + IVSolverFactoryComparison tests due to a subtle
-    // numerical stability issue in B-spline fitting. The test passes in isolation.
-    //
-    // Known issue: Extensive investigation (RNG, thread_local, static state,
-    // FPU settings) found no root cause. SolvesIV/Adaptive and BatchSolve/Adaptive
-    // still verify the adaptive path works correctly.
-    if (!solver.has_value() && GetParam().name == "Adaptive") {
-        GTEST_SKIP() << "Adaptive build failed (known test isolation issue): code "
-                     << static_cast<int>(solver.error().code);
-    }
+TEST(IVSolverFactoryTest, ManualBuilds) {
+    auto solver = make_interpolated_iv_solver(make_base_config());
     ASSERT_TRUE(solver.has_value())
         << "Error code: " << static_cast<int>(solver.error().code);
 }
 
-TEST_P(IVSolverFactoryTest, SolvesIV) {
-    auto config = make_base_config();
-    config.adaptive = GetParam().adaptive;
-    auto solver = build_solver(config);
+TEST(IVSolverFactoryTest, ManualSolvesIV) {
+    auto solver = build_solver(make_base_config());
     auto queries = make_test_queries();
     ASSERT_FALSE(queries.empty());
 
@@ -111,10 +92,8 @@ TEST_P(IVSolverFactoryTest, SolvesIV) {
     }
 }
 
-TEST_P(IVSolverFactoryTest, BatchSolve) {
-    auto config = make_base_config();
-    config.adaptive = GetParam().adaptive;
-    auto solver = build_solver(config);
+TEST(IVSolverFactoryTest, ManualBatchSolve) {
+    auto solver = build_solver(make_base_config());
 
     std::vector<IVQuery> queries(3);
     for (auto& q : queries) {
@@ -131,17 +110,54 @@ TEST_P(IVSolverFactoryTest, BatchSolve) {
     EXPECT_EQ(batch_result.results.size(), 3u);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    GridTypes,
-    IVSolverFactoryTest,
-    ::testing::Values(
-        GridParam{"Manual", std::nullopt},
-        GridParam{"Adaptive", AdaptiveGridParams{
-            .target_iv_error = 0.002,
-            .max_iter = 5,
-            .validation_samples = 32,
-        }}),
-    [](const auto& info) { return info.param.name; });
+// One adaptive build carries every adaptive-path wiring assertion: build
+// succeeds, diagnostics are exposed (spec D7), single solves recover the
+// true vol, and batch solve round-trips.  Historically these were four
+// separate cases (Builds/Adaptive, SolvesIV/Adaptive, BatchSolve/Adaptive,
+// AdaptivePathExposesDiagnostics), each paying ~18-50s for its own build of
+// the same surface.  The 0.02 tolerance is a smoke bound distinguishing a
+// correctly wired surface from garbage, not an accuracy pin — accuracy pins
+// live in iv_solver_factory_slow_test.cc (nightly slow suite).
+TEST(IVSolverFactoryTest, AdaptiveEndToEndSmoke) {
+    auto config = make_base_config();
+    config.adaptive = AdaptiveGridParams{
+        .target_iv_error = 0.002,
+        .max_iter = 5,
+        .validation_samples = 32,
+    };
+    auto solver = build_solver(config);
+
+    // Diagnostics exposed through the convenience factory (spec D7).
+    auto diag = solver.build_diagnostics();
+    ASSERT_TRUE(diag.has_value());
+    EXPECT_GE(diag->total_iterations, 1u);
+
+    // Single solves.
+    auto queries = make_test_queries();
+    ASSERT_FALSE(queries.empty());
+    for (const auto& query : queries) {
+        auto result = solver.solve(query);
+        ASSERT_TRUE(result.has_value())
+            << "IV solve failed for K=" << query.strike
+            << " T=" << query.maturity;
+        EXPECT_NEAR(result->implied_vol, 0.20, 0.02)
+            << "K=" << query.strike << " T=" << query.maturity;
+    }
+
+    // Batch solve on the same surface.
+    std::vector<IVQuery> batch(3);
+    for (auto& q : batch) {
+        q.spot = SPOT;
+        q.strike = 100.0;
+        q.maturity = 0.5;
+        q.rate = RateSpec{0.05};
+        q.dividend_yield = DIVIDEND_YIELD;
+        q.option_type = TYPE;
+        q.market_price = 6.0;
+    }
+    auto batch_result = solver.solve_batch(batch);
+    EXPECT_EQ(batch_result.results.size(), 3u);
+}
 
 // ---------------------------------------------------------------------------
 // Segmented path (manual and adaptive)
@@ -235,131 +251,20 @@ TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
     EXPECT_LT(result->implied_vol, 3.0);
 }
 
-/// The adaptive discrete-dividend configuration published in CLAUDE.md
-/// (Pattern 4) and docs/API_GUIDE.md ("Discrete Dividends with Adaptive
-/// Grid").  Shared by the two tests below so the pinning and the
-/// documented-limitation companion cannot drift apart.
-IVSolverFactoryConfig documented_adaptive_dividend_config() {
-    return IVSolverFactoryConfig{
-        .option_type = OptionType::PUT,
-        .spot = 100.0,
-        .dividend_yield = 0.01,
-        .grid = IVGrid{
-            .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
-            .vol = {0.10, 0.15, 0.20, 0.30},
-            .rate = {0.02, 0.03, 0.05, 0.07},
-        },
-        // Verbatim from the docs: the default max_iter (8) and
-        // validation_samples (64), not a relaxed pair.
-        .adaptive = AdaptiveGridParams{.target_iv_error = 0.001},
-        .backend = ChebyshevBackend{},
-        .discrete_dividends = DiscreteDividendConfig{
-            .maturity = 1.0,
-            .discrete_dividends = {
-                Dividend{.calendar_time = 0.25, .amount = 1.50},
-                Dividend{.calendar_time = 0.50, .amount = 1.50}},
-            .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
-                                       102.5, 105.0, 107.5, 110.0}},
-        },
-    };
-}
-
-// The documented adaptive discrete-dividend config, pinned so the
-// documentation cannot silently rot into a configuration the viability gate
-// refuses.  Everything a reader would copy is verbatim -- including
-// `AdaptiveGridParams`, which is *not* relaxed here: the whole point of the
-// pin is that the published parameters are the ones that were measured.
-//
-// The pairing of moneyness grid and K_refs is the fragile part.  The
-// assembled surface blends K_ref-struck prices linearly in strike, so the
-// K_refs must span *and resolve* the strike range the moneyness grid implies:
-// S/K in [0.92, 1.08] means strikes in [92.6, 108.7], served here by K_refs
-// at 2.5 % spacing across [90, 110].
-//
-// Measured on this config: **0.0549 (549 bps) max, 0.0145 avg, 64 of 64
-// holdout points measured**, against the 0.20 viability bound -- roughly 3.6x
-// of margin.  `target_met` is false (549 bps does not reach the 10 bps
-// target), which is honest and expected: viability, not the target, is what
-// gates the build.  Runtime ~57 s.
-TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
-    auto config = documented_adaptive_dividend_config();
-
-    auto solver = make_interpolated_iv_solver(config);
-    ASSERT_TRUE(solver.has_value())
-        << "the documented adaptive discrete-dividend config must build a "
-           "viable surface: code "
-        << static_cast<int>(solver.error().code);
-
-    auto diag = solver->build_diagnostics();
-    ASSERT_TRUE(diag.has_value()) << "an adaptive build must report diagnostics";
-    EXPECT_GT(diag->holdout_points_measured, 0u)
-        << "a surface measured nowhere certifies nothing";
-    EXPECT_LE(diag->achieved_max_error, 0.20)
-        << "measured " << diag->achieved_max_error * 1e4 << " bps against the "
-           "0.20 viability bound";
-    // Generous headroom over the measured 0.0549 -- this pins the config
-    // against silent degradation, not against ordinary numerical drift.
-    EXPECT_LE(diag->achieved_max_error, 0.10)
-        << "the documented config measured 549 bps when it was written; "
-           "measuring " << diag->achieved_max_error * 1e4
-        << " bps means it has degraded materially";
-
-    OptionSpec spec{
-        .spot = 100.0, .strike = 95.0, .maturity = 0.5,
-        .rate = 0.05, .dividend_yield = 0.01,
-        .option_type = OptionType::PUT
-    };
-    PricingParams pricing_params(spec, 0.20);
-    pricing_params.discrete_dividends = config.discrete_dividends->discrete_dividends;
-    auto ref = solve_american_option(pricing_params);
-    ASSERT_TRUE(ref.has_value());
-
-    IVQuery query(spec, ref->value());
-    auto result = solver->solve(query);
-    ASSERT_TRUE(result.has_value())
-        << "the documented config must also solve, not merely build: code "
-        << static_cast<int>(result.error().code);
-    EXPECT_GT(result->implied_vol, 0.0);
-    EXPECT_LT(result->implied_vol, 3.0);
-}
-
-// The documented limitation, pinned: the *same* config on `BSplineBackend`
-// does not build.  This is why the documentation recommends `ChebyshevBackend`
-// for adaptive discrete-dividend surfaces.
-//
-// The segmented multi-K_ref B-spline fit degrades badly at low vol on the
-// tau segments after a dividend.  At the documented parameters the assembled
-// surface measures **1.550 (15,500 bps) max** and the bumped-grid retry
-// measures 4.079, against the 0.20 bound.  The worst points cluster at
-// sigma <= 0.127 and tau in (0.64, 0.94) -- one returns exactly 0.0 for a put
-// worth $7.62, another returns 44.47 for one worth $7.91.  Denser grids make
-// it worse, not better, so the D9 retry cannot rescue it.
-//
-// This was always true; it was not always visible.  Before the reference
-// solves filtered their dividend schedule by the sampled maturity, every
-// sample below the last dividend date lost its reference, and the surviving
-// long-tau tail happened to miss the pathology at the relaxed parameters the
-// old version of this test used.
-//
-// Tracked as the MultiKRefSplit blend / segmented-fit follow-ups.  When one
-// of them lands this test will start failing, which is the intended signal:
-// re-measure, and if the B-spline path is viable again, promote it back into
-// the documentation.
-TEST(IVSolverFactorySegmented, DocumentedConfigOnBSplineBackendRefuses) {
-    auto config = documented_adaptive_dividend_config();
-    config.backend = BSplineBackend{.maturity_grid = {0.1, 0.25, 0.5, 1.0}};
-
-    auto solver = make_interpolated_iv_solver(config);
-    ASSERT_FALSE(solver.has_value())
-        << "a surface measuring 15,500 bps must not be returned";
-    EXPECT_EQ(solver.error().code, ValidationErrorCode::NoViableSurface);
-}
+// The documentation pins for the adaptive discrete-dividend config published
+// in CLAUDE.md (Pattern 4) and docs/API_GUIDE.md —
+// IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig and
+// .DocumentedConfigOnBSplineBackendRefuses — live in
+// iv_solver_factory_slow_test.cc (nightly slow suite): they measure accuracy
+// against the viability bound, which is computation stress, not an invariant
+// per-PR CI needs to re-establish.
 
 // ---------------------------------------------------------------------------
 // Chebyshev backend: continuous and discrete dividend paths
 // ---------------------------------------------------------------------------
 
 TEST(IVSolverFactoryChebyshev, ContinuousBuildsAndSolves) {
+
     IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,
         .spot = 100.0,
@@ -447,49 +352,11 @@ TEST(IVSolverFactoryChebyshev, SegmentedBuildsAndSolves) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Side-by-side accuracy comparison
-// ---------------------------------------------------------------------------
-
-TEST(IVSolverFactoryComparison, AccuracyManualVsAdaptive) {
-    auto manual_config = make_base_config();
-
-    auto adaptive_config = make_base_config();
-    adaptive_config.adaptive = AdaptiveGridParams{
-        .target_iv_error = 0.002,
-        .max_iter = 5,
-        .validation_samples = 32,
-    };
-
-    auto manual = build_solver(manual_config);
-    auto adaptive = build_solver(adaptive_config);
-    auto queries = make_test_queries();
-    constexpr double TRUE_VOL = 0.20;
-
-    double manual_max_err = 0.0, adaptive_max_err = 0.0;
-    double manual_sum_err = 0.0, adaptive_sum_err = 0.0;
-    size_t count = 0;
-
-    for (const auto& query : queries) {
-        auto m = manual.solve(query);
-        auto a = adaptive.solve(query);
-        if (!m.has_value() || !a.has_value()) continue;
-
-        double m_err = std::abs(m->implied_vol - TRUE_VOL);
-        double a_err = std::abs(a->implied_vol - TRUE_VOL);
-
-        manual_max_err = std::max(manual_max_err, m_err);
-        adaptive_max_err = std::max(adaptive_max_err, a_err);
-        manual_sum_err += m_err;
-        adaptive_sum_err += a_err;
-        count++;
-    }
-
-    ASSERT_GT(count, 0u);
-
-    EXPECT_LT(manual_max_err, 0.05);
-    EXPECT_LT(adaptive_max_err, 0.05);
-}
+// The manual-vs-adaptive accuracy comparison
+// (IVSolverFactoryComparison.AccuracyManualVsAdaptive) lives in
+// iv_solver_factory_slow_test.cc (nightly slow suite): it measures IV error
+// against the true vol across two full builds, which is computation stress,
+// not a wiring invariant.
 
 // ===========================================================================
 // Regression tests for bugs found during code review
@@ -552,19 +419,8 @@ TEST(IVSolverFactoryBuildDiagnostics, ManualPathHasNoDiagnostics) {
     EXPECT_FALSE(solver.build_diagnostics().has_value());
 }
 
-TEST(IVSolverFactoryBuildDiagnostics, AdaptivePathExposesDiagnostics) {
-    auto config = make_base_config();
-    config.adaptive = AdaptiveGridParams{
-        .target_iv_error = 0.002,
-        .max_iter = 3,
-        .validation_samples = 16,
-    };
-    auto solver = build_solver(config);
-
-    auto diag = solver.build_diagnostics();
-    ASSERT_TRUE(diag.has_value());
-    EXPECT_GE(diag->total_iterations, 1u);
-}
+// The adaptive-path counterpart (diagnostics ARE exposed) is asserted by
+// IVSolverFactoryTest.AdaptiveEndToEndSmoke on its single adaptive build.
 
 // Regression: a continuous surface must loudly reject a query carrying a
 // discrete dividend schedule (#448 / #440 item 1)

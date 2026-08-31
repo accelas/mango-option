@@ -6,8 +6,39 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Skip the scheduled run when the default branch saw no commits since the
+  # previous nightly window — no activity means yesterday's results still
+  # stand.  Manual dispatch always runs.
+  check-activity:
+    name: Check for recent activity
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for recent commits
+        id: check
+        run: |
+          # 30h lookback, not 24: scheduled runs can start hours late, and an
+          # exact-interval window would permanently skip a commit that lands
+          # between yesterday's checkout and 24h before today's delayed start.
+          # The slack occasionally re-runs an already-tested commit, which is
+          # harmless.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "$(git log -1 --since='30 hours ago' --format=%H)" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No commits in the last 30 hours; skipping slow suite."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   run-slow-tests:
     name: Run Slow Test Suite
+    needs: check-activity
+    if: needs.check-activity.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/${{ github.repository }}/ci-env:latest
