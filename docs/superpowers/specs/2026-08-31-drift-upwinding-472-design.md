@@ -194,12 +194,21 @@ discretize `L` differently, the validator flags our own fix.
 Changes, all inside `SpatialOperator`, gated on
 `HasJacobianCoefficients<PDE>`:
 
-1. **Private helper** (name at implementer's discretion) that receives the
-   *already-sampled* `a`, `b` plus the local spacings — per the sampling
-   discipline below, NOT a `(t, i)` signature that invites per-node
-   coefficient re-queries — and returns a small result `{a_f, z,
-   binding_side}` for sign-preserving assembly, with the small-ρ series
-   branch.
+1. **Helper**: a free function `mango::operators::detail::fitted_diffusion`
+   in the internal header `src/pde/internal/fitted_diffusion.hpp`, consumed
+   only by `SpatialOperator`. ("SpatialOperator-local" from the brainstorm
+   decision means the *discretization layer* owns the fitting — not the PDE
+   classes, not the solver; a `detail::` free function in the same internal
+   package satisfies that while keeping the floating-point contract
+   directly unit-testable, which this spec itself requires. A literally
+   private member would need friend/test-accessor gymnastics for no
+   architectural gain.) It receives the *already-sampled* `a`, `b` plus the
+   local spacings — per the sampling discipline below, NOT a `(t, i)`
+   signature that invites per-node coefficient re-queries — and returns
+   `{a_f, z}` for sign-preserving assembly, with the small-ρ series branch.
+   The binding side is NOT a returned field: it is implied by `sign(b)`,
+   which the assembly already branches on for the numerators — a redundant
+   field would just invite disagreement between the two.
 2. **`assemble_jacobian`** uses `a_f(i,t)` in place of `a` in the three
    second-derivative coefficients. Drift and reaction terms unchanged.
 3. **`apply_interior`** gains a coefficient-combine path for
@@ -454,3 +463,12 @@ solver-path assert; docs caveat narrowed to #473. Design approved by user
   documented/debug precondition (no error channel in `SpatialOperator`);
   the pre-fix KKT measurement remains execution task 0. **Gate 1 passed
   after round 4.**
+
+**Plan review round 1 (Codex, of the implementation plan) — spec
+amendments:** helper clarified as a free `detail::` function in
+`src/pde/internal/fitted_diffusion.hpp` returning `{a_f, z}` (binding side
+implied by `sign(b)`; see Architecture item 1 for rationale) — same
+architectural layer as the brainstorm decision, better testability. The
+sweep table is immutable during execution: a cell failing with an
+active-set `worst_kind` while the direct matrix-sign tests pass at the
+same parameters is a #473 finding to surface, never a cell to delete.

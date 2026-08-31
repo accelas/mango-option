@@ -71,9 +71,11 @@ Expected: FAIL with nonzero `violation_count` (that's the measurement). If it un
 
 - [ ] **Step 3: Record the measurement.** Create `docs/superpowers/plans/2026-08-31-drift-upwinding-472-baseline.md` containing: the exact fixture (all params, grid, n_time), the observed `violation_count`, `max_violation`, `worst_kind`, and the bazel command used.
 
-- [ ] **Step 4: Revert the probe**
+- [ ] **Step 4: Revert the probe.** FIRST verify the probe is the file's only modification (`git status --porcelain tests/american_option_test.cc` must show exactly ` M tests/american_option_test.cc`, and `git diff tests/american_option_test.cc` must show only the probe hunk — this task added nothing else and Task 1 runs on a clean branch). Then:
 
 Run: `git checkout -- tests/american_option_test.cc`
+
+If the diff shows anything besides the probe hunk, STOP — remove only the probe by editing the file instead of checking out.
 
 - [ ] **Step 5: Commit**
 
@@ -95,7 +97,12 @@ git commit -m "Record pre-fix KKT baseline for #472 fixture"
 **Interfaces:**
 - Produces: `mango::operators::detail::FittedDiffusion { double a_f; double z; }` and
   `inline FittedDiffusion fitted_diffusion(double a, double b, double dx_left, double dx_right)`.
-  Task 3 consumes both.
+  Task 3 consumes both. (Free `detail::` function — not a private member —
+  per the spec's plan-review-round-1 amendment: same discretization layer,
+  directly unit-testable. Binding side is implied by `sign(b)`, not a
+  returned field. `double`-only is deliberate: production instantiations
+  are `double`; templatize only if a non-double `SpatialOperator` ever
+  materializes.)
 
 - [ ] **Step 1: Write the failing tests** — create `tests/internal/fitted_diffusion_test.cc`:
 
@@ -340,31 +347,29 @@ git commit -m "Add Il'in fitted-diffusion helper for #472"
 #include "mango/pde/internal/pde_workspace.hpp"
 #include "mango/pde/internal/operator_factory.hpp"
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cmath>
+#include <limits>
+#include <memory>
+#include <utility>
 #include <vector>
 
 namespace mango::operators {
 namespace {
 
-struct Fixture {
-    Fixture(GridSpec<double> spec, auto pde)
-        : grid_buf(spec.generate())
-        , grid_view(grid_buf.view())
-        , spacing(std::make_shared<GridSpacing<double>>(grid_view))
-        , buffer(PDEWorkspace::required_size(grid_view.size()))
-        , workspace(PDEWorkspace::from_buffer(buffer, grid_view.size()).value())
-        , op(create_spatial_operator(std::move(pde), spacing, workspace)) {}
-
-    GridBuffer<double> grid_buf;
-    GridView<double> grid_view;
-    std::shared_ptr<GridSpacing<double>> spacing;
-    std::vector<double> buffer;
-    PDEWorkspace workspace;
-    decltype(create_spatial_operator(
-        std::declval<BlackScholesPDE<double>>(),
-        std::declval<std::shared_ptr<GridSpacing<double>>>(),
-        std::declval<PDEWorkspace&>())) op;
-};
+// Every local type here is `auto`-deduced, so this compiles for ANY PDE
+// type (BlackScholesPDE, LaplacianPDE, CountingPDE) — a struct fixture
+// would have to name create_spatial_operator's PDE-dependent return type.
+template <typename PDE, typename Fn>
+void with_operator(GridSpec<double> spec, PDE pde, Fn&& fn) {
+    auto grid_buf = spec.generate();
+    auto grid_view = grid_buf.view();
+    auto spacing = std::make_shared<GridSpacing<double>>(grid_view);
+    std::vector<double> buffer(PDEWorkspace::required_size(grid_view.size()));
+    auto workspace = PDEWorkspace::from_buffer(buffer, grid_view.size()).value();
+    auto op = create_spatial_operator(std::move(pde), spacing, workspace);
+    fn(op, workspace, grid_view, spacing);
+}
 
 // Regression: high cell-Peclet drift flipped an off-diagonal sign (#472).
 // Bug: centered drift outweighs diffusion when |b|*h/2 > a; the fitted
@@ -373,17 +378,21 @@ TEST(SpatialOperatorFittedTest, OffDiagonalSignsHighPecletBothDriftSigns) {
     // sigma=1%, r=5%: b = 0.05 - 0 - 5e-5 > 0. Mirror with a dividend
     // yield of 10% to flip b negative. Sinh grid gives asymmetric cells.
     for (double div_yield : {0.0, 0.10}) {
-        auto pde = BlackScholesPDE<double>(0.01, 0.05, div_yield);
-        Fixture f(GridSpec<double>::sinh_spaced(-2.0, 2.0, 21, 3.0).value(),
-                  std::move(pde));
-        auto jac = f.workspace.jacobian();
-        f.op.assemble_jacobian(0.0, 1.0, jac);  // J = I - L
-        const size_t n = f.grid_view.size();
-        for (size_t i = 1; i < n - 1; ++i) {
-            // Off-diagonals of L must be >= 0, i.e. jac.lower/upper <= 0.
-            EXPECT_LE(jac.lower()[i - 1], 0.0) << "i=" << i << " q=" << div_yield;
-            EXPECT_LE(jac.upper()[i], 0.0) << "i=" << i << " q=" << div_yield;
-        }
+        with_operator(
+            GridSpec<double>::sinh_spaced(-2.0, 2.0, 21, 3.0).value(),
+            BlackScholesPDE<double>(0.01, 0.05, div_yield),
+            [&](auto& op, auto& workspace, auto& grid_view, auto&) {
+                auto jac = workspace.jacobian();
+                op.assemble_jacobian(0.0, 1.0, jac);  // J = I - L
+                const size_t n = grid_view.size();
+                for (size_t i = 1; i < n - 1; ++i) {
+                    // Off-diagonals of L >= 0, i.e. jac.lower/upper <= 0.
+                    EXPECT_LE(jac.lower()[i - 1], 0.0)
+                        << "i=" << i << " q=" << div_yield;
+                    EXPECT_LE(jac.upper()[i], 0.0)
+                        << "i=" << i << " q=" << div_yield;
+                }
+            });
     }
 }
 
@@ -391,73 +400,149 @@ TEST(SpatialOperatorFittedTest, OffDiagonalSignsHighPecletBothDriftSigns) {
 // the binding numerator must be assembled as literally a_f - z (== 0),
 // not as two independently rounded terms that can go tiny-negative.
 TEST(SpatialOperatorFittedTest, AssembledBindingEntryNonNegativeAtExtremeRho) {
-    auto pde = BlackScholesPDE<double>(1e-4, 0.05, 0.0);  // a = 5e-9
-    Fixture f(GridSpec<double>::uniform(-5.0, 5.0, 11).value(),  // h = 1
-              std::move(pde));
-    auto jac = f.workspace.jacobian();
-    f.op.assemble_jacobian(0.0, 1.0, jac);
-    const size_t n = f.grid_view.size();
-    for (size_t i = 1; i < n - 1; ++i) {
-        EXPECT_TRUE(std::isfinite(jac.lower()[i - 1]));
-        EXPECT_TRUE(std::isfinite(jac.diag()[i]));
-        EXPECT_TRUE(std::isfinite(jac.upper()[i]));
-        // b > 0 binds the lower entry; it must be exactly <= 0 (>= 0 in L).
-        EXPECT_LE(jac.lower()[i - 1], 0.0) << "i=" << i;
-        EXPECT_LE(jac.upper()[i], 0.0) << "i=" << i;
-    }
+    with_operator(
+        GridSpec<double>::uniform(-5.0, 5.0, 11).value(),      // h = 1
+        BlackScholesPDE<double>(1e-4, 0.05, 0.0),              // a = 5e-9
+        [&](auto& op, auto& workspace, auto& grid_view, auto&) {
+            auto jac = workspace.jacobian();
+            op.assemble_jacobian(0.0, 1.0, jac);
+            const size_t n = grid_view.size();
+            for (size_t i = 1; i < n - 1; ++i) {
+                EXPECT_TRUE(std::isfinite(jac.lower()[i - 1]));
+                EXPECT_TRUE(std::isfinite(jac.diag()[i]));
+                EXPECT_TRUE(std::isfinite(jac.upper()[i]));
+                // b > 0 binds the lower entry; <= 0 exactly (>= 0 in L).
+                EXPECT_LE(jac.lower()[i - 1], 0.0) << "i=" << i;
+                EXPECT_LE(jac.upper()[i], 0.0) << "i=" << i;
+            }
+        });
 }
 
 // Direct matrix-row dominance inspection (spec: sufficient condition
 // 1 + w*r > 0). Inspects the matrix, not a KKT-clean solve.
 TEST(SpatialOperatorFittedTest, RowDominanceForPositiveAndModestNegativeRate) {
     for (double rate : {0.05, -0.01}) {
-        auto pde = BlackScholesPDE<double>(0.20, rate, 0.02);
-        Fixture f(GridSpec<double>::sinh_spaced(-2.0, 2.0, 31, 3.0).value(),
-                  std::move(pde));
-        auto jac = f.workspace.jacobian();
-        const double w = 0.5;  // stage weight; 1 + w*r > 0 for both rates
-        f.op.assemble_jacobian(0.0, w, jac);
-        const size_t n = f.grid_view.size();
-        for (size_t i = 1; i < n - 1; ++i) {
-            EXPECT_GT(jac.diag()[i], 0.0);
-            const double row_sum =
-                jac.lower()[i - 1] + jac.diag()[i] + jac.upper()[i];
-            const double scale = std::abs(jac.lower()[i - 1]) +
-                                 std::abs(jac.diag()[i]) +
-                                 std::abs(jac.upper()[i]);
-            EXPECT_NEAR(row_sum, 1.0 + w * rate, scale * 1e-14 + 1e-15)
-                << "rate=" << rate << " i=" << i;
-        }
+        with_operator(
+            GridSpec<double>::sinh_spaced(-2.0, 2.0, 31, 3.0).value(),
+            BlackScholesPDE<double>(0.20, rate, 0.02),
+            [&](auto& op, auto& workspace, auto& grid_view, auto&) {
+                auto jac = workspace.jacobian();
+                const double w = 0.5;  // stage weight; 1 + w*r > 0 for both
+                op.assemble_jacobian(0.0, w, jac);
+                const size_t n = grid_view.size();
+                for (size_t i = 1; i < n - 1; ++i) {
+                    // Full M-matrix row structure: positive diagonal,
+                    // non-positive off-diagonals, row sum 1 + w*r.
+                    EXPECT_GT(jac.diag()[i], 0.0);
+                    EXPECT_LE(jac.lower()[i - 1], 0.0)
+                        << "rate=" << rate << " i=" << i;
+                    EXPECT_LE(jac.upper()[i], 0.0)
+                        << "rate=" << rate << " i=" << i;
+                    const double row_sum =
+                        jac.lower()[i - 1] + jac.diag()[i] + jac.upper()[i];
+                    const double scale = std::abs(jac.lower()[i - 1]) +
+                                         std::abs(jac.diag()[i]) +
+                                         std::abs(jac.upper()[i]);
+                    EXPECT_NEAR(row_sum, 1.0 + w * rate, scale * 1e-14 + 1e-15)
+                        << "rate=" << rate << " i=" << i;
+                }
+            });
     }
+}
+
+// Spec test: assembly continuity across the drift-sign crossing on an
+// asymmetric (sinh) grid — coefficients at b = ±eps must straddle b = 0
+// continuously (guards the C1 claim at the operator level, not just in
+// the helper). b = r − q − σ²/2 with σ=0.20, q=0.02 crosses 0 at r=0.04.
+TEST(SpatialOperatorFittedTest, NearZeroDriftAssemblyContinuity) {
+    const double eps = 1e-9;
+    std::vector<std::vector<double>> lowers;
+    for (double rate : {0.04 - eps, 0.04, 0.04 + eps}) {
+        with_operator(
+            GridSpec<double>::sinh_spaced(-2.0, 2.0, 15, 3.0).value(),
+            BlackScholesPDE<double>(0.20, rate, 0.02),
+            [&](auto& op, auto& workspace, auto& grid_view, auto&) {
+                auto jac = workspace.jacobian();
+                op.assemble_jacobian(0.0, 1.0, jac);
+                std::vector<double> row;
+                for (size_t i = 1; i < grid_view.size() - 1; ++i) {
+                    row.push_back(jac.lower()[i - 1]);
+                    row.push_back(jac.diag()[i]);
+                    row.push_back(jac.upper()[i]);
+                }
+                lowers.push_back(std::move(row));
+            });
+    }
+    ASSERT_EQ(lowers.size(), 3u);
+    for (size_t k = 0; k < lowers[0].size(); ++k) {
+        // eps-sized drift change moves coefficients by O(eps/h^2) at most;
+        // 1e-4 absolute is orders looser than that but far tighter than
+        // any discontinuity a binding-side switch bug would produce.
+        EXPECT_NEAR(lowers[0][k], lowers[1][k], 1e-4) << "k=" << k;
+        EXPECT_NEAR(lowers[2][k], lowers[1][k], 1e-4) << "k=" << k;
+    }
+}
+
+// Spec test: LaplacianPDE's Jacobian must be unchanged by the fitting
+// (b = 0 => a_f == a exactly). Off-diagonals assemble through the exact
+// same expression as before (a/(dx*dx_avg)); the diagonal is rebuilt as
+// c − lower − upper, numerically identical within rounding.
+TEST(SpatialOperatorFittedTest, LaplacianJacobianUnchanged) {
+    const double D = 0.1;
+    with_operator(
+        GridSpec<double>::sinh_spaced(0.0, 1.0, 17, 2.0).value(),
+        LaplacianPDE<double>(D),
+        [&](auto& op, auto& workspace, auto& grid_view, auto&) {
+            auto jac = workspace.jacobian();
+            op.assemble_jacobian(0.0, 1.0, jac);
+            const auto& x = grid_view.span();
+            for (size_t i = 1; i < grid_view.size() - 1; ++i) {
+                const double dxl = x[i] - x[i - 1];
+                const double dxr = x[i + 1] - x[i];
+                const double dxa = (dxl + dxr) / 2.0;
+                const double lower = D / (dxl * dxa);
+                const double upper = D / (dxr * dxa);
+                EXPECT_DOUBLE_EQ(jac.lower()[i - 1], -lower) << "i=" << i;
+                EXPECT_DOUBLE_EQ(jac.upper()[i], -upper) << "i=" << i;
+                EXPECT_NEAR(jac.diag()[i], 1.0 + lower + upper,
+                            (1.0 + lower + upper) * 1e-15)
+                    << "i=" << i;
+            }
+        });
 }
 
 // The functional consistency the projected LCP path needs: L*u assembled
 // from the Jacobian must equal apply()'s Lu (scale-aware tolerance).
 TEST(SpatialOperatorFittedTest, ApplyMatchesAssembledMatrix) {
-    auto pde = BlackScholesPDE<double>(0.01, 0.05, 0.0);  // high Peclet
-    Fixture f(GridSpec<double>::sinh_spaced(-2.0, 2.0, 25, 3.0).value(),
-              std::move(pde));
-    auto jac = f.workspace.jacobian();
-    f.op.assemble_jacobian(0.0, 1.0, jac);  // J = I - L
+    with_operator(
+        GridSpec<double>::sinh_spaced(-2.0, 2.0, 25, 3.0).value(),
+        BlackScholesPDE<double>(0.01, 0.05, 0.0),  // high Peclet
+        [&](auto& op, auto& workspace, auto& grid_view, auto&) {
+            auto jac = workspace.jacobian();
+            op.assemble_jacobian(0.0, 1.0, jac);  // J = I - L
 
-    const size_t n = f.grid_view.size();
-    const auto& x = f.grid_view.span();
-    std::vector<double> u(n), Lu(n, 0.0);
-    for (size_t i = 0; i < n; ++i) u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+            const size_t n = grid_view.size();
+            const auto& x = grid_view.span();
+            std::vector<double> u(n), Lu(n, 0.0);
+            for (size_t i = 0; i < n; ++i)
+                u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
 
-    f.op.apply(0.0, u, Lu);
+            op.apply(0.0, u, Lu);
 
-    double max_u = 0.0;
-    for (double v : u) max_u = std::max(max_u, std::abs(v));
-    for (size_t i = 1; i < n - 1; ++i) {
-        const double Ju = jac.lower()[i - 1] * u[i - 1] + jac.diag()[i] * u[i] +
-                          jac.upper()[i] * u[i + 1];
-        const double L_from_matrix = u[i] - Ju;  // L = I - J at coeff_dt = 1
-        const double row_mag = (std::abs(jac.lower()[i - 1]) +
-                                std::abs(jac.diag()[i]) +
-                                std::abs(jac.upper()[i])) * max_u;
-        EXPECT_NEAR(Lu[i], L_from_matrix, row_mag * 1e-13 + 1e-14) << "i=" << i;
-    }
+            double max_u = 0.0;
+            for (double v : u) max_u = std::max(max_u, std::abs(v));
+            for (size_t i = 1; i < n - 1; ++i) {
+                const double Ju = jac.lower()[i - 1] * u[i - 1] +
+                                  jac.diag()[i] * u[i] +
+                                  jac.upper()[i] * u[i + 1];
+                const double L_from_matrix = u[i] - Ju;  // L = I - J at w = 1
+                const double row_mag = (std::abs(jac.lower()[i - 1]) +
+                                        std::abs(jac.diag()[i]) +
+                                        std::abs(jac.upper()[i])) * max_u;
+                EXPECT_NEAR(Lu[i], L_from_matrix, row_mag * 1e-13 + 1e-14)
+                    << "i=" << i;
+            }
+        });
 }
 
 // Dispatch guard: for HasJacobianCoefficients PDEs the coefficient methods
@@ -480,39 +565,45 @@ struct CountingPDE {
 
 TEST(SpatialOperatorFittedTest, CoefficientPathDoesNotCallOperator) {
     static_assert(HasJacobianCoefficients<CountingPDE>);
-    Fixture f(GridSpec<double>::uniform(-1.0, 1.0, 11).value(), CountingPDE{});
-    const size_t n = f.grid_view.size();
-    std::vector<double> u(n, 1.0), Lu(n, 0.0);
-    CountingPDE::op_calls = 0;
-    f.op.apply(0.0, u, Lu);
-    EXPECT_EQ(CountingPDE::op_calls, 0);
+    with_operator(
+        GridSpec<double>::uniform(-1.0, 1.0, 11).value(), CountingPDE{},
+        [&](auto& op, auto&, auto& grid_view, auto&) {
+            const size_t n = grid_view.size();
+            std::vector<double> u(n, 1.0), Lu(n, 0.0);
+            CountingPDE::op_calls = 0;
+            op.apply(0.0, u, Lu);
+            EXPECT_EQ(CountingPDE::op_calls, 0);
+        });
 }
 
 // Laplacian equality is numerical, not bit-pattern (spec): the combine
 // path a*d2u + 0*du - 0*u must equal D*d2u.
 TEST(SpatialOperatorFittedTest, LaplacianCombinePathNumericallyIdentical) {
     const double D = 0.1;
-    Fixture f(GridSpec<double>::sinh_spaced(0.0, 1.0, 17, 2.0).value(),
-              LaplacianPDE<double>(D));
-    const size_t n = f.grid_view.size();
-    const auto& x = f.grid_view.span();
-    std::vector<double> u(n), Lu(n, 0.0), d2u(n, 0.0);
-    for (size_t i = 0; i < n; ++i) u[i] = std::sin(3.0 * x[i]);
+    with_operator(
+        GridSpec<double>::sinh_spaced(0.0, 1.0, 17, 2.0).value(),
+        LaplacianPDE<double>(D),
+        [&](auto& op, auto&, auto& grid_view, auto& spacing) {
+            const size_t n = grid_view.size();
+            const auto& x = grid_view.span();
+            std::vector<double> u(n), Lu(n, 0.0), d2u(n, 0.0);
+            for (size_t i = 0; i < n; ++i) u[i] = std::sin(3.0 * x[i]);
 
-    f.op.apply(0.0, u, Lu);
+            op.apply(0.0, u, Lu);
 
-    CenteredDifference<double> stencil(*f.spacing);
-    stencil.compute_second_derivative(u, d2u, 1, n - 1);
-    for (size_t i = 1; i < n - 1; ++i) {
-        EXPECT_DOUBLE_EQ(Lu[i], D * d2u[i]) << "i=" << i;
-    }
+            CenteredDifference<double> stencil(*spacing);
+            stencil.compute_second_derivative(u, d2u, 1, n - 1);
+            for (size_t i = 1; i < n - 1; ++i) {
+                EXPECT_DOUBLE_EQ(Lu[i], D * d2u[i]) << "i=" << i;
+            }
+        });
 }
 
 }  // namespace
 }  // namespace mango::operators
 ```
 
-Note: if `Fixture`'s `decltype` gymnastics fight the actual `create_spatial_operator` return type, replace `Fixture` with a plain function-local setup in each test (copy the 6 setup lines from `spatial_operator_jacobian_test.cc:44-50`); the assertions are the deliverable, not the fixture shape. If `GridBuffer`/`GridView` type names differ, copy the exact local-variable pattern from `spatial_operator_jacobian_test.cc:28-31`.
+Note: `with_operator` uses only `auto` locals, so no grid/operator type names are spelled out; if any construction detail differs from the real API, copy the exact setup lines from `spatial_operator_jacobian_test.cc:28-50` into the helper — the assertions are the deliverable, not the fixture shape.
 
 - [ ] **Step 2: Add BUILD target** in `tests/internal/BUILD.bazel`:
 
@@ -524,6 +615,7 @@ cc_test(
     deps = [
         "//src/pde/internal:workspace",
         "//src/pde/operators:black_scholes_pde",
+        "//src/pde/operators:centered_difference",
         "//src/pde/operators:laplacian_pde",
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
@@ -531,7 +623,9 @@ cc_test(
 )
 ```
 
-(If `//src/pde/operators:centered_difference` is a separate target, add it; check how `//src/pde/internal:workspace` re-exports it first.)
+(`//src/pde/internal:workspace` lists `centered_difference` under `deps`,
+not `exports`, so the direct dep is required for the Laplacian test's
+include — src/pde/operators/BUILD.bazel:28 has the target.)
 
 - [ ] **Step 3: Run to verify failure**
 
@@ -551,7 +645,8 @@ Expected: FAIL — `OffDiagonalSignsHighPecletBothDriftSigns` and `AssembledBind
 /// (with Il'in-fitted a_f; see fitted_diffusion.hpp) and never calls
 /// operator() on interior nodes. Accessors must be pure (deterministic,
 /// side-effect free) at fixed t, and a = second_derivative_coeff() must
-/// be >= 0 whenever first_derivative_coeff(t) != 0.
+/// be >= 0 unconditionally (a < 0 is outside the fitting contract; a == 0
+/// is supported as the convection limit — see fitted_diffusion.hpp).
 ```
 
 4c. Replace the body of the interior loop in `assemble_jacobian` (keep signature and the boundary-row note):
@@ -665,17 +760,53 @@ coefficient-dispatch version (the stencil computation of `d2u`/`du` stays):
 Run: `bazel test //tests/internal:spatial_operator_fitted_test //tests/internal:spatial_operator_jacobian_test //tests/internal:fitted_diffusion_test --test_output=errors`
 Expected: all PASS (the existing `JacobianMatchesApplyFiniteDifference` now exercises the fitted path on both sides).
 
-- [ ] **Step 7: Run the wider affected suites**
+- [ ] **Step 7: Document the unfitted boundary rows in code.** In `spatial_operator.hpp`, extend the doc comment above `boundary_row_jacobian` with:
 
-Run: `bazel test //tests/internal/... //tests:pde_solver_test //tests:american_option_test --test_output=errors`
-Expected: everything passes EXCEPT `AmericanOptionTest.NoDivCallPriceUnchangedByEnvelopeBC` (known deliberate re-pin, handled in Task 5). If anything else fails, STOP and investigate before proceeding — that is unplanned churn.
+```cpp
+    /// NOTE (#472): boundary rows deliberately use the raw (unfitted)
+    /// diffusion coefficient a. Their ghost-eliminated off-diagonal
+    /// +2a/h² already has the Z-matrix sign for any drift b (drift enters
+    /// only the affine term), and each row's eval == jacobian·u + affine
+    /// identity is internal to the row, so residual/Jacobian consistency
+    /// is unaffected by the interior fitting.
+```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Run the FULL suite** (the FDM path feeds QuantLib A/B, convergence, IV, Greeks, and price-table tests — a subset run is not enough to bound this change)
+
+Run: `bazel test //... --test_output=errors`
+Expected: everything passes EXCEPT `AmericanOptionTest.NoDivCallPriceUnchangedByEnvelopeBC` (deliberate re-pin, next step). Any OTHER failure is unplanned churn — STOP and investigate; do not loosen tolerances without written justification.
+
+- [ ] **Step 9: Re-pin `NoDivCallPriceUnchangedByEnvelopeBC`** (must land in the same commit as the discretization change so no commit leaves the suite red).
+
+Run: `bazel test //tests:american_option_test --test_output=all --test_filter='*NoDivCallPriceUnchanged*' 2>&1 | grep -E "Actual|Which is|difference"`
+
+Take the new actual value from the failure output; in `tests/american_option_test.cc` (~line 527) set `kPinnedPrice` to it and replace the pin's comment paragraph about toolchain sensitivity with:
+
+```cpp
+    // Re-pinned 2026-08-31 for #472: the Il'in-fitted drift discretization
+    // deliberately perturbs every FDM solve by O(ρ²) added diffusion (see
+    // docs/superpowers/specs/2026-08-31-drift-upwinding-472-design.md).
+    // Previous pin: 10.447090628631905. The 1e-12 tolerance remains
+    // toolchain-sensitive (FP reassociation) — same precedent as PR #468's
+    // x86-64-v3 pin. On an unexplained failure, verify the toolchain (not
+    // the discretization) changed before re-pinning.
+```
+
+Record the old→new delta in `docs/superpowers/plans/2026-08-31-drift-upwinding-472-baseline.md` (spec-required measurement).
+
+- [ ] **Step 10: Re-run the full suite — must be green**
+
+Run: `bazel test //... --test_output=errors`
+Expected: ALL tests pass.
+
+- [ ] **Step 11: Commit**
 
 ```bash
 git add src/pde/internal/spatial_operator.hpp \
         tests/internal/spatial_operator_jacobian_test.cc \
-        tests/internal/spatial_operator_fitted_test.cc tests/internal/BUILD.bazel
+        tests/internal/spatial_operator_fitted_test.cc tests/internal/BUILD.bazel \
+        tests/american_option_test.cc \
+        docs/superpowers/plans/2026-08-31-drift-upwinding-472-baseline.md
 git commit -m "Apply Il'in fitting in SpatialOperator assembly and apply"
 ```
 
@@ -749,7 +880,7 @@ TEST(PDESolverTest, InvalidGammaRejectedAtSolve) {
 Run: `bazel test //tests/internal:pde_solver_test --test_output=errors --test_filter='*InvalidGamma*'`
 Expected: FAIL — solve() currently succeeds (or diverges) instead of returning InvalidConfiguration.
 
-- [ ] **Step 3: Implement** — at the very top of `PDESolver::solve()` (before `lcp_report_ = LcpKktReport{};`):
+- [ ] **Step 3: Implement** — in `PDESolver::solve()`, immediately AFTER `lcp_report_ = LcpKktReport{};` (the report reset must run even on the rejection path, or a reused solver would return a stale report from its previous solve) and before any stepping/state mutation:
 
 ```cpp
         // #472: TR-BDF2 stage weights w1 = γ·dt/2, w2 = (1−γ)·dt/(2−γ) are
@@ -780,7 +911,7 @@ git commit -m "Validate TR-BDF2 gamma at solve() entry"
 
 ---
 
-### Task 5: Public regression tests + deliberate re-pin
+### Task 5: Public regression tests (canonical fixture, sweep, sign crossing)
 
 **Files:**
 - Modify: `tests/american_option_test.cc`
@@ -852,10 +983,17 @@ TEST(AmericanOptionTest, LowVolCoarseGridComplementaritySweep) {
 // crosses zero during the solve (σ=10% ⇒ σ²/2 = 0.005; q = 2%; curve
 // rates straddle 2.5%).
 TEST(AmericanOptionTest, DriftSignCrossingSolvesCleanly) {
-    std::vector<TenorPoint> points = {{0.25, 0.01}, {2.0, 0.04}};
+    // TenorPoint stores ln(D(t)) = -∫r ds, NOT a rate (yield_curve.hpp).
+    // Forward rates: 1% on [0, 0.25] (log-discount -0.0025), 4% on
+    // [0.25, 2.0] (-0.0025 - 0.04*1.75 = -0.0725). Same construction
+    // pattern as AmericanOptionPricingTest.PricingWithYieldCurve
+    // (tests/american_option_test.cc:~185).
+    std::vector<TenorPoint> points = {
+        {0.0, 0.0}, {0.25, -0.0025}, {2.0, -0.0725}};
+    auto curve = YieldCurve::from_points(points).value();
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-                   .rate = RateSpec{points}, .dividend_yield = 0.02,
+                   .rate = curve, .dividend_yield = 0.02,
                    .option_type = OptionType::PUT},
         0.10);
 
@@ -872,42 +1010,25 @@ TEST(AmericanOptionTest, DriftSignCrossingSolvesCleanly) {
 }
 ```
 
-(Adjust `RateSpec{points}` / `TenorPoint` construction to match the existing yield-curve tests — `grep -n TenorPoint tests/*.cc` shows the working initializer shape. If `41u` literals fight the `size_t` loop type, use `size_t n_space : {size_t{41}, size_t{81}}`.)
+(If `41u` literals fight the `size_t` loop type, use `size_t n_space : {size_t{41}, size_t{81}}`.)
 
 - [ ] **Step 2: Run the new tests**
 
 Run: `bazel test //tests:american_option_test --test_output=errors --test_filter='*HighPeclet*:*LowVolCoarse*:*DriftSignCrossing*'`
-Expected: PASS. If a sweep cell fails with a nonzero count, check `worst_kind` — an active-set (non-interval) kind is a #473 manifestation: narrow that cell out with a comment referencing #473 ONLY if the matrix-sign tests from Task 3 pass for the same parameters; otherwise it's our bug — investigate.
+Expected: PASS. **The sweep table is immutable — never delete or narrow a cell.** If a cell fails with nonzero count and an active-set (non-interval) `worst_kind` WHILE the Task 3 matrix-sign tests pass at the same parameters, that is a genuine #473 finding: STOP, record the cell and report, and surface it to the user before proceeding. Any other failure is our bug — investigate.
 
-- [ ] **Step 3: Re-pin `NoDivCallPriceUnchangedByEnvelopeBC`.**
+(The `NoDivCallPriceUnchangedByEnvelopeBC` re-pin already happened in Task 3 — same commit as the discretization change, so no commit boundary is red.)
 
-Run: `bazel test //tests:american_option_test --test_output=all --test_filter='*NoDivCallPriceUnchanged*' 2>&1 | grep -E "Actual|Which is|value_at"`
-
-Take the new actual value from the failure output, then in `tests/american_option_test.cc` (line ~527): set `kPinnedPrice` to the new value and replace the pin's comment paragraph about toolchain sensitivity with:
-
-```cpp
-    // Re-pinned 2026-08-31 for #472: the Il'in-fitted drift discretization
-    // deliberately perturbs every FDM solve by O(ρ²) added diffusion (see
-    // docs/superpowers/specs/2026-08-31-drift-upwinding-472-design.md).
-    // Previous pin: 10.447090628631905. The 1e-12 tolerance remains
-    // toolchain-sensitive (FP reassociation) — same precedent as PR #468's
-    // x86-64-v3 pin. On an unexplained failure, verify the toolchain (not
-    // the discretization) changed before re-pinning.
-```
-
-Record the old→new delta in `docs/superpowers/plans/2026-08-31-drift-upwinding-472-baseline.md` (spec requires measuring the actual perturbation).
-
-- [ ] **Step 4: Run the full american_option_test**
+- [ ] **Step 3: Run the full american_option_test**
 
 Run: `bazel test //tests:american_option_test --test_output=errors`
 Expected: PASS (all).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add tests/american_option_test.cc \
-        docs/superpowers/plans/2026-08-31-drift-upwinding-472-baseline.md
-git commit -m "Add #472 KKT regressions and re-pin no-div call price"
+git add tests/american_option_test.cc
+git commit -m "Add #472 KKT regression and sweep tests"
 ```
 
 ---
@@ -941,6 +1062,12 @@ positive); and (2) an interval active set touching the sweep's starting
 side (issue #473). `validate_lcp_kkt` checks the solved system's KKT
 conditions — it detects resulting solution defects, not matrix structure,
 so a clean report is expected but not a structural guarantee.
+
+The ghost-eliminated boundary rows deliberately retain the raw
+(unfitted) diffusion coefficient a: their off-diagonal +2a/h² already
+has the required sign for any drift (drift enters those rows only
+through the affine term), so fitting them would add diffusion without
+buying any structural property.
 ```
 
 - [ ] **Step 2: Full test suite**
@@ -967,6 +1094,7 @@ git commit -m "Document Il'in-fitted drift scheme and narrowed caveats"
 
 ## Self-review notes (already applied)
 
-- Spec coverage: helper contract → Task 2; sign-preserving assembly + combine + dispatch/concept docs → Task 3; γ validation → Task 4; canonical fixture + sweep + sign-crossing + re-pin → Task 5 (fixture measurement → Task 1); docs caveat + measurements → Task 6. Boundary rows: deliberately untouched (spec architecture item 4) — no task, by design.
+- Spec coverage: helper contract → Task 2; sign-preserving assembly + combine + dispatch/concept docs + boundary-row code comment + deliberate re-pin (same commit as the change, so every commit boundary is green) → Task 3; γ validation → Task 4; canonical fixture + immutable sweep + sign-crossing → Task 5 (fixture measurement → Task 1); docs caveat (incl. unfitted-boundary-rows sentence) + measurements → Task 6.
+- Plan-review round 1 folds: `with_operator` auto-deduced fixture (the struct fixture couldn't name PDE-dependent operator types); yield-curve test uses `YieldCurve::from_points` with log-discounts (`TenorPoint.log_discount`, mandatory `{0,0}` point); γ check inserted AFTER the `lcp_report_` reset; full-suite run before the Task 3 commit; direct `centered_difference` BUILD dep; Task 1 probe-revert guard; concept doc requires `a ≥ 0` unconditionally.
 - Perf risk (spec "Risks"): the uniform-grid fast path in Task 3 computes the fitted factor once per invocation; per-stage caching stays deferred unless the full suite's performance tests regress (none pin apply-path latency; if `//tests:american_option_performance_test` exists and fails, that triggers the spec's caching mitigation as a follow-up commit).
 - Type consistency: `FittedDiffusion{a_f, z}` and `fitted_diffusion(a, b, dx_left, dx_right)` used identically in Tasks 2, 3; γ error payload `{InvalidConfiguration, 0, gamma}` consistent between Task 4 test and implementation.
