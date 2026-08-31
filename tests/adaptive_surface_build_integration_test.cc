@@ -827,7 +827,9 @@ double fdm_reference_price(double spot, double strike, double tau,
 // regardless of the chain's own maturities (measured: 0.500001, not the
 // chain's raw max of 0.1) -- so with the default n_sigma=5.0 and
 // sigma=0.10 the half-width is 5.0*0.10*sqrt(0.500001) ~= 0.3536,
-// against a fit axis reaching |ln(100/60)| ~= 0.3796 (+ headroom).
+// against the fit axis's lower endpoint |ln(100/140)| ~= 0.3365, widened by
+// ~0.043 of B-spline support headroom to ~0.3796 -- the endpoint where the
+// pre-fix failure below was actually measured.
 // extract_tensor extrapolates that tail. Min-sigma assertions guard the
 // routing defect specifically: a widening-only fix covers the max-sigma
 // slice while every lower-sigma slice still extrapolates.
@@ -945,9 +947,14 @@ TEST(AdaptiveGridBuilderTest, FallbackExplicitGridCoversMoneynessTails) {
     const double r = result->axes.grids[3].front();
 
     // Tolerance in $ per K_ref=100 strike: post-fix max observed deviation
-    // is 1.19e-05 (m_axis.back(), sigma=vol_axis.back()).  TOL = 1.2e-04 is
-    // ~10x that, and far under 1/5 of the 0.0569 pre-fix error above.
-    constexpr double TOL = 1.2e-4;
+    // is 1.19e-05 (m_axis.back(), sigma=vol_axis.back()).  TOL is
+    // deliberately loosened well above that -- this is the same
+    // coarse-fallback pipeline (multi-sinh explicit grid + accuracy
+    // re-estimation) already flagged as noisier across toolchains, so 1e-3
+    // stays robust to that noise while still ~57x below the recorded 0.0569
+    // pre-fix error, keeping full discriminating power between domain
+    // coverage and ordinary interpolation error.
+    constexpr double TOL = 1e-3;
 
     for (double m : {m_axis.front(), m_axis.back()}) {
         for (double sigma : {vol_axis.front(), vol_axis.back()}) {

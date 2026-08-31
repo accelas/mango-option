@@ -194,10 +194,18 @@ would still undershoot. The coverage call must use `missing_params`.
 
 For the same reason, the fallback branch's existing
 `required_n_sigma = max_abs_x / max_sigma_sqrt_tau` computation switches
-its denominator from `all_params`' max to `missing_params`' max — with the
-`all_params` value, the emulated explicit-grid width
-`n_sigma · max σ√τ(missing)` falls short of `max_abs_x · 1.1` whenever the
-missing batch's max σ√τ is below the full batch's. The
+its denominator from `all_params`' max to `missing_params`' max. This is
+not required for axis coverage itself: `materialize_covering_grid` runs
+`ensure_moneyness_coverage` regardless of which denominator fed
+`required_n_sigma`, so the moneyness axis is guaranteed to be covered
+either way. The actual point is fidelity to the explicit grid this
+fallback is emulating: with the `all_params` value, the realized shared
+half-width `n_sigma · max σ√τ(missing)` would drift below the caller's own
+explicit-grid width `max_abs_x · 1.1` whenever a later refinement
+iteration's missing batch has a smaller max σ√τ than the full batch. Using
+`missing_params`' max instead keeps `n_sigma · max σ√τ(missing) =
+max_abs_x · 1.1` exactly, so the emulated width stays iteration-invariant
+and faithfully tracks the explicit grid's own width. The
 `grid_meets_constraints` check itself keeps using `all_params` (it
 validates the caller's explicit grid against the whole problem, and a
 per-iteration answer flipping between branches would be a behavior change

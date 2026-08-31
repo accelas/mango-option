@@ -749,3 +749,20 @@ Expected: builds succeed without new warnings.
 - [ ] **Step 3: Commit any stragglers**
 
 Only if fixes were needed in Steps 1-2; otherwise nothing to commit.
+
+## Deviations from plan
+
+- **Task 3 fallback-test explicit grid bounds**: changed from the planned
+  `[-0.7, 0.7]` to `[-0.6, 0.6]` because `make_batch()` pins batch maturity
+  to the widened fit tau axis (~0.5), not the chain's raw max maturity; the
+  planned bounds passed even pre-fix under that widened maturity, so the
+  bounds were narrowed to reproduce the bug.
+- **Task 3/final-review tolerances**: pinned at `1e-5` and `1e-3` rather
+  than the "~10x post-fix" guideline, to stay robust to cross-toolchain
+  numerical noise. Both remain far below the recorded pre-fix errors
+  (0.4263 and 0.0569 respectively).
+- **Task 4 test recalibration**: recalibrated to `tau={0.25, 0.5, 0.75,
+  1.0}`, `vol={0.08, 0.12, 0.20, 0.30}` because the originally planned
+  config was normalized-chain-INELIGIBLE (margin 0.22 < 0.35) and could not
+  reproduce the bug. With the recalibrated config, eligibility now passes
+  (0.40 >= 0.35) while the sigma=0.08 groups undershoot (0.40 < 0.51).

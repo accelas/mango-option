@@ -178,6 +178,13 @@ BatchAmericanOptionResult solve_missing_slices(
     const PDEGridSpec& pde_grid,
     const std::vector<double>& tau_grid)
 {
+    // Precondition: the only caller already skips this call when
+    // missing_params is empty, but std::ranges::max below is UB over an
+    // empty range, so guard the file-local helper directly too.
+    if (missing_params.empty()) {
+        return {};
+    }
+
     if (const auto* explicit_grid = std::get_if<PDEGridConfig>(&pde_grid)) {
         const auto& grid_spec = explicit_grid->grid_spec;
         const size_t n_time = explicit_grid->n_time;
@@ -247,7 +254,12 @@ BatchAmericanOptionResult solve_missing_slices(
         // A concrete covering grid, not set_grid_accuracy: gridless solves
         // are routed per normalized (sigma, r) group and re-estimate a
         // per-sigma-width grid there, undershooting the moneyness axis
-        // for every sub-max sigma (issue #437).
+        // for every sub-max sigma (issue #437). Neither branch calls
+        // set_grid_accuracy any more, so the normalized-routing eligibility
+        // check reads the solver's default accuracy; that is
+        // behavior-neutral here because make_batch emits exactly one param
+        // per (sigma, r) group, so both routes solve the same normalized
+        // PDE on the same verbatim custom grid either way.
         auto covering = detail::materialize_covering_grid(
             accuracy, missing_params, m_grid);
         return batch_solver.solve_batch(missing_params, true, nullptr,
@@ -255,10 +267,8 @@ BatchAmericanOptionResult solve_missing_slices(
     }
 
     if (const auto* accuracy_grid = std::get_if<GridAccuracyParams>(&pde_grid)) {
-        // A concrete covering grid, not set_grid_accuracy: gridless solves
-        // are routed per normalized (sigma, r) group and re-estimate a
-        // per-sigma-width grid there, undershooting the moneyness axis
-        // for every sub-max sigma (issue #437).
+        // Same concrete-covering-grid reasoning as the explicit-grid
+        // fallback branch above.
         auto covering = detail::materialize_covering_grid(
             *accuracy_grid, missing_params, m_grid);
         return batch_solver.solve_batch(missing_params, true, nullptr,
@@ -365,9 +375,10 @@ build_cached_surface(
     // extract_tensor.  Auto-estimated grids are widened instead
     // (solve_missing_slices).
     if (const auto* explicit_grid = std::get_if<PDEGridConfig>(&pde_grid)) {
-        if (!m_grid.empty() &&
-            (m_grid.front() < explicit_grid->grid_spec.x_min() ||
-             m_grid.back() > explicit_grid->grid_spec.x_max())) {
+        const auto& m_axis = axes.grids[0];
+        if (!m_axis.empty() &&
+            (m_axis.front() < explicit_grid->grid_spec.x_min() ||
+             m_axis.back() > explicit_grid->grid_spec.x_max())) {
             return std::unexpected(
                 PriceTableError{PriceTableErrorCode::InvalidConfig});
         }
@@ -410,7 +421,7 @@ build_cached_surface(
         batch_solver.set_snapshot_times(std::span{tau_grid});
 
         fresh_results = solve_missing_slices(
-            batch_solver, missing_params, all_params, m_grid, pde_grid,
+            batch_solver, missing_params, all_params, axes.grids[0], pde_grid,
             tau_grid);
 
         // Add fresh results to cache
