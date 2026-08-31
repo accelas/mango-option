@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
+#include "mango/option/american_option.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/table/bspline/bspline_pde_cache.hpp"
@@ -12,6 +13,7 @@
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 
 namespace mango {
@@ -797,6 +799,158 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
     EXPECT_EQ(result->tau_points_per_segment,
               std::min(static_cast<int>(seeded.tau.size()) + tau_bump,
                        static_cast<int>(params.max_points_per_dim)));
+}
+
+// Reference FDM price with a PINNED explicit configuration (spec: the
+// tolerance floor must not drift if solve_american_option defaults
+// change).
+double fdm_reference_price(double spot, double strike, double tau,
+                           double sigma, double rate) {
+    PricingParams ref_params(
+        OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
+                   .rate = rate, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        sigma);
+    auto solver = AmericanOptionSolver::create(
+        ref_params, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::High)});
+    EXPECT_TRUE(solver.has_value());
+    auto ref = solver->solve();
+    EXPECT_TRUE(ref.has_value());
+    return ref->value_at(spot);
+}
+
+// Regression (#437): the adaptive cached path (GridAccuracyParams branch)
+// solved gridless, so per-normalized-group estimation gave each sigma
+// slice half-width n_sigma * sigma * sqrt(tau).  make_batch() solves at
+// spot=strike=K_ref (x0=0) with maturity fixed to the FIT tau axis's
+// upper bound -- which extract_chain_domain widens to a 0.5y floor
+// regardless of the chain's own maturities (measured: 0.500001, not the
+// chain's raw max of 0.1) -- so with the default n_sigma=5.0 and
+// sigma=0.10 the half-width is 5.0*0.10*sqrt(0.500001) ~= 0.3536,
+// against a fit axis reaching |ln(100/60)| ~= 0.3796 (+ headroom).
+// extract_tensor extrapolates that tail. Min-sigma assertions guard the
+// routing defect specifically: a widening-only fix covers the max-sigma
+// slice while every lower-sigma slice still extrapolates.
+// Pre-fix max abs error on this branch's parent: 0.4263 (m=-0.379555,
+// sigma=0.10; constant across all queried tau -- the underlying PDE
+// domain is identical regardless of snapshot tau, confirming genuine
+// extrapolation rather than ordinary interpolation error).
+TEST(AdaptiveGridBuilderTest, TensorTailsMatchFdmAtExtremeMoneyness) {
+    OptionGrid chain;
+    chain.spot = 100.0;
+    chain.dividend_yield = 0.0;
+    chain.strikes = {60.0, 80.0, 100.0, 120.0, 140.0};
+    chain.maturities = {0.05, 0.1};
+    chain.implied_vols = {0.10, 0.15, 0.20};
+    chain.rates = {0.03, 0.05};
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.002;  // relaxed: accuracy is asserted below
+    params.max_iter = 2;
+    params.validation_samples = 8;
+
+    auto result = build_adaptive_bspline(
+        params, chain, make_grid_accuracy(GridAccuracyProfile::High),
+        OptionType::PUT);
+    ASSERT_TRUE(result.has_value());
+
+    auto wrapper = make_bspline_surface(
+        result->spline, result->K_ref, result->dividend_yield,
+        OptionType::PUT);
+    ASSERT_TRUE(wrapper.has_value());
+
+    const auto& m_axis = result->axes.grids[0];
+    const auto& tau_axis = result->axes.grids[1];
+    const auto& vol_axis = result->axes.grids[2];
+    const auto& rate_axis = result->axes.grids[3];
+    const double K = result->K_ref;
+    const double tau = tau_axis.back();
+    const double r = rate_axis.front();
+
+    // Tolerance in $ per K_ref=100 strike: post-fix max observed deviation
+    // is 6.9e-09 (m_axis.back(), sigma=vol_axis.back()).  TOL = 7e-08 is
+    // ~10x that, and far under 1/5 of the 0.4263 pre-fix error above.
+    constexpr double TOL = 7e-8;
+
+    for (double m : {m_axis.front(), m_axis.back()}) {
+        for (double sigma : {vol_axis.front(), vol_axis.back()}) {
+            const double S = K * std::exp(m);
+            const double ref = fdm_reference_price(S, K, tau, sigma, r);
+            const double got = wrapper->price(S, K, tau, sigma, r);
+            EXPECT_NEAR(got, ref, TOL)
+                << "m=" << m << " sigma=" << sigma;
+        }
+    }
+}
+
+// Regression (#437, fallback branch): an explicit grid that covers the
+// fit axis but violates MAX_DX falls back to accuracy estimation, which
+// also solved gridless.  As above, make_batch() fixes maturity to the fit
+// tau axis's widened upper bound (measured 0.500001) for every entry, so
+// the fallback's required_n_sigma is derived from
+// max_sigma_sqrt_tau = 0.20*sqrt(0.500001) ~= 0.1414, not the chain's raw
+// max maturity of 0.1 -- an order-of-magnitude difference from a naive
+// reading of the formula.  The explicit bounds [-0.6, 0.6] are chosen so
+// that required_n_sigma = (0.6/0.1414)*1.1 ~= 4.67 sits BELOW the
+// n_sigma=5.0 floor: the fallback clamps to that floor, reproducing
+// exactly the default-profile branch's undershoot for the min-sigma
+// (0.10) group (half-width 5.0*0.10*sqrt(0.500001) ~= 0.3536 < the
+// ~0.3796 fit-axis reach at m_axis.front()) while max-sigma (0.20,
+// half-width ~0.7071) stays covered.  17 points over width 1.2 gives
+// max_dx ~= 0.094 > 0.05, forcing the fallback branch; width 1.2 still
+// exceeds min_required_width (6*0.1414 ~= 0.849) so only MAX_DX trips.
+// Pre-fix max abs error on this branch: 0.0569 (m=-0.379555, sigma=0.10).
+// Smaller than the GridAccuracyParams branch's 0.4263 despite the same
+// floored n_sigma=5.0 -- the multi-sinh point placement here differs from
+// the default-profile grid's, so the cubic-spline extrapolation just past
+// the domain edge is milder -- but it is still a genuine, real
+// out-of-domain extrapolation, not ordinary interpolation error.
+TEST(AdaptiveGridBuilderTest, FallbackExplicitGridCoversMoneynessTails) {
+    OptionGrid chain;
+    chain.spot = 100.0;
+    chain.dividend_yield = 0.0;
+    chain.strikes = {60.0, 80.0, 100.0, 120.0, 140.0};
+    chain.maturities = {0.05, 0.1};
+    chain.implied_vols = {0.10, 0.15, 0.20};
+    chain.rates = {0.03, 0.05};
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.002;
+    params.max_iter = 2;
+    params.validation_samples = 8;
+
+    // Covers the fit axis (upfront check passes) but 17 points over
+    // width 1.2 makes max_dx > 0.05, forcing the fallback branch.
+    auto grid_spec = GridSpec<double>::sinh_spaced(-0.6, 0.6, 17, 2.0).value();
+    auto result = build_adaptive_bspline(params, chain,
+        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+    ASSERT_TRUE(result.has_value());
+
+    auto wrapper = make_bspline_surface(
+        result->spline, result->K_ref, result->dividend_yield,
+        OptionType::PUT);
+    ASSERT_TRUE(wrapper.has_value());
+
+    const auto& m_axis = result->axes.grids[0];
+    const auto& vol_axis = result->axes.grids[2];
+    const double K = result->K_ref;
+    const double tau = result->axes.grids[1].back();
+    const double r = result->axes.grids[3].front();
+
+    // Tolerance in $ per K_ref=100 strike: post-fix max observed deviation
+    // is 1.19e-05 (m_axis.back(), sigma=vol_axis.back()).  TOL = 1.2e-04 is
+    // ~10x that, and far under 1/5 of the 0.0569 pre-fix error above.
+    constexpr double TOL = 1.2e-4;
+
+    for (double m : {m_axis.front(), m_axis.back()}) {
+        for (double sigma : {vol_axis.front(), vol_axis.back()}) {
+            const double S = K * std::exp(m);
+            const double ref = fdm_reference_price(S, K, tau, sigma, r);
+            const double got = wrapper->price(S, K, tau, sigma, r);
+            EXPECT_NEAR(got, ref, TOL)
+                << "m=" << m << " sigma=" << sigma;
+        }
+    }
 }
 
 }  // namespace
