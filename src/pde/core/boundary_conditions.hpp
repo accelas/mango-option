@@ -80,22 +80,30 @@ DirichletBC(Func) -> DirichletBC<Func>;
  * - Left boundary:  (u[1] - u[0]) / dx = g  →  u[0] = u[1] - g·dx
  * - Right boundary: (u[n-1] - u[n-2]) / dx = g  →  u[n-1] = u[n-2] + g·dx
  *
- * Requires diffusion coefficient D for proper ghost-point construction.
+ * `apply()` above is a standalone forward/backward-difference utility for
+ * callers outside PDESolver. PDESolver itself no longer calls it: Neumann
+ * boundaries are enforced by the solve via SpatialOperator's analytic
+ * ghost-eliminated boundary row (see docs/plans/
+ * 2026-08-30-boundary-correctness-439-455-design.md section C).
  */
 template<typename Func>
 class NeumannBC {
 public:
     using tag = bc::neumann_tag;
 
-    NeumannBC(Func f, double diffusion_coeff)
-        : func_(std::move(f)), diffusion_coeff_(diffusion_coeff) {}
+    explicit NeumannBC(Func f) : func_(std::move(f)) {}
+
+    /// Compatibility overload: the diffusion coefficient is unused (it was
+    /// vestigial — the ghost-point formula never needed it). Prefer
+    /// NeumannBC(func).
+    [[deprecated("diffusion coefficient is unused; use NeumannBC(func)")]]
+    NeumannBC(Func f, [[maybe_unused]] double diffusion_coeff)
+        : func_(std::move(f)) {}
 
     // Natural interface - returns gradient
     double gradient(double t, double x) const {
         return func_(t, x);
     }
-
-    double diffusion_coeff() const { return diffusion_coeff_; }
 
     // Solver interface - UNIFORM signature for all BC types
     // Neumann uses gradient, dx, and side to enforce du/dx = g via ghost point method
@@ -114,10 +122,11 @@ public:
 
 private:
     Func func_;
-    double diffusion_coeff_;
 };
 
-// Deduction guide
+// Deduction guides
+template<typename Func>
+NeumannBC(Func) -> NeumannBC<Func>;
 template<typename Func>
 NeumannBC(Func, double) -> NeumannBC<Func>;
 

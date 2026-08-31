@@ -155,6 +155,11 @@ public:
         return left.log_discount + alpha * (right.log_discount - left.log_discount);
     }
 
+    /// Raw tenor/log-discount knots, sorted ascending by tenor (curve_[0].tenor == 0).
+    /// Exposed for callers that need to enumerate curve breakpoints directly
+    /// (e.g. the call boundary stopping-envelope evaluator).
+    std::span<const TenorPoint> points() const { return curve_; }
+
     /// Equality comparison (compares tenor/discount vectors)
     bool operator==(const YieldCurve& other) const {
         if (curve_.size() != other.curve_.size()) return false;

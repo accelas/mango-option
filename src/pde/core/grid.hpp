@@ -58,7 +58,10 @@ public:
 
     // Factory methods for common grid types
     static std::expected<GridSpec, ValidationError> uniform(T x_min, T x_max, size_t n_points) {
-        if (n_points < 2) {
+        // Grid needs >= 3 points (3-point stencil): every spatial operator
+        // in this codebase uses a centered 3-point stencil, so a 2-point
+        // grid has no interior node to difference against.
+        if (n_points < 3) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::InvalidGridSize,
                 static_cast<double>(n_points)));
@@ -72,7 +75,8 @@ public:
     }
 
     static std::expected<GridSpec, ValidationError> log_spaced(T x_min, T x_max, size_t n_points) {
-        if (n_points < 2) {
+        // Grid needs >= 3 points (3-point stencil).
+        if (n_points < 3) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::InvalidGridSize,
                 static_cast<double>(n_points)));
@@ -91,7 +95,8 @@ public:
     }
 
     static std::expected<GridSpec, ValidationError> sinh_spaced(T x_min, T x_max, size_t n_points, T concentration = T(1.0)) {
-        if (n_points < 2) {
+        // Grid needs >= 3 points (3-point stencil).
+        if (n_points < 3) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::InvalidGridSize,
                 static_cast<double>(n_points)));
@@ -114,7 +119,8 @@ public:
         std::vector<MultiSinhCluster<T>> clusters,
         bool auto_merge = true) {
 
-        if (n_points < 2) {
+        // Grid needs >= 3 points (3-point stencil).
+        if (n_points < 3) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::InvalidGridSize,
                 static_cast<double>(n_points)));

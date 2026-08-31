@@ -2,9 +2,11 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/european_option.hpp"
+#include "mango/option/detail/call_boundary_envelope.hpp"
 
 #include <gtest/gtest.h>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -428,6 +430,247 @@ TEST(AmericanOptionTest, ZeroRateDeepITMPutEqualsEuropean) {
 
     EXPECT_GE(american, european - 0.05);
     EXPECT_NEAR(american, european, 0.05);
+}
+
+// Regression/spec test for the public complementarity report (issue #439).
+// An ATM put solve is an M-matrix regime end-to-end, so a clean solve must
+// report zero KKT violations. This is the strongest single assertion that
+// the new put sweep is exact; if it fails, the sweep is still wrong and the
+// assertion must not be loosened.
+TEST(AmericanOptionTest, ComplementarityReportCleanForATMPut) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    auto solver = AmericanOptionSolver::create(params);
+    ASSERT_TRUE(solver.has_value());
+
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+
+    EXPECT_EQ(solver->complementarity_report().violation_count, 0u)
+        << "max_violation=" << solver->complementarity_report().max_violation
+        << " worst_kind=" << solver->complementarity_report().worst_kind;
+}
+
+// ===========================================================================
+// Regression tests: call right-boundary stopping envelope (#439 item 2 / B5)
+// ===========================================================================
+
+// Regression: custom time grids must include dividend taus (#439 batch, B5)
+// Bug: process_temporal_events fires an event only at a completed grid step,
+// so a custom grid whose mandatory_times omit the ex-date applies the
+// dividend jump to a state that has already evolved past the true ex-date
+// by up to one step -- an O(dt) phase error, largest on coarse grids. Both
+// prices below use the IDENTICAL spatial grid (from estimate_pde_grid) so
+// the comparison isolates the time-grid merge; n_time=27 (dt≈0.037) puts
+// the tau=0.5 dividend roughly half a step off a uniform 27-step grid.
+// Measured on this branch: pre-fix (mandatory_times not merged) delta =
+// 5.53e-3 (FAILS a 5e-3 bound); post-fix (this change) delta = 2.87e-3
+// (residual is ordinary n_time-vs-auto-grid time-discretization difference,
+// not a phase bug -- both grids now land exactly on the dividend tau).
+TEST(AmericanOptionTest, CustomGridOmittingDividendDateStillAligns) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .option_type = OptionType::PUT},
+        0.20);
+    params.discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 3.0}};
+
+    // (a) Auto grid: estimate_pde_grid already merges dividend taus.
+    auto auto_result = solve_american_option(params);
+    ASSERT_TRUE(auto_result.has_value());
+    const double price_auto = auto_result->value_at(params.spot);
+
+    // (b) Same spatial grid as (a), but routed through the PDEGridConfig
+    // (custom-grid) path with an EMPTY mandatory_times list, at a
+    // deliberately non-divisor n_time so the dividend tau cannot land on
+    // the grid by coincidence.
+    auto grid_pair = estimate_pde_grid(params);
+    PDEGridConfig custom_cfg{grid_pair.first, 27, {}};
+
+    auto solver = AmericanOptionSolver::create(params, PDEGridSpec{custom_cfg});
+    ASSERT_TRUE(solver.has_value());
+    auto custom_result = solver->solve();
+    ASSERT_TRUE(custom_result.has_value());
+    const double price_custom = custom_result->value_at(params.spot);
+
+    EXPECT_NEAR(price_custom, price_auto, 5e-3)
+        << "price_auto=" << price_auto << " price_custom=" << price_custom
+        << " delta=" << std::abs(price_custom - price_auto);
+}
+
+// Regression: dividend-free call right BC unchanged (#439 item 2 guard)
+// Bug guard: replacing the naive `e^x - forward_discount(t)` right BC with
+// the general stopping-value envelope must be a no-op when there are no
+// discrete dividends and q=0 -- pinned to the value measured on this branch
+// immediately before the envelope wiring landed (bazel run of a throwaway
+// solve at the same params gave 10.447090628631905 both before and after).
+//
+// The 1e-12 pin is toolchain-sensitive (FP reassociation can shift the
+// last few ULPs of a solve this deep) -- same precedent as this repo's
+// other toolchain-pinned goldens (e.g. the x86-64-v3 pin from PR #468's
+// CI test split, and bspline_bit_identity_test's bit-identical goldens).
+// On an unexplained failure here, re-pin only after verifying the
+// toolchain (not the BC formula) is what changed.
+TEST(AmericanOptionTest, NoDivCallPriceUnchangedByEnvelopeBC) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.0,
+                   .option_type = OptionType::CALL},
+        0.20);
+
+    auto result = solve_american_option(params);
+    ASSERT_TRUE(result.has_value());
+
+    constexpr double kPinnedPrice = 10.447090628631905;
+    EXPECT_NEAR(result->value_at(params.spot), kPinnedPrice, 1e-12);
+}
+
+// Regression: dividend-paying call right BC no longer pinned high (#439
+// item 2). Direct envelope check plus a full solve.
+// Bug: the old right BC `e^x - forward_discount(t)` ignored discrete
+// dividends entirely, overstating the boundary value (and hence any query
+// point close enough to the boundary to feel it) by the discounted dividend
+// once the ex-date is in the option's remaining life.
+TEST(AmericanOptionTest, DiscreteDivCallRightBoundaryEnvelope) {
+    using mango::detail::CallBoundaryEnvelope;
+    constexpr size_t kTimeBased = std::numeric_limits<size_t>::max();
+
+    const double K = 100.0;
+    const double x_max = std::log(2.0);   // deep ITM, S = 2K
+    const double maturity = 1.0;
+    const double r = 0.05;
+    const double D_over_K = 1.5 / K;
+    const double calendar_div = 0.25;
+    const double tau_d = maturity - calendar_div;  // 0.75
+
+    CallBoundaryEnvelope no_div{
+        .x_max = x_max, .dividend_yield = 0.0, .maturity = maturity,
+        .rate = RateSpec{r}, .dividends = {}};
+    CallBoundaryEnvelope with_div{
+        .x_max = x_max, .dividend_yield = 0.0, .maturity = maturity,
+        .rate = RateSpec{r},
+        .dividends = {Dividend{.calendar_time = calendar_div, .amount = D_over_K}}};
+
+    // Just before the ex-date crosses into the remaining set (tau < tau_d,
+    // strict-< phase rule of B1): the dividend has not yet entered the
+    // option's remaining life as of this evaluation, so the envelope must
+    // match the no-dividend case exactly.
+    const double tau_before = tau_d - 0.01;
+    EXPECT_NEAR(with_div.value(tau_before, kTimeBased),
+                no_div.value(tau_before, kTimeBased), 1e-12);
+
+    // Just after the ex-date (tau > tau_d): the dividend is now in the
+    // remaining set, and the deep-ITM "hold to expiry" candidate (s=0) must
+    // be reduced by exactly the dividend's forward-discounted value.
+    // At this deep-ITM point with r>0 and q=0 the hold-to-expiry candidate
+    // dominates both "stop now" (=intrinsic) and "stop at expiry" for both
+    // envelopes, so the closed-form difference is exact, not approximate.
+    const double tau_after = tau_d + 0.01;
+    const double expected_drop = D_over_K * std::exp(-r * (tau_after - tau_d));
+    EXPECT_NEAR(with_div.value(tau_after, kTimeBased),
+                no_div.value(tau_after, kTimeBased) - expected_drop, 1e-12);
+
+    // Full solve sanity: the discrete-dividend call must price below its
+    // no-dividend counterpart (the boundary and interior both now see the
+    // dividend), stay at or above intrinsic, and remain finite/converged.
+    // Accuracy against QuantLib for this exact scenario shape (single
+    // discrete dividend, ATM call) is covered by
+    // DiscreteDividendAccuracyTest.CallSingleDividendVsQuantLib
+    // (tests/discrete_dividend_accuracy_test.cc), which this change must
+    // keep passing at rel_err < 1% -- verified separately as part of this
+    // task's required test run rather than duplicated here (avoids adding
+    // a QuantLib dependency to this target).
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = K, .maturity = maturity,
+                   .rate = r, .dividend_yield = 0.0,
+                   .option_type = OptionType::CALL},
+        0.20);
+    auto no_div_result = solve_american_option(params);
+    params.discrete_dividends = {Dividend{.calendar_time = calendar_div, .amount = 1.5}};
+    auto with_div_result = solve_american_option(params);
+
+    ASSERT_TRUE(no_div_result.has_value());
+    ASSERT_TRUE(with_div_result.has_value());
+    EXPECT_TRUE(with_div_result->converged);
+    EXPECT_LT(with_div_result->value_at(params.spot), no_div_result->value_at(params.spot));
+    EXPECT_GE(with_div_result->value_at(params.spot),
+              std::max(params.spot - params.strike, 0.0) - 1e-6);
+}
+
+// Regression: table-tail-style pricing accuracy on a narrow grid where the
+// call right-BC value reaches sampled nodes (#439 item 2 / T4, the #437
+// corner). Bug: the old right BC `u = e^x - forward_discount(t)` dropped
+// the continuous-yield factor `e^{-q*tau}` entirely, so on a grid narrow
+// enough that the Dirichlet boundary error reaches priced nodes (as
+// happens once `ensure_moneyness_coverage` clamps the domain near #437),
+// the mispriced boundary corrupts the interior solution, not just an
+// unused far-field node.
+//
+// Grid choice is deliberate, not arbitrary: the domain must be narrow
+// enough that the boundary is felt at S=K (half-width 0.30 in log-
+// moneyness is 1.5 sigma*sqrt(T) for sigma=0.20, T=1), AND coarse enough
+// that the deep-ITM lock (pde_solver.hpp, relative threshold
+// psi[i] > 0.95*max(psi)) does not pin the node adjacent to the boundary
+// to intrinsic -- which would fully decouple the interior from whatever
+// the right BC returns and make this test vacuous. That lock triggers
+// whenever dx is smaller than a gap of ~0.013 (the log-moneyness distance
+// from x_max at which psi falls below 95% of psi_max here); 41 points
+// over [-0.30, 0.30] (dx = 0.015) clears that gap with margin, confirmed
+// empirically: at 61/101 points (dx <= 0.010) the lock engages and the
+// narrow-grid price is bit-identical regardless of the right BC's return
+// value (verified by temporarily forcing the BC to a nonsense constant).
+//
+// Reference is a self-reference: the SAME params on the wide auto grid
+// (`solve_american_option`), which this branch's
+// QuantLibSweepRegression.PricingAccuracyAcrossPutsAndCalls test
+// (tests/quantlib_sweep_regression_test.cc, "call ATM q8" row) measures
+// at abs_err = 4.712e-3 against an 8000x801 QuantLib FD reference for
+// this exact (S=K=100, r=5%, q=8%, sigma=20%, T=1) scenario -- i.e. the
+// self-reference is itself accurate to sub-1bp-per-$100 vs the true
+// price, well below the threshold below. (american_option_test has no
+// QuantLib dependency, so a self-reference is used per the task's second
+// option rather than adding one here.)
+//
+// Counter-experiment (uncommitted local hack, per this branch's practice
+// -- see tests/internal/pde_neumann_test.cc): temporarily reverting
+// CallBoundaryEnvelope::value() to the old formula
+// `e^x_max - e^{-r*tau}` and rerunning this exact scenario/grid gave
+// narrow price 6.5847888033 (abs_err vs the same reference = 4.750e-2),
+// comfortably OVER the threshold below. The current (new, dividend/yield
+// -aware) BC gives narrow price 6.5287209983 (abs_err = 8.567e-3),
+// comfortably under it. Threshold set with margin on both sides.
+TEST(AmericanOptionTest, NarrowGridDividendCallBCPricingRegression) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.08,
+                   .option_type = OptionType::CALL},
+        0.20);
+
+    auto ref_result = solve_american_option(params);
+    ASSERT_TRUE(ref_result.has_value());
+    EXPECT_TRUE(ref_result->converged);
+    const double ref_price = ref_result->value_at(params.spot);
+
+    PDEGridConfig narrow{GridSpec<double>::uniform(-0.30, 0.30, 41).value(), 200};
+    auto narrow_solver = AmericanOptionSolver::create(params, PDEGridSpec{narrow});
+    ASSERT_TRUE(narrow_solver.has_value());
+    auto narrow_result = narrow_solver->solve();
+    ASSERT_TRUE(narrow_result.has_value());
+    EXPECT_TRUE(narrow_result->converged);
+    const double narrow_price = narrow_result->value_at(params.spot);
+
+    const double intrinsic = std::max(params.spot - params.strike, 0.0);
+    EXPECT_GE(narrow_price, intrinsic - 1e-6);
+
+    const double abs_err = std::abs(narrow_price - ref_price);
+    EXPECT_LE(abs_err, 2.5e-2)
+        << "ref=" << ref_price << " narrow=" << narrow_price
+        << " abs_err=" << abs_err
+        << " (old BC measured 4.750e-2 on this exact scenario -- FAILS "
+           "this bound; new BC measures 8.567e-3)";
 }
 
 }  // namespace

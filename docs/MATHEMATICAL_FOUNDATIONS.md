@@ -222,9 +222,11 @@ The naive approach — solve the unconstrained system, then project — breaks t
 >
 > Result: $Au \neq d$ at projected nodes. The solution is inconsistent.
 
-The Projected Thomas algorithm, due to Brennan & Schwartz (1977), does something more elegant. It enforces the constraint **during** backward substitution rather than after.
+The Projected Thomas algorithm, due to Brennan & Schwartz (1977), does something more elegant. It enforces the constraint **during** substitution rather than after — but which end the elimination/substitution sweep starts from is not a free choice. It must start on the side the active set touches, and puts and calls touch opposite sides.
 
-**Forward elimination** (identical to standard Thomas):
+**Right-active sweep** (`LcpActiveSide::Right` — calls; the exercise region sits at the right/high-price end of the grid): standard LU forward elimination top-down, then projected substitution right-to-left, starting at node $n-1$.
+
+Forward elimination:
 
 $$c'_0 = \frac{c_0}{b_0}, \qquad d'_0 = \frac{d_0}{b_0}$$
 
@@ -232,7 +234,7 @@ For $i = 1$ to $n-1$:
 
 $$w = b_i - a_{i-1}c'_{i-1}, \qquad c'_i = \frac{c_i}{w}, \qquad d'_i = \frac{d_i - a_{i-1}d'_{i-1}}{w}$$
 
-**Projected backward substitution** (the key difference):
+Projected backward substitution, starting on the right (active) side:
 
 $$u_{n-1} = \max(d'_{n-1},\; \psi_{n-1})$$
 
@@ -240,13 +242,51 @@ For $i = n-2$ down to $0$:
 
 $$u_i = \max\!\big(d'_i - c'_iu_{i+1},\;\; \psi_i\big)$$
 
-The $\max$ at each step is the projection. Because the matrix $A$ is an M-matrix (positive diagonal, non-positive off-diagonals — guaranteed by TR-BDF2's discretization), this projection is monotone and the algorithm converges in a **single pass**. Same $O(n)$ cost as standard Thomas, no iteration needed.
+**Left-active sweep** (`LcpActiveSide::Left` — puts; the exercise region sits at the left/low-price end): the mirror image. UL elimination bottom-up (each row eliminated against its row *below*, coupling $c'_i$ to the *left* neighbor), then projected substitution left-to-right, starting at node $0$:
 
-### Why This Works
+$$c'_{n-1} = \frac{a_{n-2}}{b_{n-1}}, \qquad d'_{n-1} = \frac{d_{n-1}}{b_{n-1}}$$
 
-The insight is about information flow. In backward substitution, $u_i$ depends on $u_{i+1}$. If we project $u_{i+1}$ upward (to the obstacle), this propagates correctly through the tridiagonal coupling — the constraint at one node affects its neighbors in a consistent way.
+For $i = n-2$ down to $1$:
 
-For M-matrices, the off-diagonal elements are non-positive, so increasing $u_{i+1}$ can only decrease the unconstrained value at $u_i$. This means the projection is monotone: once a node is clamped to the obstacle, nodes to its left see a larger $u_{i+1}$ and thus a smaller unconstrained value, making them more likely to also hit the obstacle. This is exactly the early-exercise region propagating inward from deep in-the-money.
+$$w = b_i - c_i c'_{i+1}, \qquad c'_i = \frac{a_{i-1}}{w}, \qquad d'_i = \frac{d_i - c_i d'_{i+1}}{w}$$
+
+Row $0$ has no left neighbor, so only $d'_0$ is needed (no $c'_0$ is ever referenced):
+
+$$d'_0 = \frac{d_0 - c_0 d'_1}{b_0 - c_0 c'_1}$$
+
+Projected substitution, starting on the left (active) side:
+
+$$u_0 = \max(d'_0,\; \psi_0)$$
+
+For $i = 1$ to $n-1$:
+
+$$u_i = \max\!\big(d'_i - c'_iu_{i-1},\;\; \psi_i\big)$$
+
+The $\max$ at each step is the projection. In `src/math/thomas_solver.hpp` both orientations live in one function, `solve_thomas_projected2<T, Side>`, selected at compile time; `Side::Right` reproduces the original `solve_thomas_projected` bit-for-bit. Each obstacle-bearing CRTP solver declares which orientation its active set touches via `static constexpr LcpActiveSide lcp_active_side` (`AmericanPutSolver` → `Left`, `AmericanCallSolver` → `Right`); `PDESolver` static-asserts the declaration exists and passes it through to the projected solve. The function also writes an `active_mask` (1 where a node was clamped) alongside the solution — the KKT validator described below consumes it.
+
+When the active set is a single interval touching the sweep's starting side and the matrix is an M-matrix (see the caveat below), this projection is monotone and the algorithm converges in a **single pass**. Same $O(n)$ cost as standard Thomas, no iteration needed.
+
+### Why This Works — and Why Orientation Matters
+
+The insight is about information flow. In a projected substitution sweep, $u_i$ depends only on the neighbor already visited — the one on the side the sweep came *from*. Projecting that already-visited neighbor onto the obstacle propagates correctly into $u_i$'s unconstrained value through the retained tridiagonal coupling.
+
+For an M-matrix (positive diagonal, non-positive off-diagonals), that propagation is monotone in the right direction: clamping a node lowers the unconstrained value the sweep computes for its next, not-yet-visited neighbor, so the clamp correctly pushes the neighbor toward (or into) the obstacle too. This is exactly the early-exercise region propagating **inward from the side the sweep starts on**.
+
+That is only half of what one-pass exactness requires, though. The pre-fix version of this document argued that monotone clamp propagation was sufficient on its own and used a single right-to-left sweep for both option types. It is not sufficient: propagation into the active set says nothing about the nodes the sweep visits *before* it ever reaches the obstacle — the continuation-region nodes on the far side, whose equations must still be satisfied *exactly* (complementarity: $u_i = \psi_i$ or $(Au)_i = d_i$, never a blend). A sweep that starts on the wrong side clamps its way toward the active set correctly, but a node on the continuation side that the sweep visits *before* the active interval gets its unconstrained value computed from an as-yet-unclamped downstream neighbor, so the continuation-side equation is not exactly satisfied.
+
+This is precisely the class of defect issue #439 found: `solve_thomas_projected` sweeps right-to-left unconditionally, which is exact for right-active sets (calls, exercise region at high price) but leaves puts (left-active, exercise region at low price) with an inexact continuation-side residual. A 2-node hand-verified counterexample and a brute-force LCP enumeration (n=12 M-matrix) both confirm the right-to-left sweep is exact only on right-active obstacles and off by construction on left-active ones (mirrored image for the left-to-right sweep). A QuantLib A/B on a real pricer (S=K=100, r=5%, σ=20%, T=1) showed the same signature at production scale: switching the put sweep to `Left` moved the ATM put price by 2.6e-3 and reduced the bias vs. QuantLib from −0.0069 to −0.0044 (the residual defect had been masked in the test suite by per-step re-projection and the deep-ITM Dirichlet lock below, both of which re-inject feasibility every step). The fix is the orientation split above: **substitution must start on the side the active set actually touches** — left-start for puts, right-start for calls — not a fixed direction chosen independently of the obstacle's geometry.
+
+### Complementarity Validation (Full KKT Check)
+
+Interval-exactness is a geometric assumption (a single contiguous active interval touching the sweep's start side) layered on top of the M-matrix assumption, and neither is guaranteed for every input the library accepts. Rather than trust the assumption silently, every projected stage solve is followed by an O(n) validator, `validate_lcp_kkt`, that checks the full KKT system against the exact matrix/RHS/obstacle the stage just solved (post Dirichlet and deep-ITM-lock row rewrites) and the `active_mask` the sweep produced:
+
+- **primal feasibility** — $u_i \geq \psi_i$ everywhere;
+- **dual feasibility** — $(Au)_i \geq d_i$ on active nodes;
+- **residual equality** — $(Au)_i = d_i$ on inactive nodes (checking only clamped nodes would miss exactly the continuation-side defect above);
+
+each with a scale-aware tolerance, non-finite values counted as violations. The result (`LcpKktReport`: violation count, worst raw defect, and its kind — primal/dual/residual) is aggregated across every implicit stage of a solve, emitted on a USDT probe (`MANGO_TRACE_LCP_KKT`) when a stage violates, and queryable after the fact via `AmericanOptionSolver::complementarity_report()`. This batch makes the check **diagnostic only** — no input that priced before is rejected now, and no hard error is raised on a violation; it exists so that a departure from exactness is visible and measurable rather than silently absorbed into the price, which is important because of the caveat below.
+
+**M-matrix / cell-Péclet caveat.** One-pass exactness also assumes the stage Jacobian is an M-matrix (non-positive off-diagonals). The current centered-difference drift discretization does not guarantee this at high cell Péclet number: at low volatility on a coarse grid (e.g. σ = 1%, h = 0.1, where the drift coefficient is 0.25 against a diffusion coefficient of 0.005) an off-diagonal entry can flip sign on inputs the library otherwise accepts and prices today — including low-vol IV probing, a supported path. Because this failure mode is not confined to pathological active-set topologies, this batch treats it as a reporting-only concern rather than a hard error: rejecting these inputs would regress currently-working solves. Two follow-up issues track the root fixes — drift upwinding to restore the M-matrix property at its source, and an iterative (PSOR-style) fallback for non-interval active-set topologies that Brennan-Schwartz cannot solve exactly in one pass regardless of monotonicity. Any caller-facing failure policy (e.g. rejecting a solve above a violation threshold) is deferred to those follow-ups.
 
 ### Deep ITM Locking
 

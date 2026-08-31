@@ -267,6 +267,21 @@ TEST(GridSpecTest, MultiSinhTwoClusterGeneration) {
 
 // Task 7: Validation tests for edge cases
 
+// Regression: n=2 used to pass (old floor was n_points < 2). Every spatial
+// stencil in this codebase is 3-point, so a 2-point grid has no interior
+// node and must be rejected too — matches the same floor already enforced
+// by uniform()/log_spaced()/sinh_spaced().
+TEST(GridSpecTest, MultiSinhRejectsTwoPoints) {
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 0.0, .alpha = 2.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 2, clusters);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::ValidationErrorCode::InvalidGridSize);
+}
+
 TEST(GridSpecTest, MultiSinhRejectsEmptyClusters) {
     std::vector<mango::MultiSinhCluster<double>> clusters = {};
 

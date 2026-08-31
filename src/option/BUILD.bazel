@@ -50,6 +50,7 @@ cc_library(
     ],
     implementation_deps = [
         "//src/pde/internal:workspace",
+        ":call_boundary_envelope",
     ],
     copts = [
         "-Wall",
@@ -190,6 +191,19 @@ cc_library(
     hdrs = ["detail/price_table_error_mapping.hpp"],
     deps = ["//src/support:error_types"],
     copts = ["-Wall", "-Wextra", "-Werror", "-O3"],
+    visibility = ["//src/option:__pkg__", "//tests:__pkg__"],
+    strip_include_prefix = "/src/option",
+    include_prefix = "mango/option",
+)
+
+cc_library(
+    name = "call_boundary_envelope",
+    hdrs = ["detail/call_boundary_envelope.hpp"],
+    deps = [
+        ":option_spec",
+        ":yield_curve",
+    ],
+    copts = ["-Wall", "-Wextra", "-Werror"],
     visibility = ["//src/option:__pkg__", "//tests:__pkg__"],
     strip_include_prefix = "/src/option",
     include_prefix = "mango/option",

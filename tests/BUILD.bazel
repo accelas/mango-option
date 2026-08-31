@@ -1,4 +1,10 @@
 # SPDX-License-Identifier: MIT
+
+# Shared LCP enumeration/reference-solve test helpers (Task 1 + Task 9,
+# issues #439/#455): used by thomas_solver_lcp_test here and by
+# //tests/internal:pde_neumann_test.
+exports_files(["lcp_test_util.hpp"])
+
 cc_test(
     name = "black_scholes_analytics_test",
     size = "small",
@@ -458,6 +464,21 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "thomas_solver_lcp_test",
+    srcs = ["thomas_solver_lcp_test.cc", "lcp_test_util.hpp"],
+    deps = [
+        "//src/math:thomas_solver",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+    size = "small",
+)
+
 
 cc_test(
     name = "iv_solver_test",
@@ -548,6 +569,7 @@ cc_test(
     deps = [
         "//src/option:american_option",
         "//src/option:american_option_batch",
+        "//src/option:call_boundary_envelope",
         "//src/option:european_option",
         "@googletest//:gtest_main",
     ],
@@ -792,6 +814,21 @@ cc_test(
     size = "large",
     timeout = "long",
     tags = ["manual"],  # Manual due to long build time for price table
+)
+
+cc_test(
+    name = "quantlib_sweep_regression_test",
+    size = "large",
+    srcs = ["quantlib_sweep_regression_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+    linkopts = ["-lQuantLib"],
 )
 
 cc_test(
@@ -1485,6 +1522,16 @@ cc_test(
     srcs = ["price_table_error_mapping_test.cc"],
     deps = [
         "//src/option:price_table_error_mapping",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "call_boundary_envelope_test",
+    size = "small",
+    srcs = ["call_boundary_envelope_test.cc"],
+    deps = [
+        "//src/option:call_boundary_envelope",
         "@googletest//:gtest_main",
     ],
 )

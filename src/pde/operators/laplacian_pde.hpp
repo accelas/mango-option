@@ -26,6 +26,18 @@ public:
         return D_ * d2u;
     }
 
+    /// Second derivative coefficient: D. Used for analytical Jacobian
+    /// construction and ghost-eliminated boundary rows.
+    T second_derivative_coeff() const { return D_; }
+
+    /// First derivative coefficient: 0 (pure diffusion has no drift term).
+    /// Time argument accepted (and ignored) to satisfy HasJacobianCoefficients.
+    T first_derivative_coeff([[maybe_unused]] double t = 0.0) const { return T(0); }
+
+    /// Discount rate: 0 (pure diffusion has no zeroth-order term).
+    /// Time argument accepted (and ignored) to satisfy HasJacobianCoefficients.
+    T discount_rate([[maybe_unused]] double t = 0.0) const { return T(0); }
+
 private:
     T D_;  // Diffusion coefficient
 };

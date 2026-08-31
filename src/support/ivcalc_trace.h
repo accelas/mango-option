@@ -361,6 +361,16 @@ enum class NormalizedIneligibilityReason {
     MANGO_TRACE_CONVERGENCE_FAILED(MODULE_PDE_SOLVER, step, max_iter, final_error)
 
 /**
+ * Fired when validate_lcp_kkt() finds a KKT violation in a projected
+ * Thomas LCP solve (e.g. wrong sweep orientation for the active set's
+ * side, or another solver defect).
+ * @param count: Number of grid points violating a KKT condition
+ * @param max_violation: Largest raw KKT defect observed
+ */
+#define MANGO_TRACE_LCP_KKT(count, max_violation) \
+    DTRACE_PROBE3(MANGO_PROVIDER, lcp_kkt_violation, MODULE_PDE_SOLVER, count, max_violation)
+
+/**
  * ============================================================================
  * Module-Specific Probes: Implied Volatility
  * ============================================================================

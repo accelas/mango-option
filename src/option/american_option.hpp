@@ -15,6 +15,7 @@
 #include "mango/option/american_option_result.hpp"
 #include "mango/option/option_spec.hpp"  // For OptionType enum
 #include "mango/option/grid_spec_types.hpp"
+#include "mango/math/thomas_solver.hpp"  // For LcpKktReport
 #include <vector>
 #include <memory>
 #include <functional>
@@ -76,6 +77,15 @@ public:
      */
     std::expected<AmericanOptionResult, SolverError> solve();
 
+    /**
+     * LCP/KKT complementarity diagnostic from the most recent solve().
+     *
+     * Zeroed before each solve() and populated on both success and
+     * failure paths (a report from an aborted solve is kept, not reset).
+     * Aggregated across all TR-BDF2 stages of the solve.
+     */
+    const LcpKktReport& complementarity_report() const { return lcp_report_; }
+
 private:
     AmericanOptionSolver(const PricingParams& params,
                         std::pair<GridSpec<double>, TimeDomain> grid_config,
@@ -93,6 +103,9 @@ private:
 
     // TR-BDF2 configuration for the PDE solver
     TRBDF2Config trbdf2_config_;
+
+    // LCP/KKT complementarity report from the most recent solve()
+    LcpKktReport lcp_report_{};
 
 public:
     /// Callable type for custom initial conditions: f(x, u) fills u given grid points x
