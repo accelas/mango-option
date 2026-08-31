@@ -299,7 +299,7 @@ TEST_F(ParquetIOTest, Chebyshev3DRoundTrip) {
 
     auto cheb = ChebyshevInterpolant<3, RawTensor<3>>::build_from_values(
         std::span<const double>(pde->values),
-        domain, num_pts);
+        domain, num_pts).value();
 
     DimensionlessTransform3D xform;
     Chebyshev3DTransformLeaf tleaf(std::move(cheb), xform, K_ref);
@@ -1050,7 +1050,7 @@ TEST_F(ParquetIOTest, ChebyshevSegmentedMultiKRefRoundTrip) {
                        + 0.0001 * spec.K_ref;
         }
         auto interp = ChebyshevInterpolant<N, RawTensor<N>>::build_from_values(
-            std::span<const double>(values), domain, num_pts);
+            std::span<const double>(values), domain, num_pts).value();
         StandardTransform4D xform;
         return ChebyshevSegmentedLeaf(std::move(interp), xform, spec.K_ref);
     };

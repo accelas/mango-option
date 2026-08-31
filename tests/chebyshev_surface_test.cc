@@ -24,9 +24,10 @@ TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
     auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build(
         [](std::array<double, 4>) { return 0.05; },
         domain, num_pts);
+    ASSERT_TRUE(interp.has_value());
 
     ChebyshevTransformLeaf tleaf(
-        std::move(interp), StandardTransform4D{}, 100.0);
+        std::move(*interp), StandardTransform4D{}, 100.0);
     ChebyshevLeaf leaf(std::move(tleaf),
         AnalyticalEEP(OptionType::PUT, 0.02));
 
@@ -111,7 +112,8 @@ TEST(TransformLeafNaNTest, PricePropagatesNaNAndKeepsFloor) {
     Domain<4> dom{.lo = {-0.7, 0.05, 0.1, 0.0}, .hi = {0.7, 2.0, 0.5, 0.08}};
     std::array<size_t, 4> npts = {5, 5, 5, 5};
     auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build(f, dom, npts);
-    ChebyshevTransformLeaf leaf(std::move(interp),
+    ASSERT_TRUE(interp.has_value());
+    ChebyshevTransformLeaf leaf(std::move(*interp),
                                  StandardTransform4D{}, 100.0);
 
     // Finite query over a negative raw value: floored to +0.0 (not -0.0)

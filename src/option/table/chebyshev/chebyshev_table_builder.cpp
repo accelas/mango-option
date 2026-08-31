@@ -184,7 +184,10 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
 
     auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build_from_values(
         eep_span, config.domain, config.num_pts);
-    ChebyshevTransformLeaf tleaf(std::move(interp), StandardTransform4D{},
+    if (!interp.has_value()) {
+        return std::unexpected(convert_to_price_table_error(interp.error()));
+    }
+    ChebyshevTransformLeaf tleaf(std::move(*interp), StandardTransform4D{},
                                  config.K_ref);
     ChebyshevLeaf leaf(std::move(tleaf), eep);
     return make_result(ChebyshevSurface(

@@ -2,7 +2,9 @@
 #include "mango/math/chebyshev/chebyshev_interpolant.hpp"
 #include "mango/math/chebyshev/raw_tensor.hpp"
 #include "mango/option/table/surface_concepts.hpp"
+#include "mango/support/error_types.hpp"
 #include <cmath>
+#include <limits>
 #include <gtest/gtest.h>
 
 namespace mango {
@@ -59,7 +61,9 @@ TEST(ChebyshevTensorTest, ExactForLinear3D) {
     Domain<3> dom{.lo = {-1.0, 0.0, 0.5}, .hi = {1.0, 2.0, 3.0}};
     std::array<size_t, 3> npts = {4, 4, 4};
 
-    auto interp = ChebyshevTensor<3>::build(f, dom, npts);
+    auto r = ChebyshevTensor<3>::build(f, dom, npts);
+    ASSERT_TRUE(r.has_value());
+    auto& interp = *r;
 
     // Test at several interior points
     std::array<double, 3> q1 = {0.3, 1.2, 1.7};
@@ -82,7 +86,9 @@ TEST(ChebyshevTensorTest, ExactForBilinear3D) {
     Domain<3> dom{.lo = {0.0, 0.0, 0.0}, .hi = {2.0, 3.0, 1.0}};
     std::array<size_t, 3> npts = {4, 4, 4};
 
-    auto interp = ChebyshevTensor<3>::build(f, dom, npts);
+    auto r = ChebyshevTensor<3>::build(f, dom, npts);
+    ASSERT_TRUE(r.has_value());
+    auto& interp = *r;
 
     std::array<double, 3> q1 = {0.7, 1.5, 0.3};
     EXPECT_NEAR(interp.eval(q1), f(q1), 1e-12);
@@ -99,8 +105,12 @@ TEST(ChebyshevTensorTest, SmoothFunctionConverges3D) {
     };
     Domain<3> dom{.lo = {-1.0, 0.0, 0.0}, .hi = {1.0, M_PI, 2.0}};
 
-    auto coarse = ChebyshevTensor<3>::build(f, dom, {5, 5, 5});
-    auto fine   = ChebyshevTensor<3>::build(f, dom, {9, 9, 9});
+    auto coarse_r = ChebyshevTensor<3>::build(f, dom, {5, 5, 5});
+    auto fine_r   = ChebyshevTensor<3>::build(f, dom, {9, 9, 9});
+    ASSERT_TRUE(coarse_r.has_value());
+    ASSERT_TRUE(fine_r.has_value());
+    auto& coarse = *coarse_r;
+    auto& fine   = *fine_r;
 
     // Evaluate at test points and measure max error
     double coarse_err = 0.0, fine_err = 0.0;
@@ -131,7 +141,9 @@ TEST(ChebyshevTensorTest, ExactForLinear4D) {
     Domain<4> dom{.lo = {0.0, -1.0, 0.0, 1.0}, .hi = {1.0, 1.0, 2.0, 3.0}};
     std::array<size_t, 4> npts = {4, 4, 4, 4};
 
-    auto interp = ChebyshevTensor<4>::build(f, dom, npts);
+    auto r = ChebyshevTensor<4>::build(f, dom, npts);
+    ASSERT_TRUE(r.has_value());
+    auto& interp = *r;
 
     std::array<double, 4> q1 = {0.5, 0.0, 1.0, 2.0};
     EXPECT_NEAR(interp.eval(q1), f(q1), 1e-12);
@@ -151,7 +163,9 @@ TEST(ChebyshevTensorTest, PartialDerivatives3D) {
     Domain<3> dom{.lo = {0.0, 0.0, 0.5}, .hi = {M_PI, M_PI, 2.0}};
     std::array<size_t, 3> npts = {12, 12, 12};
 
-    auto interp = ChebyshevTensor<3>::build(f, dom, npts);
+    auto r = ChebyshevTensor<3>::build(f, dom, npts);
+    ASSERT_TRUE(r.has_value());
+    auto& interp = *r;
 
     std::array<double, 3> q = {1.0, 0.5, 1.2};
 
@@ -178,7 +192,9 @@ TEST(ChebyshevTensorTest, DomainClamping) {
     Domain<3> dom{.lo = {0.0, 0.0, 0.0}, .hi = {1.0, 1.0, 1.0}};
     std::array<size_t, 3> npts = {4, 4, 4};
 
-    auto interp = ChebyshevTensor<3>::build(f, dom, npts);
+    auto r = ChebyshevTensor<3>::build(f, dom, npts);
+    ASSERT_TRUE(r.has_value());
+    auto& interp = *r;
 
     // Query below domain: should clamp to (0, 0, 0) => f = 0
     std::array<double, 3> below = {-1.0, -2.0, -0.5};
@@ -199,6 +215,155 @@ TEST(ChebyshevTensorTest, DomainClamping) {
 
 static_assert(SurfaceInterpolant<ChebyshevTensor<3>, 3>);
 static_assert(SurfaceInterpolant<ChebyshevTensor<4>, 4>);
+
+// ===========================================================================
+// Regression tests for issue #426 (build_from_values silently fit NaN input)
+// ===========================================================================
+
+// Regression: builds succeeded with 15-20% NaN input during the #419 incident
+// Bug: no input validation and no error path (object returned directly)
+TEST(ChebyshevInterpolantGuardTest, BuildFromValuesRejectsNaN) {
+    mango::Domain<2> dom{.lo = {0.0, 0.0}, .hi = {1.0, 1.0}};
+    std::vector<double> values(9, 0.0);
+    values[4] = std::nan("");
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build_from_values(
+        values, dom, {3, 3});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::InterpolationErrorCode::NaNInput);
+    EXPECT_EQ(r.error().index, 4u);
+}
+
+// Regression: builds succeeded with 15-20% NaN input during the #419 incident
+// Bug: no input validation and no error path (object returned directly)
+TEST(ChebyshevInterpolantGuardTest, BuildFromValuesRejectsInf) {
+    mango::Domain<2> dom{.lo = {0.0, 0.0}, .hi = {1.0, 1.0}};
+    std::vector<double> values(9, 0.0);
+    values[2] = std::numeric_limits<double>::infinity();
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build_from_values(
+        values, dom, {3, 3});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::InterpolationErrorCode::InfInput);
+    EXPECT_EQ(r.error().index, 2u);
+}
+
+// Regression: no size validation between values buffer and declared shape
+// Bug: mismatched sizes were never checked before indexing into storage
+TEST(ChebyshevInterpolantGuardTest, RejectsSizeMismatch) {
+    mango::Domain<2> dom{.lo = {0.0, 0.0}, .hi = {1.0, 1.0}};
+    std::vector<double> values(8, 0.0);  // needs 9
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build_from_values(
+        values, dom, {3, 3});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::InterpolationErrorCode::ValueSizeMismatch);
+}
+
+// Regression: num_pts < 2 on any axis produced a degenerate/undefined interpolant
+// Bug: no lower-bound check on num_pts before generating Chebyshev nodes
+TEST(ChebyshevInterpolantGuardTest, RejectsNumPtsBelowTwo) {
+    mango::Domain<2> dom{.lo = {0.0, 0.0}, .hi = {1.0, 1.0}};
+    std::vector<double> values(3, 0.0);
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build_from_values(
+        values, dom, {1, 3});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::InterpolationErrorCode::InsufficientGridPoints);
+}
+
+// Regression: NaN domain bounds were never checked before generating nodes
+// Bug: no finiteness check on domain.lo/hi
+TEST(ChebyshevInterpolantGuardTest, RejectsNaNDomain) {
+    mango::Domain<2> dom{.lo = {std::nan(""), 0.0}, .hi = {1.0, 1.0}};
+    std::vector<double> values(9, 0.0);
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build_from_values(
+        values, dom, {3, 3});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::InterpolationErrorCode::NaNInput);
+}
+
+// Regression: infinite domain bounds were never checked before generating nodes
+// Bug: no finiteness check on domain.lo/hi
+TEST(ChebyshevInterpolantGuardTest, RejectsInfDomain) {
+    mango::Domain<2> dom{.lo = {0.0, 0.0},
+                         .hi = {std::numeric_limits<double>::infinity(), 1.0}};
+    std::vector<double> values(9, 0.0);
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build_from_values(
+        values, dom, {3, 3});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::InterpolationErrorCode::InfInput);
+}
+
+// Regression: reversed domain bounds (lo > hi) were never checked
+// Bug: no ordering check on domain.lo/hi
+TEST(ChebyshevInterpolantGuardTest, RejectsReversedDomain) {
+    mango::Domain<2> dom{.lo = {0.0, 1.0}, .hi = {1.0, 0.5}};  // axis 1 reversed
+    std::vector<double> values(9, 0.0);
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build_from_values(
+        values, dom, {3, 3});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::InterpolationErrorCode::GridNotSorted);
+}
+
+// Regression: zero-width domain axes were never checked
+// Bug: no width check on domain.lo/hi, leading to division by zero in node generation
+TEST(ChebyshevInterpolantGuardTest, RejectsZeroWidthDomain) {
+    mango::Domain<2> dom{.lo = {0.0, 0.5}, .hi = {1.0, 0.5}};
+    std::vector<double> values(9, 0.0);
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build_from_values(
+        values, dom, {3, 3});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::InterpolationErrorCode::ZeroWidthGrid);
+}
+
+// Regression: unchecked product of num_pts could overflow size_t
+TEST(ChebyshevInterpolantGuardTest, RejectsShapeProductOverflow) {
+    mango::Domain<2> dom{.lo = {0.0, 0.0}, .hi = {1.0, 1.0}};
+    std::array<size_t, 2> huge = {std::numeric_limits<size_t>::max() / 2, 4};
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build_from_values(
+        std::span<const double>{}, dom, huge);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::InterpolationErrorCode::ValueSizeMismatch);
+}
+
+// Sampling overload: NaN from the sampled function is rejected too
+TEST(ChebyshevInterpolantGuardTest, BuildRejectsNaNSampledFunction) {
+    mango::Domain<2> dom{.lo = {0.0, 0.0}, .hi = {1.0, 1.0}};
+    auto f = [](std::array<double, 2> c) {
+        return (c[0] > 0.5) ? std::nan("") : 1.0;
+    };
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build(f, dom, {4, 4});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::InterpolationErrorCode::NaNInput);
+}
+
+// Sampling overload must validate shape/domain BEFORE invoking f (or allocating)
+TEST(ChebyshevInterpolantGuardTest, SamplingValidatesBeforeInvokingF) {
+    using Cheb2 = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>;
+    int calls = 0;
+    auto f = [&calls](std::array<double, 2>) { ++calls; return 1.0; };
+
+    mango::Domain<2> reversed{.lo = {0.0, 1.0}, .hi = {1.0, 0.5}};
+    auto r1 = Cheb2::build(f, reversed, {3, 3});
+    EXPECT_FALSE(r1.has_value());
+    EXPECT_EQ(calls, 0);
+
+    mango::Domain<2> ok{.lo = {0.0, 0.0}, .hi = {1.0, 1.0}};
+    auto r2 = Cheb2::build(f, ok, {1, 3});
+    EXPECT_FALSE(r2.has_value());
+    EXPECT_EQ(calls, 0);
+
+    std::array<size_t, 2> huge = {std::numeric_limits<size_t>::max() / 2, 4};
+    auto r3 = Cheb2::build(f, ok, huge);
+    EXPECT_FALSE(r3.has_value());
+    EXPECT_EQ(calls, 0);
+}
+
+// Locks existing behavior: NaN queries propagate through barycentric eval
+TEST(ChebyshevInterpolantGuardTest, EvalPropagatesNaNQuery) {
+    mango::Domain<2> dom{.lo = {0.0, 0.0}, .hi = {1.0, 1.0}};
+    auto f = [](std::array<double, 2> c) { return c[0] + c[1]; };
+    auto r = mango::ChebyshevInterpolant<2, mango::RawTensor<2>>::build(f, dom, {5, 5});
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(std::isnan(r->eval({std::nan(""), 0.5})));
+}
 
 }  // namespace
 }  // namespace mango
