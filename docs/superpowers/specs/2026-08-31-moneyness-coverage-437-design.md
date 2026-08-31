@@ -67,7 +67,9 @@ Move `ensure_moneyness_coverage` from a file-static template in
 `bspline_builder.cpp` to a free function declared in
 `src/option/table/bspline/bspline_builder.hpp` (namespace `mango::detail` —
 shared builder machinery, not general public API; implementation stays in
-`bspline_builder.cpp`):
+`bspline_builder.cpp`; note `bspline_builder.hpp` is on a public Bazel
+target, so this is an intentionally *exposed* detail symbol — the `detail`
+namespace signals intent, not linkage):
 
 ```cpp
 namespace detail {
@@ -122,8 +124,11 @@ with `m_grid` (the log-moneyness axis) passed down from
 1. copy/derive the `GridAccuracyParams`;
 2. `detail::ensure_moneyness_coverage(accuracy, missing_params, m_grid)`;
 3. `estimate_batch_pde_grid(missing_params, accuracy)`;
-4. wrap the result as `PDEGridConfig` with
-   `TimeDomain::from_n_steps(0, tau_grid.back(), n_steps)`;
+4. wrap the result as `PDEGridConfig` carrying the estimated grid spec and
+   the estimated time domain's `n_steps()` (`PDEGridConfig` stores only
+   `n_time`; the solver reconstructs each time domain from the param's
+   maturity, and all table batch params share
+   `maturity = tau_grid.back()`);
 5. `solve_batch(missing_params, true, nullptr, custom_grid)`.
 
 Concretely per branch:
@@ -178,9 +183,11 @@ Add the same check to `build_cached_surface`, before any solving: if
 The materialized grid comes from
 `estimate_batch_pde_grid(missing_params, accuracy)`
 (`grid_spec_types.cpp:120-177`), which unions per-param estimates over
-**the batch it is given** — so the realized shared half-width is
-`n_sigma · max σ√τ(missing_params)` (baseline, before any dividend
-extension). On refinement iterations after the first, `missing_params`
+**the batch it is given** — so for this normalized (x0 = 0),
+common-maturity, dividend-free batch the realized shared half-width is
+exactly `n_sigma · max σ√τ(missing_params)` (in the general estimator,
+nonzero x0 shifts bounds and discrete dividends extend the left boundary;
+neither applies here). On refinement iterations after the first, `missing_params`
 contains only newly inserted (interior) σ values, so
 `max σ√τ(missing) ≤ max σ√τ(all)`; an `n_sigma` derived from `all_params`
 would still undershoot. The coverage call must use `missing_params`.
@@ -254,6 +261,23 @@ they derive from each iteration's `missing_params` — that is fine):
    `PDEGridConfig` whose bounds undershoot the chain's moneyness axis
    fails with `InvalidConfig`, matching non-adaptive `build()`.
 
+2b. **Fallback-branch coverage tests** (round 3): the e2e regression below
+   exercises only the `GridAccuracyParams` branch, so both explicit-grid
+   fallback branches — precisely where the routing defect also lives — get
+   their own regressions, each using an explicit `PDEGridConfig` that
+   *passes* the upfront moneyness-coverage check but *fails* the stability
+   constraints (e.g. wide enough to cover the axis but coarse enough that
+   `max_dx > 0.05`), with multiple σ values in the batch:
+   - **non-adaptive (D6):** `PriceTableBuilderND::solve_batch` (public) on
+     such a config; assert every result's PDE grid — the min-σ slice in
+     particular — spans both moneyness-axis endpoints (direct grid-bound
+     assertion on `result.grid()->x()`, cheaper and sharper than another
+     accuracy test);
+   - **adaptive:** same shape through the adaptive path at whatever access
+     level permits — grid-bound assertions if the solve results are
+     reachable, otherwise an e2e min-σ endpoint accuracy assertion like
+     test 3's. Exact vehicle is pinned in the plan.
+
 3. **End-to-end adaptive regression** (issue's sketch): adaptive build via
    `build_adaptive_bspline` with `make_grid_accuracy(High)` on a chain with
    τ_max = 0.1, vols ≤ 0.20, strikes spanning ±40% of spot (spot 100,
@@ -264,8 +288,11 @@ they derive from each iteration's `missing_params` — that is fine):
      values, not comparable prices; the test queries a wrapper created via
      `make_bspline_surface(result->spline, K_ref, q, type)` — the same
      reconstruction the factory uses — and compares full American prices
-     against direct `solve_american_option` references at identical
-     (S, K, τ, σ, r).
+     against direct FDM references at identical (S, K, τ, σ, r). The
+     reference solves are pinned to an **explicit fixed configuration**
+     (an explicit high-accuracy `GridAccuracyParams` or explicit grid),
+     not `solve_american_option`'s current default, so the tolerance floor
+     cannot drift if defaults change.
    - Query points sit at the *extreme fit-axis endpoints*
      (`result->axes.grids[0].front()/.back()`, which include adaptive
      B-spline support headroom beyond the user strikes) — directly
@@ -322,9 +349,16 @@ design review should validate:
   estimated grid is now explicitly materialized and passed as
   `custom_grid`; gridless solving would not realize it.)
 - **D4 — No cap on the widening:** parity with the non-adaptive path,
-  which imposes none. The realistic widened width here (~1.1 log-units for
-  ±40% strikes) is far below the `MAX_WIDTH = 5.8` convergence limit;
-  inventing a cap would be new policy outside the issue's scope.
+  which imposes none; a cap would knowingly restore extrapolation. The
+  realistic widened width here (~1.1 log-units for ±40% strikes) is far
+  below the solver's `MAX_WIDTH = 5.8` convergence limit — but note
+  (round 3) that limit is **not enforced against a materialized custom
+  grid**: `is_normalized_eligible` checks `grid_accuracy_`, not
+  `custom_grid`, and `solve_regular_batch` uses a resolved custom grid
+  verbatim. Very wide requested moneyness axes therefore retain a
+  pre-existing convergence/resource-risk policy gap on every path that
+  materializes a grid (the non-adaptive primary branch included); a
+  reject/fallback policy for that is out of scope here.
 - **D5 — Test strategy:** fast unit tests on the helper + explicit-grid
   rejection test + one end-to-end adaptive regression reproducing the
   issue's scenario (oracle: `make_bspline_surface`-reconstructed prices at
@@ -332,7 +366,9 @@ design review should validate:
   in round 1: oracle pinned — the raw result spline holds normalized EEP
   values and is not directly comparable. Revised in round 2: endpoint
   assertions required at both max-σ and min-σ so an incomplete
-  widening-only fix cannot pass.)
+  widening-only fix cannot pass. Revised in round 3: fallback-forcing
+  regressions added for both explicit-grid fallback branches, and the FDM
+  reference configuration pinned explicitly.)
 - **D6 — Non-adaptive fallback included (round 2):** correct
   `bspline_builder.cpp:365-368` with the same materialization rather than
   filing a follow-up — same defect class, same helper, three lines from
