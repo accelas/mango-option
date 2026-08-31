@@ -439,6 +439,8 @@ TEST(CubicSplineNaNGuardTest, BuildRejectsNaNY) {
     EXPECT_TRUE(err.has_value());
 }
 
+// Regression: build() silently produced non-finite coefficients on Inf y input
+// Bug: no finiteness validation before the Thomas solve
 TEST(CubicSplineNaNGuardTest, BuildRejectsInfY) {
     CubicSpline<double> spline;
     std::vector<double> x = {0.0, 1.0, 2.0, 3.0};
@@ -455,6 +457,8 @@ TEST(CubicSplineNaNGuardTest, BuildRejectsNaNX) {
     EXPECT_TRUE(spline.build(x, y).has_value());
 }
 
+// Regression: Inf x silently corrupted interval widths
+// Bug: no finiteness validation on x
 TEST(CubicSplineNaNGuardTest, BuildRejectsInfX) {
     CubicSpline<double> spline;
     std::vector<double> x = {0.0, 1.0, 2.0, std::numeric_limits<double>::infinity()};
@@ -462,6 +466,8 @@ TEST(CubicSplineNaNGuardTest, BuildRejectsInfX) {
     EXPECT_TRUE(spline.build(x, y).has_value());
 }
 
+// Regression: rebuild_same_grid() silently produced NaN coefficients on NaN y
+// Bug: no finiteness validation before overwriting stored y-values
 TEST(CubicSplineNaNGuardTest, RebuildSameGridRejectsNaNY) {
     CubicSpline<double> spline;
     std::vector<double> x = {0.0, 1.0, 2.0, 3.0};
@@ -471,6 +477,8 @@ TEST(CubicSplineNaNGuardTest, RebuildSameGridRejectsNaNY) {
     EXPECT_TRUE(spline.rebuild_same_grid(std::span<const double>(y_bad)).has_value());
 }
 
+// Regression: rebuild_same_grid() silently produced non-finite coefficients on Inf y
+// Bug: no finiteness validation before overwriting stored y-values
 TEST(CubicSplineNaNGuardTest, RebuildSameGridRejectsInfY) {
     CubicSpline<double> spline;
     std::vector<double> x = {0.0, 1.0, 2.0, 3.0};

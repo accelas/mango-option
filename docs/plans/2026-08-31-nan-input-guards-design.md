@@ -174,6 +174,8 @@ sampling, then delegates):
 4. every `values[i]` finite → `NaNInput` or `InfInput` with the offending
    index.
 
+Implementation note: the per-axis checks run interleaved in a single loop over axes (not as four grouped passes); for multi-fault inputs the first failing axis/check in loop order wins.
+
 These mirror the invariants `reconstruct.hpp` already enforces for the same
 type. Cost is one O(total) scan next to an existing O(total) copy.
 

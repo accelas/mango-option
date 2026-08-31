@@ -370,6 +370,10 @@ private:
 
     /// Find interval containing x using binary search
     [[nodiscard]] size_t find_interval(T x_eval) const noexcept {
+        // NaN queries are a supported path (value_at(NaN) returns NaN);
+        // keep NaN away from lower_bound's ordering precondition.
+        if (std::isnan(x_eval)) return 0;
+
         // Boundary cases
         if (x_eval <= x_[0]) return 0;
         if (x_eval >= x_.back()) return x_.size() - 2;
