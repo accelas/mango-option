@@ -1216,18 +1216,53 @@ cc_test(
     ],
 )
 
-# Heavy end-to-end adaptive builds (real PDE solves through the full
-# refinement loop), split out of :adaptive_grid_builder_test so the CI dbg
-# assertion pass stays fast.  Runs in the regular test suite in the default
-# compilation mode (fastbuild: slowest shard ~140s local, ~580s CPU total;
-# the dbg-mode ~8x blowup that used to time CI out never applies here).
-# No explicit timeout: size = "enormous" grants each shard the 3600s
-# default, giving structural headroom on slow runners.
+# End-to-end adaptive builds, split out of :adaptive_grid_builder_test so the
+# CI dbg assertion pass stays fast.  This target holds only the cheap wiring
+# and regression invariants (~100s CPU local fastbuild, slowest case ~16s);
+# the heavy cases (~536s CPU, up to 60s each) that made this the long pole of
+# per-PR CI live in :adaptive_surface_build_slow_test (nightly).
 cc_test(
     name = "adaptive_surface_build_integration_test",
-    size = "enormous",
-    shard_count = 6,
+    size = "large",
+    timeout = "long",
+    shard_count = 4,
     srcs = ["adaptive_surface_build_integration_test.cc"],
+    deps = [
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_metrics",
+        "//src/option/table:adaptive_refinement",
+        "//src/option/table:tau_segment_split",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/option/table/bspline:bspline_pde_cache",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/option:american_option_batch",
+        "//src/option:interpolated_iv_solver",
+        "//src/option:option_grid",
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Heavy end-to-end adaptive builds: segmented Chebyshev edge handling,
+# numeric equivalence, and accuracy regressions, each spending tens of
+# seconds of real PDE solves per case (~536s CPU local fastbuild, slowest
+# case ~60s).  Tagged `slow` only — NOT `manual`, because Bazel drops
+# manual-tagged targets from `//tests/...` wildcard expansion before
+# --test_tag_filters applies, which would hide this target from the nightly
+# `--test_tag_filters=slow` run.  Per-PR CI excludes it with
+# `--test_tag_filters=-manual,-slow`.  size = "enormous" grants each shard
+# the 3600s default timeout.
+cc_test(
+    name = "adaptive_surface_build_slow_test",
+    size = "enormous",
+    shard_count = 7,
+    srcs = ["adaptive_surface_build_slow_test.cc"],
+    tags = ["slow"],
     deps = [
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:adaptive_metrics",
