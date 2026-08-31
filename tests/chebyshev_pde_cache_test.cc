@@ -81,3 +81,32 @@ TEST(ChebyshevPDECacheTest, InvalidSliceFailsSegmentExtraction) {
     ASSERT_FALSE(leaves.has_value());
     EXPECT_EQ(leaves.error().code, mango::PriceTableErrorCode::ExtractionFailed);
 }
+
+// Regression: a non-gap segment containing no tau nodes silently became a
+// zeros-placeholder leaf, pricing the whole real segment as 0
+// Bug: the Nt_seg == 0 placeholder branch did not check seg_is_gap
+TEST(ChebyshevPDECacheTest, EmptyRealSegmentFailsExtraction) {
+    mango::ChebyshevPDECache cache;
+    std::vector<double> x = {-0.5, 0.0, 0.5, 1.0};
+    std::vector<double> good = {0.1, 0.15, 0.2, 0.3};
+    // Only one tau node is supplied below (tau = {0.75}), so it maps to
+    // tau_idx 0 within build_segment_leaves.
+    cache.store_slice(0.2, 0.05, 0, x, good);
+    ASSERT_NE(cache.get_slice(0.2, 0.05, 0), nullptr);  // valid slice
+
+    // Two real segments: [0.0, 0.5) and [0.5, 1.0]. The single tau node
+    // falls entirely in the second segment, so the first segment has zero
+    // tau nodes despite being a real (non-gap) segment.
+    std::vector<double> seg_bounds = {0.0, 0.5, 1.0};
+    std::vector<bool> seg_is_gap = {false, false};
+    std::vector<double> m = {-0.5, 0.0, 0.5};
+    std::vector<double> tau = {0.75};
+    std::vector<double> sigma = {0.2};
+    std::vector<double> rate = {0.05};
+
+    auto leaves = mango::detail::build_segment_leaves(
+        cache, /*K_ref=*/100.0, seg_bounds, seg_is_gap, /*include_gaps=*/true,
+        m, tau, sigma, rate);
+    ASSERT_FALSE(leaves.has_value());
+    EXPECT_EQ(leaves.error().code, mango::PriceTableErrorCode::ExtractionFailed);
+}

@@ -274,6 +274,13 @@ build_segment_leaves(
         const size_t Nt_seg = tau_idx.size();
 
         if (Nt_seg == 0) {
+            // Zero-node placeholders are only legitimate for gap segments
+            // (D6); a real segment with no tau nodes must fail loudly,
+            // never price as silent zeros.
+            if (!seg_is_gap[s]) {
+                return std::unexpected(PriceTableError{
+                    PriceTableErrorCode::ExtractionFailed});
+            }
             // No tau nodes — minimal placeholder leaf
             Domain<4> domain{
                 .lo = {m_nodes.front(), 0.0,
