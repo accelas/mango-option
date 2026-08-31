@@ -223,11 +223,15 @@ static size_t solve_missing_pde_pairs(
     return batch.size() - batch_result.failed_count;
 }
 
+}  // anonymous namespace
+
+namespace detail {
+
 /// Build per-segment Chebyshev leaves from cached PDE slices.
 /// @param include_gaps If true, gap segments get minimal placeholder leaves
 ///                     (needed for direct-index routing in SurfaceHandle).
 ///                     If false, gap segments are skipped entirely.
-static std::expected<std::vector<ChebyshevSegmentedLeaf>, PriceTableError>
+std::expected<std::vector<ChebyshevSegmentedLeaf>, PriceTableError>
 build_segment_leaves(
     ChebyshevPDECache& cache,
     double K_ref,
@@ -303,7 +307,12 @@ build_segment_leaves(
                 for (size_t jt = 0; jt < Nt_seg; ++jt) {
                     auto* spline = cache.get_slice(
                         sigma, rate, tau_idx[jt]);
-                    if (!spline) continue;
+                    if (!spline) {
+                        // A slice needed here was never solved or failed its
+                        // spline build — fail loudly, never zero-fill (D6)
+                        return std::unexpected(PriceTableError{
+                            PriceTableErrorCode::ExtractionFailed});
+                    }
                     for (size_t mi = 0; mi < Nm; ++mi) {
                         double v_over_k = spline->eval(m_nodes[mi]);
                         size_t flat =
@@ -335,6 +344,10 @@ build_segment_leaves(
 
     return leaves;
 }
+
+}  // namespace detail
+
+namespace {
 
 /// Create a BuildFn for the adaptive refinement loop that builds Chebyshev surfaces.
 /// Reuses PDE solutions across refinement iterations via ChebyshevPDECache.
@@ -414,7 +427,12 @@ static BuildFn make_chebyshev_build_fn(
                 double rate = rate_nodes[ri];
                 for (size_t ti = 0; ti < Nt; ++ti) {
                     auto* spline = cache.get_slice(sigma, rate, ti);
-                    if (!spline) continue;
+                    if (!spline) {
+                        // A slice needed here was never solved or failed its
+                        // spline build — fail loudly, never zero-fill (D6)
+                        return std::unexpected(PriceTableError{
+                            PriceTableErrorCode::ExtractionFailed});
+                    }
                     double tau = tau_nodes[ti];
                     for (size_t mi = 0; mi < Nm; ++mi) {
                         double m = m_nodes[mi];
@@ -505,7 +523,7 @@ static BuildFn make_segmented_chebyshev_build_fn(
             config.discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
         cache.record_pde_solves(new_solves);
 
-        auto leaves = build_segment_leaves(
+        auto leaves = detail::build_segment_leaves(
             cache, config.K_ref, config.seg_boundaries, config.seg_is_gap,
             /*include_gaps=*/true,
             m_nodes, tau_nodes, sigma_nodes, rate_nodes);
@@ -604,7 +622,7 @@ build_chebyshev_segmented_pieces(
         cache, K_ref, option_type, dividend_yield,
         discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
 
-    auto leaves = build_segment_leaves(
+    auto leaves = detail::build_segment_leaves(
         cache, K_ref, seg_bounds, seg_is_gap,
         /*include_gaps=*/false,
         m_nodes, tau_nodes, sigma_nodes, rate_nodes);

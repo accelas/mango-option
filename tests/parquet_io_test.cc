@@ -1291,5 +1291,37 @@ TEST_F(ParquetIOTest, WriterRejectsInvalidMetadata) {
     }
 }
 
+// ===========================================================================
+// Test 21: NaN in persisted segment values rejected (D6)
+// ===========================================================================
+
+// Regression: a persisted table containing NaN values used to load and
+// produce garbage prices (issue #426 deserialization policy)
+// Bug: reconstruction did not validate segment values for finiteness
+TEST_F(ParquetIOTest, NaNSegmentValuesRejected) {
+    ChebyshevTableConfig config{
+        .num_pts = {4, 3, 3, 3},
+        .domain = Domain<4>{
+            .lo = {-0.30, 0.02, 0.10, 0.02},
+            .hi = { 0.30, 1.50, 0.40, 0.08},
+        },
+        .K_ref = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+    };
+    auto result = build_chebyshev_table(config);
+    ASSERT_TRUE(result.has_value());
+    auto& surface = result->surface;
+    auto data = to_data(surface);
+    ASSERT_EQ(data.segments.size(), 1u);
+    ASSERT_FALSE(data.segments[0].values.empty());
+
+    auto bad = data;
+    bad.segments[0].values[0] = std::numeric_limits<double>::quiet_NaN();
+    auto r = from_data<ChebyshevRawLeaf>(bad);
+    EXPECT_FALSE(r.has_value())
+        << "from_data should reject NaN in persisted segment values";
+}
+
 }  // namespace
 }  // namespace mango
