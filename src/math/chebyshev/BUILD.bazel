@@ -23,6 +23,7 @@ cc_library(
     copts = ["-fopenmp"],
     deps = [
         ":chebyshev_nodes",
+        "//src/support:error_types",
         "//src/support:parallel",
     ],
     visibility = ["//visibility:public"],

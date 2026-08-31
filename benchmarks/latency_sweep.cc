@@ -414,7 +414,7 @@ const Chebyshev3DPriceTable& GetChebyshev3D() {
         };
 
         auto cheb = ChebyshevInterpolant<3, RawTensor<3>>::build_from_values(
-            std::span<const double>(pde->values), domain, num_pts);
+            std::span<const double>(pde->values), domain, num_pts).value();
 
         DimensionlessTransform3D xform;
         Chebyshev3DTransformLeaf leaf(std::move(cheb), xform, K_ref);

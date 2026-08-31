@@ -122,8 +122,12 @@ make_chebyshev(const PriceTableData::Segment& seg) {
             PriceTableErrorCode::InvalidConfig});
     }
 
-    return ChebyshevInterpolant<N, RawTensor<N>>::build_from_values(
+    auto interp = ChebyshevInterpolant<N, RawTensor<N>>::build_from_values(
         std::span<const double>(seg.values), domain, num_pts);
+    if (!interp.has_value()) {
+        return std::unexpected(convert_to_price_table_error(interp.error()));
+    }
+    return std::move(*interp);
 }
 
 // ============================================================================

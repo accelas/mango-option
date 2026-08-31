@@ -647,9 +647,13 @@ build_dimensionless_chebyshev_table(const IVSolverFactoryConfig& config,
 
     auto cheb = ChebyshevInterpolant<3, RawTensor<3>>::build_from_values(
         std::span<const double>(pde->values), domain, backend.chebyshev_pts);
+    if (!cheb.has_value()) {
+        return std::unexpected(detail::to_validation_error(
+            convert_to_price_table_error(cheb.error())));
+    }
 
     DimensionlessTransform3D xform;
-    Chebyshev3DTransformLeaf leaf(std::move(cheb), xform, config.spot);
+    Chebyshev3DTransformLeaf leaf(std::move(*cheb), xform, config.spot);
     AnalyticalEEP eep_fn(config.option_type, 0.0);
     Chebyshev3DLeaf eep_leaf(std::move(leaf), std::move(eep_fn));
 

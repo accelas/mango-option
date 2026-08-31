@@ -5,17 +5,27 @@
 #include "mango/option/table/surface_concepts.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <concepts>
 #include <cstddef>
 
 namespace mango {
 
-/// Exact projection of a raw EEP value onto the nonnegative domain.
+/// Debiased softplus floor for EEP non-negativity.
 ///
-/// Preserves every valid nonnegative premium and maps negative numerical
-/// residuals to zero.
+/// NaN-preserving floor: returns NaN for NaN input (so non-finite values are not
+/// masked as 0 and can be caught by build-time guards), and clamps finite negatives
+/// to +0.0 (canonical positive zero). Zero-bias correction ensures eep_floor(0) == 0
+/// exactly for finite inputs.
+///
+/// Use directly when the European price comes from a non-analytical source
+/// (e.g. numerical PDE). For analytical Black-Scholes, use
+/// eep_decompose() with AnalyticalEEP.
 inline double eep_floor(double eep_raw) {
-    return std::max(0.0, eep_raw);
+    // NaN-preserving (issue #466): max(0.0, NaN) would mask NaN as +0.0 and
+    // hide it from build-time finiteness guards. +0.0 canonicalization for
+    // finite input is contractual (EEPFloorTest.BothSignedZerosProducePositiveZero).
+    return std::isnan(eep_raw) ? eep_raw : std::max(0.0, eep_raw);
 }
 
 /// Accessor concept for EEP decomposition.

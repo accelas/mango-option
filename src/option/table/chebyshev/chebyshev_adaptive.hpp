@@ -3,6 +3,7 @@
 
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
+#include "mango/option/table/chebyshev/chebyshev_pde_cache.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
@@ -74,6 +75,20 @@ struct ChebyshevRefinementState {
 /// `state` is captured by reference: it must outlive the returned hooks.
 [[nodiscard]] RefineStateHooks make_chebyshev_state_hooks(
     ChebyshevRefinementState& state);
+
+/// Exposed for testing (D6): builds per-segment Chebyshev leaves from cached
+/// PDE slices. A needed slice that is missing or invalid is
+/// PriceTableErrorCode::ExtractionFailed — never a silent zero region.
+[[nodiscard]] std::expected<std::vector<ChebyshevSegmentedLeaf>, PriceTableError>
+build_segment_leaves(ChebyshevPDECache& cache,
+                     double K_ref,
+                     const std::vector<double>& seg_bounds,
+                     const std::vector<bool>& seg_is_gap,
+                     bool include_gaps,
+                     std::span<const double> m_nodes,
+                     std::span<const double> tau_nodes,
+                     std::span<const double> sigma_nodes,
+                     std::span<const double> rate_nodes);
 
 }  // namespace detail
 

@@ -42,7 +42,9 @@ double AmericanOptionResult::value_at(double spot_price) const {
     }
 
     // Cubic spline interpolation (clamp to non-negative: option values >= 0)
-    double value_normalized = std::max(0.0, spline_.eval(x));
+    double raw = spline_.eval(x);
+    // NaN-preserving floor (issue #466): NaN spot must not price as 0.0
+    double value_normalized = std::isnan(raw) ? raw : std::max(0.0, raw);
 
     // Convert from normalized (V/K) to actual price
     return value_normalized * params_.strike;

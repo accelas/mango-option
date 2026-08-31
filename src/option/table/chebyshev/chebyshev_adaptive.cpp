@@ -223,11 +223,15 @@ static size_t solve_missing_pde_pairs(
     return batch.size() - batch_result.failed_count;
 }
 
+}  // anonymous namespace
+
+namespace detail {
+
 /// Build per-segment Chebyshev leaves from cached PDE slices.
 /// @param include_gaps If true, gap segments get minimal placeholder leaves
 ///                     (needed for direct-index routing in SurfaceHandle).
 ///                     If false, gap segments are skipped entirely.
-static std::vector<ChebyshevSegmentedLeaf>
+std::expected<std::vector<ChebyshevSegmentedLeaf>, PriceTableError>
 build_segment_leaves(
     ChebyshevPDECache& cache,
     double K_ref,
@@ -270,6 +274,13 @@ build_segment_leaves(
         const size_t Nt_seg = tau_idx.size();
 
         if (Nt_seg == 0) {
+            // Zero-node placeholders are only legitimate for gap segments
+            // (D6); a real segment with no tau nodes must fail loudly,
+            // never price as silent zeros.
+            if (!seg_is_gap[s]) {
+                return std::unexpected(PriceTableError{
+                    PriceTableErrorCode::ExtractionFailed});
+            }
             // No tau nodes — minimal placeholder leaf
             Domain<4> domain{
                 .lo = {m_nodes.front(), 0.0,
@@ -282,7 +293,10 @@ build_segment_leaves(
             auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
                 build_from_values(std::span<const double>(zeros),
                                   domain, num_pts);
-            leaves.emplace_back(std::move(interp), StandardTransform4D{},
+            if (!interp.has_value()) {
+                return std::unexpected(convert_to_price_table_error(interp.error()));
+            }
+            leaves.emplace_back(std::move(*interp), StandardTransform4D{},
                                 K_ref);
             continue;
         }
@@ -300,7 +314,12 @@ build_segment_leaves(
                 for (size_t jt = 0; jt < Nt_seg; ++jt) {
                     auto* spline = cache.get_slice(
                         sigma, rate, tau_idx[jt]);
-                    if (!spline) continue;
+                    if (!spline) {
+                        // A slice needed here was never solved or failed its
+                        // spline build — fail loudly, never zero-fill (D6)
+                        return std::unexpected(PriceTableError{
+                            PriceTableErrorCode::ExtractionFailed});
+                    }
                     for (size_t mi = 0; mi < Nm; ++mi) {
                         double v_over_k = spline->eval(m_nodes[mi]);
                         size_t flat =
@@ -323,12 +342,19 @@ build_segment_leaves(
         auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
             build_from_values(std::span<const double>(values),
                               domain, num_pts);
-        leaves.emplace_back(std::move(interp), StandardTransform4D{},
+        if (!interp.has_value()) {
+            return std::unexpected(convert_to_price_table_error(interp.error()));
+        }
+        leaves.emplace_back(std::move(*interp), StandardTransform4D{},
                             K_ref);
     }
 
     return leaves;
 }
+
+}  // namespace detail
+
+namespace {
 
 /// Create a BuildFn for the adaptive refinement loop that builds Chebyshev surfaces.
 /// Reuses PDE solutions across refinement iterations via ChebyshevPDECache.
@@ -408,7 +434,12 @@ static BuildFn make_chebyshev_build_fn(
                 double rate = rate_nodes[ri];
                 for (size_t ti = 0; ti < Nt; ++ti) {
                     auto* spline = cache.get_slice(sigma, rate, ti);
-                    if (!spline) continue;
+                    if (!spline) {
+                        // A slice needed here was never solved or failed its
+                        // spline build — fail loudly, never zero-fill (D6)
+                        return std::unexpected(PriceTableError{
+                            PriceTableErrorCode::ExtractionFailed});
+                    }
                     double tau = tau_nodes[ti];
                     for (size_t mi = 0; mi < Nm; ++mi) {
                         double m = m_nodes[mi];
@@ -440,9 +471,12 @@ static BuildFn make_chebyshev_build_fn(
         auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
             build_from_values(std::span<const double>(eep_values),
                               domain, num_pts);
+        if (!interp.has_value()) {
+            return std::unexpected(convert_to_price_table_error(interp.error()));
+        }
 
         ChebyshevRawTransformLeaf tleaf(
-            std::move(interp), StandardTransform4D{}, config.K_ref);
+            std::move(*interp), StandardTransform4D{}, config.K_ref);
         ChebyshevRawLeaf leaf(std::move(tleaf),
             AnalyticalEEP(config.option_type, config.dividend_yield));
 
@@ -496,10 +530,13 @@ static BuildFn make_segmented_chebyshev_build_fn(
             config.discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
         cache.record_pde_solves(new_solves);
 
-        auto leaves = build_segment_leaves(
+        auto leaves = detail::build_segment_leaves(
             cache, config.K_ref, config.seg_boundaries, config.seg_is_gap,
             /*include_gaps=*/true,
             m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+        if (!leaves.has_value()) {
+            return std::unexpected(leaves.error());
+        }
 
         // Direct evaluation lambda with gap routing.
         // TransformLeaf: leaf.price() = interp(log(S/K), tau, sigma, r) * K/K_ref
@@ -507,7 +544,7 @@ static BuildFn make_segmented_chebyshev_build_fn(
         const size_t n_seg = config.seg_boundaries.size() - 1;
         auto leaves_shared =
             std::make_shared<std::vector<ChebyshevSegmentedLeaf>>(
-                std::move(leaves));
+                std::move(*leaves));
         auto seg_copy = std::make_shared<std::vector<double>>(
             config.seg_boundaries.begin(), config.seg_boundaries.end());
         auto gap_copy = std::make_shared<std::vector<bool>>(
@@ -592,16 +629,19 @@ build_chebyshev_segmented_pieces(
         cache, K_ref, option_type, dividend_yield,
         discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
 
-    auto leaves = build_segment_leaves(
+    auto leaves = detail::build_segment_leaves(
         cache, K_ref, seg_bounds, seg_is_gap,
         /*include_gaps=*/false,
         m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+    if (!leaves.has_value()) {
+        return std::unexpected(leaves.error());
+    }
 
     // Build TauSegmentSplit from segment boundaries (absorbs gaps)
     auto tau_split = make_tau_split_from_segments(seg_bounds, seg_is_gap, K_ref);
 
     return ChebyshevSegmentedPieces{
-        .leaves = std::move(leaves),
+        .leaves = std::move(*leaves),
         .tau_split = std::move(tau_split),
         .pde_solves = pde_solves,
     };

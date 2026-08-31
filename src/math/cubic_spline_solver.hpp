@@ -86,6 +86,19 @@ public:
             return "Need at least 2 points for interpolation";
         }
 
+        // Non-finite input silently poisons the Thomas solve (issue #425);
+        // NaN also defeats the monotonicity check below (all comparisons false)
+        for (size_t i = 0; i < n; ++i) {
+            if (!std::isfinite(x[i])) {
+                return "X contains non-finite values (NaN or Inf)";
+            }
+        }
+        for (size_t i = 0; i < n; ++i) {
+            if (!std::isfinite(y[i])) {
+                return "Y contains non-finite values (NaN or Inf)";
+            }
+        }
+
         // Check that x is strictly increasing
         for (size_t i = 1; i < n; ++i) {
             if (x[i] <= x[i-1]) {
@@ -158,6 +171,12 @@ public:
         }
         if (y.size() != y_.size()) {
             return "Y size must match existing grid";
+        }
+
+        for (size_t i = 0; i < y.size(); ++i) {
+            if (!std::isfinite(y[i])) {
+                return "Y contains non-finite values (NaN or Inf)";
+            }
         }
 
         // Update y-values in-place (size already verified)
@@ -351,6 +370,10 @@ private:
 
     /// Find interval containing x using binary search
     [[nodiscard]] size_t find_interval(T x_eval) const noexcept {
+        // NaN queries are a supported path (value_at(NaN) returns NaN);
+        // keep NaN away from lower_bound's ordering precondition.
+        if (std::isnan(x_eval)) return 0;
+
         // Boundary cases
         if (x_eval <= x_[0]) return 0;
         if (x_eval >= x_.back()) return x_.size() - 2;

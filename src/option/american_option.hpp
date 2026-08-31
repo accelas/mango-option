@@ -20,6 +20,7 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <span>
 
 namespace mango {
 
@@ -125,6 +126,15 @@ static_assert(OptionSolver<AmericanOptionSolver>);
 /// Convenience wrapper around AmericanOptionSolver::create + solve.
 std::expected<AmericanOptionResult, SolverError>
 solve_american_option(const PricingParams& params);
+
+namespace detail {
+/// D7 (issues #425/#466 family): validate the vectors used to build the
+/// result's value/theta splines. Non-finite PDE output must fail the solve,
+/// not silently become an empty spline that evaluates to 0.
+[[nodiscard]] std::optional<SolverError> validate_finite_solution(
+    std::span<const double> final_solution,
+    std::span<const double> prev_solution);
+}  // namespace detail
 
 }  // namespace mango
 

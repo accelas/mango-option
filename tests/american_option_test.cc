@@ -673,5 +673,34 @@ TEST(AmericanOptionTest, NarrowGridDividendCallBCPricingRegression) {
            "this bound; new BC measures 8.567e-3)";
 }
 
+// ===========================================================================
+// Regression tests for issue #425/#466 family: D7 solver output validation
+// ===========================================================================
+
+// Regression: a NaN PDE solution built an AmericanOptionResult whose empty
+// spline evaluated to 0.0 — a plausible price — in opt builds
+// Bug: build_spline() checked the CubicSpline error only via assert
+TEST(ValidateFiniteSolutionTest, RejectsNaNInFinalSolution) {
+    std::vector<double> final_u = {1.0, std::nan(""), 3.0};
+    std::vector<double> prev_u = {1.0, 2.0, 3.0};
+    auto err = mango::detail::validate_finite_solution(final_u, prev_u);
+    ASSERT_TRUE(err.has_value());
+    EXPECT_EQ(err->code, mango::SolverErrorCode::NonFiniteSolution);
+}
+
+TEST(ValidateFiniteSolutionTest, RejectsInfInPrevSolution) {
+    std::vector<double> final_u = {1.0, 2.0, 3.0};
+    std::vector<double> prev_u = {1.0, std::numeric_limits<double>::infinity(), 3.0};
+    auto err = mango::detail::validate_finite_solution(final_u, prev_u);
+    ASSERT_TRUE(err.has_value());
+    EXPECT_EQ(err->code, mango::SolverErrorCode::NonFiniteSolution);
+}
+
+TEST(ValidateFiniteSolutionTest, AcceptsFiniteSolution) {
+    std::vector<double> final_u = {1.0, 2.0, 3.0};
+    std::vector<double> prev_u = {0.5, 1.5, 2.5};
+    EXPECT_FALSE(mango::detail::validate_finite_solution(final_u, prev_u).has_value());
+}
+
 }  // namespace
 }  // namespace mango

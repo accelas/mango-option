@@ -2,13 +2,16 @@
 #pragma once
 
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
+#include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <expected>
 #include <functional>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -31,6 +34,7 @@ struct Domain {
 ///
 /// ChebyshevTensor<N> = ChebyshevInterpolant<N, RawTensor<N>>
 template <size_t N, typename Storage>
+    requires (N >= 1)
 class ChebyshevInterpolant {
 public:
     /// Build from pre-computed function values at Chebyshev nodes.
@@ -41,11 +45,30 @@ public:
     /// num_pts: number of Chebyshev nodes per axis.
     /// storage_args: forwarded to Storage::build.
     template <typename... Args>
-    [[nodiscard]] static ChebyshevInterpolant
+    [[nodiscard]] static std::expected<ChebyshevInterpolant, InterpolationError>
     build_from_values(std::span<const double> values,
                       const Domain<N>& domain,
                       const std::array<size_t, N>& num_pts,
                       Args&&... storage_args) {
+        auto total = validate_shape(domain, num_pts);
+        if (!total.has_value()) {
+            return std::unexpected(total.error());
+        }
+        if (values.size() != *total) {
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::ValueSizeMismatch, values.size(), 0});
+        }
+        for (size_t i = 0; i < values.size(); ++i) {
+            if (std::isnan(values[i])) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::NaNInput, values.size(), i});
+            }
+            if (std::isinf(values[i])) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::InfInput, values.size(), i});
+            }
+        }
+
         ChebyshevInterpolant interp;
         interp.domain_ = domain;
         interp.num_pts_ = num_pts;
@@ -71,14 +94,17 @@ public:
     /// num_pts: number of Chebyshev nodes per axis.
     /// storage_args: forwarded to Storage::build.
     template <typename... Args>
-    [[nodiscard]] static ChebyshevInterpolant
+    [[nodiscard]] static std::expected<ChebyshevInterpolant, InterpolationError>
     build(std::function<double(std::array<double, N>)> f,
           const Domain<N>& domain,
           const std::array<size_t, N>& num_pts,
           Args&&... storage_args) {
-        // Compute total number of tensor product nodes
-        size_t total = 1;
-        for (size_t d = 0; d < N; ++d) total *= num_pts[d];
+        // Validate shape/domain before sampling f or allocating.
+        auto total_r = validate_shape(domain, num_pts);
+        if (!total_r.has_value()) {
+            return std::unexpected(total_r.error());
+        }
+        size_t total = *total_r;
 
         // Generate nodes per axis
         std::array<std::vector<double>, N> nodes;
@@ -156,6 +182,41 @@ public:
     [[nodiscard]] const Storage& storage() const noexcept { return storage_; }
 
 private:
+    /// Validate num_pts/domain and compute the tensor size (overflow-checked).
+    /// Returns the total point count, or the error to surface.
+    [[nodiscard]] static std::expected<size_t, InterpolationError>
+    validate_shape(const Domain<N>& domain, const std::array<size_t, N>& num_pts) {
+        size_t total = 1;
+        for (size_t d = 0; d < N; ++d) {
+            if (num_pts[d] < 2) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::InsufficientGridPoints, num_pts[d], d});
+            }
+            if (std::isnan(domain.lo[d]) || std::isnan(domain.hi[d])) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::NaNInput, 0, d});
+            }
+            if (std::isinf(domain.lo[d]) || std::isinf(domain.hi[d])) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::InfInput, 0, d});
+            }
+            if (domain.lo[d] == domain.hi[d]) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::ZeroWidthGrid, 0, d});
+            }
+            if (domain.lo[d] > domain.hi[d]) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::GridNotSorted, 0, d});
+            }
+            if (total > std::numeric_limits<size_t>::max() / num_pts[d]) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::ValueSizeMismatch, 0, d});
+            }
+            total *= num_pts[d];
+        }
+        return total;
+    }
+
     /// Compute barycentric interpolation coefficients for value x on axis d.
     /// Returns a vector of length num_pts_[d] such that the interpolated
     /// value is sum_j coeffs[j] * f_j.

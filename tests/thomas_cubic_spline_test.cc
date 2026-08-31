@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <string_view>
 
@@ -422,4 +423,67 @@ TEST(CubicSplineTest, RepeatedRebuilds) {
 
     // Verify final rebuild produces correct values
     EXPECT_NEAR(spline.eval(0.0), y[0], 1e-10);
+}
+
+// ===========================================================================
+// Regression tests for issue #425 (silent NaN coefficients)
+// ===========================================================================
+
+// Regression: build() silently produced NaN coefficients on NaN y input
+// Bug: no finiteness validation; Thomas solve propagated NaN, build returned success
+TEST(CubicSplineNaNGuardTest, BuildRejectsNaNY) {
+    CubicSpline<double> spline;
+    std::vector<double> x = {0.0, 1.0, 2.0, 3.0};
+    std::vector<double> y = {0.0, 1.0, std::nan(""), 3.0};
+    auto err = spline.build(x, y);
+    EXPECT_TRUE(err.has_value());
+}
+
+// Regression: build() silently produced non-finite coefficients on Inf y input
+// Bug: no finiteness validation before the Thomas solve
+TEST(CubicSplineNaNGuardTest, BuildRejectsInfY) {
+    CubicSpline<double> spline;
+    std::vector<double> x = {0.0, 1.0, 2.0, 3.0};
+    std::vector<double> y = {0.0, 1.0, std::numeric_limits<double>::infinity(), 3.0};
+    EXPECT_TRUE(spline.build(x, y).has_value());
+}
+
+// Regression: NaN x passed the strictly-increasing check
+// Bug: every comparison with NaN is false, so {0, NaN, 2} passed monotonicity
+TEST(CubicSplineNaNGuardTest, BuildRejectsNaNX) {
+    CubicSpline<double> spline;
+    std::vector<double> x = {0.0, std::nan(""), 2.0, 3.0};
+    std::vector<double> y = {0.0, 1.0, 2.0, 3.0};
+    EXPECT_TRUE(spline.build(x, y).has_value());
+}
+
+// Regression: Inf x silently corrupted interval widths
+// Bug: no finiteness validation on x
+TEST(CubicSplineNaNGuardTest, BuildRejectsInfX) {
+    CubicSpline<double> spline;
+    std::vector<double> x = {0.0, 1.0, 2.0, std::numeric_limits<double>::infinity()};
+    std::vector<double> y = {0.0, 1.0, 2.0, 3.0};
+    EXPECT_TRUE(spline.build(x, y).has_value());
+}
+
+// Regression: rebuild_same_grid() silently produced NaN coefficients on NaN y
+// Bug: no finiteness validation before overwriting stored y-values
+TEST(CubicSplineNaNGuardTest, RebuildSameGridRejectsNaNY) {
+    CubicSpline<double> spline;
+    std::vector<double> x = {0.0, 1.0, 2.0, 3.0};
+    std::vector<double> y = {0.0, 1.0, 2.0, 3.0};
+    ASSERT_FALSE(spline.build(x, y).has_value());
+    std::vector<double> y_bad = {0.0, std::nan(""), 2.0, 3.0};
+    EXPECT_TRUE(spline.rebuild_same_grid(std::span<const double>(y_bad)).has_value());
+}
+
+// Regression: rebuild_same_grid() silently produced non-finite coefficients on Inf y
+// Bug: no finiteness validation before overwriting stored y-values
+TEST(CubicSplineNaNGuardTest, RebuildSameGridRejectsInfY) {
+    CubicSpline<double> spline;
+    std::vector<double> x = {0.0, 1.0, 2.0, 3.0};
+    std::vector<double> y = {0.0, 1.0, 2.0, 3.0};
+    ASSERT_FALSE(spline.build(x, y).has_value());
+    std::vector<double> y_bad = {0.0, 1.0, -std::numeric_limits<double>::infinity(), 3.0};
+    EXPECT_TRUE(spline.rebuild_same_grid(std::span<const double>(y_bad)).has_value());
 }

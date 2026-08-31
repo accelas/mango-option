@@ -1677,6 +1677,7 @@ cc_test(
     size = "small",
     srcs = ["chebyshev_pde_cache_test.cc"],
     deps = [
+        "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option/table/chebyshev:chebyshev_pde_cache",
         "@googletest//:gtest_main",
     ],

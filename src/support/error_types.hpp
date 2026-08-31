@@ -15,7 +15,9 @@ enum class SolverErrorCode {
     ConvergenceFailure,
     LinearSolveFailure,
     InvalidConfiguration,
-    Unknown
+    Unknown,
+    NonFiniteSolution  ///< PDE solve produced non-finite solution values
+                       ///< (appended after Unknown: ordinals are exposed to Python)
 };
 
 /// Detailed solver error passed through expected failure path
