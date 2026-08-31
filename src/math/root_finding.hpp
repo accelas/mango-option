@@ -423,16 +423,17 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
         // Enforce bounds
         const double x_clamped = std::clamp(x_new, x_min, x_max);
 
-        // Check if bounds are hit repeatedly (may indicate convergence issues)
-        if (x_new < x_min || x_new > x_max) {
-            if (iter > 10) {
-                return std::unexpected(RootFindingError{
-                    .code = RootFindingErrorCode::NoProgress,
-                    .iterations = iter + 1,
-                    .final_error = error_abs,
-                    .last_value = x_clamped
-                });
-            }
+        // Stalled iterate: clamped back onto the point we're already at
+        // (root outside bounds), or the Newton increment was absorbed to
+        // zero. Either way the next iteration would re-evaluate f/df at a
+        // numerically identical x, so no further progress is possible.
+        if (x_clamped == x) {
+            return std::unexpected(RootFindingError{
+                .code = RootFindingErrorCode::NoProgress,
+                .iterations = iter + 1,
+                .final_error = error_abs,
+                .last_value = x_clamped
+            });
         }
 
         x = x_clamped;

@@ -84,7 +84,8 @@ public:
         return (d2f_dx2 - df_dx) / (spot * spot) * strike / K_ref_;
     }
 
-    /// Expose raw interpolant value for EEP layer guard.
+    /// Expose the raw (unscaled, unclamped) interpolant value, for
+    /// diagnostics and tests.
     [[nodiscard]] double raw_value(double spot, double strike,
                                     double tau, double sigma, double rate) const {
         auto coords = xform_.to_coords(spot, strike, tau, sigma, rate);

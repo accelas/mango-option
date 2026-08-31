@@ -102,7 +102,7 @@ The tradeoff is in Greek accuracy. Because sigma appears in both tau' and ln_kap
 
 Use the 3D path when build speed matters more than accuracy, and when q=0 is acceptable (index options, for example).
 
-The leaf also exposes `raw_value()` — the unscaled interpolant output before K_ref scaling and clamping. This seems like a leaky abstraction, but the next layer needs it for an important optimization.
+The leaf also exposes `raw_value()` — the unscaled interpolant output before K_ref scaling and clamping. It is not used by the deep-OTM optimization (that lives inside the leaf's own `greek()`/`gamma()`, see below); it remains public for diagnostics and tests.
 
 ### Layer 2a: EEPLayer
 
@@ -115,7 +115,7 @@ American delta = leaf.delta() + european_delta()
 
 Why separate EEP from the leaf? Because the segmented path (discrete dividends) does not use EEP decomposition. Segments store raw American prices normalized by K_ref, not EEPs. If EEP were baked into `TransformLeaf`, segmented surfaces would need a separate leaf type — duplicating all the coordinate mapping and scaling logic. By making EEP a wrapper, the same `TransformLeaf` serves both paths.
 
-`EEPLayer` has one important optimization. Before computing the leaf's Greek (which requires interpolant partial evaluations — the most expensive step), it checks `leaf.raw_value()`. If the EEP is zero or negative, the point is deep OTM and the option is purely European. The layer returns the analytical European Greek immediately, skipping interpolation derivatives entirely. For a typical option chain, ~30% of queries hit this fast path. This is why `raw_value()` exists on the leaf.
+One important optimization lives in the leaf. `TransformLeaf::greek()`/`gamma()` evaluate the raw interpolated EEP once and, if it is zero or negative (deep OTM — the option is purely European), return exactly `0.0` before any interpolant partial evaluations (the most expensive step). `EEPLayer` calls the leaf unconditionally and adds the analytical European Greek, so a deep-OTM Greek costs one interpolant evaluation plus closed-form European math. For a typical option chain, ~30% of queries hit this fast path. `EEPLayer` relies on the leaf's raw-value-`<= 0` ⇒ `0.0` contract (pinned by `TransformLeafZeroContractTest`); `raw_value()` remains on the leaf for diagnostics and tests.
 
 The `EEPStrategy` concept abstracts the European pricing:
 

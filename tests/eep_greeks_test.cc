@@ -97,17 +97,28 @@ struct MockLeaf {
     [[nodiscard]] double vega(double, double, double, double, double) const {
         return vega_val;
     }
+    mutable int raw_value_calls = 0;
+    mutable int greek_calls = 0;
+    mutable int gamma_calls = 0;
+
     [[nodiscard]] double raw_value(double, double, double, double, double) const {
+        ++raw_value_calls;
         return raw_val;
     }
 
     [[nodiscard]] std::expected<double, GreekError>
     greek(Greek, const PricingParams&) const {
+        ++greek_calls;
+        // Honor the TransformLeaf zero-contract EEPLayer relies on:
+        // raw <= 0 => Greek is exactly 0.0 (no derivative work).
+        if (raw_val <= 0.0) return 0.0;
         return greek_val;
     }
 
     [[nodiscard]] std::expected<double, GreekError>
     gamma(const PricingParams&) const {
+        ++gamma_calls;
+        if (raw_val <= 0.0) return 0.0;
         return gamma_val;
     }
 
@@ -246,4 +257,33 @@ TEST(AnalyticalEEPTest, PutRhoIsNegative) {
     AnalyticalEEP eep(OptionType::PUT, 0.02);
     double rho = eep.european_rho(100.0, 100.0, 1.0, 0.20, 0.05);
     EXPECT_LT(rho, 0.0);
+}
+
+// ===========================================================================
+// Regression tests for issue #443 item 2
+// ===========================================================================
+
+// Regression: EEPLayer::greek()/gamma() evaluated the interpolant twice
+// Bug: a raw_value() pre-guard (one to_coords + eval) preceded leaf_.greek(),
+// which re-evaluated the same point before its own identical raw <= 0 branch.
+// The guard was semantically a no-op (leaf returns 0.0 when raw <= 0, and
+// 0.0 + european == european), so it was removed.
+TEST(EEPLayerGreeksTest, GreekAndGammaCallLeafOnceWithoutRawValueGuard) {
+    MockLeaf leaf;
+    leaf.raw_val = 0.1;  // EEP active
+    AnalyticalEEP eep(OptionType::PUT, 0.02);
+    EEPLayer layer(std::move(leaf), std::move(eep));
+
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02,
+            .option_type = OptionType::PUT}, 0.20);
+
+    ASSERT_TRUE(layer.greek(Greek::Delta, params).has_value());
+    EXPECT_EQ(layer.leaf().raw_value_calls, 0);
+    EXPECT_EQ(layer.leaf().greek_calls, 1);
+
+    ASSERT_TRUE(layer.gamma(params).has_value());
+    EXPECT_EQ(layer.leaf().raw_value_calls, 0);
+    EXPECT_EQ(layer.leaf().gamma_calls, 1);
 }
