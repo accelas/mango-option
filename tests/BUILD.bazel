@@ -1444,11 +1444,11 @@ cc_test(
     name = "iv_solver_factory_test",
     size = "large",
     timeout = "long",
-    # 18 cases, ~346s CPU local / ~820s on CI runners — a 9% margin against
-    # the 900s budget that turned into a timeout on slower runners (run
-    # 33304140391).  Sharding gives each shard its own 900s; the slowest
-    # single case (DocumentedAdaptiveDiscreteDividendConfig, ~155s local)
-    # caps a shard well under half the budget.
+    # Wiring/invariant cases only (~80s CPU local): the accuracy pins that
+    # made this target a CI timeout risk (run 33304140391) moved to
+    # :iv_solver_factory_slow_test (nightly).  Slowest single case
+    # (Chebyshev.SegmentedBuildsAndSolves, ~23s local) keeps every shard far
+    # under the 900s budget even on oversubscribed CI runners.
     shard_count = 4,
     srcs = ["iv_solver_factory_test.cc"],
     copts = ["-fopenmp"],
@@ -1460,6 +1460,30 @@ cc_test(
         "//src/option/table/bspline:bspline_builder",
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/bspline:bspline_tensor_accessor",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "iv_solver_factory_slow_test",
+    size = "large",
+    timeout = "eternal",
+    # Accuracy pins (documented adaptive dividend config, B-spline refusal,
+    # manual-vs-adaptive comparison): computation-stress tests, ~140s CPU
+    # local.  Excluded from per-PR CI (`manual`), run by the nightly
+    # slow-tests workflow (`slow`).  One shard per case.
+    shard_count = 3,
+    srcs = ["iv_solver_factory_slow_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    tags = [
+        "manual",
+        "slow",
+    ],
+    deps = [
+        "//src/option:interpolated_iv_solver",
+        "//src/option:american_option",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
