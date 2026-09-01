@@ -3,6 +3,7 @@
 #include "mango/option/dividend_utils.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/american_option.hpp"
+#include "mango/option/detail/american_option_solver_access.hpp"
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -356,7 +357,8 @@ SegmentedPriceTableBuilder::build_segment(
 
             // IC maps log-moneyness x → normalized price u = V/K_ref.
             // Jump condition at dividend date: V(t⁻, S) = V(t⁺, S - D).
-            solver.set_initial_condition(
+            detail::AmericanOptionSolverAccess::set_initial_condition(
+                solver,
                 [ic_ctx, sigma, rate](
                     std::span<const double> x, std::span<double> u)
                 {

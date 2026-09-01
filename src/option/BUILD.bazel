@@ -90,6 +90,15 @@ cc_library(
 )
 
 cc_library(
+    name = "american_option_solver_access",
+    hdrs = ["detail/american_option_solver_access.hpp"],
+    deps = [":american_option"],
+    visibility = ["//src/option/table/bspline:__pkg__"],
+    strip_include_prefix = "/src/option",
+    include_prefix = "mango/option",
+)
+
+cc_library(
     name = "american_option_batch",
     srcs = ["american_option_batch.cpp"],
     hdrs = ["american_option_batch.hpp"],

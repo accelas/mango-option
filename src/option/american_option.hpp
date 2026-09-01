@@ -24,7 +24,9 @@
 
 namespace mango {
 
-class SegmentedPriceTableBuilder;
+namespace detail {
+class AmericanOptionSolverAccess;
+}
 
 /**
  * American option pricing solver using finite difference method.
@@ -115,12 +117,10 @@ public:
     using InitialCondition = std::function<void(std::span<const double>, std::span<double>)>;
 
 private:
-    // Internal hook for backward-chained discrete-dividend surface segments.
-    // Each segment's PricingParams pass AmericanOptionSolver::create()
-    // validation before the batch setup callback installs this continuation
-    // surface. Keeping the hook private prevents arbitrary initial states from
-    // bypassing the projected-LCP topology contract.
-    friend class SegmentedPriceTableBuilder;
+    // Internal hook for validated pricing infrastructure that chains a
+    // continuation surface. The detail access shim is package-private; this
+    // public header does not depend on any concrete table-builder type.
+    friend class detail::AmericanOptionSolverAccess;
     void set_initial_condition(InitialCondition ic) { custom_ic_ = std::move(ic); }
 
     /// Optional custom initial condition (replaces default payoff when set)
