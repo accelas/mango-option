@@ -18,7 +18,7 @@ namespace mango {
  * All arrays are padded to 8-element boundaries for SIMD safety.
  * Caller manages buffer lifetime and allocation strategy.
  *
- * Arrays (15 regular + tridiag @ 2n):
+ * Arrays (16 regular + tridiag @ 2n):
  * - dx (n-1): Grid spacing
  * - u_stage (n): Stage buffer for TR-BDF2
  * - rhs (n): Right-hand side vector
@@ -34,6 +34,10 @@ namespace mango {
  * - reserved1 (n): Reserved for future use
  * - d2u_scratch (n): Second derivative scratch (SpatialOperator)
  * - du_scratch (n): First derivative scratch (SpatialOperator)
+ * - a_f_cache (n): Per-node Il'in-fitted diffusion coefficient cache
+ *   (SpatialOperator, #472) -- amortizes the std::tanh in
+ *   fitted_diffusion() across the repeated apply()/assemble_jacobian()
+ *   calls of a single (a, b) sample instead of paying it per node per call
  * - tridiag_workspace (2n): Thomas solver workspace
  * - active_mask (n bytes): LCP active-set mask (uint8_t), carved from a
  *   double-aligned tail block so PDEWorkspace stays a single span<double>
@@ -50,8 +54,8 @@ struct PDEWorkspace {
         size_t n_padded = pad_to_simd(n);
         size_t n_minus_1_padded = pad_to_simd(n - 1);
 
-        // 12 arrays @ n (padded)
-        size_t regular_n = 12 * n_padded;
+        // 13 arrays @ n (padded)
+        size_t regular_n = 13 * n_padded;
 
         // 3 arrays @ (n-1) (padded): dx, jacobian_upper, jacobian_lower
         size_t arrays_n_minus_1 = 3 * n_minus_1_padded;
@@ -135,6 +139,9 @@ struct PDEWorkspace {
         offset += n_padded;
 
         workspace.du_scratch_ = buffer.subspan(offset, n_padded);
+        offset += n_padded;
+
+        workspace.a_f_cache_ = buffer.subspan(offset, n_padded);
         offset += n_padded;
 
         // tridiag_workspace (2n, padded)
@@ -228,6 +235,14 @@ struct PDEWorkspace {
     std::span<double> du_scratch() { return du_scratch_.subspan(0, n_); }
     std::span<const double> du_scratch() const { return du_scratch_.subspan(0, n_); }
 
+    /// Per-node fitted-diffusion coefficient cache (SpatialOperator, #472).
+    /// Owned by the workspace so it survives across the repeated
+    /// apply()/assemble_jacobian() calls of one Newton stage without a
+    /// per-call heap allocation; validity (whether it reflects the
+    /// currently sampled a, b) is tracked by SpatialOperator, not here.
+    std::span<double> a_f_cache() { return a_f_cache_.subspan(0, n_); }
+    std::span<const double> a_f_cache() const { return a_f_cache_.subspan(0, n_); }
+
     std::span<double> tridiag_workspace() { return tridiag_workspace_.subspan(0, 2 * n_); }
     std::span<const double> tridiag_workspace() const { return tridiag_workspace_.subspan(0, 2 * n_); }
 
@@ -265,6 +280,7 @@ private:
     std::span<double> reserved1_;
     std::span<double> d2u_scratch_;
     std::span<double> du_scratch_;
+    std::span<double> a_f_cache_;
     std::span<uint8_t> active_mask_;
 };
 

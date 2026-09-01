@@ -9,11 +9,11 @@ namespace {
 
 TEST(PDEWorkspaceTest, RequiredSize) {
     // For n=100:
-    // - 12 arrays @ padded(100) = 12 × 104 = 1248
+    // - 13 arrays @ padded(100) = 13 × 104 = 1352
     // - 3 arrays @ padded(99) = 3 × 104 = 312
     // - tridiag @ padded(200) = 200
     // - active_mask: 100 bytes -> 13 doubles -> padded(13) = 16 doubles
-    // Total = 1776
+    // Total = 1880
     size_t n = 100;
     size_t required = PDEWorkspace::required_size(n);
 
@@ -23,7 +23,7 @@ TEST(PDEWorkspaceTest, RequiredSize) {
     size_t mask_doubles = PDEWorkspace::pad_to_simd(
         (n + sizeof(double) - 1) / sizeof(double));  // 16
 
-    size_t expected = 12 * n_padded + 3 * n_minus_1_padded + tridiag_padded
+    size_t expected = 13 * n_padded + 3 * n_minus_1_padded + tridiag_padded
                      + mask_doubles;
     EXPECT_EQ(required, expected);
 }

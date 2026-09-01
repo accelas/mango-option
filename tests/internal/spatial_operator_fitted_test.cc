@@ -15,7 +15,6 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -146,7 +145,7 @@ TEST(SpatialOperatorFittedTest, RowDominanceForPositiveAndModestNegativeRate) {
 // the helper). b = r − q − σ²/2 with σ=0.20, q=0.02 crosses 0 at r=0.04.
 TEST(SpatialOperatorFittedTest, NearZeroDriftAssemblyContinuity) {
     const double eps = 1e-9;
-    std::vector<std::vector<double>> lowers;
+    std::vector<std::vector<double>> rows;
     for (double rate : {0.04 - eps, 0.04, 0.04 + eps}) {
         with_operator(
             GridSpec<double>::sinh_spaced(-2.0, 2.0, 15, 3.0).value(),
@@ -160,16 +159,21 @@ TEST(SpatialOperatorFittedTest, NearZeroDriftAssemblyContinuity) {
                     row.push_back(jac.diag()[i]);
                     row.push_back(jac.upper()[i]);
                 }
-                lowers.push_back(std::move(row));
+                rows.push_back(std::move(row));
             });
     }
-    ASSERT_EQ(lowers.size(), 3u);
-    for (size_t k = 0; k < lowers[0].size(); ++k) {
-        // eps-sized drift change moves coefficients by O(eps/h^2) at most;
-        // 1e-4 absolute is orders looser than that but far tighter than
-        // any discontinuity a binding-side switch bug would produce.
-        EXPECT_NEAR(lowers[0][k], lowers[1][k], 1e-4) << "k=" << k;
-        EXPECT_NEAR(lowers[2][k], lowers[1][k], 1e-4) << "k=" << k;
+    ASSERT_EQ(rows.size(), 3u);
+    for (size_t k = 0; k < rows[0].size(); ++k) {
+        // This is a continuity check across b=0 AT THE OPERATOR LEVEL only
+        // (mirroring fitted_diffusion's own continuity contract): an
+        // eps-sized drift change should move assembled coefficients by
+        // O(eps/h^2) at most, and 1e-4 absolute is orders looser than
+        // that. It is not a sensitive-enough tolerance to catch every
+        // binding-side selection bug (e.g. an inverted b>=0 branch would
+        // still pass at eps=1e-9) -- that is covered separately by the
+        // sign-preserving assembly tests above.
+        EXPECT_NEAR(rows[0][k], rows[1][k], 1e-4) << "k=" << k;
+        EXPECT_NEAR(rows[2][k], rows[1][k], 1e-4) << "k=" << k;
     }
 }
 
@@ -244,10 +248,14 @@ TEST(SpatialOperatorFittedTest, ApplyMatchesAssembledMatrix) {
         GridSpec<double>::sinh_spaced(-2.0, 2.0, 25, 3.0).value());
 }
 
-// Companion on a UNIFORM grid: the uniform stencil uses the canonical
-// stored spacing (GridSpacing::spacing()), so both assembly and apply
-// must fit with that same h — per-cell coordinate diffs differ in the
-// last ulp and would break this identity (plan-review round 2 finding).
+// Companion on a UNIFORM grid: exercises the canonical-stored-spacing
+// (GridSpacing::spacing()) branch that both assembly and apply take on a
+// uniform grid, instead of the sinh grid's per-cell coordinate diffs
+// (plan-review round 2 finding). Note this tolerance (row_mag * 1e-13)
+// would NOT by itself catch a last-ulp h mismatch between the two
+// paths — that perturbs Lu by ~1e-16, well under the bound — so this
+// test documents which branch is exercised rather than asserting the
+// last-ulp identity.
 TEST(SpatialOperatorFittedTest, ApplyMatchesAssembledMatrixUniformGrid) {
     check_apply_matches_assembled_matrix(
         GridSpec<double>::uniform(-2.0, 2.0, 41).value());
@@ -304,6 +312,48 @@ TEST(SpatialOperatorFittedTest, LaplacianCombinePathNumericallyIdentical) {
             for (size_t i = 1; i < n - 1; ++i) {
                 EXPECT_DOUBLE_EQ(Lu[i], D * d2u[i]) << "i=" << i;
             }
+        });
+}
+
+// Regression (#472 fix round 1): the per-node fitted-diffusion cache
+// (ensure_fitted_cache/a_f_cache) must invalidate when the sampled drift
+// b changes (callable-rate PDE) and must reuse cached values -- giving
+// bit-identical output -- when (a, b) are unchanged.
+TEST(SpatialOperatorFittedTest, FittedCacheInvalidatesOnRateChange) {
+    auto rate_fn = [](double t) { return t < 0.5 ? 0.05 : 0.09; };
+    with_operator(
+        GridSpec<double>::sinh_spaced(-2.0, 2.0, 21, 3.0).value(),
+        BlackScholesPDE(0.01, rate_fn, 0.0),
+        [&](auto& op, auto& workspace, auto& grid_view, auto&) {
+            const size_t n = grid_view.size();
+            auto jac = workspace.jacobian();
+
+            op.assemble_jacobian(0.0, 1.0, jac);
+            std::vector<double> lower_t0(jac.lower().begin(), jac.lower().end());
+            std::vector<double> upper_t0(jac.upper().begin(), jac.upper().end());
+            std::vector<double> diag_t0(jac.diag().begin(), jac.diag().end());
+
+            // Re-assemble at the SAME t (cache hit): bit-identical output.
+            op.assemble_jacobian(0.0, 1.0, jac);
+            for (size_t i = 1; i < n - 1; ++i) {
+                EXPECT_EQ(jac.lower()[i - 1], lower_t0[i - 1]) << "i=" << i;
+                EXPECT_EQ(jac.upper()[i], upper_t0[i]) << "i=" << i;
+                EXPECT_EQ(jac.diag()[i], diag_t0[i]) << "i=" << i;
+            }
+
+            // Assemble at a DIFFERENT t (rate steps 0.05 -> 0.09 at t=0.5):
+            // the cache must invalidate, so at least one interior
+            // off-diagonal must differ from the t=0 assembly.
+            op.assemble_jacobian(1.0, 1.0, jac);
+            bool any_differs = false;
+            for (size_t i = 1; i < n - 1; ++i) {
+                if (jac.lower()[i - 1] != lower_t0[i - 1] ||
+                    jac.upper()[i] != upper_t0[i]) {
+                    any_differs = true;
+                }
+            }
+            EXPECT_TRUE(any_differs)
+                << "cache did not invalidate on rate change";
         });
 }
 

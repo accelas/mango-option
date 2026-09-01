@@ -10,6 +10,7 @@
 #include <memory>
 #include <concepts>
 #include <cassert>
+#include <limits>
 #include <span>
 
 namespace mango::operators {
@@ -37,13 +38,7 @@ concept TimeDependentPDE = requires(PDE pde, double t, double d2u, double du, do
 /// The first-derivative coefficient and discount rate are time-dependent
 /// call forms, matching how assemble_jacobian() (and the boundary-row
 /// methods below) actually invoke them.
-template<typename PDE>
-concept HasJacobianCoefficients = requires(const PDE pde, double t) {
-    { pde.second_derivative_coeff() } -> std::convertible_to<double>;  // a
-    { pde.first_derivative_coeff(t) } -> std::convertible_to<double>;  // b(t)
-    { pde.discount_rate(t) } -> std::convertible_to<double>;           // r(t) (c = -r)
-};
-
+///
 /// CONTRACT (#472): for any PDE satisfying this concept, the coefficient
 /// methods are the AUTHORITATIVE definition of the interior operator:
 /// SpatialOperator evaluates L(u) = a_f·u'' + b(t)·u' − r(t)·u from them
@@ -52,6 +47,12 @@ concept HasJacobianCoefficients = requires(const PDE pde, double t) {
 /// side-effect free) at fixed t, and a = second_derivative_coeff() must
 /// be >= 0 unconditionally (a < 0 is outside the fitting contract; a == 0
 /// is supported as the convection limit — see fitted_diffusion.hpp).
+template<typename PDE>
+concept HasJacobianCoefficients = requires(const PDE pde, double t) {
+    { pde.second_derivative_coeff() } -> std::convertible_to<double>;  // a
+    { pde.first_derivative_coeff(t) } -> std::convertible_to<double>;  // b(t)
+    { pde.discount_rate(t) } -> std::convertible_to<double>;           // r(t) (c = -r)
+};
 
 /// Jacobian coefficients (diag, offdiag) of the ghost-eliminated boundary
 /// row's spatial operator ∂L/∂u at the boundary node and its interior
@@ -118,24 +119,10 @@ public:
             const T a = pde_.second_derivative_coeff();
             const T b = pde_.first_derivative_coeff(t);
             const T r = pde_.discount_rate(t);
-            const auto& grid = spacing_->grid();
-            if (spacing_->is_uniform()) {
-                // Canonical stored spacing — must match assemble_jacobian's
-                // uniform branch and the stencil (NOT grid[1] - grid[0],
-                // which differs in the last ulp).
-                const T h = spacing_->spacing();
-                const T a_f = detail::fitted_diffusion(a, b, h, h).a_f;
-                for (size_t i = start; i < end; ++i) {
-                    Lu[i] = a_f * d2u[i] + b * du[i] - r * u[i];
-                }
-            } else {
-                for (size_t i = start; i < end; ++i) {
-                    const T dx_left = grid[i] - grid[i-1];
-                    const T dx_right = grid[i+1] - grid[i];
-                    const T a_f =
-                        detail::fitted_diffusion(a, b, dx_left, dx_right).a_f;
-                    Lu[i] = a_f * d2u[i] + b * du[i] - r * u[i];
-                }
+            ensure_fitted_cache(a, b);
+            const auto a_f_cache = workspace_->a_f_cache();
+            for (size_t i = start; i < end; ++i) {
+                Lu[i] = a_f_cache[i] * d2u[i] + b * du[i] - r * u[i];
             }
         } else {
             for (size_t i = start; i < end; ++i) {
@@ -192,27 +179,35 @@ public:
         const bool uniform = spacing_->is_uniform();
         const T h_uniform = uniform ? spacing_->spacing() : T(0);
 
+        ensure_fitted_cache(a, b);
+        const auto a_f_cache = workspace_->a_f_cache();
+
         for (size_t i = 1; i < n - 1; ++i) {
             const T dx_left = uniform ? h_uniform : grid[i] - grid[i-1];
             const T dx_right = uniform ? h_uniform : grid[i+1] - grid[i];
             const T dx_avg = (dx_left + dx_right) / 2.0;
 
-            const auto fd = detail::fitted_diffusion(a, b, dx_left, dx_right);
+            const T a_f = a_f_cache[i];
+            // z (binding half-cell drift mass) is cheap arithmetic, not a
+            // transcendental — recomputed per node directly rather than
+            // cached, matching fitted_diffusion()'s own z formula exactly.
+            const T h_binding = (b > 0.0) ? dx_right : dx_left;
+            const T z = T(0.5) * std::abs(b) * h_binding;
 
             // Sign-preserving reduced assembly (#472): the binding-side
-            // numerator is computed literally as a_f − z, which the
-            // helper's clamp keeps >= 0 exactly in floating point. The
-            // non-binding numerator is a sum of non-negatives. This
-            // replaces the separate d2+d1 coefficient accumulation, which
-            // could round the binding entry to a tiny negative at high
-            // cell Péclet.
+            // numerator is computed literally as a_f − z, which
+            // fitted_diffusion()'s clamp keeps >= 0 exactly in floating
+            // point. The non-binding numerator is a sum of non-negatives.
+            // This replaces the separate d2+d1 coefficient accumulation,
+            // which could round the binding entry to a tiny negative at
+            // high cell Péclet.
             T num_lower, num_upper;
             if (b >= 0.0) {
-                num_lower = fd.a_f - fd.z;               // binding (z = b·dx_r/2)
-                num_upper = fd.a_f + T(0.5) * b * dx_left;
+                num_lower = a_f - z;               // binding (z = b·dx_r/2)
+                num_upper = a_f + T(0.5) * b * dx_left;
             } else {
-                num_lower = fd.a_f - T(0.5) * b * dx_right;  // adds |b|·dx_r/2
-                num_upper = fd.a_f - fd.z;               // binding (z = |b|·dx_l/2)
+                num_lower = a_f - T(0.5) * b * dx_right;  // adds |b|·dx_r/2
+                num_upper = a_f - z;               // binding (z = |b|·dx_l/2)
             }
             const T lower = num_lower / (dx_left * dx_avg);
             const T upper = num_upper / (dx_right * dx_avg);
@@ -295,10 +290,62 @@ private:
                  : (grid[n - 1] - grid[n - 2]);
     }
 
+    /// Ensure workspace_->a_f_cache()[1 .. n-2] holds the Il'in-fitted
+    /// diffusion coefficient for the CURRENTLY sampled (a, b) (#472
+    /// perf follow-up: measured ~1.85x slower on the default sinh-spaced
+    /// grid without this cache — std::tanh landed on every interior node
+    /// of every apply()/assemble_jacobian() call). Recomputes only when
+    /// (a, b) differ from the last sampled pair, via exact double
+    /// comparison against cached_a_/cached_b_ (initialized to NaN so the
+    /// first call always misses). For a constant-rate PDE, b never
+    /// changes across a whole solve, so std::tanh runs once per grid
+    /// instead of once per node per call. For a callable-rate PDE, b(t)
+    /// changes only at time-step/stage boundaries, so the cache still
+    /// amortizes std::tanh across the several apply() calls (residual,
+    /// Newton line search, ...) that share one (t, a, b) sample.
+    ///
+    /// THREAD-SAFETY: cached_a_/cached_b_ are `mutable`, and the cache
+    /// array lives in *workspace_ (non-owning). This is safe only
+    /// because a SpatialOperator/PDEWorkspace pair is owned 1:1 by a
+    /// single solver instance and never shared across threads: grepping
+    /// create_spatial_operator() call sites under src/ shows exactly two
+    /// (src/option/american_option.cpp, both inside a solver class that
+    /// constructs its own workspace_local_ and spatial_op_ once, in its
+    /// constructor), and the OpenMP batch loop
+    /// (src/option/american_option_batch.cpp) constructs one full solver
+    /// per loop iteration rather than sharing one across iterations/
+    /// threads. Do not add a call site that shares one SpatialOperator
+    /// (or its workspace) across threads without revisiting this cache.
+    void ensure_fitted_cache(T a, T b) const {
+        if (a == cached_a_ && b == cached_b_) {
+            return;
+        }
+        cached_a_ = a;
+        cached_b_ = b;
+        const auto& grid = spacing_->grid();
+        const size_t n = grid.size();
+        auto cache = workspace_->a_f_cache();
+        if (spacing_->is_uniform()) {
+            const T h = spacing_->spacing();
+            const T a_f = detail::fitted_diffusion(a, b, h, h).a_f;
+            std::fill(cache.begin() + 1, cache.begin() + (n - 1), a_f);
+        } else {
+            for (size_t i = 1; i < n - 1; ++i) {
+                const T dx_left = grid[i] - grid[i - 1];
+                const T dx_right = grid[i + 1] - grid[i];
+                cache[i] = detail::fitted_diffusion(a, b, dx_left, dx_right).a_f;
+            }
+        }
+    }
+
     PDE pde_;  // Owned by value (PDEs are typically small)
     std::shared_ptr<GridSpacing<T>> spacing_;
     std::shared_ptr<CenteredDifference<T>> stencil_;  // Shared ownership of templated facade
     PDEWorkspace* workspace_;  // Non-owning; workspace outlives operator
+    // Fitted-diffusion cache validity (#472 perf follow-up): NaN so the
+    // first ensure_fitted_cache() call always (correctly) misses.
+    mutable T cached_a_ = std::numeric_limits<T>::quiet_NaN();
+    mutable T cached_b_ = std::numeric_limits<T>::quiet_NaN();
 };
 
 /// Concept to detect spatial operators exposing analytic ghost-eliminated
