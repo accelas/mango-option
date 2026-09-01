@@ -8,6 +8,7 @@ cc_library(
     hdrs = [
         "pde_workspace.hpp",
         "american_pde_workspace.hpp",
+        "fitted_diffusion.hpp",
         "pde_solver.hpp",
         "spatial_operator.hpp",
         "operator_factory.hpp",
