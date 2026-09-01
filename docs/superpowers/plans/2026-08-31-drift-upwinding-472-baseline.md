@@ -219,3 +219,73 @@ Measured via: `TMPDIR=/tmp/codex-skills/b1f0461c-8c94-4e80-ad4d-789f804f4e10
 bazel test //tests:american_option_test --test_output=all
 --test_filter='*NoDivCallPriceUnchanged*'`. The test's pin was updated to
 the new value in the same commit as the discretization change.
+
+## Task 6 final measurements
+
+**Full suite.** `bazel test //... --test_output=errors`: **150/150 tests
+pass** (148-target baseline + 2 new targets added by this branch, per the
+Task 6 brief's expectation). No failures, no skips.
+
+**Re-pin delta.** Recorded above under "Task 3 re-pin" —
+`NoDivCallPriceUnchangedByEnvelopeBC`: `10.447090628631905 →
+10.447225343887069`, Δ = +1.347e-4 (≈1.3e-5 relative), the one deliberate
+change to a previously-pinned value on this branch, landed in the same
+commit as the discretization change.
+
+**Hot-path A/B (fitted-coefficient caching).** Recorded in
+`.superpowers/sdd/2026-08-31-drift-upwinding-472/task-3-report.md`
+("IMPORTANT #1: unmeasured std::tanh hot-path cost — measured, then
+fixed"): uncached fitting on every apply/assemble call cost 0.794 ms vs.
+0.430 ms with fitting off (1.85× regression); caching the fitted
+coefficient per sampled drift `(a, b)` in `PDEWorkspace` (invalidated only
+when the sampled drift actually changes between stages) brought it back to
+0.420 ms — statistically indistinguishable from the fitting-off baseline
+(ratio 0.977), i.e. the caching fix fully absorbed the regression.
+
+**ATM-put-vs-QuantLib pin margin.** `tests/quantlib_sweep_regression_test.cc`
+(`QuantLibSweepRegression.PricingAccuracyAcrossPutsAndCalls`, "put ATM"
+row) prints its measured error. Run:
+
+```
+TMPDIR=/tmp/codex-skills/b1f0461c-8c94-4e80-ad4d-789f804f4e10 bazel test \
+  //tests:quantlib_sweep_regression_test --test_output=all \
+  --test_filter=QuantLibSweepRegression.PricingAccuracyAcrossPutsAndCalls
+```
+
+```
+scenario             quantlib        mango      abs_err  threshold     margin  result
+put ATM              6.090260     6.085964    4.295e-03  5.500e-03  1.205e-03  PASS
+```
+
+Measured `abs_err = 4.295e-3` against the pinned `5.5e-3` threshold —
+margin `1.205e-3`, assertion unchanged by this branch (Task 6 is
+docs-only; the underlying price was already produced by Task 3's
+discretization change and Task 5's canonical-fixture pin).
+
+**CI-parity builds.** `bazel build //benchmarks/...` succeeds (all 24
+non-`real_market_data` benchmark `cc_binary` targets in
+`benchmarks/BUILD.bazel` are tagged `manual`, so the bare wildcard resolves
+to the single non-manual target, `real_market_data`, which was already
+up-to-date). To verify the full benchmark set still compiles, every
+`cc_binary` under `//benchmarks/...` was built explicitly by name
+(bypassing the `manual` tag, which only affects wildcard expansion, not
+explicit target lists). Two pre-existing build breakages were found and
+excluded, both confirmed unchanged from `main` (`git diff eb7436d5 --
+benchmarks/ src/math/BUILD.bazel` empty) and therefore out of scope for
+this branch:
+
+- `//benchmarks:cubic_spline_template_vs_hardcoded` — depends on
+  `//src/math:cubic_spline_nd`, which does not exist.
+- `//benchmarks:iv_fdm_sweep` — `iv_fdm_sweep.cc` includes
+  `mango/pde/internal/pde_workspace.hpp` without a `deps` entry that
+  exposes it (a residual from #419, "Hide PDEWorkspace from public API").
+
+The remaining 22 targets all build cleanly with no warnings from project
+code. Neither broken target is in the actual CI benchmark-build step
+(`.github/workflows/ci.yml`, "Build benchmarks"), which names 7 specific
+targets individually rather than using the `//benchmarks/...` wildcard —
+so neither breakage, nor their exclusion here, affects CI's green/red
+status.
+
+`bazel build //src/python:mango_option` succeeds, no warnings from project
+code.
