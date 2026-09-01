@@ -70,7 +70,14 @@ public:
         , spacing_(std::move(spacing))
         , stencil_(std::make_shared<CenteredDifference<T>>(*spacing_))
         , workspace_(&workspace)
-    {}
+    {
+        // A freshly constructed operator may see a workspace whose cache
+        // was filled by a previous operator over a different grid --
+        // possibly at the same GridSpacing address (allocator reuse) -- so
+        // the pointer key alone is not a lifetime-safe identity. Invalidate
+        // on construction; the cost is one refill per operator lifetime.
+        workspace_->invalidate_fitted_cache();
+    }
 
     // Default copy/move (shared_ptr makes it copyable)
     SpatialOperator(const SpatialOperator&) = default;
@@ -345,7 +352,10 @@ private:
     /// (never compared as a double: a pointer's bit pattern can happen to
     /// form a NaN payload, which would break exact comparison). The
     /// buffer's carve-time initialization (NaN/NaN/0-bits) makes the first
-    /// call on a fresh workspace always miss.
+    /// call on a fresh workspace always miss, and the SpatialOperator
+    /// constructor re-invalidates it, so the grid key is only ever trusted
+    /// within one operator's lifetime (see SHARED-WORKSPACE CORRECTNESS
+    /// below).
     ///
     /// For a constant-rate PDE, b never changes across a whole solve, so
     /// std::tanh runs once per grid instead of once per node per call. For
@@ -369,6 +379,21 @@ private:
     /// keeping its own hit rate (this is a single shared-buffer cache, not
     /// a per-operator one — see
     /// SpatialOperatorFittedTest.TwoOperatorsSharingWorkspaceStayCorrect).
+    ///
+    /// LIFETIME SAFETY (#472 gate-2 fix): the grid key is a raw
+    /// GridSpacing* bit pattern, and a *destroyed* GridSpacing's address
+    /// can be reused by an unrelated, later-allocated GridSpacing for a
+    /// DIFFERENT grid — the pointer key alone cannot tell those apart. So
+    /// the key is only a lifetime-safe identity WITHIN one operator's
+    /// lifetime (guarding against a second operator sharing the same live
+    /// workspace, per SHARED-WORKSPACE CORRECTNESS above); across operator
+    /// lifetimes it is not trustworthy on its own. Every SpatialOperator
+    /// constructor therefore invalidates the shared cache unconditionally
+    /// (workspace_->invalidate_fitted_cache()), so a freshly constructed
+    /// operator can never read back a cache filled by a previous,
+    /// possibly-destroyed operator's GridSpacing merely because the new one
+    /// happened to land at the same address. See
+    /// SpatialOperatorFittedTest.NewOperatorInvalidatesSharedCache.
     ///
     /// THREAD-SAFETY: this cache is still safe only because a
     /// SpatialOperator/PDEWorkspace pair is owned 1:1 by a single solver

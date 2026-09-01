@@ -489,6 +489,67 @@ TEST(SpatialOperatorFittedTest, TwoOperatorsSharingWorkspaceStayCorrect) {
     }
 }
 
+// Regression (#472 gate-2 fix, Codex P2): the fitted-cache grid key is a
+// raw GridSpacing* bit pattern. When a workspace is reused after the
+// operator that filled its cache is destroyed, a new GridSpacing for a
+// DIFFERENT grid can be allocated at the same address as the old one --
+// with (a, b) also unchanged, the pointer-key comparison alone would report
+// a false hit and reuse fitted coefficients computed from the old cell
+// widths. SpatialOperator's constructor now invalidates the shared cache
+// unconditionally so this can never happen, regardless of address reuse.
+// This test builds one workspace by hand (kept in scope, unlike
+// with_operator()'s fn-scoped helper) so it can inspect
+// fitted_cache_meta() directly between two operator constructions.
+TEST(SpatialOperatorFittedTest, NewOperatorInvalidatesSharedCache) {
+    auto spec = GridSpec<double>::sinh_spaced(-2.0, 2.0, 21, 3.0).value();
+    auto grid_buf = spec.generate();
+    auto grid_view = grid_buf.view();
+    auto spacing = std::make_shared<GridSpacing<double>>(grid_view);
+    const size_t n = grid_view.size();
+
+    std::vector<double> buffer(PDEWorkspace::required_size(n));
+    auto workspace = PDEWorkspace::from_buffer(buffer, n).value();
+
+    // Operator A fills the shared cache.
+    auto op_a = create_spatial_operator(
+        BlackScholesPDE<double>(0.01, 0.05, 0.0), spacing, workspace);
+    auto jac = workspace.jacobian();
+    op_a.assemble_jacobian(0.0, 1.0, jac);
+
+    auto meta_after_a = workspace.fitted_cache_meta();
+    EXPECT_DOUBLE_EQ(meta_after_a[0], 0.5 * 0.01 * 0.01)  // cached a = sigma^2/2
+        << "cache should be filled after op A's assemble_jacobian";
+
+    std::vector<double> lower_a(jac.lower().begin(), jac.lower().end());
+    std::vector<double> diag_a(jac.diag().begin(), jac.diag().end());
+    std::vector<double> upper_a(jac.upper().begin(), jac.upper().end());
+
+    // Operator B is constructed over the SAME workspace (same PDE and grid
+    // is fine here -- the point under test is construction itself, not a
+    // coefficient or grid mismatch, which TwoOperatorsSharingWorkspaceStayCorrect
+    // above already covers).
+    auto op_b = create_spatial_operator(
+        BlackScholesPDE<double>(0.01, 0.05, 0.0), spacing, workspace);
+
+    auto meta_after_b_ctor = workspace.fitted_cache_meta();
+    EXPECT_TRUE(std::isnan(meta_after_b_ctor[0]))
+        << "constructing a new operator must invalidate the shared cache";
+    EXPECT_TRUE(std::isnan(meta_after_b_ctor[1]))
+        << "constructing a new operator must invalidate the shared cache";
+
+    // Correctness preserved: B's assembly still reproduces A's bands.
+    op_b.assemble_jacobian(0.0, 1.0, jac);
+    for (size_t i = 0; i < lower_a.size(); ++i) {
+        EXPECT_EQ(jac.lower()[i], lower_a[i]) << "i=" << i;
+    }
+    for (size_t i = 0; i < diag_a.size(); ++i) {
+        EXPECT_EQ(jac.diag()[i], diag_a[i]) << "i=" << i;
+    }
+    for (size_t i = 0; i < upper_a.size(); ++i) {
+        EXPECT_EQ(jac.upper()[i], upper_a[i]) << "i=" << i;
+    }
+}
+
 // ===========================================================================
 // Regression tests for #472 gate-2 pre-merge review: deep-ITM exercise lock
 // criterion must use the RAW (unfitted) operator, not the Il'in-fitted one.

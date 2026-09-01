@@ -527,3 +527,5 @@ $a = $ `second_derivative_coeff()` (no Il'in fitting) — and the lock
 criterion now calls it instead of `apply_spatial_operator()`. Stage
 residuals, the RHS, and the assembled Jacobian are untouched and still use
 the fitted operator exclusively; only this classification check changed.
+
+Construction of a SpatialOperator invalidates the shared fitted cache — the pointer grid key is a within-lifetime guard only (allocator address reuse).

@@ -171,9 +171,7 @@ struct PDEWorkspace {
         size_t meta_padded = pad_to_simd(3);
         workspace.fitted_cache_meta_ = buffer.subspan(offset, meta_padded);
         offset += meta_padded;
-        workspace.fitted_cache_meta_[0] = std::numeric_limits<double>::quiet_NaN();
-        workspace.fitted_cache_meta_[1] = std::numeric_limits<double>::quiet_NaN();
-        workspace.fitted_cache_meta_[2] = std::bit_cast<double>(std::uint64_t{0});
+        workspace.invalidate_fitted_cache();
 
         // tridiag_workspace (2n, padded)
         size_t tridiag_padded = pad_to_simd(2 * n);
@@ -289,6 +287,21 @@ struct PDEWorkspace {
     /// per-operator one.
     std::span<double> fitted_cache_meta() { return fitted_cache_meta_.subspan(0, 3); }
     std::span<const double> fitted_cache_meta() const { return fitted_cache_meta_.subspan(0, 3); }
+
+    /// Reset fitted_cache_meta() to its always-miss state (slots 0/1 = NaN,
+    /// slot 2 = 0 bits). Called by from_buffer() on first carve and by
+    /// SpatialOperator's constructor (#472 gate-2 fix): a freshly
+    /// constructed operator over a reused workspace cannot trust the
+    /// pointer-based grid key -- a new GridSpacing can land at the same
+    /// address as a prior, now-destroyed one (allocator reuse), which would
+    /// make a stale cache entry for a DIFFERENT grid read back as a hit.
+    /// Invalidating here makes the pointer key a within-lifetime guard
+    /// only, not a lifetime-safe identity.
+    void invalidate_fitted_cache() {
+        fitted_cache_meta_[0] = std::numeric_limits<double>::quiet_NaN();
+        fitted_cache_meta_[1] = std::numeric_limits<double>::quiet_NaN();
+        fitted_cache_meta_[2] = std::bit_cast<double>(std::uint64_t{0});
+    }
 
     std::span<double> tridiag_workspace() { return tridiag_workspace_.subspan(0, 2 * n_); }
     std::span<const double> tridiag_workspace() const { return tridiag_workspace_.subspan(0, 2 * n_); }
