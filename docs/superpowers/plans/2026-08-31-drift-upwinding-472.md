@@ -545,6 +545,42 @@ TEST(SpatialOperatorFittedTest, ApplyMatchesAssembledMatrix) {
         });
 }
 
+// Companion on a UNIFORM grid: the uniform stencil uses the canonical
+// stored spacing (GridSpacing::spacing()), so both assembly and apply
+// must fit with that same h — per-cell coordinate diffs differ in the
+// last ulp and would break this identity (plan-review round 2 finding).
+TEST(SpatialOperatorFittedTest, ApplyMatchesAssembledMatrixUniformGrid) {
+    with_operator(
+        GridSpec<double>::uniform(-2.0, 2.0, 41).value(),
+        BlackScholesPDE<double>(0.01, 0.05, 0.0),  // high Peclet
+        [&](auto& op, auto& workspace, auto& grid_view, auto&) {
+            auto jac = workspace.jacobian();
+            op.assemble_jacobian(0.0, 1.0, jac);  // J = I - L
+
+            const size_t n = grid_view.size();
+            const auto& x = grid_view.span();
+            std::vector<double> u(n), Lu(n, 0.0);
+            for (size_t i = 0; i < n; ++i)
+                u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+
+            op.apply(0.0, u, Lu);
+
+            double max_u = 0.0;
+            for (double v : u) max_u = std::max(max_u, std::abs(v));
+            for (size_t i = 1; i < n - 1; ++i) {
+                const double Ju = jac.lower()[i - 1] * u[i - 1] +
+                                  jac.diag()[i] * u[i] +
+                                  jac.upper()[i] * u[i + 1];
+                const double L_from_matrix = u[i] - Ju;
+                const double row_mag = (std::abs(jac.lower()[i - 1]) +
+                                        std::abs(jac.diag()[i]) +
+                                        std::abs(jac.upper()[i])) * max_u;
+                EXPECT_NEAR(Lu[i], L_from_matrix, row_mag * 1e-13 + 1e-14)
+                    << "i=" << i;
+            }
+        });
+}
+
 // Dispatch guard: for HasJacobianCoefficients PDEs the coefficient methods
 // are the authoritative operator definition; operator() must NOT be called
 // on the apply path. Numerical agreement alone cannot prove the dispatch,
@@ -660,10 +696,17 @@ Expected: FAIL — `OffDiagonalSignsHighPecletBothDriftSigns` and `AssembledBind
 
         const size_t n = jac.size();
         const auto& grid = spacing_->grid();
+        // Uniform grids: use the canonical stored spacing, NOT per-cell
+        // coordinate differences — CenteredDifference's uniform stencil
+        // uses spacing_->spacing() for every derivative, and per-cell
+        // diffs differ from it in the last ulp, which would break the
+        // exact apply/Jacobian identity the fitted scheme requires.
+        const bool uniform = spacing_->is_uniform();
+        const T h_uniform = uniform ? spacing_->spacing() : T(0);
 
         for (size_t i = 1; i < n - 1; ++i) {
-            const T dx_left = grid[i] - grid[i-1];
-            const T dx_right = grid[i+1] - grid[i];
+            const T dx_left = uniform ? h_uniform : grid[i] - grid[i-1];
+            const T dx_right = uniform ? h_uniform : grid[i+1] - grid[i];
             const T dx_avg = (dx_left + dx_right) / 2.0;
 
             const auto fd = detail::fitted_diffusion(a, b, dx_left, dx_right);
@@ -709,7 +752,10 @@ coefficient-dispatch version (the stencil computation of `d2u`/`du` stays):
             const T r = pde_.discount_rate(t);
             const auto& grid = spacing_->grid();
             if (spacing_->is_uniform()) {
-                const T h = grid[1] - grid[0];
+                // Canonical stored spacing — must match assemble_jacobian's
+                // uniform branch and the stencil (NOT grid[1] - grid[0],
+                // which differs in the last ulp).
+                const T h = spacing_->spacing();
                 const T a_f = detail::fitted_diffusion(a, b, h, h).a_f;
                 for (size_t i = start; i < end; ++i) {
                     Lu[i] = a_f * d2u[i] + b * du[i] - r * u[i];
@@ -1096,5 +1142,6 @@ git commit -m "Document Il'in-fitted drift scheme and narrowed caveats"
 
 - Spec coverage: helper contract → Task 2; sign-preserving assembly + combine + dispatch/concept docs + boundary-row code comment + deliberate re-pin (same commit as the change, so every commit boundary is green) → Task 3; γ validation → Task 4; canonical fixture + immutable sweep + sign-crossing → Task 5 (fixture measurement → Task 1); docs caveat (incl. unfitted-boundary-rows sentence) + measurements → Task 6.
 - Plan-review round 1 folds: `with_operator` auto-deduced fixture (the struct fixture couldn't name PDE-dependent operator types); yield-curve test uses `YieldCurve::from_points` with log-discounts (`TenorPoint.log_discount`, mandatory `{0,0}` point); γ check inserted AFTER the `lcp_report_` reset; full-suite run before the Task 3 commit; direct `centered_difference` BUILD dep; Task 1 probe-revert guard; concept doc requires `a ≥ 0` unconditionally.
+- Plan-review round 2 fold: on uniform grids BOTH `assemble_jacobian` and `apply_interior` fit with the canonical `spacing_->spacing()` (the h `CenteredDifference`'s uniform stencil uses), never per-cell coordinate diffs, which differ in the last ulp; `ApplyMatchesAssembledMatrixUniformGrid` guards it.
 - Perf risk (spec "Risks"): the uniform-grid fast path in Task 3 computes the fitted factor once per invocation; per-stage caching stays deferred unless the full suite's performance tests regress (none pin apply-path latency; if `//tests:american_option_performance_test` exists and fails, that triggers the spec's caching mitigation as a follow-up commit).
 - Type consistency: `FittedDiffusion{a_f, z}` and `fitted_diffusion(a, b, dx_left, dx_right)` used identically in Tasks 2, 3; γ error payload `{InvalidConfiguration, 0, gamma}` consistent between Task 4 test and implementation.
