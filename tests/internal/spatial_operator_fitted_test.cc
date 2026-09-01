@@ -489,5 +489,94 @@ TEST(SpatialOperatorFittedTest, TwoOperatorsSharingWorkspaceStayCorrect) {
     }
 }
 
+// ===========================================================================
+// Regression tests for #472 gate-2 pre-merge review: deep-ITM exercise lock
+// criterion must use the RAW (unfitted) operator, not the Il'in-fitted one.
+// ===========================================================================
+
+// apply_unfitted() must combine the RAW diffusion coefficient a with the
+// same stencil derivatives apply() uses -- Lu[i] = a*d2u[i] + b*du[i] -
+// r*u[i], with NO Il'in fitting. Cross-checked against an independent
+// CenteredDifference computation over the same spacing, not against
+// apply()'s own internals.
+TEST(SpatialOperatorFittedTest, ApplyUnfittedMatchesRawCombine) {
+    with_operator(
+        GridSpec<double>::sinh_spaced(-4.0, 0.0, 21, 3.0).value(),
+        BlackScholesPDE<double>(0.20, 0.0, 0.0),  // sigma=20%, r=0, q=0
+        [&](auto& op, auto&, auto& grid_view, auto& spacing) {
+            const size_t n = grid_view.size();
+            const auto& x = grid_view.span();
+            std::vector<double> u(n);
+            for (size_t i = 0; i < n; ++i) {
+                u[i] = std::max(1.0 - std::exp(x[i]), 0.0);  // put payoff
+            }
+
+            std::vector<double> Lu(n, 0.0);
+            op.apply_unfitted(0.0, u, Lu);
+
+            // Independent reference: raw a/b/r combine over the SAME
+            // stencil (CenteredDifference), computed directly here rather
+            // than reusing apply_interior_impl.
+            CenteredDifference<double> stencil(*spacing);
+            std::vector<double> d2u(n, 0.0), du(n, 0.0);
+            stencil.compute_second_derivative(u, d2u, 1, n - 1);
+            stencil.compute_first_derivative(u, du, 1, n - 1);
+
+            const double a = 0.02;           // sigma^2/2
+            const double b = 0.0 - 0.0 - 0.02;  // r - q - sigma^2/2
+            const double r = 0.0;
+            for (size_t i = 1; i < n - 1; ++i) {
+                const double expected = a * d2u[i] + b * du[i] - r * u[i];
+                // Tolerance, not bit-exact equality: apply_unfitted()'s
+                // internal combine loop and this test's independent one
+                // are identical source but distinct call sites, and
+                // MANGO_TARGET_CLONES-vectorized stencil kernels feeding
+                // them can pick FMA contraction differently at the
+                // scalar/vector boundary of each loop -- observed diffs
+                // are ~1e-14 relative, far below anything a fitted-vs-raw
+                // contamination bug (order-1 relative) would produce.
+                EXPECT_NEAR(Lu[i], expected, std::abs(expected) * 1e-12 + 1e-18)
+                    << "i=" << i;
+            }
+        });
+}
+
+// The Il'in-fitted operator's extra diffusion must never make L(psi) LARGER
+// than the raw operator's at deep-ITM put nodes: psi'' = -e^x < 0 there, so
+// the fitted a_f >= a bias is strictly downward (fitted <= raw). On an
+// asymmetric (sinh) grid at least one deep node must show a STRICT
+// inequality -- the bias is real, not just non-positive by construction.
+TEST(SpatialOperatorFittedTest, FittedLPsiNeverAboveRawForDeepPut) {
+    with_operator(
+        GridSpec<double>::sinh_spaced(-4.0, 0.0, 21, 3.0).value(),
+        BlackScholesPDE<double>(0.20, 0.0, 0.0),
+        [&](auto& op, auto&, auto& grid_view, auto&) {
+            const size_t n = grid_view.size();
+            const auto& x = grid_view.span();
+            std::vector<double> psi(n);
+            for (size_t i = 0; i < n; ++i) {
+                psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+            }
+            const double psi_max = *std::max_element(psi.begin(), psi.end());
+
+            std::vector<double> fitted(n, 0.0), raw(n, 0.0);
+            op.apply(0.0, psi, fitted);
+            op.apply_unfitted(0.0, psi, raw);
+
+            bool any_strict = false;
+            for (size_t i = 1; i < n - 1; ++i) {
+                if (psi[i] > 0.95 * psi_max) {
+                    EXPECT_LE(fitted[i], raw[i] + 1e-15 * std::abs(raw[i]))
+                        << "i=" << i << " fitted=" << fitted[i]
+                        << " raw=" << raw[i];
+                    if (fitted[i] < raw[i]) any_strict = true;
+                }
+            }
+            EXPECT_TRUE(any_strict)
+                << "expected at least one deep node with a strict fitted < "
+                   "raw bias on this asymmetric grid";
+        });
+}
+
 }  // namespace
 }  // namespace mango::operators

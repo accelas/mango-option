@@ -795,12 +795,21 @@ private:
                 // Newton path (solve_implicit_stage), never by this projected
                 // path. The loop below only reads lpsi[first_candidate..n-2],
                 // an interior-only range by construction (first_candidate is
-                // found by a scan over [1, n-2]), so whatever
-                // apply_spatial_operator() writes at the boundary entries
-                // (Dirichlet zero or the real Neumann L value) is never
-                // touched here.
+                // found by a scan over [1, n-2]), so boundary entries are
+                // never touched here regardless of what fills them.
+                //
+                // This deliberately uses the RAW (unfitted) operator, not
+                // apply_spatial_operator() (#472 gate-2 review): condition 3
+                // asks a PHYSICAL question — is ψ a strict subsolution of
+                // the continuous PDE? — and the Il'in-fitted diffusion used
+                // for stage residuals/RHS/Jacobian adds extra numerical
+                // diffusion that biases L(ψ) negative for puts (ψ'' = −eˣ <
+                // 0 deep ITM), which can lock a node whose RAW L(ψ) >= 0 is
+                // actually continuation-valued. See
+                // SpatialOperator::apply_unfitted() and
+                // AmericanOptionTest.ZeroRateDeepITMPutOnCoarseAsymmetricGridEqualsEuropean.
                 auto lpsi = workspace_.newton_u_old();
-                apply_spatial_operator(t, psi, lpsi);
+                derived().spatial_operator().apply_unfitted(t, psi, lpsi);
 
                 for (size_t i = first_candidate; i < n_ - 1; ++i) {
                     bool deep_itm = (psi[i] > deep_itm_threshold);

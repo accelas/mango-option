@@ -505,3 +505,25 @@ wave:**
   `PDEWorkspace`, added in execution after measuring a 1.85× uncached ATM
   regression (see `ensure_fitted_cache` in `spatial_operator.hpp` and the
   Testing/Risks sections above).
+
+## Gate 2 (pre-merge Codex review)
+
+**Deep-ITM lock criterion evaluates the RAW operator (`apply_unfitted`):**
+the deep-ITM exercise lock's condition 3 in
+`PDESolver::solve_implicit_stage_projected`
+(`src/pde/internal/pde_solver.hpp`) asks a physical question — is the
+payoff $\psi$ a strict subsolution of the continuous PDE, i.e. $L(\psi) <
+0$? — and the fitted diffusion added for stage residuals/RHS/Jacobian
+would bias that answer: for puts $\psi'' = -e^x < 0$ deep ITM, so the
+Il'in-fitted $a_f \geq a$ makes $(a_f - a)\cdot\psi'' < 0$, pushing
+$L(\psi)$ negative and over-locking continuation-valued nodes to intrinsic
+on coarse, asymmetric grids (Codex found a concrete fixture: zero-rate,
+no-dividend put, $dx_{\text{left}}=0.1$, $dx_{\text{right}}=0.2$,
+$\sigma=20\%$, $S/K=0.04$, fitted $L(\psi) \approx -2.67\times10^{-5}$
+while the raw operator is non-negative there). **Resolution:** added
+`SpatialOperator::apply_unfitted()` — the same stencil/combine path as
+`apply()`/`apply_interior()` but with the raw coefficient
+$a = $ `second_derivative_coeff()` (no Il'in fitting) — and the lock
+criterion now calls it instead of `apply_spatial_operator()`. Stage
+residuals, the RHS, and the assembled Jacobian are untouched and still use
+the fitted operator exclusively; only this classification check changed.

@@ -98,6 +98,35 @@ public:
                        std::span<T> Lu,
                        size_t start,
                        size_t end) const {
+        apply_interior_impl<true>(t, u, Lu, start, end);
+    }
+
+    /// Physical (unfitted) operator. Used ONLY for classification decisions
+    /// that must reflect the continuous PDE (the deep-ITM exercise lock,
+    /// #472), never for stage residuals/RHS/Jacobian, which must stay
+    /// consistent with the fitted assembly (apply()/apply_interior()
+    /// above). For HasJacobianCoefficients PDEs this evaluates
+    /// L(u) = a·u'' + b(t)·u' − r(t)·u with the RAW diffusion coefficient
+    /// a = second_derivative_coeff() (no Il'in fitting); for other PDEs it
+    /// is identical to apply()/apply_interior() (there is no fitted vs.
+    /// raw distinction to make — both paths call pde_(...) directly).
+    void apply_unfitted(double t, std::span<const T> u, std::span<T> Lu) const {
+        const auto range = interior_range(u.size());
+        apply_interior_impl<false>(t, u, Lu, range.start, range.end);
+    }
+
+private:
+    /// Shared stencil + combine implementation for apply_interior() and
+    /// apply_unfitted(). Fitted selects the Il'in-fitted diffusion
+    /// coefficient (via ensure_fitted_cache/a_f_cache) vs. the raw
+    /// coefficient a = second_derivative_coeff() for HasJacobianCoefficients
+    /// PDEs; other PDEs take the identical pde_(...) path in both cases.
+    template <bool Fitted>
+    void apply_interior_impl(double t,
+                            std::span<const T> u,
+                            std::span<T> Lu,
+                            size_t start,
+                            size_t end) const {
         auto d2u = workspace_->d2u_scratch();
         auto du = workspace_->du_scratch();
 
@@ -120,10 +149,16 @@ public:
             const T a = pde_.second_derivative_coeff();
             const T b = pde_.first_derivative_coeff(t);
             const T r = pde_.discount_rate(t);
-            ensure_fitted_cache(a, b);
-            const auto a_f_cache = workspace_->a_f_cache();
-            for (size_t i = start; i < end; ++i) {
-                Lu[i] = a_f_cache[i] * d2u[i] + b * du[i] - r * u[i];
+            if constexpr (Fitted) {
+                ensure_fitted_cache(a, b);
+                const auto a_f_cache = workspace_->a_f_cache();
+                for (size_t i = start; i < end; ++i) {
+                    Lu[i] = a_f_cache[i] * d2u[i] + b * du[i] - r * u[i];
+                }
+            } else {
+                for (size_t i = start; i < end; ++i) {
+                    Lu[i] = a * d2u[i] + b * du[i] - r * u[i];
+                }
             }
         } else {
             for (size_t i = start; i < end; ++i) {
@@ -135,6 +170,8 @@ public:
             }
         }
     }
+
+public:
 
     /// Greeks computation (delegates to stencil)
     void compute_first_derivative(std::span<const T> u,

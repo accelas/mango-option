@@ -432,6 +432,41 @@ TEST(AmericanOptionTest, ZeroRateDeepITMPutEqualsEuropean) {
     EXPECT_NEAR(american, european, 0.05);
 }
 
+// Guard for #472 gate-2 pre-merge review: the deep-ITM exercise lock's
+// condition 3 (L(psi) < 0) must use the RAW (unfitted) operator, not the
+// Il'in-fitted one -- a fitted evaluation biases L(psi) negative for puts
+// (psi'' = -e^x < 0 deep ITM) and can over-lock continuation-valued nodes
+// on a coarse, asymmetric grid. With r=0 an American put never exercises
+// early, so American == European everywhere; this deliberately uses a
+// coarse sinh grid (asymmetric cells) at deep-ITM S/K = 0.05 to approximate
+// the finding's fixture. It is fine -- and expected -- for this test to
+// pass both before and after the fix (continuation value is tiny this deep
+// ITM, so over-locking barely moves the price here); it is a guard against
+// the lock criterion regressing, not a test that discriminates the bug.
+TEST(AmericanOptionTest, ZeroRateDeepITMPutOnCoarseAsymmetricGridEqualsEuropean) {
+    PricingParams params(
+        OptionSpec{.spot = 5.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.0, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    PDEGridConfig grid_config{
+        .grid_spec = GridSpec<double>::sinh_spaced(-5.0, 1.0, 21, 3.0).value(),
+        .n_time = 100};
+    auto solver = AmericanOptionSolver::create(params, grid_config);
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+
+    const double american = result->value_at(params.spot);
+    const double european = EuropeanOptionResult(params).value();
+    const double intrinsic = params.strike - params.spot;  // 95.0
+
+    EXPECT_GE(american, european - 0.05);
+    EXPECT_NEAR(american, european, 0.05);
+    EXPECT_GE(american, intrinsic);
+}
+
 // Regression/spec test for the public complementarity report (issue #439).
 // An ATM put solve is an M-matrix regime end-to-end, so a clean solve must
 // report zero KKT violations. This is the strongest single assertion that
