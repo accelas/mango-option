@@ -10,8 +10,9 @@
 #include <memory>
 #include <concepts>
 #include <cassert>
-#include <limits>
 #include <span>
+#include <bit>
+#include <cstdint>
 
 namespace mango::operators {
 
@@ -297,40 +298,67 @@ private:
     /// perf follow-up: measured ~1.85x slower on the default sinh-spaced
     /// grid without this cache — std::tanh landed on every interior node
     /// of every apply()/assemble_jacobian() call). Recomputes only when
-    /// (a, b, grid) differ from the last sampled triple, via exact double
-    /// comparison against cached_a_/cached_b_ and pointer comparison
-    /// against cached_grid_ (initialized to NaN/nullptr so the first call
-    /// always misses). For a constant-rate PDE, b never changes across a
-    /// whole solve, so std::tanh runs once per grid instead of once per
-    /// node per call. For a callable-rate PDE, b(t) changes only at
-    /// time-step/stage boundaries, so the cache still amortizes std::tanh
-    /// across the several apply() calls (residual, Newton line search,
-    /// ...) that share one (t, a, b) sample. The grid key exists so a
-    /// cache filled for one GridSpacing can never be silently read back
-    /// for a different one that happens to sample the same (a, b) — e.g.
-    /// two SpatialOperator instances sharing a PDEWorkspace across grids
-    /// (not a pattern used today, but (a, b) alone cannot distinguish it).
+    /// (a, b, grid) differ from the last sampled triple, tracked via
+    /// workspace_->fitted_cache_meta() — three doubles co-located with
+    /// a_f_cache in the SAME workspace buffer (#472 follow-up; see
+    /// PDEWorkspace::fitted_cache_meta() for the slot layout and why
+    /// validity metadata lives there rather than as members here).
+    /// Compared by exact double equality for (a, b) and by re-interpreting
+    /// the grid slot's bit pattern as a std::uintptr_t for the grid key
+    /// (never compared as a double: a pointer's bit pattern can happen to
+    /// form a NaN payload, which would break exact comparison). The
+    /// buffer's carve-time initialization (NaN/NaN/0-bits) makes the first
+    /// call on a fresh workspace always miss.
     ///
-    /// THREAD-SAFETY: cached_a_/cached_b_/cached_grid_ are `mutable`, and
-    /// the cache array lives in *workspace_ (non-owning). This is safe
-    /// only because a SpatialOperator/PDEWorkspace pair is owned 1:1 by a
-    /// single solver instance and never shared across threads: grepping
+    /// For a constant-rate PDE, b never changes across a whole solve, so
+    /// std::tanh runs once per grid instead of once per node per call. For
+    /// a callable-rate PDE, b(t) changes only at time-step/stage
+    /// boundaries, so the cache still amortizes std::tanh across the
+    /// several apply() calls (residual, Newton line search, ...) that
+    /// share one (t, a, b) sample. The grid key exists so a cache filled
+    /// for one GridSpacing can never be silently read back for a different
+    /// one that happens to sample the same (a, b).
+    ///
+    /// SHARED-WORKSPACE CORRECTNESS: because the validity key and the
+    /// cached data are co-located in the workspace buffer, two
+    /// SpatialOperator instances that share one PDEWorkspace (e.g. via
+    /// copy, or by construction) can no longer observe each other's stale
+    /// data under a locally-matching key — whichever operator last called
+    /// ensure_fitted_cache() also owns the key that says the cache is
+    /// valid, so the next call from a DIFFERENT (a, b, grid) sample always
+    /// misses and recomputes, regardless of which operator makes it. Two
+    /// operators alternating samples over one workspace therefore stay
+    /// correct; they just recompute on every switch instead of each
+    /// keeping its own hit rate (this is a single shared-buffer cache, not
+    /// a per-operator one — see
+    /// SpatialOperatorFittedTest.TwoOperatorsSharingWorkspaceStayCorrect).
+    ///
+    /// THREAD-SAFETY: this cache is still safe only because a
+    /// SpatialOperator/PDEWorkspace pair is owned 1:1 by a single solver
+    /// instance and never shared across threads: grepping
     /// create_spatial_operator() call sites under src/ shows exactly two
     /// (src/option/american_option.cpp, both inside a solver class that
     /// constructs its own workspace_local_ and spatial_op_ once, in its
     /// constructor), and the OpenMP batch loop
     /// (src/option/american_option_batch.cpp) constructs one full solver
     /// per loop iteration rather than sharing one across iterations/
-    /// threads. Do not add a call site that shares one SpatialOperator
-    /// (or its workspace) across threads without revisiting this cache.
+    /// threads. Co-locating validity with the data fixes the
+    /// cross-operator staleness hazard, not concurrent access: two threads
+    /// racing on the same workspace's fitted_cache_meta()/a_f_cache() is
+    /// still a data race. Do not add a call site that shares one
+    /// SpatialOperator (or its workspace) across threads without
+    /// revisiting this cache.
     void ensure_fitted_cache(T a, T b) const {
-        const void* grid_key = spacing_.get();
-        if (a == cached_a_ && b == cached_b_ && grid_key == cached_grid_) {
+        auto meta = workspace_->fitted_cache_meta();
+        const auto grid_key = static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(spacing_.get()));
+        const auto cached_grid_key = std::bit_cast<std::uint64_t>(meta[2]);
+        if (a == meta[0] && b == meta[1] && grid_key == cached_grid_key) {
             return;
         }
-        cached_a_ = a;
-        cached_b_ = b;
-        cached_grid_ = grid_key;
+        meta[0] = a;
+        meta[1] = b;
+        meta[2] = std::bit_cast<double>(grid_key);
         const auto& grid = spacing_->grid();
         const size_t n = grid.size();
         assert(n == workspace_->a_f_cache().size() &&
@@ -353,13 +381,11 @@ private:
     std::shared_ptr<GridSpacing<T>> spacing_;
     std::shared_ptr<CenteredDifference<T>> stencil_;  // Shared ownership of templated facade
     PDEWorkspace* workspace_;  // Non-owning; workspace outlives operator
-    // Fitted-diffusion cache validity (#472 perf follow-up): keyed on
-    // (a, b, grid) -- NaN/nullptr so the first ensure_fitted_cache() call
-    // always (correctly) misses. See ensure_fitted_cache() for why the
-    // grid identity is part of the key.
-    mutable T cached_a_ = std::numeric_limits<T>::quiet_NaN();
-    mutable T cached_b_ = std::numeric_limits<T>::quiet_NaN();
-    mutable const void* cached_grid_ = nullptr;
+    // Fitted-diffusion cache validity (#472 follow-up) no longer lives
+    // here: it is co-located with a_f_cache in *workspace_ via
+    // PDEWorkspace::fitted_cache_meta(), so it stays correct when two
+    // SpatialOperator instances share one workspace. See
+    // ensure_fitted_cache() above.
 };
 
 /// Concept to detect spatial operators exposing analytic ghost-eliminated

@@ -3,10 +3,12 @@
 
 #include <span>
 #include <cstdint>
+#include <bit>
 #include <expected>
 #include <string>
 #include <format>
 #include <algorithm>
+#include <limits>
 #include "mango/math/tridiagonal_matrix_view.hpp"
 
 namespace mango {
@@ -38,6 +40,15 @@ namespace mango {
  *   (SpatialOperator, #472) -- amortizes the std::tanh in
  *   fitted_diffusion() across the repeated apply()/assemble_jacobian()
  *   calls of a single (a, b) sample instead of paying it per node per call
+ * - fitted_cache_meta (3, padded to 8): validity metadata for a_f_cache,
+ *   co-located with it in this buffer rather than held by SpatialOperator
+ *   (#472 follow-up) so that when two SpatialOperator instances share one
+ *   PDEWorkspace, whichever last filled a_f_cache also owns the key that
+ *   says so -- a stale key living on a different object can no longer read
+ *   back the wrong data. Slot 0 = cached a, slot 1 = cached b (NaN until
+ *   first fill), slot 2 = the sampled GridSpacing's identity as
+ *   std::uintptr_t bits (0 until first fill; never compared as a double,
+ *   since a pointer's bit pattern can form a NaN payload)
  * - tridiag_workspace (2n): Thomas solver workspace
  * - active_mask (n bytes): LCP active-set mask (uint8_t), carved from a
  *   double-aligned tail block so PDEWorkspace stays a single span<double>
@@ -49,7 +60,8 @@ struct PDEWorkspace {
         return ((n + SIMD_WIDTH - 1) / SIMD_WIDTH) * SIMD_WIDTH;
     }
 
-    /// Calculate required buffer size (16 arrays + tridiag @ 2n)
+    /// Calculate required buffer size (16 arrays + tridiag @ 2n +
+    /// fitted_cache_meta + active_mask tail)
     static constexpr size_t required_size(size_t n) {
         size_t n_padded = pad_to_simd(n);
         size_t n_minus_1_padded = pad_to_simd(n - 1);
@@ -69,7 +81,12 @@ struct PDEWorkspace {
         // array here.
         size_t mask_doubles = pad_to_simd((n + sizeof(double) - 1) / sizeof(double));
 
-        return regular_n + arrays_n_minus_1 + tridiag + mask_doubles;
+        // fitted_cache_meta: 3 doubles (cached a, b, grid-key bits),
+        // fixed-size (independent of n), padded to the same SIMD-safe
+        // boundary as every other array here.
+        size_t meta_padded = pad_to_simd(3);
+
+        return regular_n + arrays_n_minus_1 + tridiag + mask_doubles + meta_padded;
     }
 
     /// Create workspace spans from buffer (without grid, dx not initialized)
@@ -143,6 +160,20 @@ struct PDEWorkspace {
 
         workspace.a_f_cache_ = buffer.subspan(offset, n_padded);
         offset += n_padded;
+
+        // fitted_cache_meta: 3 doubles co-located with a_f_cache so
+        // validity travels with the data (#472 follow-up). Slots 0/1
+        // (cached a, b) start at NaN and slot 2 (grid-key bits) starts at
+        // 0, so the first ensure_fitted_cache() call on this buffer always
+        // misses regardless of which SpatialOperator touches it first.
+        static_assert(sizeof(std::uintptr_t) <= sizeof(std::uint64_t),
+                      "grid key must round-trip through a uint64_t bit_cast");
+        size_t meta_padded = pad_to_simd(3);
+        workspace.fitted_cache_meta_ = buffer.subspan(offset, meta_padded);
+        offset += meta_padded;
+        workspace.fitted_cache_meta_[0] = std::numeric_limits<double>::quiet_NaN();
+        workspace.fitted_cache_meta_[1] = std::numeric_limits<double>::quiet_NaN();
+        workspace.fitted_cache_meta_[2] = std::bit_cast<double>(std::uint64_t{0});
 
         // tridiag_workspace (2n, padded)
         size_t tridiag_padded = pad_to_simd(2 * n);
@@ -238,10 +269,26 @@ struct PDEWorkspace {
     /// Per-node fitted-diffusion coefficient cache (SpatialOperator, #472).
     /// Owned by the workspace so it survives across the repeated
     /// apply()/assemble_jacobian() calls of one Newton stage without a
-    /// per-call heap allocation; validity (whether it reflects the
-    /// currently sampled a, b) is tracked by SpatialOperator, not here.
+    /// per-call heap allocation. Validity is tracked by fitted_cache_meta()
+    /// below, co-located in this same buffer so it travels with the data.
     std::span<double> a_f_cache() { return a_f_cache_.subspan(0, n_); }
     std::span<const double> a_f_cache() const { return a_f_cache_.subspan(0, n_); }
+
+    /// Validity metadata for a_f_cache (#472 follow-up): slot 0 = cached
+    /// a, slot 1 = cached b, slot 2 = the sampled GridSpacing's identity
+    /// as std::uintptr_t bits (see SpatialOperator::ensure_fitted_cache).
+    /// Co-located with a_f_cache in this workspace buffer -- rather than
+    /// held as members on SpatialOperator -- so that when two
+    /// SpatialOperator instances share one PDEWorkspace, the key that
+    /// says whether a_f_cache is valid lives with the data it describes:
+    /// whichever operator last filled the cache also owns the key, so a
+    /// second operator reading a stale local key can no longer read back
+    /// data it didn't write. Behavior when two operators alternate over
+    /// one workspace is "correct but recomputes on every switch" rather
+    /// than "corrupt" -- this is a shared single-slot cache, not a
+    /// per-operator one.
+    std::span<double> fitted_cache_meta() { return fitted_cache_meta_.subspan(0, 3); }
+    std::span<const double> fitted_cache_meta() const { return fitted_cache_meta_.subspan(0, 3); }
 
     std::span<double> tridiag_workspace() { return tridiag_workspace_.subspan(0, 2 * n_); }
     std::span<const double> tridiag_workspace() const { return tridiag_workspace_.subspan(0, 2 * n_); }
@@ -281,6 +328,7 @@ private:
     std::span<double> d2u_scratch_;
     std::span<double> du_scratch_;
     std::span<double> a_f_cache_;
+    std::span<double> fitted_cache_meta_;
     std::span<uint8_t> active_mask_;
 };
 

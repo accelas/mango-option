@@ -88,12 +88,13 @@ TEST(SpatialOperatorFittedTest, IssueFixtureUniformGridOffDiagonalSigns) {
 // Regression: at overflow-scale Peclet, tanh(rho) == 1 makes a_f == z and
 // the binding numerator must be assembled as literally a_f - z (== 0),
 // not as two independently rounded terms that can go tiny-negative. This
-// must run on an ASYMMETRIC grid: on a uniform grid (dx_left == dx_right)
-// a_f - z is exactly 0 by construction on BOTH the binding and non-binding
-// sides, so the old two-term accumulation (a_f/(dx*dx_avg) -
-// b*dx_other/(dx*(dx_l+dx_r))) would also happen to round to exactly 0 —
-// every division involved is exact at h = 1 — and the test could not
-// distinguish sign-preserving assembly from the bug it guards against.
+// must run on an ASYMMETRIC grid: the canonical two-term form (a_f -
+// z as a single subtraction) is bit-identical to the old two-term
+// accumulation on ANY grid, uniform or not, so what actually needs the
+// asymmetric cells here is exercising a binding entry on unequal-length
+// neighbor cells at the extreme-rho regime where tanh(rho) == 1 and
+// a_f == z exactly — the assertion below is on the assembled entry's
+// sign, not on distinguishing the two arithmetic forms.
 TEST(SpatialOperatorFittedTest, AssembledBindingEntryNonNegativeAtExtremeRho) {
     with_operator(
         GridSpec<double>::sinh_spaced(-5.0, 5.0, 11, 3.0).value(),  // asymmetric cells
@@ -409,6 +410,83 @@ TEST(SpatialOperatorFittedTest, FittedCacheInvalidatesOnRateChange) {
                 EXPECT_EQ(jac.diag()[i], diag_t1[i]) << "i=" << i;
             }
         });
+}
+
+// Regression (#472 gate-2 fix): the fitted-cache validity metadata used to
+// live on SpatialOperator itself (cached_a_/cached_b_/cached_grid_), so
+// when two SpatialOperator instances shared one PDEWorkspace, each kept an
+// independent validity key while both wrote the SAME a_f_cache array. After
+// op B overwrote the cache with its own coefficients, op A's next call
+// would see its OWN unchanged (a, b, grid) sample still match its own
+// local key and return early -- silently reading back op B's fitted
+// values instead of its own. Co-locating the key with the data in the
+// workspace buffer (PDEWorkspace::fitted_cache_meta()) fixes this: the key
+// that says the cache is valid travels with the array it describes, so a
+// mismatched writer always misses and recomputes, regardless of which
+// operator makes the call.
+TEST(SpatialOperatorFittedTest, TwoOperatorsSharingWorkspaceStayCorrect) {
+    auto spec = GridSpec<double>::sinh_spaced(-2.0, 2.0, 21, 3.0).value();
+    auto grid_buf = spec.generate();
+    auto grid_view = grid_buf.view();
+    auto spacing = std::make_shared<GridSpacing<double>>(grid_view);
+    const size_t n = grid_view.size();
+
+    std::vector<double> buffer(PDEWorkspace::required_size(n));
+    auto workspace = PDEWorkspace::from_buffer(buffer, n).value();
+
+    // Two operators, same workspace, same grid (same spacing_ pointer),
+    // different sampled coefficients (rate 0.05 vs 0.09).
+    auto op_a = create_spatial_operator(
+        BlackScholesPDE<double>(0.01, 0.05, 0.0), spacing, workspace);
+    auto op_b = create_spatial_operator(
+        BlackScholesPDE<double>(0.01, 0.09, 0.0), spacing, workspace);
+
+    auto jac = workspace.jacobian();
+
+    op_a.assemble_jacobian(0.0, 1.0, jac);
+    std::vector<double> lower_a1(jac.lower().begin(), jac.lower().end());
+    std::vector<double> diag_a1(jac.diag().begin(), jac.diag().end());
+    std::vector<double> upper_a1(jac.upper().begin(), jac.upper().end());
+
+    // op B writes the SAME shared a_f_cache with its own coefficients.
+    op_b.assemble_jacobian(0.0, 1.0, jac);
+
+    // op A re-assembles at the SAME (a, b) it started with. Its own local
+    // validity key (pre-fix) would still match, so it must not silently
+    // reuse op B's fitted values.
+    op_a.assemble_jacobian(0.0, 1.0, jac);
+    std::vector<double> lower_a2(jac.lower().begin(), jac.lower().end());
+    std::vector<double> diag_a2(jac.diag().begin(), jac.diag().end());
+    std::vector<double> upper_a2(jac.upper().begin(), jac.upper().end());
+
+    for (size_t i = 0; i < lower_a1.size(); ++i) {
+        EXPECT_EQ(lower_a2[i], lower_a1[i]) << "i=" << i;
+    }
+    for (size_t i = 0; i < diag_a1.size(); ++i) {
+        EXPECT_EQ(diag_a2[i], diag_a1[i]) << "i=" << i;
+    }
+    for (size_t i = 0; i < upper_a1.size(); ++i) {
+        EXPECT_EQ(upper_a2[i], upper_a1[i]) << "i=" << i;
+    }
+
+    // Cross-check against a THIRD operator, A's PDE, over its OWN fresh
+    // workspace -- never went through a cache-sharing transition at all.
+    std::vector<double> buffer_c(PDEWorkspace::required_size(n));
+    auto workspace_c = PDEWorkspace::from_buffer(buffer_c, n).value();
+    auto op_c = create_spatial_operator(
+        BlackScholesPDE<double>(0.01, 0.05, 0.0), spacing, workspace_c);
+    auto jac_c = workspace_c.jacobian();
+    op_c.assemble_jacobian(0.0, 1.0, jac_c);
+
+    for (size_t i = 0; i < lower_a1.size(); ++i) {
+        EXPECT_EQ(jac_c.lower()[i], lower_a1[i]) << "i=" << i;
+    }
+    for (size_t i = 0; i < diag_a1.size(); ++i) {
+        EXPECT_EQ(jac_c.diag()[i], diag_a1[i]) << "i=" << i;
+    }
+    for (size_t i = 0; i < upper_a1.size(); ++i) {
+        EXPECT_EQ(jac_c.upper()[i], upper_a1[i]) << "i=" << i;
+    }
 }
 
 }  // namespace

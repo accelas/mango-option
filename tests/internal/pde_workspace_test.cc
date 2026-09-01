@@ -13,7 +13,8 @@ TEST(PDEWorkspaceTest, RequiredSize) {
     // - 3 arrays @ padded(99) = 3 × 104 = 312
     // - tridiag @ padded(200) = 200
     // - active_mask: 100 bytes -> 13 doubles -> padded(13) = 16 doubles
-    // Total = 1880
+    // - fitted_cache_meta: 3 doubles -> padded(3) = 8 doubles
+    // Total = 1888
     size_t n = 100;
     size_t required = PDEWorkspace::required_size(n);
 
@@ -22,9 +23,10 @@ TEST(PDEWorkspaceTest, RequiredSize) {
     size_t tridiag_padded = PDEWorkspace::pad_to_simd(2 * n);  // 200
     size_t mask_doubles = PDEWorkspace::pad_to_simd(
         (n + sizeof(double) - 1) / sizeof(double));  // 16
+    size_t meta_padded = PDEWorkspace::pad_to_simd(3);  // 8
 
     size_t expected = 13 * n_padded + 3 * n_minus_1_padded + tridiag_padded
-                     + mask_doubles;
+                     + mask_doubles + meta_padded;
     EXPECT_EQ(required, expected);
 }
 
