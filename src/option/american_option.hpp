@@ -116,9 +116,10 @@ public:
 
 private:
     // Internal hook for backward-chained discrete-dividend surface segments.
-    // Keeping this non-public is part of the projected-LCP domain contract:
-    // arbitrary initial data can manufacture an active set detached from both
-    // grid edges, which no oriented one-pass sweep can solve exactly.
+    // Each segment's PricingParams pass AmericanOptionSolver::create()
+    // validation before the batch setup callback installs this continuation
+    // surface. Keeping the hook private prevents arbitrary initial states from
+    // bypassing the projected-LCP topology contract.
     friend class SegmentedPriceTableBuilder;
     void set_initial_condition(InitialCondition ic) { custom_ic_ = std::move(ic); }
 
