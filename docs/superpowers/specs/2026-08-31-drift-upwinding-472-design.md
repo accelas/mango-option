@@ -211,6 +211,14 @@ Changes, all inside `SpatialOperator`, gated on
    field would just invite disagreement between the two.
 2. **`assemble_jacobian`** uses `a_f(i,t)` in place of `a` in the three
    second-derivative coefficients. Drift and reaction terms unchanged.
+   **Uniform-grid law (binding):** on uniform grids, both
+   `assemble_jacobian` and `apply_interior` fit with the canonical
+   `spacing_->spacing()`, never per-cell coordinate diffs — `dx_left`/
+   `dx_right` must both resolve to the stored spacing, not `grid[i] -
+   grid[i-1]` — because `CenteredDifference`'s uniform stencil uses the
+   stored spacing for every derivative, and per-cell diffs differ from it
+   in the last ulp, which would break the exact apply/Jacobian identity
+   the sign-preserving assembly above requires.
 3. **`apply_interior`** gains a coefficient-combine path for
    `HasJacobianCoefficients` PDEs:
    `Lu[i] = a_f(i,t)·d2u[i] + b(t)·du[i] − r(t)·u[i]`,
@@ -486,3 +494,14 @@ architectural layer as the brainstorm decision, better testability. The
 sweep table is immutable during execution: a cell failing with an
 active-set `worst_kind` while the direct matrix-sign tests pass at the
 same parameters is a #473 finding to surface, never a cell to delete.
+
+**Plan review round 2 (Codex) — spec amendments folded in the final fix
+wave:**
+- Uniform-grid law: `assemble_jacobian` and `apply_interior` must fit with
+  `spacing_->spacing()` on uniform grids, never per-cell coordinate diffs
+  — folded into Architecture item 2 above (it was implemented correctly
+  from the start but had not been recorded as spec-level binding law).
+- Fitted-diffusion cache: a per-sampled-`(a, b, grid)` cache of `a_f` in
+  `PDEWorkspace`, added in execution after measuring a 1.85× uncached ATM
+  regression (see `ensure_fitted_cache` in `spatial_operator.hpp` and the
+  Testing/Risks sections above).

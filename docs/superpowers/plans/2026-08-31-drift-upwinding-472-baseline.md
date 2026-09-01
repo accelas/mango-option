@@ -289,3 +289,46 @@ status.
 
 `bazel build //src/python:mango_option` succeeds, no warnings from project
 code.
+
+## Final fix wave — ρ distribution on default grids
+
+Measurement only, temporary test, reverted after recording (final fix
+wave item I). For σ ∈ {0.01, 0.05, 0.20}, ATM put (S=K=100), r=5%, q=0,
+T=1, `mango::estimate_pde_grid(params)` picks the default `GridSpec`
+(sinh-spaced, n=101 for all three σ in this fixture); for every interior
+cell, ρ = |b|·h_binding/(2a) with a = σ²/2, b = r − q − σ²/2,
+h_binding = dx_right (b > 0 here, since q = 0 keeps b ≈ r > 0 for these
+σ).
+
+Ran: `TMPDIR=/tmp/codex-skills/b1f0461c-8c94-4e80-ad4d-789f804f4e10 bazel
+test //tests:american_option_test
+--test_filter='*TEMP_RhoDistributionOnDefaultGrids472*' --test_output=all`
+
+| σ     | n   | ρ min     | ρ median  | ρ max    |
+|-------|-----|-----------|-----------|----------|
+| 0.01  | 101 | 0.279162  | 0.420397  | 1.00621  |
+| 0.05  | 101 | 0.0544911 | 0.0820595 | 0.196408 |
+| 0.20  | 101 | 0.00838325| 0.0126245 | 0.0302166|
+
+**Observation: ρ is NOT σ-independent on default auto-selected grids —
+it scales roughly as `O(1/σ)`, decreasing as σ increases**, the opposite
+of the "roughly σ-independent because domain width and spacing both
+scale with σ" hypothesis floated when this measurement was planned. The
+domain half-width and point spacing do scale with σ (`estimate_pde_grid`
+sizes the domain to `n_sigma·σ·√T`, and point count came out fixed at
+n=101 across all three σ here), so `h_binding ∝ σ`; but `a = σ²/2` scales
+as `σ²` while `b = r − q − σ²/2 ≈ r` stays roughly constant for these σ
+(σ²/2 ≪ r), so `ρ = |b|·h_binding/(2a) ∝ r·σ/σ² = r/σ` — an inverse, not
+a cancellation. The median ratios confirm it: 0.420397/0.0820595 ≈ 5.12
+for a 5× σ increase (0.01→0.05, close to the predicted 1/σ), and
+0.0820595/0.0126245 ≈ 6.50 for a 4× σ increase (0.05→0.20, somewhat
+steeper than 1/σ, plausibly from `n_sigma`/spacing-law nonlinearity at
+larger σ·√T). This is consistent with — and a quantitative confirmation
+of — the doc's existing claim that the cell-Péclet failure mode this
+issue fixes is specifically a **low-volatility, coarse-grid** phenomenon
+(σ = 1%, h = 0.1 in the canonical fixture): on default grids, low-vol
+configs run at ρ up to ≈1.0 at the domain edge, roughly 30–80× the ρ of
+high-vol configs, not a σ-uniform hazard.
+
+This observation (corrected from the pre-measurement hypothesis) is
+recorded in `docs/MATHEMATICAL_FOUNDATIONS.md`'s #472 section.
