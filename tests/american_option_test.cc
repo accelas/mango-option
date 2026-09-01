@@ -752,7 +752,8 @@ TEST(AmericanOptionTest, LowVolCoarseGridComplementaritySweep) {
                         GridSpec<double>::uniform(-2.0, 2.0, n_space).value(),
                     .n_time = 50};
                 auto solver = AmericanOptionSolver::create(params, grid_config);
-                ASSERT_TRUE(solver.has_value());
+                ASSERT_TRUE(solver.has_value())
+                    << "sigma=" << sigma << " n=" << n_space << " r=" << rate;
                 auto result = solver->solve();
                 ASSERT_TRUE(result.has_value())
                     << "sigma=" << sigma << " n=" << n_space << " r=" << rate;

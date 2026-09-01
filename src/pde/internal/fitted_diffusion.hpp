@@ -15,7 +15,8 @@
  * Contract (binding; see the #472 design spec):
  *  - a < 0 is outside the contract (debug assert).
  *  - a == 0, b != 0 returns the representable convection limit a_f = z.
- *  - b == 0 returns exactly a (bit-exact pure-diffusion behavior).
+ *  - z == 0 (b == 0, or a degenerate zero-width binding cell) returns
+ *    exactly a (bit-exact pure-diffusion behavior).
  *  - Callers sample a and b once per assembly/apply invocation and pass
  *    them in; this function is pure.
  */

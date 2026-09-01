@@ -267,7 +267,8 @@ TEST(PDESolverTest, InvalidGammaRejectedAtSolve) {
             std::fill(u.begin(), u.end(), 0.0);
         });
         auto status = solver.solve();
-        ASSERT_FALSE(status.has_value()) << "gamma=" << gamma;
+        EXPECT_FALSE(status.has_value()) << "gamma=" << gamma;
+        if (status.has_value()) continue;
         EXPECT_EQ(status.error().code,
                   mango::SolverErrorCode::InvalidConfiguration)
             << "gamma=" << gamma;

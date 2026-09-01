@@ -49,7 +49,7 @@ struct PDEWorkspace {
         return ((n + SIMD_WIDTH - 1) / SIMD_WIDTH) * SIMD_WIDTH;
     }
 
-    /// Calculate required buffer size (15 arrays + tridiag @ 2n)
+    /// Calculate required buffer size (16 arrays + tridiag @ 2n)
     static constexpr size_t required_size(size_t n) {
         size_t n_padded = pad_to_simd(n);
         size_t n_minus_1_padded = pad_to_simd(n - 1);

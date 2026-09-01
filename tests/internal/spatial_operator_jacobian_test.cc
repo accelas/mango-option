@@ -2,6 +2,16 @@
 //
 // Regression test for Jacobian/operator stencil consistency on non-uniform grids.
 // See issue #329: the Jacobian used a different first-derivative stencil than apply().
+// The stencil-divergence guard this file originally existed for now lives in
+// JacobianMatchesApplyFiniteDifference (below) and in
+// ApplyMatchesAssembledMatrix (tests/internal/spatial_operator_fitted_test.cc),
+// both of which compare against apply()'s actual output rather than a
+// hand-derived formula. NonUniformFirstDerivativeConsistency below instead
+// pins the production Il'in-fitted reduced-assembly formula (#472) against
+// an independent re-derivation from fitted_diffusion() -- it would not catch
+// a #329-style stencil divergence (its "expected" values are derived from
+// the same production formula, not from apply()), only a typo in that
+// re-derivation.
 
 #include "mango/pde/internal/spatial_operator.hpp"
 #include "mango/pde/internal/fitted_diffusion.hpp"
@@ -17,13 +27,23 @@ namespace mango::operators {
 namespace {
 
 // ===========================================================================
-// Regression: Jacobian first-derivative stencil must match apply() stencil
-// Bug: assemble_jacobian() used (u[i+1]-u[i-1])/(dx_l+dx_r) while apply()
-//      used the weighted forward/backward stencil. These differ on non-uniform
-//      grids, causing the implicit solve to converge to the wrong discretization.
+// Originally: regression that the Jacobian first-derivative stencil matches
+// apply()'s stencil (#329 bug: assemble_jacobian() used
+// (u[i+1]-u[i-1])/(dx_l+dx_r) while apply() used the weighted
+// forward/backward stencil -- these differ on non-uniform grids). That
+// stencil-divergence guard now lives in JacobianMatchesApplyFiniteDifference
+// (below, compares against apply()'s actual finite-difference response) and
+// ApplyMatchesAssembledMatrix (spatial_operator_fitted_test.cc, compares
+// against apply()'s actual L*u). NonUniformFirstDerivativeConsistency below
+// instead pins the production Il'in-fitted reduced-assembly formula (#472)
+// against an independent re-derivation via fitted_diffusion() -- both sides
+// are formulas, not apply() output, so this test only catches a typo in the
+// re-derivation, not a genuine apply()/Jacobian divergence.
 // ===========================================================================
 
-// Verify Jacobian coefficients match finite-difference of apply() on a sinh grid
+// Verify the assembled Jacobian matches an independent re-derivation of the
+// production fitted-reduced-assembly formula (see file header: does NOT
+// exercise apply()).
 TEST(SpatialOperatorJacobianTest, NonUniformFirstDerivativeConsistency) {
     // Use a sinh grid with strong concentration (α=4) to amplify non-uniformity
     auto grid_spec = GridSpec<double>::sinh_spaced(-1.0, 1.0, 21, 4.0).value();

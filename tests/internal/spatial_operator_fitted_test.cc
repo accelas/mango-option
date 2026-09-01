@@ -87,10 +87,16 @@ TEST(SpatialOperatorFittedTest, IssueFixtureUniformGridOffDiagonalSigns) {
 
 // Regression: at overflow-scale Peclet, tanh(rho) == 1 makes a_f == z and
 // the binding numerator must be assembled as literally a_f - z (== 0),
-// not as two independently rounded terms that can go tiny-negative.
+// not as two independently rounded terms that can go tiny-negative. This
+// must run on an ASYMMETRIC grid: on a uniform grid (dx_left == dx_right)
+// a_f - z is exactly 0 by construction on BOTH the binding and non-binding
+// sides, so the old two-term accumulation (a_f/(dx*dx_avg) -
+// b*dx_other/(dx*(dx_l+dx_r))) would also happen to round to exactly 0 —
+// every division involved is exact at h = 1 — and the test could not
+// distinguish sign-preserving assembly from the bug it guards against.
 TEST(SpatialOperatorFittedTest, AssembledBindingEntryNonNegativeAtExtremeRho) {
     with_operator(
-        GridSpec<double>::uniform(-5.0, 5.0, 11).value(),      // h = 1
+        GridSpec<double>::sinh_spaced(-5.0, 5.0, 11, 3.0).value(),  // asymmetric cells
         BlackScholesPDE<double>(1e-4, 0.05, 0.0),              // a = 5e-9
         [&](auto& op, auto& workspace, auto& grid_view, auto&) {
             auto jac = workspace.jacobian();
@@ -319,8 +325,29 @@ TEST(SpatialOperatorFittedTest, LaplacianCombinePathNumericallyIdentical) {
 // (ensure_fitted_cache/a_f_cache) must invalidate when the sampled drift
 // b changes (callable-rate PDE) and must reuse cached values -- giving
 // bit-identical output -- when (a, b) are unchanged.
+//
+// The same-t re-assembly half below (a cache hit reproducing t=0 output
+// bit-for-bit) is a real check, but the divergence half that FOLLOWS it
+// ("assemble at a different t, expect *some* entry to differ from t=0")
+// cannot actually fail on a stale cache: even if ensure_fitted_cache()
+// wrongly reused the t=0 a_f values at t=1.0, the drift term z (and hence
+// the assembled off-diagonals, via num_lower/num_upper) is recomputed
+// inline from the freshly-sampled b every call -- a stale a_f still
+// produces a numerically different row once b has changed. So "any_differs
+// == true" would pass whether or not the cache actually invalidated.
+//
+// The discriminating check is therefore an EXACT cross-check against a
+// second, independently-assembled operator that never went through a
+// cache transition at all: a constant-rate PDE fixed at r=0.09 (same
+// sigma, dividend, and grid), assembled fresh at t=0. If FittedCache's
+// t=1.0 assembly used a stale (r=0.05) a_f, its bands would numerically
+// differ from this reference's bands (both still finite, so "any_differs"
+// above would not have caught it either); a correct cache produces
+// bit-identical bands, because both paths sample the same (a=0.01,
+// b(0.09), grid) and ensure_fitted_cache is otherwise deterministic.
 TEST(SpatialOperatorFittedTest, FittedCacheInvalidatesOnRateChange) {
     auto rate_fn = [](double t) { return t < 0.5 ? 0.05 : 0.09; };
+    std::vector<double> lower_t1, upper_t1, diag_t1;
     with_operator(
         GridSpec<double>::sinh_spaced(-2.0, 2.0, 21, 3.0).value(),
         BlackScholesPDE(0.01, rate_fn, 0.0),
@@ -343,7 +370,8 @@ TEST(SpatialOperatorFittedTest, FittedCacheInvalidatesOnRateChange) {
 
             // Assemble at a DIFFERENT t (rate steps 0.05 -> 0.09 at t=0.5):
             // the cache must invalidate, so at least one interior
-            // off-diagonal must differ from the t=0 assembly.
+            // off-diagonal must differ from the t=0 assembly. (Weak check
+            // -- see the discriminating cross-check below.)
             op.assemble_jacobian(1.0, 1.0, jac);
             bool any_differs = false;
             for (size_t i = 1; i < n - 1; ++i) {
@@ -354,6 +382,32 @@ TEST(SpatialOperatorFittedTest, FittedCacheInvalidatesOnRateChange) {
             }
             EXPECT_TRUE(any_differs)
                 << "cache did not invalidate on rate change";
+
+            lower_t1.assign(jac.lower().begin(), jac.lower().end());
+            upper_t1.assign(jac.upper().begin(), jac.upper().end());
+            diag_t1.assign(jac.diag().begin(), jac.diag().end());
+        });
+
+    // Discriminating cross-check: a fresh operator/workspace, constant
+    // rate fixed at the SAME value (0.09) the callable-rate PDE steps to
+    // at t=1.0, same sigma/dividend/grid. A stale a_f_cache in the first
+    // operator would make its t=1.0 bands numerically diverge from this
+    // one; a correctly-invalidated cache makes them EXACTLY equal, since
+    // both assemblies sample the identical (a, b, grid) triple through
+    // the same deterministic fitted_diffusion() computation.
+    with_operator(
+        GridSpec<double>::sinh_spaced(-2.0, 2.0, 21, 3.0).value(),
+        BlackScholesPDE<double>(0.01, 0.09, 0.0),
+        [&](auto& op, auto& workspace, auto& grid_view, auto&) {
+            const size_t n = grid_view.size();
+            auto jac = workspace.jacobian();
+            op.assemble_jacobian(0.0, 1.0, jac);
+            ASSERT_EQ(lower_t1.size(), n - 1);
+            for (size_t i = 1; i < n - 1; ++i) {
+                EXPECT_EQ(jac.lower()[i - 1], lower_t1[i - 1]) << "i=" << i;
+                EXPECT_EQ(jac.upper()[i], upper_t1[i]) << "i=" << i;
+                EXPECT_EQ(jac.diag()[i], diag_t1[i]) << "i=" << i;
+            }
         });
 }
 

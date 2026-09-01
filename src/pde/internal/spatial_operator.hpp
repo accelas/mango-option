@@ -170,6 +170,8 @@ public:
         const T c = -pde_.discount_rate(t);           // -r(t)
 
         const size_t n = jac.size();
+        assert(n == spacing_->grid().size() &&
+               "Jacobian view size must match the grid this operator was built over");
         const auto& grid = spacing_->grid();
         // Uniform grids: use the canonical stored spacing, NOT per-cell
         // coordinate differences — CenteredDifference's uniform stencil
@@ -291,22 +293,27 @@ private:
     }
 
     /// Ensure workspace_->a_f_cache()[1 .. n-2] holds the Il'in-fitted
-    /// diffusion coefficient for the CURRENTLY sampled (a, b) (#472
+    /// diffusion coefficient for the CURRENTLY sampled (a, b, grid) (#472
     /// perf follow-up: measured ~1.85x slower on the default sinh-spaced
     /// grid without this cache — std::tanh landed on every interior node
     /// of every apply()/assemble_jacobian() call). Recomputes only when
-    /// (a, b) differ from the last sampled pair, via exact double
-    /// comparison against cached_a_/cached_b_ (initialized to NaN so the
-    /// first call always misses). For a constant-rate PDE, b never
-    /// changes across a whole solve, so std::tanh runs once per grid
-    /// instead of once per node per call. For a callable-rate PDE, b(t)
-    /// changes only at time-step/stage boundaries, so the cache still
-    /// amortizes std::tanh across the several apply() calls (residual,
-    /// Newton line search, ...) that share one (t, a, b) sample.
+    /// (a, b, grid) differ from the last sampled triple, via exact double
+    /// comparison against cached_a_/cached_b_ and pointer comparison
+    /// against cached_grid_ (initialized to NaN/nullptr so the first call
+    /// always misses). For a constant-rate PDE, b never changes across a
+    /// whole solve, so std::tanh runs once per grid instead of once per
+    /// node per call. For a callable-rate PDE, b(t) changes only at
+    /// time-step/stage boundaries, so the cache still amortizes std::tanh
+    /// across the several apply() calls (residual, Newton line search,
+    /// ...) that share one (t, a, b) sample. The grid key exists so a
+    /// cache filled for one GridSpacing can never be silently read back
+    /// for a different one that happens to sample the same (a, b) — e.g.
+    /// two SpatialOperator instances sharing a PDEWorkspace across grids
+    /// (not a pattern used today, but (a, b) alone cannot distinguish it).
     ///
-    /// THREAD-SAFETY: cached_a_/cached_b_ are `mutable`, and the cache
-    /// array lives in *workspace_ (non-owning). This is safe only
-    /// because a SpatialOperator/PDEWorkspace pair is owned 1:1 by a
+    /// THREAD-SAFETY: cached_a_/cached_b_/cached_grid_ are `mutable`, and
+    /// the cache array lives in *workspace_ (non-owning). This is safe
+    /// only because a SpatialOperator/PDEWorkspace pair is owned 1:1 by a
     /// single solver instance and never shared across threads: grepping
     /// create_spatial_operator() call sites under src/ shows exactly two
     /// (src/option/american_option.cpp, both inside a solver class that
@@ -317,13 +324,17 @@ private:
     /// threads. Do not add a call site that shares one SpatialOperator
     /// (or its workspace) across threads without revisiting this cache.
     void ensure_fitted_cache(T a, T b) const {
-        if (a == cached_a_ && b == cached_b_) {
+        const void* grid_key = spacing_.get();
+        if (a == cached_a_ && b == cached_b_ && grid_key == cached_grid_) {
             return;
         }
         cached_a_ = a;
         cached_b_ = b;
+        cached_grid_ = grid_key;
         const auto& grid = spacing_->grid();
         const size_t n = grid.size();
+        assert(n == workspace_->a_f_cache().size() &&
+               "a_f_cache size must match the grid this operator was built over");
         auto cache = workspace_->a_f_cache();
         if (spacing_->is_uniform()) {
             const T h = spacing_->spacing();
@@ -342,10 +353,13 @@ private:
     std::shared_ptr<GridSpacing<T>> spacing_;
     std::shared_ptr<CenteredDifference<T>> stencil_;  // Shared ownership of templated facade
     PDEWorkspace* workspace_;  // Non-owning; workspace outlives operator
-    // Fitted-diffusion cache validity (#472 perf follow-up): NaN so the
-    // first ensure_fitted_cache() call always (correctly) misses.
+    // Fitted-diffusion cache validity (#472 perf follow-up): keyed on
+    // (a, b, grid) -- NaN/nullptr so the first ensure_fitted_cache() call
+    // always (correctly) misses. See ensure_fitted_cache() for why the
+    // grid identity is part of the key.
     mutable T cached_a_ = std::numeric_limits<T>::quiet_NaN();
     mutable T cached_b_ = std::numeric_limits<T>::quiet_NaN();
+    mutable const void* cached_grid_ = nullptr;
 };
 
 /// Concept to detect spatial operators exposing analytic ghost-eliminated
