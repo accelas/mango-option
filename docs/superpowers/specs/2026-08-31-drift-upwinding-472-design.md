@@ -249,22 +249,36 @@ the stage-weight premise above.
 
 ## Testing
 
-1. **Regression test** (per acceptance criteria, in the #475 regression
-   style): full American solve via the public API
-   (`AmericanOptionSolver::create` with a custom `PDEGridConfig` uniform
-   grid); assert `complementarity_report().violation_count == 0`.
-   Canonical fixture (starting point): PUT, S = K = 100, T = 1, r = 5%,
-   q = 0, σ = 1%, uniform x-grid over ≈[−2, 2] with spacing h ≈ 0.1
-   (n ≈ 41), default time stepping. **Execution task 0 (binding): run this
-   fixture on unmodified code and record its nonzero
-   `violation_count`/`worst_kind` in the test comment before implementing
-   the fix; if it does not violate as-is, adjust within the sweep table
-   below until it does and pin the adjusted fixture.** The "nearby sweep"
-   is a fixed parameterized table (e.g. σ ∈ {0.5%, 1%, 2%} × h ∈ {0.05,
-   0.1} × r ∈ {2%, 5%}), not an informal instruction. A zero-KKT
-   assertion can in principle still fail for #473 (active-set) reasons —
-   the direct matrix-sign unit tests (item 2) are what attribute the
-   improvement specifically to the M-matrix repair.
+1. **Regression tests.** *Premise correction (execution task 1,
+   2026-09-01, recorded in
+   `docs/superpowers/plans/2026-08-31-drift-upwinding-472-baseline.md`):*
+   the issue's fixture family does NOT produce KKT-visible violations on
+   unmodified code — 57/57 full-solve configs (puts/calls, both drift
+   signs, off-ATM, T ∈ {0.25, 1, 3}, cell Péclet up to ≈400) report
+   `violation_count == 0`. The structural defect is nevertheless
+   confirmed: on the canonical fixture the assembled stage Jacobian has
+   `jac.lower ≈ +0.24475` on every interior row (L's lower off-diagonal
+   negative — the sign flip, at the predicted magnitude). The full-solve
+   KKT report stays clean because (a) the deep-ITM lock replaces the
+   deepest active rows with identity rows before the sweep, removing the
+   flipped entries from exactly the region they would bite, and (b) the
+   remaining transition band is still magnitude-diagonally-dominant
+   (|diag| ≈ 1.06 vs |lower|+|upper| ≈ 0.50) for this fixture family —
+   a property of these fixtures, not a guarantee. Therefore:
+   - **Primary regression (attributable):** the direct matrix-sign test
+     on the issue's exact fixture — PUT, S = K = 100, T = 1, r = 5%,
+     q = 0, σ = 1%, uniform grid over [−2, 2], n = 41 (h = 0.1) —
+     asserting every interior `jac.lower ≤ 0` and `jac.upper ≤ 0`, with
+     the pre-fix value `+0.24475` recorded in the test comment. This
+     satisfies the issue's acceptance criterion in its second form ("no
+     violation attributable to a non-M-matrix off-diagonal").
+   - **Guards (public API):** the full-solve `violation_count == 0`
+     assertion on the canonical fixture, a fixed immutable sweep table
+     (σ ∈ {0.5%, 1%, 2%} × h ∈ {0.05, 0.1} × r ∈ {2%, 5%}), and the
+     drift-sign-crossing solve. Their comments state honestly that they
+     were already clean pre-fix; they guard against the fitting
+     *introducing* a defect, and against the deep-ITM-lock workaround
+     ever being removed without this fix in place.
 2. **Helper-invariant unit tests** (internal `SpatialOperator` fixture, in
    the style of `tests/internal/spatial_operator_jacobian_test.cc`):
    - assembled off-diagonal signs on deliberately **asymmetric non-uniform

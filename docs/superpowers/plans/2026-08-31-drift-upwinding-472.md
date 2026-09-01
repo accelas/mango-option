@@ -396,6 +396,30 @@ TEST(SpatialOperatorFittedTest, OffDiagonalSignsHighPecletBothDriftSigns) {
     }
 }
 
+// PRIMARY #472 regression: the issue's exact fixture (PUT ATM, r=5%, q=0,
+// sigma=1%, uniform h=0.1 on [-2,2]). Pre-fix baseline measured 2026-09-01
+// (docs/superpowers/plans/2026-08-31-drift-upwinding-472-baseline.md):
+// jac.lower = +0.24475 on every interior row (L's lower off-diagonal
+// NEGATIVE — the M-matrix break), diag ≈ 1.06, upper ≈ -0.25475. The
+// full-solve KKT report is clean pre-fix (deep-ITM identity-row lock +
+// magnitude dominance mask it), so THIS structural assertion is what
+// attributes the repair to the discretization.
+TEST(SpatialOperatorFittedTest, IssueFixtureUniformGridOffDiagonalSigns) {
+    with_operator(
+        GridSpec<double>::uniform(-2.0, 2.0, 41).value(),
+        BlackScholesPDE<double>(0.01, 0.05, 0.0),
+        [&](auto& op, auto& workspace, auto& grid_view, auto&) {
+            auto jac = workspace.jacobian();
+            op.assemble_jacobian(0.0, 1.0, jac);  // J = I - L
+            const size_t n = grid_view.size();
+            for (size_t i = 1; i < n - 1; ++i) {
+                EXPECT_LE(jac.lower()[i - 1], 0.0) << "i=" << i;   // was +0.24475
+                EXPECT_LE(jac.upper()[i], 0.0) << "i=" << i;
+                EXPECT_GT(jac.diag()[i], 0.0) << "i=" << i;
+            }
+        });
+}
+
 // Regression: at overflow-scale Peclet, tanh(rho) == 1 makes a_f == z and
 // the binding numerator must be assembled as literally a_f - z (== 0),
 // not as two independently rounded terms that can go tiny-negative.
@@ -965,19 +989,24 @@ git commit -m "Validate TR-BDF2 gamma at solve() entry"
 **Interfaces:**
 - Consumes: fitted solver from Tasks 3–4; baseline numbers from Task 1's `docs/superpowers/plans/2026-08-31-drift-upwinding-472-baseline.md`.
 
-- [ ] **Step 1: Add the canonical regression + sweep** (new section at the end of `tests/american_option_test.cc`, after the #439/#455 regression block). Fill `<COUNT>`, `<KIND>` from Task 1's baseline doc:
+- [ ] **Step 1: Add the canonical guard + sweep** (new section at the end of `tests/american_option_test.cc`, after the #439/#455 regression block). Task 1 measured these as ALREADY clean pre-fix (57/57 configs, `violation_count = 0`) — the comment below states that honestly; the attributable regression is the structural sign test in `tests/internal/spatial_operator_fitted_test.cc` (Task 3):
 
 ```cpp
 // ===========================================================================
-// Regression tests for #472: Il'in-fitted drift discretization (M-matrix)
+// Guard tests for #472: Il'in-fitted drift discretization (M-matrix)
 // ===========================================================================
 
-// Regression: high cell-Péclet drift broke the M-matrix property (#472).
-// Bug: centered drift at σ=1%, h=0.1 flips a stage off-diagonal sign, so
-// the one-pass projected Thomas sweep is inexact and validate_lcp_kkt
-// reports violations. Pre-fix baseline (recorded 2026-08-31, task 1 of
-// docs/superpowers/plans/2026-08-31-drift-upwinding-472.md):
-// violation_count = <COUNT>, worst_kind = <KIND>.
+// Guard: high cell-Péclet drift broke the stage Jacobian's M-matrix
+// structure (#472): at σ=1%, h=0.1 the centered drift stencil made L's
+// lower off-diagonal negative (jac.lower = +0.24475 pre-fix — see the
+// structural regression IssueFixtureUniformGridOffDiagonalSigns in
+// tests/internal/spatial_operator_fitted_test.cc). The full-solve KKT
+// report was ALREADY clean before the fix (baseline 2026-09-01, 57/57
+// configs: the deep-ITM identity-row lock removes the flipped entries
+// from the deepest active rows and the transition band stays
+// magnitude-dominant for this fixture family). This test therefore guards
+// that the fitting introduces no solution defect and that the KKT report
+// stays clean if the deep-ITM workaround is ever narrowed.
 TEST(AmericanOptionTest, HighPecletComplementarityCleanAfterFitting) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
