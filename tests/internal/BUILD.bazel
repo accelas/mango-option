@@ -86,6 +86,30 @@ cc_test(
 )
 
 cc_test(
+    name = "spatial_operator_fitted_test",
+    size = "small",
+    srcs = ["spatial_operator_fitted_test.cc"],
+    deps = [
+        "//src/pde/internal:workspace",
+        "//src/pde/operators:black_scholes_pde",
+        "//src/pde/operators:centered_difference",
+        "//src/pde/operators:laplacian_pde",
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "fitted_diffusion_test",
+    size = "small",
+    srcs = ["fitted_diffusion_test.cc"],
+    deps = [
+        "//src/pde/internal:workspace",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "pde_solver_snapshot_test",
     srcs = ["pde_solver_snapshot_test.cc"],
     deps = [

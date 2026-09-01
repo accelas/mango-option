@@ -432,6 +432,41 @@ TEST(AmericanOptionTest, ZeroRateDeepITMPutEqualsEuropean) {
     EXPECT_NEAR(american, european, 0.05);
 }
 
+// Guard for #472 gate-2 pre-merge review: the deep-ITM exercise lock's
+// condition 3 (L(psi) < 0) must use the RAW (unfitted) operator, not the
+// Il'in-fitted one -- a fitted evaluation biases L(psi) negative for puts
+// (psi'' = -e^x < 0 deep ITM) and can over-lock continuation-valued nodes
+// on a coarse, asymmetric grid. With r=0 an American put never exercises
+// early, so American == European everywhere; this deliberately uses a
+// coarse sinh grid (asymmetric cells) at deep-ITM S/K = 0.05 to approximate
+// the finding's fixture. It is fine -- and expected -- for this test to
+// pass both before and after the fix (continuation value is tiny this deep
+// ITM, so over-locking barely moves the price here); it is a guard against
+// the lock criterion regressing, not a test that discriminates the bug.
+TEST(AmericanOptionTest, ZeroRateDeepITMPutOnCoarseAsymmetricGridEqualsEuropean) {
+    PricingParams params(
+        OptionSpec{.spot = 5.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.0, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    PDEGridConfig grid_config{
+        .grid_spec = GridSpec<double>::sinh_spaced(-5.0, 1.0, 21, 3.0).value(),
+        .n_time = 100};
+    auto solver = AmericanOptionSolver::create(params, grid_config);
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+
+    const double american = result->value_at(params.spot);
+    const double european = EuropeanOptionResult(params).value();
+    const double intrinsic = params.strike - params.spot;  // 95.0
+
+    EXPECT_GE(american, european - 0.05);
+    EXPECT_NEAR(american, european, 0.05);
+    EXPECT_GE(american, intrinsic);
+}
+
 // Regression/spec test for the public complementarity report (issue #439).
 // An ATM put solve is an M-matrix regime end-to-end, so a clean solve must
 // report zero KKT violations. This is the strongest single assertion that
@@ -508,12 +543,13 @@ TEST(AmericanOptionTest, CustomGridOmittingDividendDateStillAligns) {
 // immediately before the envelope wiring landed (bazel run of a throwaway
 // solve at the same params gave 10.447090628631905 both before and after).
 //
-// The 1e-12 pin is toolchain-sensitive (FP reassociation can shift the
-// last few ULPs of a solve this deep) -- same precedent as this repo's
-// other toolchain-pinned goldens (e.g. the x86-64-v3 pin from PR #468's
-// CI test split, and bspline_bit_identity_test's bit-identical goldens).
-// On an unexplained failure here, re-pin only after verifying the
-// toolchain (not the BC formula) is what changed.
+// Re-pinned 2026-08-31 for #472: the Il'in-fitted drift discretization
+// deliberately perturbs every FDM solve by O(ρ²) added diffusion (see
+// docs/superpowers/specs/2026-08-31-drift-upwinding-472-design.md).
+// Previous pin: 10.447090628631905. The 1e-12 tolerance remains
+// toolchain-sensitive (FP reassociation) -- same precedent as PR #468's
+// x86-64-v3 pin. On an unexplained failure, verify the toolchain (not
+// the discretization) changed before re-pinning.
 TEST(AmericanOptionTest, NoDivCallPriceUnchangedByEnvelopeBC) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
@@ -524,7 +560,7 @@ TEST(AmericanOptionTest, NoDivCallPriceUnchangedByEnvelopeBC) {
     auto result = solve_american_option(params);
     ASSERT_TRUE(result.has_value());
 
-    constexpr double kPinnedPrice = 10.447090628631905;
+    constexpr double kPinnedPrice = 10.447225343887069;
     EXPECT_NEAR(result->value_at(params.spot), kPinnedPrice, 1e-12);
 }
 
@@ -700,6 +736,99 @@ TEST(ValidateFiniteSolutionTest, AcceptsFiniteSolution) {
     std::vector<double> final_u = {1.0, 2.0, 3.0};
     std::vector<double> prev_u = {0.5, 1.5, 2.5};
     EXPECT_FALSE(mango::detail::validate_finite_solution(final_u, prev_u).has_value());
+}
+
+// ===========================================================================
+// Guard tests for #472: Il'in-fitted drift discretization (M-matrix)
+// ===========================================================================
+
+// Guard: high cell-Péclet drift broke the stage Jacobian's M-matrix
+// structure (#472): at σ=1%, h=0.1 the centered drift stencil made L's
+// lower off-diagonal negative (jac.lower = +0.24475 pre-fix — see the
+// structural regression IssueFixtureUniformGridOffDiagonalSigns in
+// tests/internal/spatial_operator_fitted_test.cc). The full-solve KKT
+// report was ALREADY clean before the fix (baseline 2026-09-01, 57/57
+// configs: the deep-ITM identity-row lock removes the flipped entries
+// from the deepest active rows and the transition band stays
+// magnitude-dominant for this fixture family). This test therefore guards
+// that the fitting introduces no solution defect and that the KKT report
+// stays clean if the deep-ITM workaround is ever narrowed.
+TEST(AmericanOptionTest, HighPecletComplementarityCleanAfterFitting) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        0.01);
+
+    PDEGridConfig grid_config{
+        .grid_spec = GridSpec<double>::uniform(-2.0, 2.0, 41).value(),
+        .n_time = 50};
+    auto solver = AmericanOptionSolver::create(params, grid_config);
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(solver->complementarity_report().violation_count, 0u)
+        << "max_violation=" << solver->complementarity_report().max_violation
+        << " worst_kind=" << solver->complementarity_report().worst_kind;
+}
+
+// Fixed sweep table around the canonical fixture (spec Testing item 1).
+TEST(AmericanOptionTest, LowVolCoarseGridComplementaritySweep) {
+    for (double sigma : {0.005, 0.01, 0.02}) {
+        for (size_t n_space : {41u, 81u}) {   // h = 0.1, 0.05
+            for (double rate : {0.02, 0.05}) {
+                PricingParams params(
+                    OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                               .rate = rate, .dividend_yield = 0.0,
+                               .option_type = OptionType::PUT},
+                    sigma);
+                PDEGridConfig grid_config{
+                    .grid_spec =
+                        GridSpec<double>::uniform(-2.0, 2.0, n_space).value(),
+                    .n_time = 50};
+                auto solver = AmericanOptionSolver::create(params, grid_config);
+                ASSERT_TRUE(solver.has_value())
+                    << "sigma=" << sigma << " n=" << n_space << " r=" << rate;
+                auto result = solver->solve();
+                ASSERT_TRUE(result.has_value())
+                    << "sigma=" << sigma << " n=" << n_space << " r=" << rate;
+                EXPECT_EQ(solver->complementarity_report().violation_count, 0u)
+                    << "sigma=" << sigma << " n=" << n_space << " r=" << rate
+                    << " worst_kind="
+                    << solver->complementarity_report().worst_kind;
+            }
+        }
+    }
+}
+
+// Guards the per-t binding-side re-derivation: b(t) = r(t) − q − σ²/2
+// crosses zero during the solve (σ=10% ⇒ σ²/2 = 0.005; q = 2%; curve
+// rates straddle 2.5%).
+TEST(AmericanOptionTest, DriftSignCrossingSolvesCleanly) {
+    // TenorPoint stores ln(D(t)) = -∫r ds, NOT a rate (yield_curve.hpp).
+    // Forward rates: 1% on [0, 0.25] (log-discount -0.0025), 4% on
+    // [0.25, 2.0] (-0.0025 - 0.04*1.75 = -0.0725). Same construction
+    // pattern as AmericanOptionPricingTest.PricingWithYieldCurve
+    // (tests/american_option_test.cc:~185).
+    std::vector<TenorPoint> points = {
+        {0.0, 0.0}, {0.25, -0.0025}, {2.0, -0.0725}};
+    auto curve = YieldCurve::from_points(points).value();
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = curve, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.10);
+
+    PDEGridConfig grid_config{
+        .grid_spec = GridSpec<double>::sinh_spaced(-2.0, 2.0, 101, 3.0).value(),
+        .n_time = 200};
+    auto solver = AmericanOptionSolver::create(params, grid_config);
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(solver->complementarity_report().violation_count, 0u)
+        << "worst_kind=" << solver->complementarity_report().worst_kind;
+    EXPECT_TRUE(std::isfinite(result->value_at(100.0)));
 }
 
 }  // namespace

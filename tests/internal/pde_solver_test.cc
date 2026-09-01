@@ -9,6 +9,8 @@
 #include <cmath>
 #include <numbers>
 #include <memory_resource>
+#include <limits>
+#include <algorithm>
 
 namespace {
 
@@ -229,4 +231,52 @@ TEST(PDESolverTest, ConvergenceFailureReportsNonzeroResidual) {
     EXPECT_EQ(result.error().code, mango::SolverErrorCode::ConvergenceFailure);
     EXPECT_TRUE(std::isfinite(result.error().residual));
     EXPECT_GT(result.error().residual, 0.0);
+}
+
+// Regression: TR-BDF2 stage weights w1 = γ·dt/2 and w2 = (1−γ)·dt/(2−γ)
+// are positive only for γ in (0,1); outside it the stage matrix loses the
+// Z-matrix premise of #472's M-matrix guarantee.
+// Bug guard: set_config accepted any TRBDF2Config silently.
+TEST(PDESolverTest, InvalidGammaRejectedAtSolve) {
+    const double D = 0.1;
+    auto grid_spec = mango::GridSpec<double>::uniform(0.0, 1.0, 11).value();
+    auto time = mango::TimeDomain::from_n_steps(0.0, 0.1, 10);
+    auto grid = mango::Grid<double>::create(grid_spec, time).value();
+
+    std::pmr::monotonic_buffer_resource pool;
+    size_t buffer_size = mango::PDEWorkspace::required_size(grid->n_space());
+    std::pmr::vector<double> pmr_buffer(buffer_size, 0.0, &pool);
+    auto workspace = mango::PDEWorkspace::from_buffer_and_grid(
+        std::span{pmr_buffer.data(), pmr_buffer.size()},
+        grid->x(), grid->n_space()).value();
+
+    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
+    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
+    auto pde = mango::operators::LaplacianPDE<double>(D);
+    auto spacing = std::make_shared<mango::GridSpacing<double>>(grid->spacing());
+    auto op = mango::operators::create_spatial_operator(std::move(pde), spacing,
+                                                        workspace);
+
+    for (double gamma : {0.0, 1.0, 1.5, -0.5,
+                         std::numeric_limits<double>::quiet_NaN()}) {
+        auto solver = TestPDESolver(grid, workspace, left_bc, right_bc, op);
+        mango::TRBDF2Config config;
+        config.gamma = gamma;
+        solver.set_config(config);
+        solver.initialize([](std::span<const double>, std::span<double> u) {
+            std::fill(u.begin(), u.end(), 0.0);
+        });
+        auto status = solver.solve();
+        EXPECT_FALSE(status.has_value()) << "gamma=" << gamma;
+        if (status.has_value()) continue;
+        EXPECT_EQ(status.error().code,
+                  mango::SolverErrorCode::InvalidConfiguration)
+            << "gamma=" << gamma;
+        EXPECT_EQ(status.error().iterations, 0u);
+        if (std::isnan(gamma)) {
+            EXPECT_TRUE(std::isnan(status.error().residual));
+        } else {
+            EXPECT_EQ(status.error().residual, gamma);
+        }
+    }
 }

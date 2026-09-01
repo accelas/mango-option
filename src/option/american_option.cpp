@@ -37,7 +37,7 @@ namespace {
 
 // Sized to cover GridAccuracyParams::max_spatial_points (1200 by
 // default) without heap fallback. Per-thread footprint:
-// ~270 KB (33920 doubles × 8 bytes).
+// ~290 KB (37128 doubles × 8 bytes; PDEWorkspace::required_size(2048)).
 constexpr size_t TLS_RESERVE_N = 2048;
 constexpr size_t TLS_RESERVE_BYTES =
     PDEWorkspace::required_size(TLS_RESERVE_N) * sizeof(double);
