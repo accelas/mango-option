@@ -24,6 +24,10 @@
 
 namespace mango {
 
+namespace detail {
+class AmericanOptionSolverAccess;
+}
+
 /**
  * American option pricing solver using finite difference method.
  *
@@ -112,10 +116,13 @@ public:
     /// Callable type for custom initial conditions: f(x, u) fills u given grid points x
     using InitialCondition = std::function<void(std::span<const double>, std::span<double>)>;
 
-    /// Set a custom initial condition (overrides the standard payoff)
+private:
+    // Internal hook for validated pricing infrastructure that chains a
+    // continuation surface. The detail access shim is package-private; this
+    // public header does not depend on any concrete table-builder type.
+    friend class detail::AmericanOptionSolverAccess;
     void set_initial_condition(InitialCondition ic) { custom_ic_ = std::move(ic); }
 
-private:
     /// Optional custom initial condition (replaces default payoff when set)
     std::optional<InitialCondition> custom_ic_;
 };

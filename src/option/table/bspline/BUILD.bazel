@@ -92,6 +92,7 @@ cc_library(
         ":bspline_surface",
         "//src/option/table:adaptive_grid_types",
         "//src/option:american_option",
+        "//src/option:american_option_solver_access",
         "//src/option:dividend_utils",
         "//src/option:grid_spec_types",
         "//src/support:error_types",

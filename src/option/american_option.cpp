@@ -387,6 +387,85 @@ public:
 
 using AmericanSolverVariant = std::variant<AmericanPutSolver, AmericanCallSolver>;
 
+// Brennan-Schwartz is a one-pass LCP solve.  The Il'in-fitted spatial
+// operator guarantees the required off-diagonal signs, but two assumptions
+// still have to be enforced at the American-option boundary:
+//
+//  * 1 + w*r(t) > 0 for every implicit stage (diagonal dominance); and
+//  * the exercise set is one-sided.  With q >= 0 (enforced by
+//    validate_pricing_params), a rate term structure of one sign has the
+//    standard one-sided/empty exercise topology.  A curve which crosses zero
+//    is not covered: time-inhomogeneous negative-rate models can develop a
+//    floating exercise interval with two boundaries.
+//
+// Every TR-BDF2/Rannacher implicit coefficient is at most dt/2, and dt <= T,
+// so r > -2/T is a conservative grid/config-independent dominance bound.
+std::optional<ValidationError> validate_projected_lcp_domain(
+    const PricingParams& params)
+{
+    const double min_admissible_rate = -2.0 / params.maturity;
+    // Do not admit a value merely because it rounded one ULP above the
+    // theoretical open boundary.  At the worst permitted stage weight that
+    // can still round 1 + w*r to zero.  Keep a small, scale-aware FP margin.
+    const double dominance_margin = 64.0 * std::numeric_limits<double>::epsilon() *
+        std::max(1.0, std::abs(min_admissible_rate));
+    const double min_rate_with_margin = min_admissible_rate + dominance_margin;
+
+    if (const auto* scalar_rate = std::get_if<double>(&params.rate)) {
+        if (*scalar_rate <= min_rate_with_margin) {
+            return ValidationError{ValidationErrorCode::InvalidRate, *scalar_rate};
+        }
+        return std::nullopt;
+    }
+
+    const auto& curve = std::get<YieldCurve>(params.rate);
+    const auto points = curve.points();
+    if (points.size() < 2) {
+        // The default-constructed empty curve evaluates to the safe zero rate.
+        return std::nullopt;
+    }
+
+    double min_rate = std::numeric_limits<double>::infinity();
+    double max_rate = -std::numeric_limits<double>::infinity();
+    size_t min_rate_segment = 0;
+    for (size_t i = 0; i + 1 < points.size(); ++i) {
+        if (points[i].tenor >= params.maturity) break;
+        const double dt = points[i + 1].tenor - points[i].tenor;
+        const double rate = -(points[i + 1].log_discount - points[i].log_discount) / dt;
+        if (!std::isfinite(rate)) {
+            return ValidationError{ValidationErrorCode::InvalidRate, rate, i};
+        }
+        if (rate < min_rate) {
+            min_rate = rate;
+            min_rate_segment = i;
+        }
+        max_rate = std::max(max_rate, rate);
+    }
+
+    if (min_rate == std::numeric_limits<double>::infinity()) {
+        return std::nullopt;
+    }
+    if (min_rate <= min_rate_with_margin) {
+        return ValidationError{
+            ValidationErrorCode::InvalidRate, min_rate, min_rate_segment};
+    }
+    // Log-discount interpolation can manufacture a few ULPs of rate around a
+    // mathematically flat zero segment.  Classify those as zero; rejecting a
+    // curve requires a sign change large enough to be numerically meaningful.
+    const double zero_rate_scale = std::max(
+        {1.0 / params.maturity, std::abs(min_rate), std::abs(max_rate)});
+    const double zero_rate_tol = 64.0 * std::numeric_limits<double>::epsilon() *
+        zero_rate_scale;
+    if (min_rate < -zero_rate_tol && max_rate > zero_rate_tol) {
+        // Sign-changing forward rates are the reachable vanilla-input route
+        // to a floating/non-edge-touching exercise interval.  The oriented
+        // one-pass solver has no exact sweep for that topology.
+        return ValidationError{
+            ValidationErrorCode::InvalidRate, min_rate, min_rate_segment};
+    }
+    return std::nullopt;
+}
+
 }  // anonymous namespace
 
 // ============================================================================
@@ -402,6 +481,9 @@ AmericanOptionSolver::create(
     auto validation = validate_pricing_params(params);
     if (!validation) {
         return std::unexpected(validation.error());
+    }
+    if (auto lcp_validation = validate_projected_lcp_domain(params)) {
+        return std::unexpected(*lcp_validation);
     }
 
     auto grid_config = resolve_grid(params, grid);
