@@ -223,6 +223,116 @@ TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
         << "Yield curve price differs significantly from flat rate average";
 }
 
+TEST(AmericanOptionValidationTest, RejectsSignChangingForwardRateCurve) {
+    // A negative-to-positive term structure is outside the one-sided active-
+    // set domain of the oriented Brennan-Schwartz solve.  Such time-varying
+    // inputs can produce an exercise interval detached from either grid edge.
+    auto curve = YieldCurve::from_points({
+        {0.0, 0.0},
+        {0.5, 0.005},   // -1% forward rate
+        {1.0, -0.005},  // +2% forward rate
+    }).value();
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = curve, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    auto solver = AmericanOptionSolver::create(params);
+    ASSERT_FALSE(solver.has_value());
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::InvalidRate);
+    EXPECT_EQ(solver.error().index, 0u);
+}
+
+TEST(AmericanOptionValidationTest, AcceptsFlatNegativeForwardRateCurve) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = YieldCurve::flat(-0.01), .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    auto solver = AmericanOptionSolver::create(params);
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(solver->complementarity_report().violation_count, 0u);
+}
+
+TEST(AmericanOptionValidationTest, AcceptsAllNegativeForwardRateCurve) {
+    auto curve = YieldCurve::from_points({
+        {0.0, 0.0},
+        {0.5, 0.005},  // -1% forward rate
+        {1.0, 0.015},  // -2% forward rate
+    }).value();
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = curve, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    auto solver = AmericanOptionSolver::create(params);
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(solver->complementarity_report().violation_count, 0u);
+}
+
+TEST(AmericanOptionValidationTest, RejectsRateBelowDominanceBound) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = -2.0, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    auto solver = AmericanOptionSolver::create(params);
+    ASSERT_FALSE(solver.has_value());
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::InvalidRate);
+    EXPECT_DOUBLE_EQ(solver.error().value, -2.0);
+}
+
+TEST(AmericanOptionValidationTest, DominanceBoundaryHasFloatingPointMargin) {
+    constexpr double maturity = 1.0;
+    constexpr double boundary = -2.0 / maturity;
+    const double margin = 64.0 * std::numeric_limits<double>::epsilon() *
+        std::max(1.0, std::abs(boundary));
+    const double guarded_boundary = boundary + margin;
+
+    auto create_at_rate = [](double rate) {
+        PricingParams params(
+            OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = maturity,
+                       .rate = rate, .dividend_yield = 0.0,
+                       .option_type = OptionType::PUT},
+            0.20);
+        return AmericanOptionSolver::create(params);
+    };
+
+    EXPECT_FALSE(create_at_rate(std::nextafter(
+        boundary, -std::numeric_limits<double>::infinity())).has_value());
+    EXPECT_FALSE(create_at_rate(boundary).has_value());
+    EXPECT_FALSE(create_at_rate(std::nextafter(
+        boundary, std::numeric_limits<double>::infinity())).has_value());
+    EXPECT_FALSE(create_at_rate(guarded_boundary).has_value());
+    EXPECT_TRUE(create_at_rate(
+        std::nextafter(guarded_boundary,
+                       std::numeric_limits<double>::infinity())).has_value());
+}
+
+TEST(AmericanOptionValidationTest, ForwardRateZeroCrossingIgnoresUlpNoise) {
+    const double tiny = std::numeric_limits<double>::epsilon();
+    auto curve = YieldCurve::from_points({
+        {0.0, 0.0},
+        {0.5, 0.5 * tiny},   // forward rate = -epsilon
+        {1.0, 0.0},          // forward rate = +epsilon
+    }).value();
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = curve, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    EXPECT_TRUE(AmericanOptionSolver::create(params).has_value());
+}
+
 TEST_F(AmericanOptionPricingTest, DiscreteDividendPutPriceHigherThanNoDividend) {
     // A discrete dividend increases put value (spot drops)
     PricingParams no_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
