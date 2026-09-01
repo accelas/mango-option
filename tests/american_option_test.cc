@@ -703,5 +703,97 @@ TEST(ValidateFiniteSolutionTest, AcceptsFiniteSolution) {
     EXPECT_FALSE(mango::detail::validate_finite_solution(final_u, prev_u).has_value());
 }
 
+// ===========================================================================
+// Guard tests for #472: Il'in-fitted drift discretization (M-matrix)
+// ===========================================================================
+
+// Guard: high cell-Péclet drift broke the stage Jacobian's M-matrix
+// structure (#472): at σ=1%, h=0.1 the centered drift stencil made L's
+// lower off-diagonal negative (jac.lower = +0.24475 pre-fix — see the
+// structural regression IssueFixtureUniformGridOffDiagonalSigns in
+// tests/internal/spatial_operator_fitted_test.cc). The full-solve KKT
+// report was ALREADY clean before the fix (baseline 2026-09-01, 57/57
+// configs: the deep-ITM identity-row lock removes the flipped entries
+// from the deepest active rows and the transition band stays
+// magnitude-dominant for this fixture family). This test therefore guards
+// that the fitting introduces no solution defect and that the KKT report
+// stays clean if the deep-ITM workaround is ever narrowed.
+TEST(AmericanOptionTest, HighPecletComplementarityCleanAfterFitting) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        0.01);
+
+    PDEGridConfig grid_config{
+        .grid_spec = GridSpec<double>::uniform(-2.0, 2.0, 41).value(),
+        .n_time = 50};
+    auto solver = AmericanOptionSolver::create(params, grid_config);
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(solver->complementarity_report().violation_count, 0u)
+        << "max_violation=" << solver->complementarity_report().max_violation
+        << " worst_kind=" << solver->complementarity_report().worst_kind;
+}
+
+// Fixed sweep table around the canonical fixture (spec Testing item 1).
+TEST(AmericanOptionTest, LowVolCoarseGridComplementaritySweep) {
+    for (double sigma : {0.005, 0.01, 0.02}) {
+        for (size_t n_space : {41u, 81u}) {   // h = 0.1, 0.05
+            for (double rate : {0.02, 0.05}) {
+                PricingParams params(
+                    OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                               .rate = rate, .dividend_yield = 0.0,
+                               .option_type = OptionType::PUT},
+                    sigma);
+                PDEGridConfig grid_config{
+                    .grid_spec =
+                        GridSpec<double>::uniform(-2.0, 2.0, n_space).value(),
+                    .n_time = 50};
+                auto solver = AmericanOptionSolver::create(params, grid_config);
+                ASSERT_TRUE(solver.has_value());
+                auto result = solver->solve();
+                ASSERT_TRUE(result.has_value())
+                    << "sigma=" << sigma << " n=" << n_space << " r=" << rate;
+                EXPECT_EQ(solver->complementarity_report().violation_count, 0u)
+                    << "sigma=" << sigma << " n=" << n_space << " r=" << rate
+                    << " worst_kind="
+                    << solver->complementarity_report().worst_kind;
+            }
+        }
+    }
+}
+
+// Guards the per-t binding-side re-derivation: b(t) = r(t) − q − σ²/2
+// crosses zero during the solve (σ=10% ⇒ σ²/2 = 0.005; q = 2%; curve
+// rates straddle 2.5%).
+TEST(AmericanOptionTest, DriftSignCrossingSolvesCleanly) {
+    // TenorPoint stores ln(D(t)) = -∫r ds, NOT a rate (yield_curve.hpp).
+    // Forward rates: 1% on [0, 0.25] (log-discount -0.0025), 4% on
+    // [0.25, 2.0] (-0.0025 - 0.04*1.75 = -0.0725). Same construction
+    // pattern as AmericanOptionPricingTest.PricingWithYieldCurve
+    // (tests/american_option_test.cc:~185).
+    std::vector<TenorPoint> points = {
+        {0.0, 0.0}, {0.25, -0.0025}, {2.0, -0.0725}};
+    auto curve = YieldCurve::from_points(points).value();
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = curve, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.10);
+
+    PDEGridConfig grid_config{
+        .grid_spec = GridSpec<double>::sinh_spaced(-2.0, 2.0, 101, 3.0).value(),
+        .n_time = 200};
+    auto solver = AmericanOptionSolver::create(params, grid_config);
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(solver->complementarity_report().violation_count, 0u)
+        << "worst_kind=" << solver->complementarity_report().worst_kind;
+    EXPECT_TRUE(std::isfinite(result->value_at(100.0)));
+}
+
 }  // namespace
 }  // namespace mango
