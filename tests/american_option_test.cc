@@ -508,12 +508,13 @@ TEST(AmericanOptionTest, CustomGridOmittingDividendDateStillAligns) {
 // immediately before the envelope wiring landed (bazel run of a throwaway
 // solve at the same params gave 10.447090628631905 both before and after).
 //
-// The 1e-12 pin is toolchain-sensitive (FP reassociation can shift the
-// last few ULPs of a solve this deep) -- same precedent as this repo's
-// other toolchain-pinned goldens (e.g. the x86-64-v3 pin from PR #468's
-// CI test split, and bspline_bit_identity_test's bit-identical goldens).
-// On an unexplained failure here, re-pin only after verifying the
-// toolchain (not the BC formula) is what changed.
+// Re-pinned 2026-08-31 for #472: the Il'in-fitted drift discretization
+// deliberately perturbs every FDM solve by O(ρ²) added diffusion (see
+// docs/superpowers/specs/2026-08-31-drift-upwinding-472-design.md).
+// Previous pin: 10.447090628631905. The 1e-12 tolerance remains
+// toolchain-sensitive (FP reassociation) -- same precedent as PR #468's
+// x86-64-v3 pin. On an unexplained failure, verify the toolchain (not
+// the discretization) changed before re-pinning.
 TEST(AmericanOptionTest, NoDivCallPriceUnchangedByEnvelopeBC) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
@@ -524,7 +525,7 @@ TEST(AmericanOptionTest, NoDivCallPriceUnchangedByEnvelopeBC) {
     auto result = solve_american_option(params);
     ASSERT_TRUE(result.has_value());
 
-    constexpr double kPinnedPrice = 10.447090628631905;
+    constexpr double kPinnedPrice = 10.447225343887069;
     EXPECT_NEAR(result->value_at(params.spot), kPinnedPrice, 1e-12);
 }
 

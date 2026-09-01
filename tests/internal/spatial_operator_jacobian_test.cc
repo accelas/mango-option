@@ -4,6 +4,7 @@
 // See issue #329: the Jacobian used a different first-derivative stencil than apply().
 
 #include "mango/pde/internal/spatial_operator.hpp"
+#include "mango/pde/internal/fitted_diffusion.hpp"
 #include "mango/pde/operators/black_scholes_pde.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/pde/internal/pde_workspace.hpp"
@@ -72,20 +73,20 @@ TEST(SpatialOperatorJacobianTest, NonUniformFirstDerivativeConsistency) {
         double dx_right = x[i + 1] - x[i];
         double dx_avg = (dx_left + dx_right) / 2.0;
 
-        // Second derivative coefficients
-        double d2_lower = a / (dx_left * dx_avg);
-        double d2_diag  = -a * (1.0 / dx_left + 1.0 / dx_right) / dx_avg;
-        double d2_upper = a / (dx_right * dx_avg);
-
-        // First derivative: weighted forward/backward
-        double d1_denom = dx_left + dx_right;
-        double d1_lower = -b * dx_right / (dx_left * d1_denom);
-        double d1_diag  =  b * (dx_right - dx_left) / (dx_left * dx_right);
-        double d1_upper =  b * dx_left / (dx_right * d1_denom);
-
-        double expected_lower = d2_lower + d1_lower;
-        double expected_diag  = d2_diag + d1_diag + c;
-        double expected_upper = d2_upper + d1_upper;
+        // #472: expected coefficients use the Il'in-fitted diffusion and the
+        // sign-preserving reduced assembly (see fitted_diffusion.hpp).
+        auto fd = detail::fitted_diffusion(a, b, dx_left, dx_right);
+        double num_lower, num_upper;
+        if (b >= 0.0) {
+            num_lower = fd.a_f - fd.z;
+            num_upper = fd.a_f + 0.5 * b * dx_left;
+        } else {
+            num_lower = fd.a_f - 0.5 * b * dx_right;
+            num_upper = fd.a_f - fd.z;
+        }
+        double expected_lower = num_lower / (dx_left * dx_avg);
+        double expected_upper = num_upper / (dx_right * dx_avg);
+        double expected_diag  = c - expected_lower - expected_upper;
 
         EXPECT_NEAR(jac_L_lower, expected_lower, 1e-14)
             << "Lower mismatch at i=" << i

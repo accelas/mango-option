@@ -203,3 +203,19 @@ magnitude.
   top of the same underlying defect — worth being aware of during the
   #472 implementation in case its `0.95·max(ψ)` threshold interacts with
   the new fitted-coefficient scheme's own boundary-row behavior.
+
+## Task 3 re-pin: `AmericanOptionTest.NoDivCallPriceUnchangedByEnvelopeBC`
+
+After wiring the Il'in-fitted assembly/apply paths into `SpatialOperator`
+(Task 3), this ATM no-dividend call's full FDM solve moved as expected —
+the fitting deliberately adds `O(ρ²)` diffusion to every interior row.
+
+- Old pin: `10.447090628631905`
+- New value: `10.447225343887069`
+- Delta: `+0.00013471525516450811` (≈1.3e-4 on a ~10.45 price, ≈1.3e-5
+  relative)
+
+Measured via: `TMPDIR=/tmp/codex-skills/b1f0461c-8c94-4e80-ad4d-789f804f4e10
+bazel test //tests:american_option_test --test_output=all
+--test_filter='*NoDivCallPriceUnchanged*'`. The test's pin was updated to
+the new value in the same commit as the discretization change.

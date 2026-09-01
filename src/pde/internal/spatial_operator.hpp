@@ -4,6 +4,7 @@
 #include "mango/pde/core/grid.hpp"
 #include "mango/pde/core/boundary_conditions.hpp"
 #include "mango/pde/internal/pde_workspace.hpp"
+#include "mango/pde/internal/fitted_diffusion.hpp"
 #include "mango/pde/operators/centered_difference.hpp"
 #include "mango/math/tridiagonal_matrix_view.hpp"
 #include <memory>
@@ -42,6 +43,15 @@ concept HasJacobianCoefficients = requires(const PDE pde, double t) {
     { pde.first_derivative_coeff(t) } -> std::convertible_to<double>;  // b(t)
     { pde.discount_rate(t) } -> std::convertible_to<double>;           // r(t) (c = -r)
 };
+
+/// CONTRACT (#472): for any PDE satisfying this concept, the coefficient
+/// methods are the AUTHORITATIVE definition of the interior operator:
+/// SpatialOperator evaluates L(u) = a_f·u'' + b(t)·u' − r(t)·u from them
+/// (with Il'in-fitted a_f; see fitted_diffusion.hpp) and never calls
+/// operator() on interior nodes. Accessors must be pure (deterministic,
+/// side-effect free) at fixed t, and a = second_derivative_coeff() must
+/// be >= 0 unconditionally (a < 0 is outside the fitting contract; a == 0
+/// is supported as the convection limit — see fitted_diffusion.hpp).
 
 /// Jacobian coefficients (diag, offdiag) of the ghost-eliminated boundary
 /// row's spatial operator ∂L/∂u at the boundary node and its interior
@@ -98,11 +108,42 @@ public:
         stencil_->compute_first_derivative(u, du, start, end);
 
         // Apply PDE operator to combine derivatives
-        for (size_t i = start; i < end; ++i) {
-            if constexpr (TimeDependentPDE<PDE>) {
-                Lu[i] = pde_(t, d2u[i], du[i], u[i]);
+        if constexpr (HasJacobianCoefficients<PDE>) {
+            // Coefficient-combine path (#472): coefficients are the
+            // authoritative operator definition (concept contract), and the
+            // fitted diffusion keeps this residual/RHS evaluation the SAME
+            // operator the assembled Jacobian represents — the projected
+            // LCP stage solves A·u = rhs with A from assemble_jacobian, so
+            // the two paths must not diverge.
+            const T a = pde_.second_derivative_coeff();
+            const T b = pde_.first_derivative_coeff(t);
+            const T r = pde_.discount_rate(t);
+            const auto& grid = spacing_->grid();
+            if (spacing_->is_uniform()) {
+                // Canonical stored spacing — must match assemble_jacobian's
+                // uniform branch and the stencil (NOT grid[1] - grid[0],
+                // which differs in the last ulp).
+                const T h = spacing_->spacing();
+                const T a_f = detail::fitted_diffusion(a, b, h, h).a_f;
+                for (size_t i = start; i < end; ++i) {
+                    Lu[i] = a_f * d2u[i] + b * du[i] - r * u[i];
+                }
             } else {
-                Lu[i] = pde_(d2u[i], du[i], u[i]);
+                for (size_t i = start; i < end; ++i) {
+                    const T dx_left = grid[i] - grid[i-1];
+                    const T dx_right = grid[i+1] - grid[i];
+                    const T a_f =
+                        detail::fitted_diffusion(a, b, dx_left, dx_right).a_f;
+                    Lu[i] = a_f * d2u[i] + b * du[i] - r * u[i];
+                }
+            }
+        } else {
+            for (size_t i = start; i < end; ++i) {
+                if constexpr (TimeDependentPDE<PDE>) {
+                    Lu[i] = pde_(t, d2u[i], du[i], u[i]);
+                } else {
+                    Lu[i] = pde_(d2u[i], du[i], u[i]);
+                }
             }
         }
     }
@@ -135,38 +176,51 @@ public:
                           TridiagonalMatrixView& jac) const
         requires HasJacobianCoefficients<PDE>
     {
-        // Get PDE coefficients at current time t
-        const T a = pde_.second_derivative_coeff();   // σ²/2 (time-independent)
+        // Sample coefficients ONCE per invocation (concept contract: pure
+        // at fixed t). The per-node quantity is the fitted diffusion only.
+        const T a = pde_.second_derivative_coeff();   // σ²/2
         const T b = pde_.first_derivative_coeff(t);   // r(t) - d - σ²/2
         const T c = -pde_.discount_rate(t);           // -r(t)
 
         const size_t n = jac.size();
         const auto& grid = spacing_->grid();
+        // Uniform grids: use the canonical stored spacing, NOT per-cell
+        // coordinate differences — CenteredDifference's uniform stencil
+        // uses spacing_->spacing() for every derivative, and per-cell
+        // diffs differ from it in the last ulp, which would break the
+        // exact apply/Jacobian identity the fitted scheme requires.
+        const bool uniform = spacing_->is_uniform();
+        const T h_uniform = uniform ? spacing_->spacing() : T(0);
 
         for (size_t i = 1; i < n - 1; ++i) {
-            const T dx_left = grid[i] - grid[i-1];
-            const T dx_right = grid[i+1] - grid[i];
+            const T dx_left = uniform ? h_uniform : grid[i] - grid[i-1];
+            const T dx_right = uniform ? h_uniform : grid[i+1] - grid[i];
             const T dx_avg = (dx_left + dx_right) / 2.0;
 
-            // Second derivative coefficients
-            const T d2_coeff_im1 = a / (dx_left * dx_avg);
-            const T d2_coeff_i = -a * (1.0 / dx_left + 1.0 / dx_right) / dx_avg;
-            const T d2_coeff_ip1 = a / (dx_right * dx_avg);
+            const auto fd = detail::fitted_diffusion(a, b, dx_left, dx_right);
 
-            // First derivative coefficients (weighted central difference)
-            const T d1_denom = dx_left + dx_right;
-            const T d1_coeff_im1 = -b * dx_right / (dx_left * d1_denom);
-            const T d1_coeff_i   =  b * (dx_right - dx_left) / (dx_left * dx_right);
-            const T d1_coeff_ip1 =  b * dx_left / (dx_right * d1_denom);
+            // Sign-preserving reduced assembly (#472): the binding-side
+            // numerator is computed literally as a_f − z, which the
+            // helper's clamp keeps >= 0 exactly in floating point. The
+            // non-binding numerator is a sum of non-negatives. This
+            // replaces the separate d2+d1 coefficient accumulation, which
+            // could round the binding entry to a tiny negative at high
+            // cell Péclet.
+            T num_lower, num_upper;
+            if (b >= 0.0) {
+                num_lower = fd.a_f - fd.z;               // binding (z = b·dx_r/2)
+                num_upper = fd.a_f + T(0.5) * b * dx_left;
+            } else {
+                num_lower = fd.a_f - T(0.5) * b * dx_right;  // adds |b|·dx_r/2
+                num_upper = fd.a_f - fd.z;               // binding (z = |b|·dx_l/2)
+            }
+            const T lower = num_lower / (dx_left * dx_avg);
+            const T upper = num_upper / (dx_right * dx_avg);
+            const T diag = c - lower - upper;  // row-sum identity by construction
 
-            // F(u) = u - rhs - coeff_dt·L(u), so ∂F/∂u = I - coeff_dt·∂L/∂u
-            const T jac_lower_i = d2_coeff_im1 + d1_coeff_im1;
-            const T jac_diag_i = d2_coeff_i + d1_coeff_i + c;
-            const T jac_upper_i = d2_coeff_ip1 + d1_coeff_ip1;
-
-            jac.lower()[i - 1] = -coeff_dt * jac_lower_i;
-            jac.diag()[i] = 1.0 - coeff_dt * jac_diag_i;
-            jac.upper()[i] = -coeff_dt * jac_upper_i;
+            jac.lower()[i - 1] = -coeff_dt * lower;
+            jac.diag()[i] = 1.0 - coeff_dt * diag;
+            jac.upper()[i] = -coeff_dt * upper;
         }
 
         // Note: Boundary rows (i=0, i=n-1) are NOT filled here.
@@ -183,6 +237,13 @@ public:
     ///
     /// so diag = c − 2a/h² and offdiag = 2a/h² on both sides; only h (and
     /// the affine term, computed separately) differ by side.
+    ///
+    /// NOTE (#472): boundary rows deliberately use the raw (unfitted)
+    /// diffusion coefficient a. Their ghost-eliminated off-diagonal
+    /// +2a/h² already has the Z-matrix sign for any drift b (drift enters
+    /// only the affine term), and each row's eval == jacobian·u + affine
+    /// identity is internal to the row, so residual/Jacobian consistency
+    /// is unaffected by the interior fitting.
     BoundaryRowJacobian boundary_row_jacobian(double t, bc::BoundarySide side) const
         requires HasJacobianCoefficients<PDE>
     {
