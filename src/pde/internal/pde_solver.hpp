@@ -141,6 +141,17 @@ public:
     std::expected<void, SolverError> solve() {
         lcp_report_ = LcpKktReport{};
 
+        // #472: TR-BDF2 stage weights w1 = γ·dt/2, w2 = (1−γ)·dt/(2−γ) are
+        // positive — the Z-matrix premise of the fitted discretization's
+        // M-matrix guarantee — only for γ in (0,1). Reject anything else.
+        if (!(std::isfinite(config_.gamma) &&
+              config_.gamma > 0.0 && config_.gamma < 1.0)) {
+            return std::unexpected(SolverError{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .iterations = 0,
+                .residual = config_.gamma});
+        }
+
         const auto& time = grid_->time();
         const auto time_pts = time.time_points();
         double t = time_pts[0];
