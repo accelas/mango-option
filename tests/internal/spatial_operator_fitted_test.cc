@@ -639,5 +639,46 @@ TEST(SpatialOperatorFittedTest, FittedLPsiNeverAboveRawForDeepPut) {
         });
 }
 
+// #472 gate-2 review: raw and fitted L(psi) can disagree in SIGN, not just
+// magnitude, for a CONVEX (call) payoff. psi'' = e^x > 0 here, so fitting
+// adds the positive term (a_f - a)*e^x; at a node where the raw operator
+// is barely negative (r - q*e^x < 0, i.e. e^x just above r/q), that extra
+// term is enough to flip the fitted sign non-negative. This is the exact
+// discrepancy the deep-ITM lock in pde_solver.hpp must respect: locking
+// on the raw sign alone would impose an identity row the fitted stage
+// system disagrees with. This test exercises the operators only (not the
+// lock) and passes both before and after the pde_solver.hpp lock change;
+// the lock rule itself is covered by code review and the full test suite.
+TEST(SpatialOperatorFittedTest, RawAndFittedLPsiCanDisagreeForConvexPayoff) {
+    // Single interior node at x = 0.18235, where e^x ~= 1.20003 sits just
+    // above r/q = 1.2 -- the raw operator (r - q*e^x) is barely negative.
+    with_operator(
+        GridSpec<double>::uniform(0.16235, 0.20235, 3).value(),
+        BlackScholesPDE<double>(0.01, 0.06, 0.05),  // sigma=1%, r=6%, q=5%
+        [&](auto& op, auto&, auto& grid_view, auto&) {
+            const size_t n = grid_view.size();
+            const auto& x = grid_view.span();
+            std::vector<double> u(n);
+            for (size_t i = 0; i < n; ++i) {
+                u[i] = std::exp(x[i]) - 1.0;  // call payoff, convex: u'' > 0
+            }
+
+            std::vector<double> raw(n, 0.0), fitted(n, 0.0);
+            op.apply_unfitted(0.0, u, raw);
+            op.apply(0.0, u, fitted);
+
+            ASSERT_EQ(n, 3u);
+            // Observed values (h = 0.02, rho ~= 1.99, a_f - a ~= 5.33e-5):
+            // raw ~= -9.09e-7 (central-difference d2u/du of e^x - 1 into
+            // r - q*e^x), fitted ~= +6.30e-5 (raw + (a_f - a)*d2u). Sign
+            // assertions are strict; magnitudes carry a loose tolerance
+            // since they are not the contract.
+            EXPECT_LT(raw[1], 0.0) << "raw=" << raw[1];
+            EXPECT_NEAR(raw[1], -9.09e-7, 2e-7);
+            EXPECT_GE(fitted[1], 0.0) << "fitted=" << fitted[1];
+            EXPECT_NEAR(fitted[1], 6.30e-5, 5e-6);
+        });
+}
+
 }  // namespace
 }  // namespace mango::operators

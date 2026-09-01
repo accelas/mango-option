@@ -763,6 +763,13 @@ private:
         //    qS > rK (calls). Without this check the lock ratchets: u = ψ
         //    makes condition 2 true forever, even where the true solution
         //    lifts off the obstacle (e.g. r=0 puts, no-dividend calls).
+        //    Both the physical operator (raw a — so fitted diffusion
+        //    cannot over-lock concave put payoffs, #472) AND the fitted
+        //    operator the stage solves (so the identity row never
+        //    contradicts the fitted LCP for convex call payoffs) must
+        //    report L(ψ) < 0. Locking fewer nodes is always safe now that
+        //    the fitted stage matrix is an M-matrix: an unlocked node is
+        //    handled by the projected sweep.
         // Conditions 1+3 are re-evaluated every stage, so a lock releases as
         // soon as it stops being justified.
         //
@@ -791,30 +798,49 @@ private:
             }
 
             if (first_candidate < n_ - 1) {
-                // L(ψ): newton_u_old is free here — it is only used by the
-                // Newton path (solve_implicit_stage), never by this projected
-                // path. The loop below only reads lpsi[first_candidate..n-2],
-                // an interior-only range by construction (first_candidate is
-                // found by a scan over [1, n-2]), so boundary entries are
-                // never touched here regardless of what fills them.
+                // L(ψ) computed BOTH ways: newton_u_old and residual are
+                // free here — both are only used by the Newton path
+                // (solve_implicit_stage_newton), never by this projected
+                // path or by the build_jacobian()/build_jacobian_*() calls
+                // above (those touch lu(), reserved1(), u_stage(), and
+                // jacobian() only). The loops below only read
+                // lpsi_*[first_candidate..n-2], an interior-only range by
+                // construction (first_candidate is found by a scan over
+                // [1, n-2]), so boundary entries are never touched here
+                // regardless of what fills them.
                 //
-                // This deliberately uses the RAW (unfitted) operator, not
-                // apply_spatial_operator() (#472 gate-2 review): condition 3
-                // asks a PHYSICAL question — is ψ a strict subsolution of
-                // the continuous PDE? — and the Il'in-fitted diffusion used
-                // for stage residuals/RHS/Jacobian adds extra numerical
-                // diffusion that biases L(ψ) negative for puts (ψ'' = −eˣ <
-                // 0 deep ITM), which can lock a node whose RAW L(ψ) >= 0 is
-                // actually continuation-valued. See
-                // SpatialOperator::apply_unfitted() and
-                // AmericanOptionTest.ZeroRateDeepITMPutOnCoarseAsymmetricGridEqualsEuropean.
-                auto lpsi = workspace_.newton_u_old();
-                derived().spatial_operator().apply_unfitted(t, psi, lpsi);
+                // Condition 3 requires BOTH operators to agree that ψ is a
+                // strict subsolution (#472 gate-2 review, Codex P2):
+                //  - RAW (apply_unfitted): asks the PHYSICAL question — is
+                //    ψ a strict subsolution of the continuous PDE? The
+                //    Il'in-fitted diffusion used for stage residuals/RHS/
+                //    Jacobian adds extra numerical diffusion that biases
+                //    L(ψ) negative for puts (ψ'' = −eˣ < 0 deep ITM), which
+                //    can lock a node whose RAW L(ψ) >= 0 is actually
+                //    continuation-valued. See SpatialOperator::apply_unfitted()
+                //    and AmericanOptionTest.ZeroRateDeepITMPutOnCoarseAsymmetricGridEqualsEuropean.
+                //  - FITTED (apply): the bias runs the OTHER way for convex
+                //    call payoffs (ψ'' = eˣ > 0): fitting adds the positive
+                //    term (a_f − a)·ψ'' > 0, so the raw operator can report
+                //    L(ψ) < 0 while the fitted operator the stage actually
+                //    solves reports L_f(ψ) >= 0. A raw-only lock would then
+                //    impose an identity row (u = ψ) that contradicts the
+                //    fitted LCP, clamping a node the fitted system would
+                //    lift off the obstacle. See
+                //    SpatialOperatorFittedTest.RawAndFittedLPsiCanDisagreeForConvexPayoff.
+                // Requiring both is always safe: the fitted stage matrix is
+                // an M-matrix, so any node left unlocked is still handled
+                // correctly by the projected Thomas sweep.
+                auto lpsi_raw = workspace_.newton_u_old();
+                derived().spatial_operator().apply_unfitted(t, psi, lpsi_raw);
+                auto lpsi_fitted = workspace_.residual();
+                derived().spatial_operator().apply(t, psi, lpsi_fitted);
 
                 for (size_t i = first_candidate; i < n_ - 1; ++i) {
                     bool deep_itm = (psi[i] > deep_itm_threshold);
                     bool at_obstacle = (u[i] - psi[i] < exercise_tolerance);
-                    bool payoff_subsolution = (lpsi[i] < 0.0);
+                    bool payoff_subsolution =
+                        (lpsi_raw[i] < 0.0) && (lpsi_fitted[i] < 0.0);
 
                     if (deep_itm && at_obstacle && payoff_subsolution) {
                         // Convert row i to Dirichlet constraint: u[i] = ψ[i]

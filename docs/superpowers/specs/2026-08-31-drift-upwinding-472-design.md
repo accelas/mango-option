@@ -508,6 +508,11 @@ wave:**
 
 ## Gate 2 (pre-merge Codex review)
 
+**Deep-ITM lock requires BOTH raw and fitted L(ψ) < 0** — the raw check
+prevents over-locking concave (put) payoffs, the fitted check prevents an
+identity row that contradicts the fitted LCP for convex (call) payoffs;
+locking fewer nodes is safe under the M-matrix sweep.
+
 **Deep-ITM lock criterion evaluates the RAW operator (`apply_unfitted`):**
 the deep-ITM exercise lock's condition 3 in
 `PDESolver::solve_implicit_stage_projected`
