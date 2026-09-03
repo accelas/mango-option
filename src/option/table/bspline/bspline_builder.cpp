@@ -339,8 +339,7 @@ PriceTableBuilderND<N>::solve_batch(
                 // the solver must resolve the whole node span (spec D12).
                 accuracy.log_moneyness_coverage =
                     LogMoneynessRange::of(axes.grids[0]);
-                // One shared grid for the whole cohort the cache stores
-                // together.
+                // One shared grid for the whole batch.
                 return solver.solve_batch(
                     batch, true, nullptr,
                     estimate_batch_pde_grid_config(batch, accuracy));

@@ -1088,6 +1088,8 @@ Record here, during execution, anything done differently from this plan or the s
 - Task 3: residual ≈0.021 at S = 50 after Task 3b is off-node Chebyshev fit
   error over a 9-node m axis, not coverage (edge-node sweep max 9.8e-5);
   left as-is, `TOL_COVERAGE = 0.25` documents it.
+- Rework round: helper replaced by `GridAccuracyParams::log_moneyness_coverage`
+  (spec D12–D16); no pinned number changed.
 
 ## Follow-ups to file at finish (not in this PR)
 

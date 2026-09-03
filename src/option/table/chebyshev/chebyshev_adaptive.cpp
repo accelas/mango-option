@@ -211,6 +211,10 @@ static size_t solve_missing_pde_pairs(
     std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
     solver.set_snapshot_times(std::span<const double>(tau_vec));
     // One shared grid for the whole cohort the cache stores together.
+    // estimate_batch_pde_grid_config's mandatory_times comes back empty,
+    // but that's safe: the batch solver rebuilds each contract's dividend
+    // times from its own discrete_dividends schedule rather than reading
+    // them off the shared config.
     auto batch_result = solver.solve_batch(
         std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
         nullptr,

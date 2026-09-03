@@ -99,6 +99,8 @@ discrete-dividend surfaces (S2 is the production path behind it).
 
 ### 1. Relocate the covering-grid helpers to a backend-neutral target
 
+> Superseded by §Rework (D12–D16); kept for the review history.
+
 Move `detail::ensure_moneyness_coverage` and
 `detail::materialize_covering_grid` (declared in `bspline_builder.hpp:236-253`,
 defined in `bspline_builder.cpp:235-265`) to a new pair

@@ -121,7 +121,7 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     // Every moneyness node is read from the slice splines, so the solver
     // must resolve the whole node span (spec D12).
     accuracy.log_moneyness_coverage = LogMoneynessRange::of(m_nodes);
-    // One shared grid for the whole cohort the cache stores together.
+    // One shared grid for the whole batch.
     auto batch_result = solver.solve_batch(
         std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
         nullptr,

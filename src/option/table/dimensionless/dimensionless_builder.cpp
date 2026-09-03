@@ -56,7 +56,7 @@ solve_dimensionless_pde(
             std::span<const double>{axes.tau_prime.data(), axes.tau_prime.size()});
 
         std::vector<PricingParams> batch = {params};
-        // One shared grid for the whole cohort the cache stores together.
+        // One shared grid for the whole batch.
         auto batch_result = batch_solver.solve_batch(
             batch, true, nullptr,
             estimate_batch_pde_grid_config(

@@ -360,7 +360,11 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("max_spatial_points", &mango::GridAccuracyParams::max_spatial_points)
         .def_readwrite("max_time_steps", &mango::GridAccuracyParams::max_time_steps)
         .def_readwrite("log_moneyness_coverage",
-                       &mango::GridAccuracyParams::log_moneyness_coverage)
+                       &mango::GridAccuracyParams::log_moneyness_coverage,
+                       "Log-moneyness range the solution must resolve, or "
+                       "None. Reassign the whole LogMoneynessRange to "
+                       "change it; mutating .lo/.hi on the returned value "
+                       "has no effect (it is a copy).")
         .def_readwrite("coverage_clearance_sigmas",
                        &mango::GridAccuracyParams::coverage_clearance_sigmas);
 
