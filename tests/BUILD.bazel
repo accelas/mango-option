@@ -1792,6 +1792,8 @@ cc_test(
     srcs = ["dimensionless_adaptive_test.cc"],
     deps = [
         "//src/option/table/dimensionless:dimensionless_adaptive",
+        "//src/option:american_option",
+        "//src/option/table/dimensionless:dimensionless_european",
         "@googletest//:gtest_main",
     ],
 )
