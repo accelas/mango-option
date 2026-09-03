@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cmath>
 #include <variant>
 #include "mango/option/table/covering_grid.hpp"
@@ -25,8 +26,9 @@ TEST(EnsureMoneynessCoverage, WidensNSigmaWhenAxisUndershoots) {
         0.20)};
     std::vector<double> log_m = {-0.51, 0.0, 0.51};
     mango::detail::ensure_moneyness_coverage(accuracy, batch, log_m);
-    const double expected = 0.51 / (0.20 * std::sqrt(0.1)) * 1.1;
-    EXPECT_NEAR(accuracy.n_sigma, expected, 1e-12);
+    const double ssqt = 0.20 * std::sqrt(0.1);
+    const double expected = std::max(0.51 / ssqt * 1.1, 0.51 / ssqt + 3.0);
+    EXPECT_NEAR(accuracy.n_sigma, expected, 1e-12);  // ~11.06
 }
 
 TEST(EnsureMoneynessCoverage, LeavesNSigmaWhenCovered) {
@@ -38,7 +40,8 @@ TEST(EnsureMoneynessCoverage, LeavesNSigmaWhenCovered) {
         0.50)};
     std::vector<double> log_m = {-0.51, 0.0, 0.51};
     mango::detail::ensure_moneyness_coverage(accuracy, batch, log_m);
-    EXPECT_DOUBLE_EQ(accuracy.n_sigma, 5.0);  // 0.51/0.5*1.1 = 1.12 < 5
+    // max(0.51/0.5*1.1, 0.51/0.5+3) = 4.02 < 5
+    EXPECT_DOUBLE_EQ(accuracy.n_sigma, 5.0);
 }
 
 // Regression: exported helper must not read front()/back() of empty spans
@@ -99,9 +102,36 @@ TEST(EnsureMoneynessCoverage, ReachIsOrderIndependent) {
     mango::detail::ensure_moneyness_coverage(from_sorted, batch, sorted);
     mango::detail::ensure_moneyness_coverage(from_permuted, batch, permuted);
 
-    const double expected = 0.51 / (0.20 * std::sqrt(0.1)) * 1.1;  // ~8.87
+    const double ssqt = 0.20 * std::sqrt(0.1);
+    // ~11.06
+    const double expected = std::max(0.51 / ssqt * 1.1, 0.51 / ssqt + 3.0);
     EXPECT_NEAR(from_sorted.n_sigma, expected, 1e-12);
     EXPECT_NEAR(from_permuted.n_sigma, expected, 1e-12);
+}
+
+// Regression (#480 follow-on): the boundary must clear the outermost node by
+// a few diffusion lengths, not a fixed fraction of the reach.  With reach
+// 0.5 and sigma*sqrt(T) = 0.1 the 10% rule alone would put the edge 0.05
+// past the node -- half a diffusion length -- and boundary error diffused
+// into the edge nodes (measured 0.84 per $100 at sigma ~0.19 on the
+// segmented Chebyshev fit).  Required: half-width >= reach + 3*sigma*sqrt(T).
+TEST(EnsureMoneynessCoverage, BoundaryClearsOuterNodeByThreeSigmaSqrtT) {
+    mango::GridAccuracyParams accuracy;
+    std::vector<mango::PricingParams> batch{mango::PricingParams(
+        mango::OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.25,
+                          .rate = 0.05, .dividend_yield = 0.0,
+                          .option_type = mango::OptionType::PUT},
+        0.20)};                                  // sigma*sqrt(T) = 0.1
+    std::vector<double> log_m = {-0.5, 0.0, 0.5};
+    mango::detail::ensure_moneyness_coverage(accuracy, batch, log_m);
+    EXPECT_NEAR(accuracy.n_sigma, 0.5 / 0.1 + 3.0, 1e-12);   // 8.0 > 5.5
+
+    auto spec = mango::detail::materialize_covering_grid(
+        mango::GridAccuracyParams{}, batch, log_m);
+    auto* config = std::get_if<mango::PDEGridConfig>(&spec);
+    ASSERT_NE(config, nullptr);
+    EXPECT_LE(config->grid_spec.x_min(), -(0.5 + 3.0 * 0.1) + 1e-9);
+    EXPECT_GE(config->grid_spec.x_max(),  (0.5 + 3.0 * 0.1) - 1e-9);
 }
 
 }  // namespace

@@ -14,7 +14,10 @@ namespace mango::detail {
 /// n_sigma * max(sigma*sqrt(T)) over `batch`, and any node beyond it would
 /// be evaluated by cubic-spline extrapolation of the slice.  The reach is
 /// max(|min|, |max|) over the nodes in ANY order (Chebyshev/CC node arrays
-/// are handed in directly).  Callers must actually solve on such an
+/// are handed in directly).  The realized half-width is at least
+/// max(1.1 * reach, reach + 3 * max(sigma*sqrt(T))): the boundary must
+/// clear the outermost node by a few diffusion lengths, or boundary error
+/// diffuses into the edge nodes.  Callers must actually solve on such an
 /// estimated grid, passed as a concrete custom grid: the batch solver's
 /// gridless routing re-estimates per normalized group (or unions the
 /// unwidened per-param grids) and does NOT realize this width.  No-op when

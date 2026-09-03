@@ -25,8 +25,19 @@ void ensure_moneyness_coverage(GridAccuracyParams& accuracy,
     }
     max_sigma_sqrt_T = std::max(max_sigma_sqrt_T, 1e-10);
 
-    constexpr double MARGIN = 1.1;  // 10% margin for boundary effects
-    double required_n_sigma = (required_half_width / max_sigma_sqrt_T) * MARGIN;
+    // The boundary must clear the outermost node by a few diffusion lengths:
+    // Dirichlet-boundary error (and, with discrete dividends, the jump
+    // condition's edge fallback) diffuses inward ~sigma*sqrt(T) per unit
+    // time, and a clearance that is a fixed fraction of the reach is far
+    // thinner than that whenever the reach is large relative to
+    // sigma*sqrt(T).  Measured on the segmented Chebyshev fit with the old
+    // 10% rule: 0.84 per $100 at the two edge nodes for sigma ~0.19.  The
+    // 10% rule stays as a floor for tiny sigma*sqrt(T).
+    constexpr double MARGIN = 1.1;
+    constexpr double BOUNDARY_SIGMAS = 3.0;
+    const double reach_sigmas = required_half_width / max_sigma_sqrt_T;
+    const double required_n_sigma =
+        std::max(reach_sigmas * MARGIN, reach_sigmas + BOUNDARY_SIGMAS);
     accuracy.n_sigma = std::max(accuracy.n_sigma, required_n_sigma);
 }
 

@@ -433,3 +433,14 @@ made from code analysis. All are for the design review to validate.
   empirically pinned tolerance. The segmented path's dividend-timing skew
   from the 1.01 maturity padding is pre-existing and filed as a follow-up,
   not fixed here.
+- **D11 — Boundary clearance (execution, Task 3b):** the covering half-width
+  is `max(1.1·reach, reach + 3·max σ√T)`, not `1.1·reach`. Found by Task 3's
+  node sweep: with the flat 10 % margin the two edge nodes of the segmented
+  Chebyshev fit carried boundary contamination growing with σ (0.84 per $100
+  at σ ≈ 0.19) while interior nodes matched an independent wide-grid oracle
+  to ≤ 1.4e-4. A clearance that is a fraction of the reach is thinner than a
+  diffusion length whenever the reach is large relative to σ√T. Applies to
+  the #479 B-spline path too (same helper). Rejected: fixing the boundary
+  values themselves (a solver change, out of scope) and leaving it as a
+  follow-up (the production discrete-dividend path would ship with a
+  measured 0.84/$100 defect at its support nodes).

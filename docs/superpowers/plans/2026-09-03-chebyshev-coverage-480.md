@@ -1076,7 +1076,8 @@ git commit -m "Refresh pinned Chebyshev accuracy numbers after #480"
 
 Record here, during execution, anything done differently from this plan or the spec and why (the pre-merge review reads it).
 
-- (none yet)
+- Task 3b (controller-added): boundary clearance `reach + 3·σ_max√T` in
+  `ensure_moneyness_coverage` (spec D11). Tasks 2/3 tolerances re-pinned.
 
 ## Follow-ups to file at finish (not in this PR)
 

@@ -986,8 +986,12 @@ TEST(AdaptiveGridBuilderTest, FallbackExplicitGridCoversMoneynessTails) {
 // 27.850638458), and that sigma-independence to 8 significant figures is
 // the signature of extrapolating one slice past the PDE domain edge
 // rather than of interpolation error.  Post-fix the node queries agree
-// with FDM to <= 6.7e-09 and the user-strike queries to <= 0.0176; the
+// with FDM to <= 6.65e-09 and the user-strike queries to <= 0.01759; the
 // two classes are therefore asserted at different tolerances below.
+// (Re-measured after the boundary-clearance change of spec D11, which
+// widens this chain's covering half-width from ~1.20 to ~1.65 and clamps
+// Nx at the Ultra 5,000-point cap: both classes moved by less than one
+// part in a thousand of their own size.)
 TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     OptionGrid chain;
     chain.spot = 100.0;
@@ -1021,7 +1025,7 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     //
     // TOL_NODE guards the two on-node m endpoints -- the queries that
     // actually discriminate this defect.  Post-fix max deviation over that
-    // class is 6.7e-09 (m_lo, sigma=0.15), so the plan's ">= 10x post-fix"
+    // class is 6.65e-09 (m_lo, sigma=0.15), so the plan's ">= 10x post-fix"
     // rule would pin ~7e-08; it is loosened to 1e-5 for exactly the reason
     // the #437 test above uses 1e-5 -- this compares two independently-run
     // pipelines (batch PDE solve + Chebyshev fit vs. a separate
@@ -1033,9 +1037,9 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     //
     // TOL_USER guards the two user strikes.  These sit off-node in m, so
     // the class carries ordinary Chebyshev interpolation error across the
-    // intrinsic-value kink: post-fix max deviation is 0.0176, at strike 250
-    // with the sigma_lo = 0.01 node, where the exact American put value is
-    // its intrinsic 60 and a global polynomial cannot follow the kink.
+    // intrinsic-value kink: post-fix max deviation is 0.01759, at strike
+    // 250 with the sigma_lo = 0.01 node, where the exact American put value
+    // is its intrinsic 60 and a global polynomial cannot follow the kink.
     // TOL_USER = 0.2 is ~11x that per the ">= 10x post-fix" rule, and
     // ~139x below the 27.85 pre-fix error.  This class is a user-visible
     // sanity assertion, not the discriminator: pre-fix its worst deviation
@@ -1166,32 +1170,37 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevTailsMatchFdmAtExtremeMoneyness)
     //
     // TOL_COVERAGE guards the padded-timeline oracle -- the assertion that
     // actually discriminates this defect.  Post-fix max deviation over the
-    // four queries is 0.0217 (S=50, sigma=0.15); the other three are
-    // 0.0048 (S=50, sigma=0.05) and <= 1e-20 at S=200.  0.25 is ~11x that
-    // per the ">= 10x post-fix" rule.  The extra headroom is deliberate:
-    // sweeping the fit's own moneyness nodes shows agreement with the
-    // oracle at <= 1.4e-4 everywhere except the two left-most nodes
-    // (m = -0.845, -0.782), where the deviation grows with sigma
-    // (1.4e-4 at sigma=0.01, 0.24 at 0.1175, 0.84 at 0.1935).  That is
-    // Dirichlet-boundary contamination diffusing in from the covering
-    // grid's left edge -- the covering grid clears the outermost node by
-    // only the 10% margin in materialize_covering_grid -- and the m-fit
-    // spreads a little of it to S=50.  Its size depends on the solver's
-    // boundary handling and grid sizing, so CI must not pin it tightly
-    // across toolchains.  0.25 is still 202x below the *smallest* pre-fix
-    // failure (50.51) and 2.5e+11x below the largest, far inside the
-    // "<= 1/50 of pre-fix" bound, so the class keeps its discriminating
-    // power.
+    // four queries is 0.02114 (S=50, sigma=0.15); the other three are
+    // 0.00491 (S=50, sigma=0.05) and <= 1e-20 at S=200.  0.25 is ~11.8x
+    // that per the ">= 10x post-fix" rule.  The residual is NOT a coverage
+    // defect: sweeping the fit's own moneyness nodes (9 CC nodes over
+    // [-0.845, 0.825] x five sigma nodes) shows agreement with the oracle
+    // to <= 9.9e-05 at every node, the two left-most ones included, and to
+    // <= 2.1e-04 over the whole sweep.  S = 50 sits between the nodes at
+    // m = -0.782 and m = -0.601, so what is left is ordinary Chebyshev
+    // interpolation error in m across the early-exercise kink of a deep
+    // ITM put.  Its size depends on the solver's boundary handling and
+    // grid sizing, so CI must not pin it tightly across toolchains: 1e-3
+    // is the floor the plan permits and 0.25 is still 202x below the
+    // *smallest* pre-fix failure (50.51) and 2.5e+11x below the largest,
+    // far inside the "<= 1/50 of pre-fix" bound, so the class keeps its
+    // discriminating power.
+    //
+    // Before spec D11's boundary clearance the two left-most nodes carried
+    // Dirichlet contamination diffusing in from the covering grid's left
+    // edge, growing with sigma to 0.84 per $100 at sigma = 0.1935; the
+    // covering half-width now clears the outermost node by 3*sigma*sqrt(T)
+    // rather than a flat 10% of the reach, and that signature is gone.
     constexpr double TOL_COVERAGE = 0.25;
     //
     // TOL_USER guards the option the user actually asked about.  It must
     // clear the timing skew between the two oracles -- the table anchors
     // the dividend to the padded 1.01*tau maturity, so the two contracts
     // differ by 2.5e-3 years of dividend timing, measured here as
-    // |cov - usr| = 0.0127 at S=50 (~1e-14 at S=200).  Post-fix max
-    // |got - usr| is 0.0090 (S=50, sigma=0.15).  0.05 is ~4x the skew and
-    // ~5.5x the measured deviation, and ~1000x below the smallest pre-fix
-    // failure.
+    // |cov - usr| = 0.01268 at S=50 (~1e-14 at S=200).  Post-fix max
+    // |got - usr| is 0.00846 (S=50, sigma=0.15).  0.05 is ~3.9x the skew
+    // and ~5.9x the measured deviation, and ~1000x below the smallest
+    // pre-fix failure.
     constexpr double TOL_USER = 0.05;
 
     for (double S : {50.0, 200.0}) {
