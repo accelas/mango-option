@@ -67,10 +67,10 @@ struct GridAccuracyParams {
     /// Maximum time steps (default: 5000)
     size_t max_time_steps = 5000;
 
-    /// Log-moneyness range the PDE solution must resolve BEYOND the
-    /// contract's own spot, because the caller will read the solution there
-    /// (price tables evaluate every slice at their moneyness nodes).  The
-    /// estimated domain, which is symmetric about the contract's x0 =
+    /// Log-moneyness range the PDE solution must resolve (in addition to
+    /// the contract's own spot), because the caller will read the solution
+    /// there (price tables evaluate every slice at their moneyness nodes).
+    /// The estimated domain, which is symmetric about the contract's x0 =
     /// ln(spot/strike), is widened until the range sits at least
     /// `coverage_clearance_sigmas` diffusion lengths (sigma*sqrt(T)) inside
     /// the boundary, with a 10 % widening of the reach as a floor for tiny

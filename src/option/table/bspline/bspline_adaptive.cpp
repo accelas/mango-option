@@ -254,7 +254,8 @@ BatchAmericanOptionResult solve_missing_slices(
         // Every moneyness node is read from the batch solutions, so the
         // solver must resolve the whole node span (spec D12).
         accuracy.log_moneyness_coverage = LogMoneynessRange::of(m_grid);
-        // One shared grid for the whole cohort the cache stores together.
+        // One shared grid per cohort (spec D13): keeps every cached slice on
+        // the same x grid and the branch's numbers unchanged.
         return batch_solver.solve_batch(
             missing_params, true, nullptr,
             estimate_batch_pde_grid_config(missing_params, accuracy));
@@ -265,7 +266,8 @@ BatchAmericanOptionResult solve_missing_slices(
         // Every moneyness node is read from the batch solutions, so the
         // solver must resolve the whole node span (spec D12).
         accuracy.log_moneyness_coverage = LogMoneynessRange::of(m_grid);
-        // One shared grid for the whole cohort the cache stores together.
+        // One shared grid per cohort (spec D13): keeps every cached slice on
+        // the same x grid and the branch's numbers unchanged.
         return batch_solver.solve_batch(
             missing_params, true, nullptr,
             estimate_batch_pde_grid_config(missing_params, accuracy));

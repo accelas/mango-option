@@ -1196,6 +1196,20 @@ auto [grid_spec, time_domain] = mango::estimate_pde_grid(params, accuracy);
 - `tol = 1e-3`: Standard mode (~300-400 points, ~50ms)
 - `tol = 1e-6`: High accuracy (~1200 points, ~300ms)
 
+**Covering off-spot reads:** If you will read the PDE solution at
+log-moneyness points other than the contract's own spot (as price tables
+do at their moneyness nodes), declare them so the estimated domain covers
+them instead of extrapolating:
+
+```cpp
+auto acc = mango::make_grid_accuracy(mango::GridAccuracyProfile::High);
+acc.log_moneyness_coverage = mango::LogMoneynessRange::of(log_moneyness_nodes);
+// the domain now clears [lo, hi] by coverage_clearance_sigmas (3) diffusion lengths
+```
+
+For a whole batch, `estimate_batch_pde_grid_config(batch, acc)` returns the
+shared grid as a `PDEGridConfig` for `solve_batch`'s `custom_grid`.
+
 ---
 
 ## Related Documentation

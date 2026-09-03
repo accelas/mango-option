@@ -210,7 +210,8 @@ static size_t solve_missing_pde_pairs(
     solver.set_grid_accuracy(accuracy);
     std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
     solver.set_snapshot_times(std::span<const double>(tau_vec));
-    // One shared grid for the whole cohort the cache stores together.
+    // One shared grid per cohort (spec D13): keeps every cached slice on
+    // the same x grid and the branch's numbers unchanged.
     // estimate_batch_pde_grid_config's mandatory_times comes back empty,
     // but that's safe: the batch solver rebuilds each contract's dividend
     // times from its own discrete_dividends schedule rather than reading
@@ -419,7 +420,8 @@ static BuildFn make_chebyshev_build_fn(
             solver.set_grid_accuracy(accuracy);
             std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
             solver.set_snapshot_times(std::span<const double>(tau_vec));
-            // One shared grid for the whole cohort the cache stores together.
+            // One shared grid per cohort (spec D13): keeps every cached
+            // slice on the same x grid and the branch's numbers unchanged.
             auto batch_result = solver.solve_batch(
                 std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
                 nullptr,
