@@ -1077,7 +1077,8 @@ git commit -m "Refresh pinned Chebyshev accuracy numbers after #480"
 Record here, during execution, anything done differently from this plan or the spec and why (the pre-merge review reads it).
 
 - Task 3b (controller-added): boundary clearance `reach + 3·σ_max√T` in
-  `ensure_moneyness_coverage` (spec D11). Tasks 2/3 tolerances re-pinned.
+  `ensure_moneyness_coverage` (spec D11). Tasks 2/3 tolerance rationales
+  re-justified (values unchanged).
 - Task 2: tolerances split by query class (`TOL_NODE = 1e-5` on the node
   endpoints, `TOL_USER = 0.2` on the user strikes). Measured pre-fix error at
   the user strikes was only 0.0139, so the spec's claim that endpoint-node

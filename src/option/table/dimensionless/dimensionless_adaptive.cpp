@@ -29,6 +29,8 @@ double dimensionless_reference_eep(double x0, double tau_prime_0, double ln_kapp
 
     const auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
     BatchAmericanOptionSolver solver;
+    // grid_accuracy_ only decides normalized-chain eligibility; the grid
+    // itself is the covering spec below (#480).
     solver.set_grid_accuracy(accuracy);
 
     std::vector<double> snap_times = {tau_prime_0};
@@ -49,7 +51,7 @@ double dimensionless_reference_eep(double x0, double tau_prime_0, double ln_kapp
     // The probe is read at x0, which the solver's own n_sigma*sigma*sqrt(T)
     // domain need not contain; materialize a grid that covers it (#480).
     const std::array<double, 1> reach = {x0};
-    auto covering = detail::materialize_covering_grid(
+    auto covering = materialize_covering_grid(
         accuracy, std::span<const PricingParams>(batch),
         std::span<const double>(reach));
     auto result = solver.solve_batch(batch, /*use_shared_grid=*/false,

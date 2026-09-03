@@ -49,6 +49,8 @@ solve_dimensionless_pde(
             sigma_eff);
 
         BatchAmericanOptionSolver batch_solver;
+        // grid_accuracy_ only decides normalized-chain eligibility; the
+        // grid itself is the covering spec below (#480).
         batch_solver.set_grid_accuracy(accuracy);
         batch_solver.set_snapshot_times(
             std::span<const double>{axes.tau_prime.data(), axes.tau_prime.size()});

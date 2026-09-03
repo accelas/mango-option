@@ -217,15 +217,18 @@ For a dividend-free normalized param, `estimate_pde_grid` gives width
 `Nx = 2·n_sigma·√T/√tol` — **σ cancels**. Every param in an S1/S3/S4
 batch therefore estimates the same `Nx`, and the batch union takes that
 value: at Ultra and the 0.5y-floored τ axis (T ≈ 0.694) it is ≈ 3,725
-points today. Widening `n_sigma` to `reach·1.1/(σ_max√T)` scales `Nx` by
-the same factor: for the T2 chain below (reach ≈ 1.09, σ_hi ≈ 0.225) that
-is ≈ 4,760 points, still under the 5,000 clamp, so the widened solves cost
-roughly 28 % more spatial points than today's union grid. The time-step
-count stays approximately constant: width and `Nx` grow by the same
-factor, so with a fixed sinh concentration the smallest cell — which sets
-`dt = c_t·dx_min` (`grid_spec_types.cpp:86`) — barely moves. This is the
-same resolution-for-coverage trade #437 D4 accepted for the B-spline path;
-there is no new policy.
+points today. Under D11's clearance rule, `max(1.1·reach, reach +
+3·max σ√T)`, the T2 chain below (reach ≈ 1.09, σ_hi ≈ 0.225) resolves to a
+half-width ≈ 1.65, so `Nx ≈ 6,550` — the Ultra `max_spatial_points = 5,000`
+clamp **binds** for this chain (measured in Task 3b: errors did not
+degrade against the covering oracle). The trade is therefore coarser
+interior `dx` in exchange for coverage, not the ~28 % point-count growth
+originally estimated; the spec accepts that trade. The time-step count
+stays approximately constant regardless: width and `Nx` grow together
+until the clamp binds, so with a fixed sinh concentration the smallest
+cell — which sets `dt = c_t·dx_min` (`grid_spec_types.cpp:86`) — barely
+moves. This is the same resolution-for-coverage trade #437 D4 accepted for
+the B-spline path; there is no new policy.
 
 S2 differs only in that the dividend left-extension
 `x_min ← ln(e^{x_min} − D/K)` (`grid_spec_types.cpp:65`) is applied per
@@ -251,8 +254,12 @@ followed by `solve()`, as `fdm_reference_price` in
 `solve_american_option`, whose only overload uses the default grid.
 
 - **T1 — helper unit tests** (`tests:covering_grid_test`, small): the four
-  #479 tests moved verbatim, plus one new case proving the reach is
-  order-independent. A merely reversed array would pass against the old
+  #479 tests moved, plus one new case proving the reach is
+  order-independent. D11's boundary clearance rule updates three of the
+  expected values (`WidensNSigmaWhenAxisUndershoots`,
+  `LeavesNSigmaWhenCovered`, and the new order-independence case below):
+  each now computes `max(1.1·reach/σ√T, reach/σ√T + 3)` instead of the
+  flat `1.1·reach/σ√T`. A merely reversed array would pass against the old
   `front()/back()` code (review round 2), so the case uses a permutation
   whose largest-magnitude node is *interior*, e.g. `{0.0, -0.51, 0.10}`,
   and asserts it widens exactly as its sorted form does.
@@ -354,9 +361,15 @@ with the new value recorded: `IVSolverFactorySegmented.DocumentedAdaptive
 DiscreteDividendConfig` (549 bps, bound 0.10, nightly slow split),
 `greeks_accuracy_test` (uses `build_chebyshev_table`),
 `chebyshev_surface_test`, `dimensionless_*_test`, and
-`price_table_data_test`'s Chebyshev round-trips. B-spline bit-identity
-goldens are untouched (no B-spline builder code changes beyond the include
-move).
+`price_table_data_test`'s Chebyshev round-trips. D11 lives in the shared
+`ensure_moneyness_coverage` helper, so it also reaches the B-spline path
+through the unchanged #479 call sites: a B-spline build whose reach falls
+in `(2·σ_max√T, 4.5·σ_max√T]` previously left `n_sigma` at its default 5
+(the flat 10 % margin didn't clear that band) and now widens under the
+`reach + 3·σ_max√T` floor. The B-spline bit-identity goldens and the #479
+regressions still pass (re-run in Task 3b, Step 4) because their pinned
+configurations fall outside that band, not because the B-spline builder
+code is unaffected by D11.
 
 ## Decisions
 

@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 namespace mango {
 namespace {
@@ -1095,7 +1096,11 @@ double segmented_coverage_oracle(double S, double K, double tau_query,
     auto res = solver.solve_batch(
         std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
         nullptr, PDEGridSpec{PDEGridConfig{grid_spec, 4000, {}}});
-    EXPECT_TRUE(res.results[0].has_value());
+    if (!res.results[0].has_value()) {
+        ADD_FAILURE() << "segmented_coverage_oracle solve failed for S=" << S
+                      << " sigma=" << sigma;
+        return std::numeric_limits<double>::quiet_NaN();
+    }
     const auto& r = res.results[0].value();
     CubicSpline<double> spline;
     auto err = spline.build(r.grid()->x(), r.at_time(0));
@@ -1115,9 +1120,17 @@ double dividend_fdm_reference_price(double S, double K, double tau,
     p.discrete_dividends = dividends;
     auto solver = AmericanOptionSolver::create(
         p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::High)});
-    EXPECT_TRUE(solver.has_value());
+    if (!solver.has_value()) {
+        ADD_FAILURE() << "dividend_fdm_reference_price solver create failed"
+                      << " for S=" << S << " sigma=" << sigma;
+        return std::numeric_limits<double>::quiet_NaN();
+    }
     auto ref = solver->solve();
-    EXPECT_TRUE(ref.has_value());
+    if (!ref.has_value()) {
+        ADD_FAILURE() << "dividend_fdm_reference_price solve failed for S="
+                      << S << " sigma=" << sigma;
+        return std::numeric_limits<double>::quiet_NaN();
+    }
     return ref->value_at(S);
 }
 
