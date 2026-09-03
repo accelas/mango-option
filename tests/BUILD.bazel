@@ -250,6 +250,7 @@ cc_test(
     size = "small",
     srcs = ["covering_grid_test.cc"],
     deps = [
+        "//src/option:grid_spec_types",
         "//src/option/table:covering_grid",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -883,6 +884,17 @@ cc_test(
     copts = [
         "-Wall",
         "-Wextra",
+    ],
+)
+
+cc_test(
+    name = "grid_spec_types_test",
+    size = "small",
+    srcs = ["grid_spec_types_test.cc"],
+    deps = [
+        "//src/option:grid_spec_types",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
     ],
 )
 

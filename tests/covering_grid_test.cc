@@ -2,7 +2,10 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <variant>
+#include <vector>
+#include "mango/option/grid_spec_types.hpp"
 #include "mango/option/table/covering_grid.hpp"
 
 namespace mango {
@@ -132,6 +135,45 @@ TEST(EnsureMoneynessCoverage, BoundaryClearsOuterNodeByThreeSigmaSqrtT) {
     ASSERT_NE(config, nullptr);
     EXPECT_LE(config->grid_spec.x_min(), -(0.5 + 3.0 * 0.1) + 1e-9);
     EXPECT_GE(config->grid_spec.x_max(),  (0.5 + 3.0 * 0.1) - 1e-9);
+}
+
+// Rework identity: the estimator with log_moneyness_coverage must produce
+// EXACTLY the grid materialize_covering_grid produces (D12 numeric-identity
+// claim).  Three batch shapes: clamp-binding Ultra chain, High B-spline-like,
+// dividend segmented.
+TEST(CoverageRework, EstimatorReproducesTheHelperExactly) {
+    struct Case { const char* name; GridAccuracyParams acc; std::vector<PricingParams> batch; std::vector<double> nodes; };
+    auto mk = [](double sigma, double T, std::vector<Dividend> divs = {}) {
+        PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = T,
+            .rate = 0.05, .dividend_yield = 0.0, .option_type = OptionType::PUT}, sigma);
+        p.discrete_dividends = std::move(divs);
+        return p;
+    };
+    std::vector<Case> cases;
+    cases.push_back({"ultra-chain", make_grid_accuracy(GridAccuracyProfile::Ultra),
+        {mk(0.01, 0.694375), mk(0.1175, 0.694375), mk(0.225, 0.694375)}, {-1.0881, 0.0, 1.0881}});
+    cases.push_back({"high-bspline", make_grid_accuracy(GridAccuracyProfile::High),
+        {mk(0.10, 0.500001), mk(0.15, 0.500001), mk(0.20, 0.500001)}, {-0.3796, 0.0, 0.3796}});
+    const std::vector<Dividend> divs = {Dividend{.calendar_time = 0.1, .amount = 1.0}};
+    cases.push_back({"dividend", make_grid_accuracy(GridAccuracyProfile::Ultra),
+        {mk(0.05, 0.2525, divs), mk(0.15, 0.2525, divs)}, {-0.8452, 0.0, 0.8250}});
+    for (auto& c : cases) {
+        auto helper = mango::detail::materialize_covering_grid(c.acc, c.batch, c.nodes);
+        auto* h = std::get_if<PDEGridConfig>(&helper);
+        ASSERT_NE(h, nullptr) << c.name;
+        GridAccuracyParams acc = c.acc;
+        acc.log_moneyness_coverage = LogMoneynessRange::of(c.nodes);
+        auto e = estimate_batch_pde_grid_config(c.batch, acc);
+        EXPECT_DOUBLE_EQ(e.grid_spec.x_min(), h->grid_spec.x_min()) << c.name;
+        EXPECT_DOUBLE_EQ(e.grid_spec.x_max(), h->grid_spec.x_max()) << c.name;
+        EXPECT_EQ(e.grid_spec.n_points(), h->grid_spec.n_points()) << c.name;
+        EXPECT_EQ(e.grid_spec.type(), h->grid_spec.type()) << c.name;
+        EXPECT_EQ(e.n_time, h->n_time) << c.name;
+        auto ge = e.grid_spec.generate(); auto gh = h->grid_spec.generate();
+        auto se = ge.view().span(); auto sh = gh.view().span();
+        ASSERT_EQ(se.size(), sh.size()) << c.name;
+        for (size_t i = 0; i < se.size(); ++i) EXPECT_EQ(se[i], sh[i]) << c.name << " i=" << i;
+    }
 }
 
 }  // namespace

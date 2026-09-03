@@ -2,6 +2,11 @@
 #include <gtest/gtest.h>
 #include "mango/option/american_option_batch.hpp"
 
+#include <cmath>
+#include <utility>
+#include <variant>
+#include <vector>
+
 using namespace mango;
 
 TEST(BatchAmericanOptionSolver, NormalizedEligibility) {
@@ -152,4 +157,110 @@ TEST(AmericanOptionBatch, RegressionIssue272_PerOptionGridConsistency) {
     for (const auto& result : results.results) {
         ASSERT_TRUE(result.has_value());
     }
+}
+
+// ===========================================================================
+// Log-moneyness coverage on GridAccuracyParams (#480 rework)
+// ===========================================================================
+
+namespace {
+PricingParams atm_put(double sigma, double T, std::vector<Dividend> divs = {}) {
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = T,
+        .rate = 0.05, .dividend_yield = 0.0, .option_type = OptionType::PUT}, sigma);
+    p.discrete_dividends = std::move(divs);
+    return p;
+}
+}  // namespace
+
+// D14: eligibility is judged with coverage cleared.  Reach 3.0 makes the
+// coverage-widened first-contract grid 7.2 wide (> MAX_WIDTH = 5.8) while its
+// base grid (half-width 1.0, margin 1.0) is eligible, so the batch must STILL
+// route through the normalized chain: each group solves on its own grid,
+// covering with its own clearance, and the two grids differ.  Without D14
+// the batch would fall to the shared regular path and both results would
+// share one grid.
+// Note that the per-group grids solved on here are therefore WIDER than
+// MAX_WIDTH = 5.8 by design of D14; #487 (eligibility judging the grid
+// actually solved on) may renegotiate that.
+TEST(BatchAmericanOptionSolver, CoverageDoesNotChangeRoutingAndEveryGroupCovers) {
+    std::vector<PricingParams> batch = {atm_put(0.20, 1.0), atm_put(0.40, 1.0)};
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-3.0, 3.0};
+    BatchAmericanOptionSolver solver;
+    solver.set_grid_accuracy(acc);
+    auto result = solver.solve_batch(batch, /*use_shared_grid=*/true);
+    ASSERT_EQ(result.failed_count, 0u);
+    auto x0 = result.results[0]->grid()->x();
+    auto x1 = result.results[1]->grid()->x();
+    EXPECT_LE(x0.front(), -(3.0 + 3.0 * 0.20) + 1e-9);
+    EXPECT_LE(x1.front(), -(3.0 + 3.0 * 0.40) + 1e-9);
+    EXPECT_NE(x0.front(), x1.front()) << "per-group grids expected (normalized routing)";
+}
+
+// Shared regular route (dividends make the batch ineligible): one grid for
+// all, its edge set by the LARGEST sigma*sqrt(T).
+TEST(BatchAmericanOptionSolver, SharedRegularRouteCoversWithSigmaMax) {
+    const std::vector<Dividend> divs = {Dividend{.calendar_time = 0.5, .amount = 1.0}};
+    std::vector<PricingParams> batch = {atm_put(0.20, 1.0, divs), atm_put(0.40, 1.0, divs)};
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-1.5, 1.5};
+    BatchAmericanOptionSolver solver;
+    solver.set_grid_accuracy(acc);
+    auto result = solver.solve_batch(batch, /*use_shared_grid=*/true);
+    ASSERT_EQ(result.failed_count, 0u);
+    auto x0 = result.results[0]->grid()->x();
+    auto x1 = result.results[1]->grid()->x();
+    EXPECT_DOUBLE_EQ(x0.front(), x1.front());
+    EXPECT_LE(x0.front(), -(1.5 + 3.0 * 0.40) + 1e-9);
+    EXPECT_GE(x0.back(),   (1.5 + 3.0 * 0.40) - 1e-9);
+}
+
+// Per-contract route: a probe 1.3 beyond the strike with s = 0.2*sqrt(0.02).
+TEST(BatchAmericanOptionSolver, PerContractRouteHonoursCoverage) {
+    std::vector<PricingParams> batch = {atm_put(0.20, 0.02)};
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-1.3, -1.3};
+    BatchAmericanOptionSolver solver;
+    solver.set_grid_accuracy(acc);
+    auto result = solver.solve_batch(batch, /*use_shared_grid=*/false);
+    ASSERT_TRUE(result.results[0].has_value());
+    EXPECT_LE(result.results[0]->grid()->x().front(),
+              -(1.3 + 3.0 * 0.20 * std::sqrt(0.02)) + 1e-9);
+}
+
+// D15: an accuracy spec passed as custom_grid is estimated the same way the
+// solver's own accuracy is -- over the batch on the shared path (edge from
+// sigma_max, not from params[0]) ...
+TEST(BatchAmericanOptionSolver, AccuracyCustomGridIsEstimatedOverTheBatch) {
+    const std::vector<Dividend> divs = {Dividend{.calendar_time = 0.5, .amount = 1.0}};
+    std::vector<PricingParams> batch = {atm_put(0.20, 1.0, divs), atm_put(0.40, 1.0, divs)};
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-1.5, 1.5};
+    BatchAmericanOptionSolver solver;
+    auto result = solver.solve_batch(batch, /*use_shared_grid=*/true, nullptr, PDEGridSpec{acc});
+    ASSERT_EQ(result.failed_count, 0u);
+    auto x0 = result.results[0]->grid()->x();
+    auto x1 = result.results[1]->grid()->x();
+    EXPECT_DOUBLE_EQ(x0.front(), x1.front());
+    EXPECT_DOUBLE_EQ(x0.back(),  x1.back());
+    EXPECT_LE(x0.front(), -(1.5 + 3.0 * 0.40) + 1e-9);
+}
+
+// ... and per contract otherwise: two sigmas -> two different grids (before
+// the repair both contracts reused params[0]'s grid), and the coverage set
+// on the custom accuracy spec is honoured by each (range [-2.5, 2.5] lies
+// beyond both base domains, +-1.0 and +-2.0).
+TEST(BatchAmericanOptionSolver, AccuracyCustomGridIsEstimatedPerContractWithCoverage) {
+    std::vector<PricingParams> batch = {atm_put(0.20, 1.0), atm_put(0.40, 1.0)};
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-2.5, 2.5};
+    BatchAmericanOptionSolver solver;
+    auto result = solver.solve_batch(batch, /*use_shared_grid=*/false, nullptr,
+                                     PDEGridSpec{acc});
+    ASSERT_EQ(result.failed_count, 0u);
+    auto x0 = result.results[0]->grid()->x();
+    auto x1 = result.results[1]->grid()->x();
+    EXPECT_LE(x0.front(), -(2.5 + 3.0 * 0.20) + 1e-9);
+    EXPECT_LE(x1.front(), -(2.5 + 3.0 * 0.40) + 1e-9);
+    EXPECT_NE(x0.front(), x1.front());
 }
