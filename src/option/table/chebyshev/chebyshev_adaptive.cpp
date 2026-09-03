@@ -9,6 +9,7 @@
 #include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_pde_cache.hpp"
+#include "mango/option/table/covering_grid.hpp"
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/dividend_utils.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
@@ -397,13 +398,25 @@ static BuildFn make_chebyshev_build_fn(
                                .option_type = config.option_type},
                     sigma_nodes[si]);
             }
+            const auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
             BatchAmericanOptionSolver solver;
-            solver.set_grid_accuracy(
-                make_grid_accuracy(GridAccuracyProfile::Ultra));
+            // grid_accuracy_ still decides normalized-chain eligibility
+            // (and its traced route); the grid itself comes from the
+            // covering spec below (#480).
+            solver.set_grid_accuracy(accuracy);
             std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
             solver.set_snapshot_times(std::span<const double>(tau_vec));
+            // One concrete grid covering every moneyness node, estimated
+            // over the batch actually solved (the missing pairs), passed as
+            // custom_grid so both the normalized-chain and the shared
+            // regular path solve on it.  Gridless solving sized the domain
+            // from n_sigma*sigma*sqrt(T) alone and extrapolated the tails
+            // (#480, same defect as #437).
+            auto covering = detail::materialize_covering_grid(
+                accuracy, std::span<const PricingParams>(batch), m_nodes);
             auto batch_result = solver.solve_batch(
-                std::span<const PricingParams>(batch), /*use_shared_grid=*/true);
+                std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
+                nullptr, covering);
             new_solves = batch.size() - batch_result.failed_count;
 
             for (size_t bi = 0; bi < missing.size(); ++bi) {

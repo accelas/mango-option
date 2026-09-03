@@ -50,6 +50,7 @@ cc_library(
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:adaptive_metrics",
         "//src/option/table:adaptive_refinement",
+        "//src/option/table:covering_grid",
         "//src/option/table:eep_decomposer",
         "//src/option/table:multi_kref_split",
         "//src/option/table:split_surface",
