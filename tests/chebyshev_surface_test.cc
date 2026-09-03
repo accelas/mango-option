@@ -128,3 +128,56 @@ TEST(TransformLeafNaNTest, PricePropagatesNaNAndKeepsFloor) {
     EXPECT_TRUE(std::isfinite(
         leaf.price(std::numeric_limits<double>::infinity(), 100.0, 1.0, 0.2, 0.05)));
 }
+
+// ===========================================================================
+// Regression test for issue #480 (S3): gridless non-adaptive solve
+// extrapolated outer moneyness nodes
+// ===========================================================================
+
+// Regression (#480, S3): build_chebyshev_table solved its batch gridless
+// with the default accuracy (n_sigma = 5), so the PDE half-width was
+// 5 * 0.20 * sqrt(0.1) ~= 0.32 while the moneyness nodes reach +-0.7:
+// both endpoint nodes were cubic-spline extrapolations.  All queried
+// coordinates are CGL nodes (endpoints), so only extraction is measured.
+// Pre-fix max abs error on this branch's parent: 74.14 at m=-0.7,
+// sigma=0.10 (deep-ITM put; also 74.14 at sigma=0.20).
+TEST(ChebyshevTableBuilderTest, TailsMatchFdmAtExtremeMoneyness) {
+    ChebyshevTableConfig config{
+        .num_pts = {9, 5, 3, 3},
+        .domain = {.lo = {-0.7, 0.01, 0.10, 0.02},
+                   .hi = { 0.7, 0.10, 0.20, 0.06}},
+        .K_ref = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+    };
+    auto result = build_chebyshev_table(config);
+    ASSERT_TRUE(result.has_value());
+
+    const double K = 100.0;
+    const double tau = 0.10;   // tau node (domain hi)
+    const double r = 0.06;     // rate node (domain hi)
+
+    // Tolerance ($ per K=100): post-fix max |got-ref| measured 1.173e-6;
+    // 10x that is 1.173e-5, floored to 1e-5 for cross-toolchain slack
+    // (well under 1/50 of the 74.14 pre-fix error).
+    constexpr double TOL = 1e-5;
+
+    for (double m : {-0.7, 0.7}) {
+        for (double sigma : {0.10, 0.20}) {
+            const double S = K * std::exp(m);
+            PricingParams p(
+                OptionSpec{.spot = S, .strike = K, .maturity = tau,
+                           .rate = r, .dividend_yield = 0.0,
+                           .option_type = OptionType::PUT},
+                sigma);
+            auto solver = AmericanOptionSolver::create(
+                p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::High)});
+            ASSERT_TRUE(solver.has_value());
+            auto ref = solver->solve();
+            ASSERT_TRUE(ref.has_value());
+            const double got = result->surface.price(S, K, tau, sigma, r);
+            EXPECT_NEAR(got, ref->value_at(S), TOL)
+                << "m=" << m << " sigma=" << sigma;
+        }
+    }
+}
