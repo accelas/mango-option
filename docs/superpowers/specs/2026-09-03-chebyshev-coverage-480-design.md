@@ -60,16 +60,18 @@ already materializes via `builder.estimate_pde_grid`, which calls
 1. **The Chebyshev batches are usually normalized-ineligible, not
    per-group.** `is_normalized_eligible` estimates the margin from the
    *first* batch param and requires `5·σ_first√T ≥ 0.35`
-   (`american_option_batch.cpp:64-105`). On S1 the first missing pair is the
-   lowest σ node, and the CC σ-headroom pushes `sigma_lo` down to
-   `max(σ_min − 3(σ_max−σ_min)/4, 0.01)` — e.g. 0.025 for a chain with vols
-   0.10–0.20 — so the margin is far below 0.35 unless T ≳ 8y. S2 is always
-   ineligible because of the dividends. Both therefore solve on the
-   batch-union grid, half-width `5·σ_max(batch)√T`, which covers every
-   slice *only coincidentally*, whenever that product happens to exceed
-   the node reach. The per-group routing the issue describes is the
-   eligible corner (first-param σ large enough, or S2 with an empty
-   dividend list).
+   (`american_option_batch.cpp:64-105`). `missing_pairs` enumerates
+   σ-major (`pde_cache.hpp:89`), so on S1 the first missing pair carries
+   the lowest *not-yet-cached* σ node: on the seed build that is `sigma_lo
+   = max(σ_min − 3(σ_max−σ_min)/4, 0.01)` — 0.025 for a chain with vols
+   0.10–0.20 — and on a σ-only refinement it is the lowest newly inserted
+   node, which is still small. The margin is therefore far below 0.35
+   unless T ≳ 8y. S2 is always ineligible because of the dividends. Both
+   therefore solve on the batch-union grid, half-width `5·σ_max(batch)√T`,
+   which covers every slice *only coincidentally*, whenever that product
+   happens to exceed the node reach. The per-group routing the issue
+   describes is the eligible corner (first-param σ large enough, or S2
+   with an empty dividend list).
 2. **Both routings are unsound and both are fixed by the same mechanism.**
    A concrete `PDEGridConfig` passed as `custom_grid` propagates verbatim
    into every normalized group (`american_option_batch.cpp:333-345`) and
@@ -88,7 +90,7 @@ already materializes via `builder.estimate_pde_grid`, which calls
 A Chebyshev interpolant is a global polynomial. A garbage value at an
 endpoint node contaminates queries across the whole moneyness axis, not
 just the tails, so the user-visible error appears at interior strikes too.
-For S4, `reference_eep` is the adaptive loop's *ground truth*; an
+For S5, `reference_eep` is the adaptive loop's *ground truth*; an
 extrapolated reference misdirects refinement silently. CLAUDE.md documents
 `ChebyshevBackend` as **the** supported backend for adaptive
 discrete-dividend surfaces (S2 is the production path behind it).
@@ -109,11 +111,22 @@ include path `mango/option/table/covering_grid.hpp`, following the
 `src/option/table/BUILD.bazel`.
 
 `bspline_builder.hpp` replaces its two declarations with
-`#include "mango/option/table/covering_grid.hpp"` and `bspline_builder`
-adds the dep, so every #479 call site and test (`bspline_adaptive.cpp:263/272`,
-`bspline_builder.cpp:380`, `tests/price_table_builder_test.cc:426-498`)
-compiles unchanged. The helper's existing unit tests move with the code to a
-new small `tests:covering_grid_test` (D7).
+`#include "mango/option/table/covering_grid.hpp"`, so every #479 call site
+(`bspline_adaptive.cpp:263/272`, `bspline_builder.cpp:380`) compiles
+unchanged. The helper's four existing unit tests
+(`tests/price_table_builder_test.cc:429-495`) move with the code to a new
+small `tests:covering_grid_test` (D7).
+
+Bazel wiring, stated here so strict-deps failures are not left to
+implementation discovery: the new target is `visibility =
+["//visibility:public"]` like its siblings, and every target that includes
+the header — directly or through `bspline_builder.hpp` — lists it as a
+direct dep: `//src/option/table/bspline:bspline_builder`,
+`//src/option/table/chebyshev:chebyshev_adaptive`,
+`//src/option/table/chebyshev:chebyshev_table_builder`,
+`//src/option/table/dimensionless:dimensionless_builder`,
+`//src/option/table/dimensionless:dimensionless_adaptive`, and
+`//tests:covering_grid_test`.
 
 Contract widening (D3): the moneyness-axis argument is renamed
 `log_moneyness_nodes` and its reach is computed as
@@ -129,9 +142,11 @@ Each site keeps its accuracy profile, computes
 `auto covering = detail::materialize_covering_grid(accuracy, batch, reach);`
 and passes `covering` as the fourth `solve_batch` argument
 (`solve_batch(batch, /*use_shared_grid=*/…, nullptr, covering)`). The
-`set_grid_accuracy` calls become redundant for grid sizing but stay, since
-`grid_accuracy_` still feeds `is_normalized_eligible` and therefore the
-routing choice; routing no longer affects the grid.
+helper's estimator is driven by the `accuracy` value passed to it, not by
+solver state; the existing `set_grid_accuracy` calls become redundant for
+grid sizing but stay, since `grid_accuracy_` still feeds
+`is_normalized_eligible` and therefore the routing choice. Routing no
+longer affects the grid.
 
 - **S1** `make_chebyshev_build_fn`: `reach = m_nodes` (already in scope of
   the lambda). Batch = the *missing* pairs, which is what the grid must be
@@ -150,32 +165,60 @@ routing choice; routing no longer affects the grid.
   the single κ param; hoist the accuracy construction out of the κ loop.
 - **S5** `reference_eep`: `reach = std::array{x0}`; the covering grid goes
   through the `use_shared_grid=false` path, where `resolved_custom_grid` is
-  used per contract (`american_option_batch.cpp:466-470`).
+  used per contract (`american_option_batch.cpp:466-470`). To make this
+  site testable (review round 1), the file-static function becomes
+  `double detail::dimensionless_reference_eep(double x0, double tau_prime_0,
+  double ln_kappa_0, double K_ref, OptionType option_type)`, declared in
+  `dimensionless_builder.hpp` (the header both dimensionless targets
+  export) and defined where it is today; the adaptive loop calls it
+  unchanged. Semantics are untouched: normalized EEP `max(American −
+  European, 0)`, 0.0 on any solver failure.
 
 ### 3. Cache safety across refinement iterations (S1, S2)
 
 Same invariants as #437: `ChebyshevPDECache::store_slice` builds each
 slice's spline over the x-grid that slice was solved on
 (`chebyshev_pde_cache.hpp:23-30`), so cohorts with different domains and
-resolutions coexist; a τ-node change clears the cache
-(`chebyshev_adaptive.cpp:379-382`, `:512-515`); the node span `[m_lo, m_hi]`
-is frozen at seed time, so the required reach is constant across
-iterations and a slice that covered on iteration 1 still covers on
-iteration N. Widening only requires that *every newly solved slice*
-covers the frozen span, which the materialized grid guarantees for the
-whole batch under either routing.
+resolutions coexist; the node span `[m_lo, m_hi]` is frozen at seed time
+(`build_adaptive_chebyshev` and `ChebyshevSegmentedBuilder::build_adaptive`
+both size the headroom once from the initial CC levels), so the required
+reach is constant across iterations and a slice that covered on iteration
+1 still covers on iteration N. Widening only requires that *every newly
+solved slice* covers the frozen span, which the materialized grid
+guarantees for the whole batch under either routing.
+
+The τ-axis guard is narrower than "any τ change clears the cache": both
+build functions compare only `tau_nodes.size()` (`chebyshev_adaptive.cpp:377`,
+`:523`). That is sufficient on the adaptive paths because the τ bounds are
+frozen and a CC level's node count determines its nodes exactly, so equal
+size implies equal τ vector. The manual `ChebyshevSegmentedBuilder::build
+(cc_levels)` has level-dependent m-headroom, but it constructs a fresh
+cache per call (`build_chebyshev_segmented_pieces`), so no slice is ever
+reused across different node spans. This change relies on those two facts
+and does not alter the guard.
 
 ### 4. Resolution and cost
 
-`estimate_batch_pde_grid` takes the max `Nx` over the batch, and the
-lowest-σ Chebyshev node (as low as 0.01–0.025) already drives `Nx` to the
-profile's `max_spatial_points` clamp (Ultra: 5000) on the batch-union
-grid that S1/S2 hit today. The covering grid spreads those points over a
-wider domain, trading interior resolution for coverage exactly as #437 D4
-accepted for the B-spline path; there is no new policy. The `MAX_WIDTH =
-5.8` convergence limit remains unenforced against materialized custom grids
-on every materializing path (pre-existing gap noted in #437 D4; out of
-scope here).
+For a dividend-free normalized param, `estimate_pde_grid` gives width
+`2·n_sigma·σ√T` and `dx_target = σ·√tol` (`grid_spec_types.cpp:45-50`), so
+`Nx = 2·n_sigma·√T/√tol` — **σ cancels**. Every param in an S1/S3/S4
+batch therefore estimates the same `Nx`, and the batch union takes that
+value: at Ultra and the 0.5y-floored τ axis (T ≈ 0.694) it is ≈ 3,725
+points today. Widening `n_sigma` to `reach·1.1/(σ_max√T)` scales `Nx` by
+the same factor: for the T2 chain below (reach ≈ 1.09, σ_hi ≈ 0.225) that
+is ≈ 4,760 points, still under the 5,000 clamp, so the widened solves cost
+roughly 28 % more spatial points (and proportionally more time steps,
+since `dt` follows the smallest cell) than today's union grid. This is the
+same resolution-for-coverage trade #437 D4 accepted for the B-spline path;
+there is no new policy.
+
+S2 differs: the dividend left-extension is applied per param *after* the
+σ-scaled width, so low-σ params get a relatively larger extension and can
+be the ones that set the union's `x_min`; that is pre-existing estimator
+behaviour and the covering grid only adds the widened `n_sigma` on top.
+The `MAX_WIDTH = 5.8` convergence limit remains unenforced against
+materialized custom grids on every materializing path (pre-existing gap
+noted in #437 D4; out of scope here).
 
 ## Regression tests
 
@@ -186,37 +229,70 @@ allowed and must be justified in the comment). References are direct FDM
 solves pinned to an explicit `GridAccuracyParams` profile, never the
 solver default.
 
-- **T1 — helper unit tests** (`tests:covering_grid_test`, small): the three
+- **T1 — helper unit tests** (`tests:covering_grid_test`, small): the four
   #479 tests moved verbatim, plus one new case proving the reach is
-  order-independent (a descending CGL node array widens exactly as its
-  ascending copy).
-- **T2 — S1 e2e** (`adaptive_surface_build_integration_test`): a chain
-  built so the batch-union half-width undershoots the CC-extended node
-  span — narrow, low vol range (so the σ headroom stays small) and wide
-  strikes, e.g. vols {0.10, 0.12}, strikes ≈ 55–180 with the τ axis
-  floored at 0.5y by `extract_chain_domain`. Assert `surface->price` vs
-  FDM at both extreme *node* endpoints (`K_ref·exp(m_lo/m_hi)`, obtained
-  from the returned interpolant's domain) **and** at the extreme user
-  strikes, at both the min-σ and max-σ sample bounds. The user-strike
-  assertions are what a global-polynomial contamination shows; the node
-  assertions are what pins extraction.
+  order-independent (a descending copy of a node array widens exactly as
+  the ascending original).
+- **T2 — S1 e2e** (`adaptive_surface_build_integration_test`). The chain
+  must be derived against the full transformation chain, because
+  `extract_chain_domain` (`adaptive_refinement.cpp:1147-1150`) first
+  applies minimum spreads (m ≥ 0.10, τ ≥ 0.5y, σ ≥ 0.10, r ≥ 0.04, each
+  centred on the chain's range and then clamped positive) and
+  `build_adaptive_chebyshev` (`chebyshev_adaptive.cpp:679-698`) then adds
+  CC headroom (`3·width/32` on m, `3·width/8` on τ, `3·width/4` on σ,
+  clamped to `σ_lo ≥ 0.01`, `τ_lo ≥ 1e-4`). For any chain with maturities
+  ≤ 0.5y that gives `τ_hi = 0.5 + 0.1875 = 0.6875`, PDE `T = 1.01·τ_hi`,
+  `√T ≈ 0.833`; a single chain vol `v` gives sample σ `[v−0.05, v+0.05]`
+  and `σ_hi = v + 0.125`. The old union half-width is thus
+  `5·(v+0.125)·0.833 ≈ 4.17·(v+0.125)`, minimised by a small `v`. The
+  node reach for strikes symmetric about spot, `K ∈ [S/a, S·a]`, is
+  `ln a·(1 + 6/32) = 1.1875·ln a`. With `v = 0.10`: half-width ≈ 0.94,
+  so `a > 2.2` undershoots; the spec's candidate is spot 100, strikes
+  `{40, 60, 100, 160, 250}` (reach ≈ 1.09 vs 0.94 — both node endpoints
+  ≈ 0.15 beyond the old domain), maturities `{0.05, 0.1}`, vols `{0.10}`,
+  rates `{0.03, 0.05}`. The plan measures the pre-fix error on the parent
+  revision and widens the strikes further if the extrapolated tail is not
+  visibly wrong; the recorded number goes into the test comment.
+  Assertions, at fixed K = K_ref and `S = K_ref·exp(m)` so that `m` is
+  the surface's log-moneyness coordinate: (i) at both extreme *node*
+  endpoints `m_lo/m_hi` read from the returned interpolant's `domain()`,
+  and (ii) at the extreme user strikes (`m = ln(100/250)`, `ln(100/40)`);
+  each at both the min-σ and max-σ sample bounds, on-axis τ and r. The
+  user-strike assertions are what a global-polynomial contamination shows;
+  the node assertions pin extraction. A put's deep-ITM (negative-m) end is
+  where the extrapolation is expected to be visibly wrong; the deep-OTM end
+  is asserted too but is not expected to be the red one.
 - **T3 — S2 regression** through `build_chebyshev_segmented_manual` (fixed
-  CC levels, no refinement, single `K_ref = spot` so no strike blend):
-  short maturity, one dividend, low vols, wide moneyness so
-  `5·σ_hi√T` undershoots the dividend-widened node span; compare
-  `surface.price` at the extreme moneyness vs a discrete-dividend FDM solve
-  at the same (S, K, τ, σ, r).
+  CC levels, no refinement, single `K_ref = spot` so no strike blend).
+  `expand_segmented_domain` (`adaptive_refinement.cpp:1080-1121`) applies
+  the same minimum spreads but keeps `τ_max = maturity`, so PDE
+  `T = 1.01·maturity`. Candidate: maturity 0.25 (`√T ≈ 0.50`), one
+  dividend of 1.0 at calendar time 0.1, vols `{0.10}` (σ_hi ≈ 0.225, old
+  half-width ≈ 0.57), log-moneyness `{ln 0.5, 0, ln 2}` (reach ≈ 0.69,
+  dividend-extended to ≈ 0.71 on the left, plus `3·1.41/32 ≈ 0.13` of
+  headroom ≈ 0.84). Assert at the *queried* user moneyness endpoints
+  (`S = 50` and `S = 200` at `K = 100`, both outside the old PDE domain
+  by themselves, not only via hidden support nodes), at τ = maturity, at
+  **both** σ sample endpoints, vs a discrete-dividend FDM solve built the
+  way `make_validate_fn` builds its references (same `PricingParams`
+  including `discrete_dividends`).
 - **T4 — S4 unit** (`dimensionless_builder_test`): axes with
-  `max|x| > 7.1·√τ'_max` (e.g. x ∈ [−0.7, 0.7], τ' ≤ 0.004); compare
-  `values` at the x extremes vs `solve_american_option` with
-  spot = K·eˣ, strike = K, σ = √2, r = κ, q = 0, T = τ', divided by K.
+  `max|x| > 7.1·√τ'_max` (e.g. x ∈ [−0.7, 0.7], τ' ≤ 0.004, old
+  half-width ≈ 0.45); compare `values` at the x extremes vs
+  `solve_american_option` with spot = K·eˣ, strike = K, σ = √2, r = κ,
+  q = 0, T = τ', divided by K.
 - **T5 — S3 regression** (`chebyshev_surface_test`): `build_chebyshev_table`
-  with a domain whose m reach exceeds `5·σ_hi·√τ_hi`; compare
+  with a domain whose m reach exceeds `5·σ_hi·√τ_hi` (e.g. m ∈ [−0.7, 0.7],
+  τ ∈ [0.01, 0.1], σ ∈ [0.10, 0.20]: old half-width ≈ 0.32); compare
   `surface.price` at the extreme m vs FDM at min-σ and max-σ.
-- **S5** has no direct regression: `reference_eep` is file-static and its
-  maturity floor makes the defect reachable only on extreme domains. It is
-  fixed by the invariant, and the existing `dimensionless_adaptive_test`
-  covers the path end to end.
+- **T6 — S5 unit** (`dimensionless_adaptive_test` or
+  `dimensionless_builder_test`): `detail::dimensionless_reference_eep` at a
+  probe with `|x₀| > 1` (beyond the ≈ ±1.0 reach the 0.02 maturity floor
+  gives today, e.g. x₀ = −1.3, τ'₀ = 0.005) vs the same normalized EEP
+  computed directly: `solve_american_option` at spot = K·e^{x₀}, strike =
+  K, σ = √2, r = κ, T = τ'₀, minus `dimensionless_european`, floored at 0.
+  This also exercises the `use_shared_grid=false` custom-grid propagation
+  path, which no other test covers.
 
 Placement follows the CI doctrine (per-PR = short invariant tests; move a
 test to the nightly `slow` split only if its measured runtime warrants it,
@@ -285,7 +361,15 @@ made from code analysis. All are for the design review to validate.
   `price_table_builder_test.cc` exercising a re-exported symbol, which ties
   the test to the include seam rather than the target.
 - **D8 — Test strategy** as in *Regression tests*: one red-first regression
-  per fixed site that is reachable through a public API (S1–S4), S5 by
-  invariant only; direct FDM oracles at extreme moneyness, at both σ
-  extremes where the path has a σ axis (the min-σ assertion is what
-  distinguishes a per-group undershoot from a union-grid undershoot).
+  per fixed site (S1–S5; S5 through a new `detail` seam, revised in review
+  round 1 — the original "S5 by invariant only" left a site whose fix
+  could be silently dropped, and the existing adaptive test cannot reach
+  the defect); direct FDM oracles at extreme moneyness, at both σ extremes
+  where the path has a σ axis (the min-σ assertion is what distinguishes a
+  per-group undershoot from a union-grid undershoot). T2's chain is derived
+  against the full domain-transformation chain (round 1: the first example
+  was covered by the old union grid and would not have been red).
+- **D9 — `reference_eep` becomes a `detail` function** rather than gaining
+  a test-only hook. Rejected: a friend/test-access header — the function
+  has no state to protect and the `detail` namespace is already the
+  convention for shared-but-internal builder machinery (#437 D1).
