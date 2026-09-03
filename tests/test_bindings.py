@@ -137,6 +137,20 @@ def test_optional_and_backend_variant_conversions():
         pass
 
 
+def test_grid_accuracy_coverage_roundtrip():
+    p = mo.GridAccuracyParams()
+    assert p.log_moneyness_coverage is None
+    p.log_moneyness_coverage = mo.LogMoneynessRange(-0.5, 0.5)
+    p.coverage_clearance_sigmas = 2.5
+    assert p.log_moneyness_coverage.lo == -0.5
+    assert p.log_moneyness_coverage.hi == 0.5
+    assert p.coverage_clearance_sigmas == 2.5
+    p.log_moneyness_coverage = None
+    assert p.log_moneyness_coverage is None
+    solver = mo.BatchAmericanOptionSolver()
+    solver.set_grid_accuracy_params(p)
+
+
 def test_dividend_conversions():
     p = make_pricing_params()
     p.discrete_dividends = [mo.Dividend(0.25, 1.0), mo.Dividend(0.75, 1.0)]
@@ -371,6 +385,7 @@ def main():
         test_rate_spec_conversions,
         test_sequence_conversions_for_vectors_and_axes,
         test_optional_and_backend_variant_conversions,
+        test_grid_accuracy_coverage_roundtrip,
         test_dividend_conversions,
         test_fdm_iv_solver_honors_discrete_dividends,
         test_bspline_4d_price_table_workflow_and_persistence_paths,

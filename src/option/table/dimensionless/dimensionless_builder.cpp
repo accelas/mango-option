@@ -3,7 +3,6 @@
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/grid_spec_types.hpp"
-#include "mango/option/table/covering_grid.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include <cmath>
 #include <chrono>
@@ -32,7 +31,10 @@ solve_dimensionless_pde(
 
     const double sigma_eff = std::sqrt(2.0);
     const double pde_maturity = axes.tau_prime.back() * 1.01;
-    const auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    // Every log-moneyness node is read from the slice spline, so the solver
+    // must resolve the whole node span (spec D12).
+    accuracy.log_moneyness_coverage = LogMoneynessRange::of(axes.log_moneyness);
     int n_pde_solves = 0;
 
     for (size_t k = 0; k < Nk; ++k) {
@@ -49,19 +51,16 @@ solve_dimensionless_pde(
             sigma_eff);
 
         BatchAmericanOptionSolver batch_solver;
-        // grid_accuracy_ only decides normalized-chain eligibility; the
-        // grid itself is the covering spec below (#480).
         batch_solver.set_grid_accuracy(accuracy);
         batch_solver.set_snapshot_times(
             std::span<const double>{axes.tau_prime.data(), axes.tau_prime.size()});
 
         std::vector<PricingParams> batch = {params};
-        // The solver's own estimate has half-width n_sigma*sqrt(2)*sqrt(T)
-        // and extrapolated the outer x nodes for short tau'_max; solve on
-        // a grid materialized to cover axes.log_moneyness (#480).
-        auto covering = detail::materialize_covering_grid(
-            accuracy, std::span<const PricingParams>(batch), axes.log_moneyness);
-        auto batch_result = batch_solver.solve_batch(batch, true, nullptr, covering);
+        // One shared grid for the whole cohort the cache stores together.
+        auto batch_result = batch_solver.solve_batch(
+            batch, true, nullptr,
+            estimate_batch_pde_grid_config(
+                std::span<const PricingParams>(batch), accuracy));
         ++n_pde_solves;
 
         if (batch_result.failed_count > 0 || !batch_result.results[0].has_value()) {

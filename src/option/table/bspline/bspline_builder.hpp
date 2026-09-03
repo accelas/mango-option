@@ -5,7 +5,6 @@
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/covering_grid.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/option_grid.hpp"

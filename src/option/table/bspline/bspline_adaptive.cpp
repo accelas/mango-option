@@ -8,7 +8,6 @@
 #include "mango/option/table/bspline/bspline_pde_cache.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
-#include "mango/option/table/covering_grid.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
@@ -252,28 +251,24 @@ BatchAmericanOptionResult solve_missing_slices(
             accuracy.n_sigma = std::max(5.0, required_n_sigma);
         }
 
-        // A concrete covering grid, not set_grid_accuracy: gridless solves
-        // are routed per normalized (sigma, r) group and re-estimate a
-        // per-sigma-width grid there, undershooting the moneyness axis
-        // for every sub-max sigma (issue #437). Neither branch calls
-        // set_grid_accuracy any more, so the normalized-routing eligibility
-        // check reads the solver's default accuracy; that is
-        // behavior-neutral here because make_batch emits exactly one param
-        // per (sigma, r) group, so both routes solve the same normalized
-        // PDE on the same verbatim custom grid either way.
-        auto covering = detail::materialize_covering_grid(
-            accuracy, missing_params, m_grid);
-        return batch_solver.solve_batch(missing_params, true, nullptr,
-                                        covering);
+        // Every moneyness node is read from the batch solutions, so the
+        // solver must resolve the whole node span (spec D12).
+        accuracy.log_moneyness_coverage = LogMoneynessRange::of(m_grid);
+        // One shared grid for the whole cohort the cache stores together.
+        return batch_solver.solve_batch(
+            missing_params, true, nullptr,
+            estimate_batch_pde_grid_config(missing_params, accuracy));
     }
 
     if (const auto* accuracy_grid = std::get_if<GridAccuracyParams>(&pde_grid)) {
-        // Same concrete-covering-grid reasoning as the explicit-grid
-        // fallback branch above.
-        auto covering = detail::materialize_covering_grid(
-            *accuracy_grid, missing_params, m_grid);
-        return batch_solver.solve_batch(missing_params, true, nullptr,
-                                        covering);
+        GridAccuracyParams accuracy = *accuracy_grid;
+        // Every moneyness node is read from the batch solutions, so the
+        // solver must resolve the whole node span (spec D12).
+        accuracy.log_moneyness_coverage = LogMoneynessRange::of(m_grid);
+        // One shared grid for the whole cohort the cache stores together.
+        return batch_solver.solve_batch(
+            missing_params, true, nullptr,
+            estimate_batch_pde_grid_config(missing_params, accuracy));
     }
 
     // Should not reach here -- PDEGridSpec is a variant with two alternatives

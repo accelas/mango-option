@@ -9,7 +9,6 @@
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/grid_spec_types.hpp"
-#include "mango/option/table/covering_grid.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include <algorithm>
 #include <array>
@@ -27,10 +26,11 @@ double dimensionless_reference_eep(double x0, double tau_prime_0, double ln_kapp
     double kappa = std::exp(ln_kappa_0);
     double sigma_eff = std::sqrt(2.0);
 
-    const auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    // The probe is read at x0, so the solver must resolve that point even
+    // when it lies outside the contract's own n_sigma domain (spec D12).
+    accuracy.log_moneyness_coverage = LogMoneynessRange{x0, x0};
     BatchAmericanOptionSolver solver;
-    // grid_accuracy_ only decides normalized-chain eligibility; the grid
-    // itself is the covering spec below (#480).
     solver.set_grid_accuracy(accuracy);
 
     std::vector<double> snap_times = {tau_prime_0};
@@ -48,14 +48,7 @@ double dimensionless_reference_eep(double x0, double tau_prime_0, double ln_kapp
             .option_type = option_type},
         sigma_eff);
 
-    // The probe is read at x0, which the solver's own n_sigma*sigma*sqrt(T)
-    // domain need not contain; materialize a grid that covers it (#480).
-    const std::array<double, 1> reach = {x0};
-    auto covering = materialize_covering_grid(
-        accuracy, std::span<const PricingParams>(batch),
-        std::span<const double>(reach));
-    auto result = solver.solve_batch(batch, /*use_shared_grid=*/false,
-                                     nullptr, covering);
+    auto result = solver.solve_batch(batch, /*use_shared_grid=*/false);
     if (result.results.empty() || !result.results[0].has_value()) {
         return 0.0;
     }

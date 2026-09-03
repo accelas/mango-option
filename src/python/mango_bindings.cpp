@@ -339,6 +339,16 @@ PYBIND11_MODULE(mango_option, m) {
         .value("HIGH", mango::GridAccuracyProfile::High)
         .value("ULTRA", mango::GridAccuracyProfile::Ultra);
 
+    // LogMoneynessRange: log-moneyness interval the solution must resolve
+    py::class_<mango::LogMoneynessRange>(m, "LogMoneynessRange")
+        .def(py::init<>())
+        .def(py::init([](double lo, double hi) {
+                 return mango::LogMoneynessRange{lo, hi};
+             }),
+             py::arg("lo"), py::arg("hi"))
+        .def_readwrite("lo", &mango::LogMoneynessRange::lo)
+        .def_readwrite("hi", &mango::LogMoneynessRange::hi);
+
     // GridAccuracyParams structure
     py::class_<mango::GridAccuracyParams>(m, "GridAccuracyParams")
         .def(py::init<>())
@@ -348,7 +358,11 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("c_t", &mango::GridAccuracyParams::c_t)
         .def_readwrite("min_spatial_points", &mango::GridAccuracyParams::min_spatial_points)
         .def_readwrite("max_spatial_points", &mango::GridAccuracyParams::max_spatial_points)
-        .def_readwrite("max_time_steps", &mango::GridAccuracyParams::max_time_steps);
+        .def_readwrite("max_time_steps", &mango::GridAccuracyParams::max_time_steps)
+        .def_readwrite("log_moneyness_coverage",
+                       &mango::GridAccuracyParams::log_moneyness_coverage)
+        .def_readwrite("coverage_clearance_sigmas",
+                       &mango::GridAccuracyParams::coverage_clearance_sigmas);
 
     // OptionGrid data container
     py::class_<mango::OptionGrid>(m, "OptionGrid")

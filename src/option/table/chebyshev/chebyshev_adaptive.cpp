@@ -5,11 +5,11 @@
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/grid_spec_types.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_pde_cache.hpp"
-#include "mango/option/table/covering_grid.hpp"
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/dividend_utils.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
@@ -202,22 +202,20 @@ static size_t solve_missing_pde_pairs(
         batch.push_back(std::move(p));
     }
 
-    const auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    // Every moneyness node is read from the slice splines, so the solver
+    // must resolve the whole node span (spec D12).
+    accuracy.log_moneyness_coverage = LogMoneynessRange::of(m_nodes);
     BatchAmericanOptionSolver solver;
-    solver.set_grid_accuracy(accuracy);  // routing eligibility only
+    solver.set_grid_accuracy(accuracy);
     std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
     solver.set_snapshot_times(std::span<const double>(tau_vec));
-    // A dividend batch is normalized-ineligible and solved on the
-    // batch-union grid, whose half-width n_sigma*sigma_max*sqrt(T) knows
-    // nothing about the moneyness nodes; materialize a covering grid over
-    // the missing batch and pass it as custom_grid (#480).  Dividend event
-    // times are rebuilt per contract by the batch solver, so the config's
-    // empty mandatory_times is safe.
-    auto covering = detail::materialize_covering_grid(
-        accuracy, std::span<const PricingParams>(batch), m_nodes);
+    // One shared grid for the whole cohort the cache stores together.
     auto batch_result = solver.solve_batch(
         std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
-        nullptr, covering);
+        nullptr,
+        estimate_batch_pde_grid_config(
+            std::span<const PricingParams>(batch), accuracy));
 
     for (size_t bi = 0; bi < missing.size(); ++bi) {
         auto [si, ri] = missing[bi];
@@ -409,25 +407,20 @@ static BuildFn make_chebyshev_build_fn(
                                .option_type = config.option_type},
                     sigma_nodes[si]);
             }
-            const auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
+            auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
+            // Every moneyness node is read from the slice splines, so the
+            // solver must resolve the whole node span (spec D12).
+            accuracy.log_moneyness_coverage = LogMoneynessRange::of(m_nodes);
             BatchAmericanOptionSolver solver;
-            // grid_accuracy_ still decides normalized-chain eligibility
-            // (and its traced route); the grid itself comes from the
-            // covering spec below (#480).
             solver.set_grid_accuracy(accuracy);
             std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
             solver.set_snapshot_times(std::span<const double>(tau_vec));
-            // One concrete grid covering every moneyness node, estimated
-            // over the batch actually solved (the missing pairs), passed as
-            // custom_grid so both the normalized-chain and the shared
-            // regular path solve on it.  Gridless solving sized the domain
-            // from n_sigma*sigma*sqrt(T) alone and extrapolated the tails
-            // (#480, same defect as #437).
-            auto covering = detail::materialize_covering_grid(
-                accuracy, std::span<const PricingParams>(batch), m_nodes);
+            // One shared grid for the whole cohort the cache stores together.
             auto batch_result = solver.solve_batch(
                 std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
-                nullptr, covering);
+                nullptr,
+                estimate_batch_pde_grid_config(
+                    std::span<const PricingParams>(batch), accuracy));
             new_solves = batch.size() - batch_result.failed_count;
 
             for (size_t bi = 0; bi < missing.size(); ++bi) {

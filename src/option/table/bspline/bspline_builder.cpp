@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/bspline/bspline_builder.hpp"
-#include "mango/option/table/covering_grid.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/math/bspline/bspline_nd_separable.hpp"
 #include "mango/math/bspline/bspline_basis.hpp"
@@ -238,7 +237,7 @@ PriceTableBuilderND<N>::estimate_pde_grid(
     const PriceTableAxesND<N>& axes) const
 {
     auto accuracy = std::get<GridAccuracyParams>(config_.pde_grid);
-    detail::ensure_moneyness_coverage(accuracy, batch, axes.grids[0]);
+    accuracy.log_moneyness_coverage = LogMoneynessRange::of(axes.grids[0]);
 
     auto [grid_spec, time_domain] = estimate_batch_pde_grid(
         std::span<const PricingParams>(batch), accuracy);
@@ -336,14 +335,15 @@ PriceTableBuilderND<N>::solve_batch(
                 double required_n_sigma = (max_abs_x / safe_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
                 accuracy.n_sigma = std::max(5.0, required_n_sigma);
 
-                // Materialize one concrete covering grid for the whole
-                // batch: a gridless solve is routed per normalized
-                // (sigma, r) group and would re-estimate per-sigma-width
-                // grids there, undershooting the moneyness axis for every
-                // sub-max sigma (issue #437).
-                auto covering = detail::materialize_covering_grid(
-                    accuracy, batch, axes.grids[0]);
-                return solver.solve_batch(batch, true, nullptr, covering);
+                // Every moneyness node is read from the batch solutions, so
+                // the solver must resolve the whole node span (spec D12).
+                accuracy.log_moneyness_coverage =
+                    LogMoneynessRange::of(axes.grids[0]);
+                // One shared grid for the whole cohort the cache stores
+                // together.
+                return solver.solve_batch(
+                    batch, true, nullptr,
+                    estimate_batch_pde_grid_config(batch, accuracy));
             }
         }
     }, config_.pde_grid);

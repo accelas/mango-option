@@ -174,9 +174,9 @@ TEST(EstimateBatchPdeGridConfig, WrapsTheSharedGrid) {
     EXPECT_TRUE(config.mandatory_times.empty());
 }
 
-// Exact goldens recorded from detail::materialize_covering_grid on the
-// parent revision (see covering_grid_test.cc's identity test, Step 3), so
-// the fold cannot drift after the helper is deleted.
+// Exact goldens recorded from the retired covering-grid helper on the
+// parent revision (its identity test proved the fold reproduces them bit
+// for bit), so the fold cannot drift now that the helper is deleted.
 TEST(EstimateBatchPdeGrid, GoldensMatchTheRetiredHelper) {
     // (a) clamp-binding Ultra chain batch (T2-like): sigma nodes over
     //     [0.01, 0.225] at T = 0.694375, coverage [-1.0881, 1.0881].
