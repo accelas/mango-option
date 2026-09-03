@@ -1239,6 +1239,8 @@ cc_test(
     shard_count = 4,
     srcs = ["adaptive_surface_build_integration_test.cc"],
     deps = [
+        "//src/math:cubic_spline_solver",
+        "//src/option:grid_spec_types",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:adaptive_metrics",
         "//src/option/table:adaptive_refinement",

@@ -12,6 +12,8 @@
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
+#include "mango/option/grid_spec_types.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -1063,6 +1065,147 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     }
 }
 
+// Padded-timeline coverage oracle for the segmented Chebyshev path: the
+// table solves a normalized contract with maturity 1.01 * tau_max and the
+// dividend's calendar time anchored to THAT maturity, so at the tau_query
+// snapshot the event sits at tau = 1.01*tau_query - calendar_time, not at
+// tau_query - calendar_time.  Reproduce exactly that contract on an
+// explicit wide grid and read the snapshot at the queried moneyness, so
+// the comparison isolates spatial coverage from the (pre-existing,
+// out-of-scope) timing skew.  Returns a dollar price for strike K.
+double segmented_coverage_oracle(double S, double K, double tau_query,
+                                 double sigma, double rate,
+                                 const std::vector<Dividend>& dividends) {
+    PricingParams p(
+        OptionSpec{.spot = K, .strike = K, .maturity = tau_query * 1.01,
+                   .rate = rate, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        sigma);
+    p.discrete_dividends = dividends;
+
+    BatchAmericanOptionSolver solver;
+    const std::vector<double> snaps = {tau_query};
+    solver.set_snapshot_times(std::span<const double>(snaps));
+    auto grid_spec = GridSpec<double>::sinh_spaced(-1.5, 1.5, 3001, 2.0).value();
+    const std::vector<PricingParams> batch = {p};
+    auto res = solver.solve_batch(
+        std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
+        nullptr, PDEGridSpec{PDEGridConfig{grid_spec, 4000, {}}});
+    EXPECT_TRUE(res.results[0].has_value());
+    const auto& r = res.results[0].value();
+    CubicSpline<double> spline;
+    auto err = spline.build(r.grid()->x(), r.at_time(0));
+    EXPECT_FALSE(err.has_value());
+    return spline.eval(std::log(S / K)) * K;   // at_time() is V/K
+}
+
+// User-contract oracle: the option the user actually asked about, with the
+// dividend at its true calendar time (High profile, pinned).
+double dividend_fdm_reference_price(double S, double K, double tau,
+                                    double sigma, double rate,
+                                    const std::vector<Dividend>& dividends) {
+    PricingParams p(
+        OptionSpec{.spot = S, .strike = K, .maturity = tau, .rate = rate,
+                   .dividend_yield = 0.0, .option_type = OptionType::PUT},
+        sigma);
+    p.discrete_dividends = dividends;
+    auto solver = AmericanOptionSolver::create(
+        p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::High)});
+    EXPECT_TRUE(solver.has_value());
+    auto ref = solver->solve();
+    EXPECT_TRUE(ref.has_value());
+    return ref->value_at(S);
+}
+
+// Regression (#480, S2): the segmented Chebyshev build solved its dividend
+// batch gridless.  A batch with discrete dividends is normalized-ineligible,
+// so it solved on the batch-union grid: half-width 5 * sigma_hi * sqrt(T)
+// with T = 1.01 * 0.25 and sigma_hi = 0.15 + 0.075 (CC headroom on the
+// [0.05, 0.15] sample range) ~= 0.57, left edge nudged by the dividend
+// extension.  The moneyness nodes span the user range [ln 0.49, ln 2]
+// (dividend-widened) plus 3/32 of headroom ~= [-0.85, 0.83], so every
+// endpoint node was extrapolated; the queried S = 50 and S = 200 are
+// themselves outside the old domain.
+// Pre-fix max abs error on this branch's parent (coverage oracle):
+// 6.31e+10 at S=50, sigma=0.05 -- the surface returned
+// 63,086,864,583.46 for a put whose reference value is 50.51.  The other
+// two failing cases show the same signature at different scales: S=50 /
+// sigma=0.15 returned exactly 0 against a reference of 50.5089 (error
+// 50.51), and S=200 / sigma=0.05 returned 2,991,753.61 against a
+// reference of 7.5e-163 (error 2.99e+06).  Only S=200 / sigma=0.15
+// happened to land close enough to pass.  Runaway magnitudes of that
+// kind, and an exact 0 where the put is 50 in the money, are the
+// signature of a cubic spline evaluated far outside its data range, not
+// of interpolation error.
+TEST(AdaptiveGridBuilderTest, SegmentedChebyshevTailsMatchFdmAtExtremeMoneyness) {
+    const std::vector<Dividend> dividends = {
+        Dividend{.calendar_time = 0.1, .amount = 1.0}};
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = dividends,
+        .maturity = 0.25,
+        .kref_config = {.K_refs = {100.0}},   // single K_ref: no strike blend
+    };
+    IVGrid grid{
+        .moneyness = {std::log(0.5), 0.0, std::log(2.0)},  // log(S/K) here
+        .vol = {0.10},                                       // -> [0.05, 0.15]
+        .rate = {0.03, 0.05},
+    };
+
+    auto surface = build_chebyshev_segmented_manual(seg_config, grid);
+    ASSERT_TRUE(surface.has_value())
+        << "build failed: " << static_cast<int>(surface.error().code);
+
+    const double K = 100.0;
+    const double tau = 0.25;
+    const double r = 0.05;
+
+    // Tolerances in $ per K=100, pinned from measurement.
+    //
+    // TOL_COVERAGE guards the padded-timeline oracle -- the assertion that
+    // actually discriminates this defect.  Post-fix max deviation over the
+    // four queries is 0.0217 (S=50, sigma=0.15); the other three are
+    // 0.0048 (S=50, sigma=0.05) and <= 1e-20 at S=200.  0.25 is ~11x that
+    // per the ">= 10x post-fix" rule.  The extra headroom is deliberate:
+    // sweeping the fit's own moneyness nodes shows agreement with the
+    // oracle at <= 1.4e-4 everywhere except the two left-most nodes
+    // (m = -0.845, -0.782), where the deviation grows with sigma
+    // (1.4e-4 at sigma=0.01, 0.24 at 0.1175, 0.84 at 0.1935).  That is
+    // Dirichlet-boundary contamination diffusing in from the covering
+    // grid's left edge -- the covering grid clears the outermost node by
+    // only the 10% margin in materialize_covering_grid -- and the m-fit
+    // spreads a little of it to S=50.  Its size depends on the solver's
+    // boundary handling and grid sizing, so CI must not pin it tightly
+    // across toolchains.  0.25 is still 202x below the *smallest* pre-fix
+    // failure (50.51) and 2.5e+11x below the largest, far inside the
+    // "<= 1/50 of pre-fix" bound, so the class keeps its discriminating
+    // power.
+    constexpr double TOL_COVERAGE = 0.25;
+    //
+    // TOL_USER guards the option the user actually asked about.  It must
+    // clear the timing skew between the two oracles -- the table anchors
+    // the dividend to the padded 1.01*tau maturity, so the two contracts
+    // differ by 2.5e-3 years of dividend timing, measured here as
+    // |cov - usr| = 0.0127 at S=50 (~1e-14 at S=200).  Post-fix max
+    // |got - usr| is 0.0090 (S=50, sigma=0.15).  0.05 is ~4x the skew and
+    // ~5.5x the measured deviation, and ~1000x below the smallest pre-fix
+    // failure.
+    constexpr double TOL_USER = 0.05;
+
+    for (double S : {50.0, 200.0}) {
+        for (double sigma : {0.05, 0.15}) {
+            const double got = surface->price(S, K, tau, sigma, r);
+            const double cov = segmented_coverage_oracle(S, K, tau, sigma, r, dividends);
+            EXPECT_NEAR(got, cov, TOL_COVERAGE)
+                << "coverage oracle S=" << S << " sigma=" << sigma;
+            const double usr = dividend_fdm_reference_price(S, K, tau, sigma, r, dividends);
+            EXPECT_NEAR(got, usr, TOL_USER)
+                << "user oracle S=" << S << " sigma=" << sigma;
+        }
+    }
+}
+
 }  // namespace
 }  // namespace mango
-

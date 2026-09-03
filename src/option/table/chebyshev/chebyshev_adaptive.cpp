@@ -180,6 +180,7 @@ static size_t solve_missing_pde_pairs(
     OptionType option_type,
     double dividend_yield,
     const std::vector<Dividend>& discrete_dividends,
+    std::span<const double> m_nodes,
     std::span<const double> tau_nodes,
     std::span<const double> sigma_nodes,
     std::span<const double> rate_nodes)
@@ -201,12 +202,22 @@ static size_t solve_missing_pde_pairs(
         batch.push_back(std::move(p));
     }
 
+    const auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
     BatchAmericanOptionSolver solver;
-    solver.set_grid_accuracy(make_grid_accuracy(GridAccuracyProfile::Ultra));
+    solver.set_grid_accuracy(accuracy);  // routing eligibility only
     std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
     solver.set_snapshot_times(std::span<const double>(tau_vec));
+    // A dividend batch is normalized-ineligible and solved on the
+    // batch-union grid, whose half-width n_sigma*sigma_max*sqrt(T) knows
+    // nothing about the moneyness nodes; materialize a covering grid over
+    // the missing batch and pass it as custom_grid (#480).  Dividend event
+    // times are rebuilt per contract by the batch solver, so the config's
+    // empty mandatory_times is safe.
+    auto covering = detail::materialize_covering_grid(
+        accuracy, std::span<const PricingParams>(batch), m_nodes);
     auto batch_result = solver.solve_batch(
-        std::span<const PricingParams>(batch), /*use_shared_grid=*/true);
+        std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
+        nullptr, covering);
 
     for (size_t bi = 0; bi < missing.size(); ++bi) {
         auto [si, ri] = missing[bi];
@@ -540,7 +551,8 @@ static BuildFn make_segmented_chebyshev_build_fn(
 
         size_t new_solves = solve_missing_pde_pairs(
             cache, config.K_ref, config.option_type, config.dividend_yield,
-            config.discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
+            config.discrete_dividends, m_nodes, tau_nodes, sigma_nodes,
+            rate_nodes);
         cache.record_pde_solves(new_solves);
 
         auto leaves = detail::build_segment_leaves(
@@ -640,7 +652,7 @@ build_chebyshev_segmented_pieces(
     ChebyshevPDECache cache;
     size_t pde_solves = solve_missing_pde_pairs(
         cache, K_ref, option_type, dividend_yield,
-        discrete_dividends, tau_nodes, sigma_nodes, rate_nodes);
+        discrete_dividends, m_nodes, tau_nodes, sigma_nodes, rate_nodes);
 
     auto leaves = detail::build_segment_leaves(
         cache, K_ref, seg_bounds, seg_is_gap,
