@@ -1106,7 +1106,7 @@ stop and report — the rework is API-only.
 
 **Files:**
 - Modify: `src/option/grid_spec_types.hpp`, `src/option/grid_spec_types.cpp`
-- Modify: `src/option/american_option_batch.cpp` (`is_normalized_eligible`, `trace_ineligibility_reason`: judge on a copy with coverage cleared; `solve_regular_batch`: resolve a `GridAccuracyParams` custom grid over the batch / per contract)
+- Modify: `src/option/american_option_batch.cpp` (`is_normalized_eligible`, `trace_ineligibility_reason`: judge on a copy with coverage cleared; `solve_regular_batch`: resolve a `GridAccuracyParams` custom grid over the batch / per contract). Do not add or remove any `set_grid_accuracy` call anywhere (D14).
 - Create: `tests/grid_spec_types_test.cc`; Modify: `tests/BUILD.bazel` (new small `grid_spec_types_test` on `//src/option:grid_spec_types`), `tests/american_option_batch_test.cc` (five solver-level tests), `tests/covering_grid_test.cc` (temporary exact-identity test against the helper; the file is deleted in Task 9)
 
 **Interfaces (produced):**
@@ -1129,13 +1129,33 @@ PricingParams put(double sigma, double T, double spot = 100.0) {
         .rate = 0.05, .dividend_yield = 0.0, .option_type = OptionType::PUT}, sigma);
 }
 
-TEST(LogMoneynessRange, OfIsOrderIndependentAndEmptyIsNullopt) {
+// Literal "same grid": bounds, type, every generated coordinate, time steps.
+void expect_same_grid(const std::pair<GridSpec<double>, TimeDomain>& a,
+                      const std::pair<GridSpec<double>, TimeDomain>& b) {
+    EXPECT_DOUBLE_EQ(a.first.x_min(), b.first.x_min());
+    EXPECT_DOUBLE_EQ(a.first.x_max(), b.first.x_max());
+    EXPECT_EQ(a.first.n_points(), b.first.n_points());
+    EXPECT_EQ(a.first.type(), b.first.type());
+    auto ga = a.first.generate(); auto gb = b.first.generate();
+    auto sa = ga.view().span();   auto sb = gb.view().span();
+    ASSERT_EQ(sa.size(), sb.size());
+    for (size_t i = 0; i < sa.size(); ++i) EXPECT_EQ(sa[i], sb[i]) << "i=" << i;
+    EXPECT_EQ(a.second.n_steps(), b.second.n_steps());
+}
+
+TEST(LogMoneynessRange, OfIsOrderIndependentAndEmptyOrNonFiniteIsNullopt) {
     std::vector<double> permuted = {0.0, -0.51, 0.10};
     auto r = LogMoneynessRange::of(permuted);
     ASSERT_TRUE(r.has_value());
     EXPECT_DOUBLE_EQ(r->lo, -0.51);
     EXPECT_DOUBLE_EQ(r->hi, 0.10);
     EXPECT_FALSE(LogMoneynessRange::of({}).has_value());
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    std::vector<double> with_nan = {0.0, nan, 0.5};
+    std::vector<double> with_inf = {-inf, 0.0};
+    EXPECT_FALSE(LogMoneynessRange::of(with_nan).has_value());
+    EXPECT_FALSE(LogMoneynessRange::of(with_inf).has_value());
 }
 
 TEST(LogMoneynessRange, ReachIsMeasuredFromX0) {
@@ -1176,26 +1196,48 @@ TEST(EstimatePdeGrid, CoverageInsideNSigmaDomainLeavesGridUnchanged) {
     GridAccuracyParams plain;
     GridAccuracyParams covered = plain;
     covered.log_moneyness_coverage = LogMoneynessRange{-0.51, 0.51};   // 0.51/0.5 + 3 = 4.02 < 5
-    auto [g1, t1] = estimate_pde_grid(put(0.50, 1.0), plain);
-    auto [g2, t2] = estimate_pde_grid(put(0.50, 1.0), covered);
-    EXPECT_DOUBLE_EQ(g1.x_min(), g2.x_min());
-    EXPECT_EQ(g1.n_points(), g2.n_points());
-    EXPECT_EQ(t1.n_steps(), t2.n_steps());
+    expect_same_grid(estimate_pde_grid(put(0.50, 1.0), plain),
+                     estimate_pde_grid(put(0.50, 1.0), covered));
 }
 
-TEST(EstimatePdeGrid, NonFiniteEndpointDisablesCoverageAndNegativeClearanceIsZero) {
+// Non-finite input never reaches the grid arithmetic: a NaN or infinite
+// endpoint, or a NaN or infinite clearance, disables coverage (the plain
+// n_sigma grid results); a negative clearance counts as zero.
+TEST(EstimatePdeGrid, NonFiniteInputDisablesCoverageAndNegativeClearanceIsZero) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
     GridAccuracyParams plain;
-    GridAccuracyParams nan = plain;
-    nan.log_moneyness_coverage = LogMoneynessRange{std::numeric_limits<double>::quiet_NaN(), 0.5};
-    auto [g1, t1] = estimate_pde_grid(put(0.20, 0.25), plain);
-    auto [g2, t2] = estimate_pde_grid(put(0.20, 0.25), nan);
-    EXPECT_DOUBLE_EQ(g1.x_min(), g2.x_min());
-
+    const auto reference = estimate_pde_grid(put(0.20, 0.25), plain);
+    for (double bad : {nan, inf, -inf}) {
+        GridAccuracyParams endpoint = plain;
+        endpoint.log_moneyness_coverage = LogMoneynessRange{bad, 0.5};
+        expect_same_grid(estimate_pde_grid(put(0.20, 0.25), endpoint), reference);
+        GridAccuracyParams clearance = plain;
+        clearance.log_moneyness_coverage = LogMoneynessRange{-2.0, 2.0};
+        clearance.coverage_clearance_sigmas = bad;
+        expect_same_grid(estimate_pde_grid(put(0.20, 0.25), clearance), reference);
+    }
     GridAccuracyParams neg;
     neg.log_moneyness_coverage = LogMoneynessRange{-2.0, 2.0};
     neg.coverage_clearance_sigmas = -4.0;
     auto [g3, t3] = estimate_pde_grid(put(0.20, 0.25), neg);
     EXPECT_NEAR(g3.x_min(), -(2.0 * 1.1), 1e-9);   // the 10% floor alone
+}
+
+// The novel part of the fold: contracts with different x0.  Contract A is
+// ATM with the largest s (0.4*sqrt(0.25) = 0.2); contract B sits at
+// x0 = ln 0.6 ~ -0.511 with s = 0.05 and owns the FARTHEST required reach
+// (1.411 vs A's 0.9).  The union must contain [lo - 3*s_max, hi + 3*s_max]
+// = [-0.9, 1.5].  Using x0 = 0 only, or the s_max contract's reach only,
+// or the first contract's reach only, leaves x_min at ~-0.886 and fails.
+TEST(EstimateBatchPdeGrid, HeterogeneousX0BatchCoversTheAbsoluteRange) {
+    std::vector<PricingParams> batch = {put(0.40, 0.25, /*spot=*/100.0),
+                                        put(0.10, 0.25, /*spot=*/60.0)};
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-0.3, 0.9};
+    auto [grid, td] = estimate_batch_pde_grid(batch, acc);
+    EXPECT_LE(grid.x_min(), -0.9 + 1e-9);
+    EXPECT_GE(grid.x_max(),  1.5 - 1e-9);
 }
 
 // Batch: one n_sigma for all, from the largest sigma*sqrt(T); the union's edge
@@ -1330,19 +1372,30 @@ TEST(BatchAmericanOptionSolver, AccuracyCustomGridIsEstimatedOverTheBatch) {
     BatchAmericanOptionSolver solver;
     auto result = solver.solve_batch(batch, /*use_shared_grid=*/true, nullptr, PDEGridSpec{acc});
     ASSERT_EQ(result.failed_count, 0u);
-    EXPECT_LE(result.results[0]->grid()->x().front(), -(1.5 + 3.0 * 0.40) + 1e-9);
+    auto x0 = result.results[0]->grid()->x();
+    auto x1 = result.results[1]->grid()->x();
+    EXPECT_DOUBLE_EQ(x0.front(), x1.front());
+    EXPECT_DOUBLE_EQ(x0.back(),  x1.back());
+    EXPECT_LE(x0.front(), -(1.5 + 3.0 * 0.40) + 1e-9);
 }
 
-// ... and per contract otherwise (two sigmas -> two different grids; before
-// the repair both contracts reused params[0]'s grid).
-TEST(BatchAmericanOptionSolver, AccuracyCustomGridIsEstimatedPerContract) {
+// ... and per contract otherwise: two sigmas -> two different grids (before
+// the repair both contracts reused params[0]'s grid), and the coverage set
+// on the custom accuracy spec is honoured by each (range [-2.5, 2.5] lies
+// beyond both base domains, +-1.0 and +-2.0).
+TEST(BatchAmericanOptionSolver, AccuracyCustomGridIsEstimatedPerContractWithCoverage) {
     std::vector<PricingParams> batch = {atm_put(0.20, 1.0), atm_put(0.40, 1.0)};
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-2.5, 2.5};
     BatchAmericanOptionSolver solver;
     auto result = solver.solve_batch(batch, /*use_shared_grid=*/false, nullptr,
-                                     PDEGridSpec{GridAccuracyParams{}});
+                                     PDEGridSpec{acc});
     ASSERT_EQ(result.failed_count, 0u);
-    EXPECT_NEAR(result.results[0]->grid()->x().front(), -1.0, 1e-9);   // 5 * 0.2
-    EXPECT_NEAR(result.results[1]->grid()->x().front(), -2.0, 1e-9);   // 5 * 0.4
+    auto x0 = result.results[0]->grid()->x();
+    auto x1 = result.results[1]->grid()->x();
+    EXPECT_LE(x0.front(), -(2.5 + 3.0 * 0.20) + 1e-9);
+    EXPECT_LE(x1.front(), -(2.5 + 3.0 * 0.40) + 1e-9);
+    EXPECT_NE(x0.front(), x1.front());
 }
 ```
 Run: `bazel test //tests:american_option_batch_test` — expected: does not compile.
@@ -1401,6 +1454,10 @@ Run: `bazel test //tests:covering_grid_test` — expected: does not compile.
 std::optional<LogMoneynessRange>
 LogMoneynessRange::of(std::span<const double> nodes) {
     if (nodes.empty()) return std::nullopt;
+    if (!std::all_of(nodes.begin(), nodes.end(),
+                     [](double v) { return std::isfinite(v); })) {
+        return std::nullopt;   // a tight range of a node set with a hole in it is meaningless
+    }
     const auto [lo, hi] = std::minmax_element(nodes.begin(), nodes.end());
     return LogMoneynessRange{*lo, *hi};
 }
@@ -1427,10 +1484,15 @@ double required_n_sigma(const LogMoneynessRange& range, double x0, double s,
                     reach_sigmas + std::max(clearance, 0.0));
 }
 
+/// Coverage takes part in grid sizing only when every input is finite; a
+/// NaN or infinite endpoint or clearance would otherwise reach ceil() and
+/// the integer point count.  (Negative clearance is clamped to zero in
+/// required_n_sigma.)
 bool coverage_usable(const GridAccuracyParams& accuracy) {
     return accuracy.log_moneyness_coverage
         && std::isfinite(accuracy.log_moneyness_coverage->lo)
-        && std::isfinite(accuracy.log_moneyness_coverage->hi);
+        && std::isfinite(accuracy.log_moneyness_coverage->hi)
+        && std::isfinite(accuracy.coverage_clearance_sigmas);
 }
 
 /// Fold coverage into n_sigma for one contract (its own s) and clear it.
