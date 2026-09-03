@@ -3,6 +3,7 @@
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/grid_spec_types.hpp"
+#include "mango/option/table/covering_grid.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include <cmath>
 #include <chrono>
@@ -31,6 +32,7 @@ solve_dimensionless_pde(
 
     const double sigma_eff = std::sqrt(2.0);
     const double pde_maturity = axes.tau_prime.back() * 1.01;
+    const auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
     int n_pde_solves = 0;
 
     for (size_t k = 0; k < Nk; ++k) {
@@ -47,12 +49,17 @@ solve_dimensionless_pde(
             sigma_eff);
 
         BatchAmericanOptionSolver batch_solver;
-        batch_solver.set_grid_accuracy(make_grid_accuracy(GridAccuracyProfile::Ultra));
+        batch_solver.set_grid_accuracy(accuracy);
         batch_solver.set_snapshot_times(
             std::span<const double>{axes.tau_prime.data(), axes.tau_prime.size()});
 
         std::vector<PricingParams> batch = {params};
-        auto batch_result = batch_solver.solve_batch(batch, true);
+        // The solver's own estimate has half-width n_sigma*sqrt(2)*sqrt(T)
+        // and extrapolated the outer x nodes for short tau'_max; solve on
+        // a grid materialized to cover axes.log_moneyness (#480).
+        auto covering = detail::materialize_covering_grid(
+            accuracy, std::span<const PricingParams>(batch), axes.log_moneyness);
+        auto batch_result = batch_solver.solve_batch(batch, true, nullptr, covering);
         ++n_pde_solves;
 
         if (batch_result.failed_count > 0 || !batch_result.results[0].has_value()) {

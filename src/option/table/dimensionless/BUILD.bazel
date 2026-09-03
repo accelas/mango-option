@@ -54,6 +54,7 @@ cc_library(
         "//src/option/table/bspline:bspline_surface",
         "//src/option:american_option_batch",
         "//src/option:grid_spec_types",
+        "//src/option/table:covering_grid",
         "//src/math:cubic_spline_solver",
         "//src/support:error_types",
     ],
