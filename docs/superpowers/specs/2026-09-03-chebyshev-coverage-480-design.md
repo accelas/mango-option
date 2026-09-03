@@ -227,10 +227,12 @@ factor, so with a fixed sinh concentration the smallest cell — which sets
 same resolution-for-coverage trade #437 D4 accepted for the B-spline path;
 there is no new policy.
 
-S2 differs: the dividend left-extension is applied per param *after* the
-σ-scaled width, so low-σ params get a relatively larger extension and can
-be the ones that set the union's `x_min`; that is pre-existing estimator
-behaviour and the covering grid only adds the widened `n_sigma` on top.
+S2 differs only in that the dividend left-extension
+`x_min ← ln(e^{x_min} − D/K)` (`grid_spec_types.cpp:65`) is applied per
+param after the σ-scaled width; it is monotone, so the highest-σ param
+still sets the union's `x_min` and the extension only ever pushes the
+left edge further out. That is pre-existing estimator behaviour and the
+covering grid only adds the widened `n_sigma` on top.
 The `MAX_WIDTH = 5.8` convergence limit remains unenforced against
 materialized custom grids on every materializing path (pre-existing gap
 noted in #437 D4; out of scope here).
@@ -242,7 +244,11 @@ the pre-fix error recorded in the test comment, and its tolerance pinned
 empirically well below that error (cross-toolchain loosening as in #479 is
 allowed and must be justified in the comment). References are direct FDM
 solves pinned to an explicit `GridAccuracyParams` profile, never the
-solver default.
+solver default: every oracle below that says "American solve" means
+`AmericanOptionSolver::create(params, PDEGridSpec{make_grid_accuracy(High)})`
+followed by `solve()`, as `fdm_reference_price` in
+`adaptive_surface_build_integration_test.cc` already does — not
+`solve_american_option`, whose only overload uses the default grid.
 
 - **T1 — helper unit tests** (`tests:covering_grid_test`, small): the four
   #479 tests moved verbatim, plus one new case proving the reach is
@@ -257,9 +263,13 @@ solver default.
   centred on the chain's range and then clamped positive) and
   `build_adaptive_chebyshev` (`chebyshev_adaptive.cpp:679-698`) then adds
   CC headroom (`3·width/32` on m, `3·width/8` on τ, `3·width/4` on σ,
-  clamped to `σ_lo ≥ 0.01`, `τ_lo ≥ 1e-4`). For any chain with maturities
-  ≤ 0.5y that gives `τ_hi = 0.5 + 0.1875 = 0.6875`, PDE `T = 1.01·τ_hi`,
-  `√T ≈ 0.833`; a single chain vol `v` gives sample σ `[v−0.05, v+0.05]`
+  clamped to `σ_lo ≥ 0.01`, `τ_lo ≥ 1e-4`). The τ spread is centred on
+  the chain's range and only shifted up when its lower end crosses the
+  positive clamp, so for the short-maturity chain proposed here
+  (`{0.05, 0.1}`) the sample τ axis becomes ≈ `[1e-6, 0.500001]`, giving
+  `τ_hi = 0.5 + 0.1875 = 0.6875`, PDE `T = 1.01·τ_hi`, `√T ≈ 0.833`
+  (a `{0.4, 0.5}` chain would instead land at ≈ `[0.2, 0.7]`); a single
+  chain vol `v` gives sample σ `[v−0.05, v+0.05]`
   and `σ_hi = v + 0.125`. The old union half-width is thus
   `5·(v+0.125)·0.833 ≈ 4.17·(v+0.125)`, minimised by a small `v`. The
   node reach for strikes symmetric about spot, `K ∈ [S/a, S·a]`, is
@@ -304,15 +314,15 @@ solver default.
     covers the queried x, and its snapshot spline evaluated at the queried
     x. This isolates spatial coverage from the timing skew.
   - *User-contract oracle (looser tolerance, pinned empirically):* the
-    `make_validate_fn`-style direct solve at maturity 0.25 with the same
+    `make_validate_fn`-style direct pinned-profile solve at maturity 0.25 with the same
     `discrete_dividends`, which is what a user compares against; its
     tolerance must sit above the measured timing-skew discrepancy and well
     below the pre-fix extrapolation error.
 - **T4 — S4 unit** (`dimensionless_builder_test`): axes with
   `max|x| > 7.1·√τ'_max` (e.g. x ∈ [−0.7, 0.7], τ' ≤ 0.004, old
-  half-width ≈ 0.45); compare `values` at the x extremes vs
-  `solve_american_option` with spot = K·eˣ, strike = K, σ = √2, r = κ,
-  q = 0, T = τ', divided by K.
+  half-width ≈ 0.45); compare `values` at the x extremes vs a
+  pinned-profile American solve with spot = K·eˣ, strike = K, σ = √2,
+  r = κ, q = 0, T = τ', its dollar value divided by K.
 - **T5 — S3 regression** (`chebyshev_surface_test`): `build_chebyshev_table`
   with a domain whose m reach exceeds `5·σ_hi·√τ_hi` (e.g. m ∈ [−0.7, 0.7],
   τ ∈ [0.01, 0.1], σ ∈ [0.10, 0.20]: old half-width ≈ 0.32); compare
@@ -320,11 +330,15 @@ solver default.
 - **T6 — S5 unit** (`dimensionless_adaptive_test`, the target that owns
   the symbol): `detail::dimensionless_reference_eep` at a
   probe with `|x₀| > 1` (beyond the ≈ ±1.0 reach the 0.02 maturity floor
-  gives today, e.g. x₀ = −1.3, τ'₀ = 0.005) vs the same normalized EEP
-  computed directly: `solve_american_option` at spot = K·e^{x₀}, strike =
-  K, σ = √2, r = κ, T = τ'₀, minus `dimensionless_european`, floored at 0.
-  This also exercises the `use_shared_grid=false` custom-grid propagation
-  path, which no other test covers.
+  gives today, e.g. x₀ = −1.3, τ'₀ = 0.005; the plan moves the probe
+  further out if the pre-fix error is not robustly visible) vs the same
+  *normalized* EEP computed directly: a pinned-profile American solve at
+  spot = K·e^{x₀}, strike = K, σ = √2, r = κ, T = τ'₀, whose dollar
+  `value()` is **divided by K** before subtracting the normalized
+  `dimensionless_european(x₀, τ'₀, κ, type)`, floored at 0 (review round
+  3: `AmericanOptionResult::value()` is a dollar price, the reference is
+  V/K). This also exercises the `use_shared_grid=false` custom-grid
+  propagation path, which no other test covers.
 
 Placement follows the CI doctrine (per-PR = short invariant tests; move a
 test to the nightly `slow` split only if its measured runtime warrants it,
@@ -382,7 +396,8 @@ made from code analysis. All are for the design review to validate.
 - **D4 — Estimate over the batch actually solved.** S1/S2 pass the
   *missing* batch, not the full node product (#437 D3 carried over).
 - **D5 — Keep `set_grid_accuracy`.** It still governs routing eligibility
-  (and the tracing that reports it); removing it would silently change
+  and the traced route / rejection reason derived from it
+  (`american_option_batch.cpp:166`); removing it would silently change
   which path is taken. It does not feed `materialize_covering_grid`, which
   takes its `accuracy` explicitly. Rejected: dropping it as dead code.
 - **D6 — No cap on the widening** (#437 D4 carried over). A cap would
