@@ -212,6 +212,11 @@ and does not alter the guard.
 
 ### 4. Resolution and cost
 
+(Note: when the `max_spatial_points` clamp binds, `estimate_pde_grid` still
+adds one point to keep the count odd, so a clamped grid has 5,001 points at
+Ultra — the same pre-existing "+1 odd-point adjustment, so the cap is not a
+strict ceiling" the #437 spec recorded; this change does not alter it.)
+
 For a dividend-free normalized param, `estimate_pde_grid` gives width
 `2·n_sigma·σ√T` and `dx_target = σ·√tol` (`grid_spec_types.cpp:45-50`), so
 `Nx = 2·n_sigma·√T/√tol` — **σ cancels**. Every param in an S1/S3/S4

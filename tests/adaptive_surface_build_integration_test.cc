@@ -1211,10 +1211,11 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevTailsMatchFdmAtExtremeMoneyness)
     // the dividend to the padded 1.01*tau maturity, so the two contracts
     // differ by 2.5e-3 years of dividend timing, measured here as
     // |cov - usr| = 0.01268 at S=50 (~1e-14 at S=200).  Post-fix max
-    // |got - usr| is 0.00846 (S=50, sigma=0.15).  0.05 is ~3.9x the skew
-    // and ~5.9x the measured deviation, and ~1000x below the smallest
-    // pre-fix failure.
-    constexpr double TOL_USER = 0.05;
+    // |got - usr| is 0.00846 (S=50, sigma=0.15).  0.1 is ~7.9x the skew
+    // and ~11.8x the measured deviation (the ">= 10x post-fix" rule for
+    // cross-toolchain robustness), and ~500x below the smallest pre-fix
+    // failure (50.51), well inside the "<= 1/50 of pre-fix" bound.
+    constexpr double TOL_USER = 0.1;
 
     for (double S : {50.0, 200.0}) {
         for (double sigma : {0.05, 0.15}) {
