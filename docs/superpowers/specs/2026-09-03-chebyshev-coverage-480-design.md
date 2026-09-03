@@ -482,19 +482,29 @@ range" — on the accuracy spec it already hands the solver; the estimator,
 which owns `n_sigma`'s semantics, honours it; every routing inherits it
 because every routing calls the estimator.
 
+**Scope of the claim (narrowed in review round 1).** This rework removes the
+*coverage-specific* solver knowledge from the table layer. The explicit-grid
+validation and fallback policy the B-spline builders still duplicate
+(`MAX_WIDTH`, `MAX_DX`, minimum width, point clamps, `required_n_sigma`
+emulation in `bspline_builder.cpp` and `bspline_adaptive.cpp`) is the same
+kind of smell and is out of scope here; it is filed as a follow-up at
+finish.
+
 ### API
 
 `src/option/grid_spec_types.hpp`:
 
 ```cpp
-/// Log-moneyness interval, x = ln(S/K) relative to the contract's strike.
+/// Closed interval of log-moneyness x = ln(S/K), relative to the contract's
+/// strike (absolute in the solver's x coordinate, NOT an offset from spot).
 struct LogMoneynessRange {
     double lo = 0.0;
     double hi = 0.0;
     /// Tight range of a node set given in any order; nullopt for an empty set.
     static std::optional<LogMoneynessRange> of(std::span<const double> nodes);
-    /// Largest distance from x = 0 the range reaches.
-    [[nodiscard]] double reach() const;
+    /// Largest distance from x0 to either endpoint: the symmetric half-width
+    /// about x0 that contains the whole range.
+    [[nodiscard]] double reach_from(double x0) const;
 };
 
 struct GridAccuracyParams {
@@ -502,13 +512,18 @@ struct GridAccuracyParams {
     /// Log-moneyness range the PDE solution must resolve BEYOND the
     /// contract's own spot, because the caller will read the solution there
     /// (price tables evaluate every slice at their moneyness nodes).  The
-    /// domain is widened so the range sits `coverage_clearance_sigmas`
-    /// diffusion lengths (sigma*sqrt(T)) inside the boundary, with a 10 %
-    /// widening of the range as a floor for tiny sigma*sqrt(T).  For a set
-    /// of contracts sharing one grid the largest sigma*sqrt(T) among them
-    /// sets the clearance, so the shared grid covers as a whole.  nullopt:
-    /// only the contract's spot matters (the n_sigma domain).
-    std::optional<LogMoneynessRange> x_coverage;
+    /// estimated domain, which is symmetric about the contract's x0 =
+    /// ln(spot/strike), is widened until the range sits at least
+    /// `coverage_clearance_sigmas` diffusion lengths (sigma*sqrt(T)) inside
+    /// the boundary, with a 10 % widening of the reach as a floor for tiny
+    /// sigma*sqrt(T).  For contracts sharing one estimated grid the largest
+    /// sigma*sqrt(T) among them sets the clearance and the largest required
+    /// widening is applied to all, so the shared grid covers the range as a
+    /// whole.  nullopt: only the contract's spot matters (the n_sigma domain).
+    /// A non-finite endpoint disables coverage; a negative clearance counts
+    /// as zero.  An explicit PDEGridConfig always takes precedence: a caller
+    /// supplying a concrete grid owns its domain.
+    std::optional<LogMoneynessRange> log_moneyness_coverage;
     double coverage_clearance_sigmas = 3.0;
 };
 
@@ -519,50 +534,85 @@ PDEGridConfig estimate_batch_pde_grid_config(std::span<const PricingParams> batc
                                              const GridAccuracyParams& accuracy);
 ```
 
-### Semantics (numerically identical to D11)
+### Semantics
 
-One private fold in `grid_spec_types.cpp`, applied to a *set of contracts
-sharing a grid* with `s = max sigma*sqrt(T)` over the set (floored at 1e-10):
+One private fold in `grid_spec_types.cpp`. For a contract with
+`x0 = ln(spot/strike)` and `s = sigma*sqrt(T)`:
 
 ```
-reach_sigmas = reach / s
-n_sigma      = max(n_sigma, reach_sigmas * 1.1, reach_sigmas + coverage_clearance_sigmas)
-x_coverage   = nullopt          // folded; per-contract estimation must not re-apply it
+reach    = max(|lo − x0|, |hi − x0|)                 // symmetric half-width about x0 that contains [lo, hi]
+required = max(reach·1.1, reach + clearance·s) / s   // in units of s
 ```
 
-- `estimate_batch_pde_grid(batch, accuracy)` folds once over the batch, then
-  estimates each contract with the folded accuracy and unions. The union's
-  edge is `reach + 3·σ_max√T` and `Nx` stays σ-cancelled — exactly the grid
-  `materialize_covering_grid` produces today, so every pinned number on the
-  branch is unchanged.
-- `estimate_pde_grid(contract, accuracy)` folds with the contract's own
-  sigma*sqrt(T): a batch of one.
-- Because both estimators honour it, every routing of
-  `BatchAmericanOptionSolver::solve_batch` honours it with no solver change:
-  the shared regular path (`estimate_batch_pde_grid` over the batch), the
-  normalized chain (`estimate_batch_pde_grid` over each single-contract
-  group — each group covers with its own clearance), and the
-  `use_shared_grid=false` per-contract path (`estimate_pde_grid`).
+- `estimate_pde_grid(contract, accuracy)`: `n_sigma = max(n_sigma, required)`
+  with the contract's own `s`, then coverage is cleared and the existing
+  estimate runs. The domain `[x0 ± n_sigma·s]` contains `[lo − clearance·s,
+  hi + clearance·s]` by construction, for any `x0`, inside or outside the
+  range. (Review round 1 found the previous draft measured `reach` from 0
+  and therefore failed for non-ATM contracts on the public
+  `AmericanOptionSolver::create(params, GridAccuracyParams)` path.)
+- `estimate_batch_pde_grid(batch, accuracy)`: `s_max = max s_i` over the
+  batch; `n_sigma = max(n_sigma, max_i required_i(s_max))`, applied
+  uniformly to every contract with coverage cleared, then the existing
+  per-contract estimates are unioned. Correctness for an arbitrary batch:
+  the contract with `s = s_max` alone has half-width `≥ reach_max +
+  clearance·s_max` about its own `x0`, so its domain — and therefore the
+  union — contains `[lo − clearance·s_max, hi + clearance·s_max]`. `Nx`
+  stays σ-cancelled because one `n_sigma` is applied to all.
+- **Numeric identity with D11.** Every table batch is normalized
+  (`spot = strike`, so `x0 = 0` for all contracts) and every table site
+  passes `LogMoneynessRange::of(nodes)`; then `reach_i = max(|lo|, |hi|)`
+  for all `i` and the batch fold is exactly the expression
+  `materialize_covering_grid` evaluates today, feeding the same
+  `estimate_batch_pde_grid` (same clamp, same odd-point adjustment, same
+  time domain). The realized edge is at least `reach + 3·σ_max√T` (the
+  maximum of the three terms; `n_sigma`'s own domain can be wider).
+- **Every routing of `solve_batch` honours it**, with one solver repair:
+  - shared regular path: `estimate_batch_pde_grid(params, grid_accuracy_)`
+    over the whole batch (unchanged code);
+  - normalized chain: each single-contract group calls
+    `estimate_batch_pde_grid({group}, grid_accuracy_)` — a batch of one,
+    covering with its own clearance (unchanged code);
+  - `use_shared_grid=false`: `estimate_pde_grid(params[i], grid_accuracy_)`
+    per contract (unchanged code);
+  - `custom_grid = GridAccuracyParams{...}` (**repaired, D15**): today
+    `solve_regular_batch` resolves that accuracy against `params[0]` once
+    and reuses the result for every contract, on both the shared and the
+    per-contract path — a pre-existing violation of the shared-grid
+    contract that would also defeat coverage. It now resolves a
+    `GridAccuracyParams` custom grid with `estimate_batch_pde_grid(params)`
+    on the shared path and `estimate_pde_grid(params[i])` per contract
+    otherwise; a `PDEGridConfig` custom grid is still resolved once. No
+    in-tree caller passes a `GridAccuracyParams` as `custom_grid`
+    (verified by grep), so no existing number moves.
 - `is_normalized_eligible` and `trace_ineligibility_reason` judge
-  eligibility on the accuracy *with coverage cleared*: routing is decided on
-  the contract's own kink-region grid exactly as today, so no batch changes
-  route because of this rework. Making eligibility judge the grid actually
-  solved on is #487's business, unchanged here.
+  eligibility on a copy of `grid_accuracy_` with coverage cleared (D14):
+  routing is decided on the contract's own kink-region grid exactly as
+  today. Making eligibility judge the grid actually solved on is #487's
+  business, unchanged here.
 
 ### Call sites
 
-Every builder sets `accuracy.x_coverage = LogMoneynessRange::of(nodes)` on
-the accuracy it already builds. To keep every number on the branch
-bit-identical, the sites that today pass a materialized grid keep passing an
-explicit shared grid — now obtained from the public estimator,
-`estimate_batch_pde_grid_config(batch, accuracy)` — because a builder that
-caches per-(σ, r) slices legitimately wants one grid per cohort. That is a
-caller's choice expressed through the public API, not a leaked internal:
-the same call with no `custom_grid` is correct too, and two solver-level
-tests pin that (normalized chain per group; per-contract path). The
-dimensionless reference probe (S5, `use_shared_grid=false`, one contract)
-goes gridless — it has no cohort. `set_grid_accuracy(accuracy)` becomes the
-single source of truth again; the "routing-only" comments go.
+Every builder sets `accuracy.log_moneyness_coverage =
+LogMoneynessRange::of(nodes)` on the accuracy object it already builds. To
+keep every number on the branch bit-identical, the sites that today pass a
+materialized grid keep passing an explicit shared grid — now obtained from
+the public estimator, `estimate_batch_pde_grid_config(batch, accuracy)` —
+because a builder that caches per-(σ, r) slices legitimately wants one grid
+per cohort. That is a caller's choice expressed through the public API, not
+a leaked internal: the same call with no `custom_grid` is correct too, and
+solver-level tests pin that on every routing. The dimensionless reference
+probe (S5, `use_shared_grid=false`, one contract) goes gridless — it has no
+cohort.
+
+**Routing preservation rule (D14, refined in round 1):** no
+`set_grid_accuracy` call is added or removed at any site. Sites that call
+it today (S1–S5) pass the same accuracy object with coverage set, which
+eligibility clears; the B-spline sites that today leave the solver's
+accuracy at its default keep doing so. Task 9 carries a per-site
+before/after table so the reviewer can check this rather than trust it.
+The "routing-only" comments at S1–S5 are deleted: the solver's accuracy is
+the single source of truth again.
 
 Sites: `chebyshev_adaptive.cpp` S1/S2, `chebyshev_table_builder.cpp` S3,
 `dimensionless_builder.cpp` S4, `dimensionless_adaptive.cpp` S5,
@@ -571,40 +621,77 @@ explicit-grid fallback), `bspline_adaptive.cpp` (both auto-estimation
 branches). `covering_grid.{hpp,cpp}`, its target, and `covering_grid_test`
 are deleted; `bspline_builder.hpp` drops the re-include.
 
+**Python (D16).** `CONTEXT.md`'s parity rule makes every supported C++
+capability reachable from Python, and `GridAccuracyParams` /
+`BatchAmericanOptionSolver.set_grid_accuracy_params` are already bound, so
+`LogMoneynessRange` (fields `lo`, `hi`) and the two new fields are bound
+too, with a round-trip reachability check in `tests/test_bindings.py`.
+
+**ABI.** `GridAccuracyParams` grows; it is not serialized anywhere (not
+part of the Parquet price-table artifacts) and no ADR is implicated, but
+binary consumers must rebuild.
+
 ### Tests
 
 - `tests/grid_spec_types_test.cc` (new, small, on `//src/option:grid_spec_types`):
-  `LogMoneynessRange::of` order-independence and empty → nullopt; the batch
-  estimate's edge is `≥ reach + 3·σ_max√T` (the D11 rule) and equals the
-  old helper's edge; the single-contract estimate covers with its own
-  sigma*sqrt(T); coverage well inside the n_sigma domain leaves the grid
-  unchanged; `estimate_batch_pde_grid_config` carries `n_steps` and an empty
-  `mandatory_times`. These replace the six `covering_grid_test` cases.
-- `tests/american_option_batch_test.cc`: a normalized-eligible two-σ batch
-  with `x_coverage` set and no `custom_grid` — every result's grid spans
-  `reach + 3·σ_i√T`; and a `use_shared_grid=false` single contract whose
-  probe lies beyond its n_sigma domain — its grid spans the probe.
-- T1's behaviour is now covered by the estimator tests; T2–T6 are untouched
-  and must pass with their recorded numbers unchanged (that is the proof of
-  numeric identity).
+  `LogMoneynessRange::of` order-independence and empty → nullopt;
+  `reach_from` for x0 inside and outside the range; single-contract
+  coverage at `x0 = 0` and at `x0 ≠ 0` (domain contains `[lo − 3s, hi +
+  3s]`); the batch edge for a normalized batch equals the D11 expression;
+  a non-default `coverage_clearance_sigmas`; coverage well inside the
+  `n_sigma` domain leaves the grid unchanged; non-finite endpoint → same
+  grid as no coverage; negative clearance counts as zero;
+  `estimate_batch_pde_grid_config` carries `n_steps` and an empty
+  `mandatory_times`; and **exact grid goldens** (`x_min`, `x_max`,
+  `n_points`, `n_time`) for a clamp-binding Ultra batch and a dividend
+  batch, recorded from the helper before it is deleted.
+- **Exact identity with the helper (Task 8, while it still exists):** for
+  the T2-like Ultra chain batch, a High B-spline-like batch, and a dividend
+  batch, `estimate_batch_pde_grid_config(batch, accuracy-with-coverage)`
+  equals `detail::materialize_covering_grid(accuracy, batch, nodes)` in
+  `x_min`, `x_max`, `n_points`, grid type/concentration, every generated
+  coordinate (exact equality), and `n_time`. This is the proof of numeric
+  identity; the goldens above retain it after the helper is gone.
+- `tests/american_option_batch_test.cc`: (a) normalized chain with
+  coverage set and reach 3.0, chosen so the coverage-widened first-contract
+  grid is wider than `MAX_WIDTH` while its base grid is eligible — the
+  batch must still route normalized (distinct per-group grids, each
+  covering with its own clearance), which fails if eligibility is not
+  judged with coverage cleared; (b) the shared regular route (two-σ batch
+  with a discrete dividend, hence ineligible): all results share one grid
+  whose edge follows `σ_max√T`; (c) `use_shared_grid=false` with a probe
+  beyond the `n_sigma` domain; (d) `custom_grid = GridAccuracyParams` on
+  the shared path (batch-level grid) and on the per-contract path
+  (per-contract grids).
+- T1's behaviour is covered by the estimator tests; T2–T6 are untouched
+  and must pass with their recorded numbers unchanged.
 
 ### Decisions
 
 - **D12 — Coverage is a property of the accuracy spec, honoured by the
-  estimator.** Rejected: a new `PDEGridSpec` variant ("accuracy plus range")
-  — the range modifies how accuracy is turned into a domain, it is not a
-  third kind of grid specification; and keeping the helper but moving it
-  into the solver — still a second grid-sizing path beside the estimator.
+  estimator, in absolute `ln(S/K)` with the reach measured from each
+  contract's own `x0`.** Rejected: an offset-from-spot field (the table
+  layer thinks in strike-relative moneyness, and the batch guarantee is
+  cleanest as an absolute interval); a new `PDEGridSpec` variant; keeping
+  the helper but moving it into the solver. (Round 1: the first draft
+  measured reach from 0 and was wrong off the money.)
 - **D13 — Explicit shared grid at cohort-caching sites, gridless at S5.**
   Numeric identity with the reviewed branch, and one grid per cache cohort
   is a legitimate caller intent. Rejected: gridless everywhere — on the
   normalized-eligible corner it would switch those batches to per-group
-  covering grids (correct, but different numbers and, for low-σ groups, the
-  point clamp), a behaviour change this API rework must not carry.
-- **D14 — Eligibility judged with coverage cleared.** Preserves today's
-  routing exactly; the pre-existing gap that eligibility judges a grid that
-  is never solved on stays with #487.
-- **Out of scope, noted:** asymmetric use of `lo`/`hi` (the estimator's
-  symmetric `reach` keeps D11's numbers); exposing `x_coverage` in the Python
-  bindings (tables set it internally); letting `build_adaptive_chebyshev`
-  take a `PDEGridSpec` like the B-spline builder (a separate API gap).
+  covering grids (correct, but different numbers and, for low-σ groups,
+  the point clamp), a behaviour change this API rework must not carry.
+- **D14 — Eligibility judged with coverage cleared, and no
+  `set_grid_accuracy` call added or removed.** Preserves today's routing at
+  every site; the pre-existing gap that eligibility judges a grid never
+  solved on stays with #487.
+- **D15 — Repair `custom_grid = GridAccuracyParams` resolution** so the
+  shared path estimates over the batch and the per-contract path per
+  contract. Rejected: narrowing `custom_grid` to `PDEGridConfig` (a public
+  API change needing its own compatibility pass) and documenting the
+  first-contract behaviour (a contract violation, not a feature).
+- **D16 — Bind the new fields in Python** per the parity rule. Rejected:
+  leaving them C++-only (the type is public and user-configurable).
+- **Out of scope, noted:** the B-spline explicit-grid policy duplication
+  (follow-up); letting `build_adaptive_chebyshev` take a `PDEGridSpec` like
+  the B-spline builder (a separate API gap).

@@ -1095,37 +1095,37 @@ Record here, during execution, anything done differently from this plan or the s
 
 ---
 
-## Rework tasks (composable coverage API — spec §"Rework", D12–D14)
+## Rework tasks (composable coverage API — spec §"Rework", D12–D16)
 
 Global constraints above still bind. Additional invariant for every rework
 task: **no pinned number changes.** T2–T6, the #479 regressions, the B-spline
 bit-identity goldens, and the 549 bps pin must pass untouched; if any moves,
 stop and report — the rework is API-only.
 
-### Task 8: `x_coverage` on `GridAccuracyParams`, honoured by the estimators
+### Task 8: `log_moneyness_coverage` on `GridAccuracyParams`, honoured by the estimators and every `solve_batch` routing
 
 **Files:**
-- Modify: `src/option/grid_spec_types.hpp` (`LogMoneynessRange`, two new fields, `estimate_batch_pde_grid_config`), `src/option/grid_spec_types.cpp`
-- Modify: `src/option/american_option_batch.cpp` (`is_normalized_eligible`, `trace_ineligibility_reason`: judge on a copy with `x_coverage` cleared)
-- Create: `tests/grid_spec_types_test.cc`; Modify: `tests/BUILD.bazel` (new small `grid_spec_types_test` on `//src/option:grid_spec_types`), `tests/american_option_batch_test.cc` (two solver-level tests)
+- Modify: `src/option/grid_spec_types.hpp`, `src/option/grid_spec_types.cpp`
+- Modify: `src/option/american_option_batch.cpp` (`is_normalized_eligible`, `trace_ineligibility_reason`: judge on a copy with coverage cleared; `solve_regular_batch`: resolve a `GridAccuracyParams` custom grid over the batch / per contract)
+- Create: `tests/grid_spec_types_test.cc`; Modify: `tests/BUILD.bazel` (new small `grid_spec_types_test` on `//src/option:grid_spec_types`), `tests/american_option_batch_test.cc` (five solver-level tests), `tests/covering_grid_test.cc` (temporary exact-identity test against the helper; the file is deleted in Task 9)
 
 **Interfaces (produced):**
 ```cpp
 struct LogMoneynessRange { double lo = 0.0, hi = 0.0;
     static std::optional<LogMoneynessRange> of(std::span<const double> nodes);
-    [[nodiscard]] double reach() const; };
-// GridAccuracyParams gains:
-std::optional<LogMoneynessRange> x_coverage;   // default nullopt
+    [[nodiscard]] double reach_from(double x0) const; };
+// GridAccuracyParams gains (appended after max_time_steps):
+std::optional<LogMoneynessRange> log_moneyness_coverage;   // default nullopt
 double coverage_clearance_sigmas = 3.0;
 PDEGridConfig estimate_batch_pde_grid_config(std::span<const PricingParams> batch,
                                              const GridAccuracyParams& accuracy);
 ```
 
-- [ ] **Step 1: Write the failing estimator tests** (`tests/grid_spec_types_test.cc`, SPDX header, `namespace mango { namespace {`):
+- [ ] **Step 1: Write the failing estimator tests** — `tests/grid_spec_types_test.cc` (SPDX header; `#include <gtest/gtest.h>`, `"mango/option/grid_spec_types.hpp"`, `<cmath>`, `<limits>`, `<vector>`; `namespace mango { namespace {`):
 
 ```cpp
-PricingParams put(double sigma, double T) {
-    return PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = T,
+PricingParams put(double sigma, double T, double spot = 100.0) {
+    return PricingParams(OptionSpec{.spot = spot, .strike = 100.0, .maturity = T,
         .rate = 0.05, .dividend_yield = 0.0, .option_type = OptionType::PUT}, sigma);
 }
 
@@ -1135,22 +1135,80 @@ TEST(LogMoneynessRange, OfIsOrderIndependentAndEmptyIsNullopt) {
     ASSERT_TRUE(r.has_value());
     EXPECT_DOUBLE_EQ(r->lo, -0.51);
     EXPECT_DOUBLE_EQ(r->hi, 0.10);
-    EXPECT_DOUBLE_EQ(r->reach(), 0.51);
     EXPECT_FALSE(LogMoneynessRange::of({}).has_value());
 }
 
-// D11: the shared grid's edge clears the covered range by three diffusion
-// lengths of the LARGEST sigma*sqrt(T) in the batch (reach 0.51, s = 0.2*sqrt(0.1)).
-TEST(EstimateBatchPdeGrid, CoverageEdgeIsReachPlusThreeSigmaSqrtT) {
+TEST(LogMoneynessRange, ReachIsMeasuredFromX0) {
+    LogMoneynessRange r{-0.5, 0.5};
+    EXPECT_DOUBLE_EQ(r.reach_from(0.0), 0.5);
+    EXPECT_DOUBLE_EQ(r.reach_from(0.2), 0.7);    // inside: to the far endpoint
+    EXPECT_DOUBLE_EQ(r.reach_from(2.0), 2.5);    // outside: to the far endpoint
+}
+
+// D11 rule on a single normalized contract: edge = max(1.1*reach, reach + 3s).
+TEST(EstimatePdeGrid, SingleContractCoversWithItsOwnSigmaSqrtT) {
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-0.5, 0.5};
+    auto [grid, td] = estimate_pde_grid(put(0.20, 0.25), acc);   // s = 0.1
+    EXPECT_NEAR(grid.x_min(), -(0.5 + 3.0 * 0.1), 1e-9);
+    EXPECT_NEAR(grid.x_max(),  (0.5 + 3.0 * 0.1), 1e-9);
+}
+
+// Review round 1: the range is absolute ln(S/K); a contract off the money
+// must still get [lo - 3s, hi + 3s] inside its domain (x0 = ln 1.2 ~ 0.182).
+TEST(EstimatePdeGrid, OffTheMoneyContractStillCoversTheAbsoluteRange) {
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-0.5, 0.5};
+    auto [grid, td] = estimate_pde_grid(put(0.20, 0.25, /*spot=*/120.0), acc);  // s = 0.1
+    EXPECT_LE(grid.x_min(), -0.8 + 1e-9);
+    EXPECT_GE(grid.x_max(),  0.8 - 1e-9);
+}
+
+TEST(EstimatePdeGrid, ClearanceIsConfigurable) {
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-0.5, 0.5};
+    acc.coverage_clearance_sigmas = 6.0;
+    auto [grid, td] = estimate_pde_grid(put(0.20, 0.25), acc);   // s = 0.1
+    EXPECT_NEAR(grid.x_min(), -(0.5 + 6.0 * 0.1), 1e-9);
+}
+
+TEST(EstimatePdeGrid, CoverageInsideNSigmaDomainLeavesGridUnchanged) {
+    GridAccuracyParams plain;
+    GridAccuracyParams covered = plain;
+    covered.log_moneyness_coverage = LogMoneynessRange{-0.51, 0.51};   // 0.51/0.5 + 3 = 4.02 < 5
+    auto [g1, t1] = estimate_pde_grid(put(0.50, 1.0), plain);
+    auto [g2, t2] = estimate_pde_grid(put(0.50, 1.0), covered);
+    EXPECT_DOUBLE_EQ(g1.x_min(), g2.x_min());
+    EXPECT_EQ(g1.n_points(), g2.n_points());
+    EXPECT_EQ(t1.n_steps(), t2.n_steps());
+}
+
+TEST(EstimatePdeGrid, NonFiniteEndpointDisablesCoverageAndNegativeClearanceIsZero) {
+    GridAccuracyParams plain;
+    GridAccuracyParams nan = plain;
+    nan.log_moneyness_coverage = LogMoneynessRange{std::numeric_limits<double>::quiet_NaN(), 0.5};
+    auto [g1, t1] = estimate_pde_grid(put(0.20, 0.25), plain);
+    auto [g2, t2] = estimate_pde_grid(put(0.20, 0.25), nan);
+    EXPECT_DOUBLE_EQ(g1.x_min(), g2.x_min());
+
+    GridAccuracyParams neg;
+    neg.log_moneyness_coverage = LogMoneynessRange{-2.0, 2.0};
+    neg.coverage_clearance_sigmas = -4.0;
+    auto [g3, t3] = estimate_pde_grid(put(0.20, 0.25), neg);
+    EXPECT_NEAR(g3.x_min(), -(2.0 * 1.1), 1e-9);   // the 10% floor alone
+}
+
+// Batch: one n_sigma for all, from the largest sigma*sqrt(T); the union's edge
+// is max(1.1*reach, reach + 3*s_max).  Identical to widening n_sigma by hand.
+TEST(EstimateBatchPdeGrid, CoverageEdgeIsReachPlusThreeSigmaMaxSqrtT) {
     std::vector<PricingParams> batch = {put(0.10, 0.1), put(0.15, 0.1), put(0.20, 0.1)};
     GridAccuracyParams acc;
-    acc.x_coverage = LogMoneynessRange{-0.51, 0.51};
+    acc.log_moneyness_coverage = LogMoneynessRange{-0.51, 0.51};
     const double s = 0.20 * std::sqrt(0.1);
     const double expected_edge = std::max(0.51 * 1.1, 0.51 + 3.0 * s);   // ~0.700
     auto [grid, td] = estimate_batch_pde_grid(batch, acc);
     EXPECT_NEAR(grid.x_min(), -expected_edge, 1e-9);
     EXPECT_NEAR(grid.x_max(),  expected_edge, 1e-9);
-    // Identical to widening n_sigma by hand and estimating without coverage:
     GridAccuracyParams manual;
     manual.n_sigma = std::max(manual.n_sigma, expected_edge / s);
     auto [grid2, td2] = estimate_batch_pde_grid(batch, manual);
@@ -1159,34 +1217,26 @@ TEST(EstimateBatchPdeGrid, CoverageEdgeIsReachPlusThreeSigmaSqrtT) {
     EXPECT_EQ(td.n_steps(), td2.n_steps());
 }
 
-TEST(EstimatePdeGrid, SingleContractCoversWithItsOwnSigmaSqrtT) {
-    GridAccuracyParams acc;
-    acc.x_coverage = LogMoneynessRange{-0.5, 0.5};
-    auto [grid, td] = estimate_pde_grid(put(0.20, 0.25), acc);   // s = 0.1
-    EXPECT_NEAR(grid.x_min(), -(0.5 + 3.0 * 0.1), 1e-9);
-    EXPECT_NEAR(grid.x_max(),  (0.5 + 3.0 * 0.1), 1e-9);
-}
-
-TEST(EstimatePdeGrid, CoverageInsideNSigmaDomainLeavesGridUnchanged) {
-    GridAccuracyParams plain;
-    GridAccuracyParams covered = plain;
-    covered.x_coverage = LogMoneynessRange{-0.51, 0.51};        // 0.51/0.5 + 3 = 4.02 < 5
-    auto [g1, t1] = estimate_pde_grid(put(0.50, 1.0), plain);
-    auto [g2, t2] = estimate_pde_grid(put(0.50, 1.0), covered);
-    EXPECT_DOUBLE_EQ(g1.x_min(), g2.x_min());
-    EXPECT_EQ(g1.n_points(), g2.n_points());
-    EXPECT_EQ(t1.n_steps(), t2.n_steps());
-}
-
 TEST(EstimateBatchPdeGridConfig, WrapsTheSharedGrid) {
     std::vector<PricingParams> batch = {put(0.10, 0.1), put(0.20, 0.1)};
     GridAccuracyParams acc;
-    acc.x_coverage = LogMoneynessRange{-0.51, 0.51};
+    acc.log_moneyness_coverage = LogMoneynessRange{-0.51, 0.51};
     auto [grid, td] = estimate_batch_pde_grid(batch, acc);
     auto config = estimate_batch_pde_grid_config(batch, acc);
     EXPECT_DOUBLE_EQ(config.grid_spec.x_min(), grid.x_min());
     EXPECT_EQ(config.n_time, td.n_steps());
     EXPECT_TRUE(config.mandatory_times.empty());
+}
+
+// Exact goldens recorded from detail::materialize_covering_grid on the
+// parent revision (see covering_grid_test.cc's identity test, Step 3), so
+// the fold cannot drift after the helper is deleted.  Values: <FILL IN STEP 5>.
+TEST(EstimateBatchPdeGrid, GoldensMatchTheRetiredHelper) {
+    // (a) clamp-binding Ultra chain batch (T2-like): sigma nodes over
+    //     [0.01, 0.225] at T = 0.694375, coverage [-1.0881, 1.0881].
+    // (b) dividend batch: sigma {0.05, 0.15}, T = 0.2525, one dividend
+    //     {calendar_time 0.1, amount 1.0}, coverage [-0.8452, 0.8250].
+    // For each: EXPECT_DOUBLE_EQ on x_min, x_max; EXPECT_EQ on n_points, n_time.
 }
 ```
 `tests/BUILD.bazel`, next to `american_option_batch_test`:
@@ -1202,58 +1252,151 @@ cc_test(
     ],
 )
 ```
-Run: `bazel test //tests:grid_spec_types_test` — expected: does not compile (no `LogMoneynessRange`).
+Run: `bazel test //tests:grid_spec_types_test` — expected: does not compile.
 
-- [ ] **Step 2: Write the failing solver tests** (append to `tests/american_option_batch_test.cc`):
+- [ ] **Step 2: Write the failing solver tests** (append to `tests/american_option_batch_test.cc`; add `<cmath>`, `<variant>`):
 
 ```cpp
-// Coverage travels with the accuracy spec into EVERY routing: a
-// normalized-eligible batch (spot = strike, no dividends, margin 5*0.2 >= 0.35)
-// is solved per (sigma, r) group, and each group's grid must still clear the
-// covered range by three of ITS OWN diffusion lengths.
-TEST(BatchAmericanOptionSolver, NormalizedChainHonoursCoveragePerGroup) {
-    std::vector<PricingParams> batch;
-    for (double sigma : {0.20, 0.40}) {
-        batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0,
-            .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.0,
-            .option_type = OptionType::PUT}, sigma));
-    }
+namespace {
+PricingParams atm_put(double sigma, double T, std::vector<Dividend> divs = {}) {
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = T,
+        .rate = 0.05, .dividend_yield = 0.0, .option_type = OptionType::PUT}, sigma);
+    p.discrete_dividends = std::move(divs);
+    return p;
+}
+}  // namespace
+
+// D14: eligibility is judged with coverage cleared.  Reach 3.0 makes the
+// coverage-widened first-contract grid 7.2 wide (> MAX_WIDTH = 5.8) while its
+// base grid (half-width 1.0, margin 1.0) is eligible, so the batch must STILL
+// route through the normalized chain: each group solves on its own grid,
+// covering with its own clearance, and the two grids differ.  Without D14
+// the batch would fall to the shared regular path and both results would
+// share one grid.
+TEST(BatchAmericanOptionSolver, CoverageDoesNotChangeRoutingAndEveryGroupCovers) {
+    std::vector<PricingParams> batch = {atm_put(0.20, 1.0), atm_put(0.40, 1.0)};
     GridAccuracyParams acc;
-    acc.x_coverage = LogMoneynessRange{-1.5, 1.5};
+    acc.log_moneyness_coverage = LogMoneynessRange{-3.0, 3.0};
     BatchAmericanOptionSolver solver;
     solver.set_grid_accuracy(acc);
     auto result = solver.solve_batch(batch, /*use_shared_grid=*/true);
     ASSERT_EQ(result.failed_count, 0u);
-    for (size_t i = 0; i < batch.size(); ++i) {
-        ASSERT_TRUE(result.results[i].has_value());
-        auto x = result.results[i]->grid()->x();
-        const double clearance = 3.0 * batch[i].volatility;   // sqrt(T) = 1
-        EXPECT_LE(x.front(), -(1.5 + clearance) + 1e-9) << "sigma=" << batch[i].volatility;
-        EXPECT_GE(x.back(),   (1.5 + clearance) - 1e-9) << "sigma=" << batch[i].volatility;
-    }
+    auto x0 = result.results[0]->grid()->x();
+    auto x1 = result.results[1]->grid()->x();
+    EXPECT_LE(x0.front(), -(3.0 + 3.0 * 0.20) + 1e-9);
+    EXPECT_LE(x1.front(), -(3.0 + 3.0 * 0.40) + 1e-9);
+    EXPECT_NE(x0.front(), x1.front()) << "per-group grids expected (normalized routing)";
 }
 
-// The per-contract path (use_shared_grid = false) honours it too: a probe
-// 1.3 beyond the strike with sigma*sqrt(T) = 0.2*sqrt(0.02) ~= 0.028, whose
-// n_sigma domain reaches only ~0.14.
-TEST(BatchAmericanOptionSolver, PerContractPathHonoursCoverage) {
-    std::vector<PricingParams> batch = {PricingParams(OptionSpec{.spot = 100.0,
-        .strike = 100.0, .maturity = 0.02, .rate = 0.05, .dividend_yield = 0.0,
-        .option_type = OptionType::PUT}, 0.20)};
+// Shared regular route (dividends make the batch ineligible): one grid for
+// all, its edge set by the LARGEST sigma*sqrt(T).
+TEST(BatchAmericanOptionSolver, SharedRegularRouteCoversWithSigmaMax) {
+    const std::vector<Dividend> divs = {Dividend{.calendar_time = 0.5, .amount = 1.0}};
+    std::vector<PricingParams> batch = {atm_put(0.20, 1.0, divs), atm_put(0.40, 1.0, divs)};
     GridAccuracyParams acc;
-    acc.x_coverage = LogMoneynessRange{-1.3, -1.3};
+    acc.log_moneyness_coverage = LogMoneynessRange{-1.5, 1.5};
+    BatchAmericanOptionSolver solver;
+    solver.set_grid_accuracy(acc);
+    auto result = solver.solve_batch(batch, /*use_shared_grid=*/true);
+    ASSERT_EQ(result.failed_count, 0u);
+    auto x0 = result.results[0]->grid()->x();
+    auto x1 = result.results[1]->grid()->x();
+    EXPECT_DOUBLE_EQ(x0.front(), x1.front());
+    EXPECT_LE(x0.front(), -(1.5 + 3.0 * 0.40) + 1e-9);
+    EXPECT_GE(x0.back(),   (1.5 + 3.0 * 0.40) - 1e-9);
+}
+
+// Per-contract route: a probe 1.3 beyond the strike with s = 0.2*sqrt(0.02).
+TEST(BatchAmericanOptionSolver, PerContractRouteHonoursCoverage) {
+    std::vector<PricingParams> batch = {atm_put(0.20, 0.02)};
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-1.3, -1.3};
     BatchAmericanOptionSolver solver;
     solver.set_grid_accuracy(acc);
     auto result = solver.solve_batch(batch, /*use_shared_grid=*/false);
     ASSERT_TRUE(result.results[0].has_value());
-    auto x = result.results[0]->grid()->x();
-    EXPECT_LE(x.front(), -(1.3 + 3.0 * 0.20 * std::sqrt(0.02)) + 1e-9);
+    EXPECT_LE(result.results[0]->grid()->x().front(),
+              -(1.3 + 3.0 * 0.20 * std::sqrt(0.02)) + 1e-9);
+}
+
+// D15: an accuracy spec passed as custom_grid is estimated the same way the
+// solver's own accuracy is -- over the batch on the shared path (edge from
+// sigma_max, not from params[0]) ...
+TEST(BatchAmericanOptionSolver, AccuracyCustomGridIsEstimatedOverTheBatch) {
+    const std::vector<Dividend> divs = {Dividend{.calendar_time = 0.5, .amount = 1.0}};
+    std::vector<PricingParams> batch = {atm_put(0.20, 1.0, divs), atm_put(0.40, 1.0, divs)};
+    GridAccuracyParams acc;
+    acc.log_moneyness_coverage = LogMoneynessRange{-1.5, 1.5};
+    BatchAmericanOptionSolver solver;
+    auto result = solver.solve_batch(batch, /*use_shared_grid=*/true, nullptr, PDEGridSpec{acc});
+    ASSERT_EQ(result.failed_count, 0u);
+    EXPECT_LE(result.results[0]->grid()->x().front(), -(1.5 + 3.0 * 0.40) + 1e-9);
+}
+
+// ... and per contract otherwise (two sigmas -> two different grids; before
+// the repair both contracts reused params[0]'s grid).
+TEST(BatchAmericanOptionSolver, AccuracyCustomGridIsEstimatedPerContract) {
+    std::vector<PricingParams> batch = {atm_put(0.20, 1.0), atm_put(0.40, 1.0)};
+    BatchAmericanOptionSolver solver;
+    auto result = solver.solve_batch(batch, /*use_shared_grid=*/false, nullptr,
+                                     PDEGridSpec{GridAccuracyParams{}});
+    ASSERT_EQ(result.failed_count, 0u);
+    EXPECT_NEAR(result.results[0]->grid()->x().front(), -1.0, 1e-9);   // 5 * 0.2
+    EXPECT_NEAR(result.results[1]->grid()->x().front(), -2.0, 1e-9);   // 5 * 0.4
 }
 ```
-(add `#include <cmath>` if missing). Run: `bazel test //tests:american_option_batch_test` — expected: does not compile.
+Run: `bazel test //tests:american_option_batch_test` — expected: does not compile.
 
-- [ ] **Step 3: Implement the API** — header additions exactly as in the spec §"Rework/API" (place `LogMoneynessRange` above `GridAccuracyParams`; add `<optional>`, `<span>`, `<algorithm>`, `<cmath>` includes as needed; declare `estimate_batch_pde_grid_config` after `estimate_batch_pde_grid`). In `grid_spec_types.cpp`:
+- [ ] **Step 3: Write the exact-identity test against the helper** (append to `tests/covering_grid_test.cc`; it dies with the file in Task 9; add `"mango/option/grid_spec_types.hpp"` include and, if needed, `//src/option:grid_spec_types` to its deps):
 
+```cpp
+// Rework identity: the estimator with log_moneyness_coverage must produce
+// EXACTLY the grid materialize_covering_grid produces (D12 numeric-identity
+// claim).  Three batch shapes: clamp-binding Ultra chain, High B-spline-like,
+// dividend segmented.
+TEST(CoverageRework, EstimatorReproducesTheHelperExactly) {
+    struct Case { const char* name; GridAccuracyParams acc; std::vector<PricingParams> batch; std::vector<double> nodes; };
+    auto mk = [](double sigma, double T, std::vector<Dividend> divs = {}) {
+        PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = T,
+            .rate = 0.05, .dividend_yield = 0.0, .option_type = OptionType::PUT}, sigma);
+        p.discrete_dividends = std::move(divs);
+        return p;
+    };
+    std::vector<Case> cases;
+    cases.push_back({"ultra-chain", make_grid_accuracy(GridAccuracyProfile::Ultra),
+        {mk(0.01, 0.694375), mk(0.1175, 0.694375), mk(0.225, 0.694375)}, {-1.0881, 0.0, 1.0881}});
+    cases.push_back({"high-bspline", make_grid_accuracy(GridAccuracyProfile::High),
+        {mk(0.10, 0.500001), mk(0.15, 0.500001), mk(0.20, 0.500001)}, {-0.3796, 0.0, 0.3796}});
+    const std::vector<Dividend> divs = {Dividend{.calendar_time = 0.1, .amount = 1.0}};
+    cases.push_back({"dividend", make_grid_accuracy(GridAccuracyProfile::Ultra),
+        {mk(0.05, 0.2525, divs), mk(0.15, 0.2525, divs)}, {-0.8452, 0.0, 0.8250}});
+    for (auto& c : cases) {
+        auto helper = mango::detail::materialize_covering_grid(c.acc, c.batch, c.nodes);
+        auto* h = std::get_if<PDEGridConfig>(&helper);
+        ASSERT_NE(h, nullptr) << c.name;
+        GridAccuracyParams acc = c.acc;
+        acc.log_moneyness_coverage = LogMoneynessRange::of(c.nodes);
+        auto e = estimate_batch_pde_grid_config(c.batch, acc);
+        EXPECT_DOUBLE_EQ(e.grid_spec.x_min(), h->grid_spec.x_min()) << c.name;
+        EXPECT_DOUBLE_EQ(e.grid_spec.x_max(), h->grid_spec.x_max()) << c.name;
+        EXPECT_EQ(e.grid_spec.n_points(), h->grid_spec.n_points()) << c.name;
+        EXPECT_EQ(e.grid_spec.type(), h->grid_spec.type()) << c.name;
+        EXPECT_EQ(e.n_time, h->n_time) << c.name;
+        auto ge = e.grid_spec.generate(); auto gh = h->grid_spec.generate();
+        auto se = ge.view().span(); auto sh = gh.view().span();
+        ASSERT_EQ(se.size(), sh.size()) << c.name;
+        for (size_t i = 0; i < se.size(); ++i) EXPECT_EQ(se[i], sh[i]) << c.name << " i=" << i;
+        // Print x_min/x_max/n_points/n_time for the goldens in Step 5 (remove afterwards).
+    }
+}
+```
+Run: `bazel test //tests:covering_grid_test` — expected: does not compile.
+
+- [ ] **Step 4: Implement**
+
+`grid_spec_types.hpp`: add `#include <optional>`, `<span>`; define `LogMoneynessRange` above `GridAccuracyParams`; append the two fields to `GridAccuracyParams` with the spec's doc comment; declare `estimate_batch_pde_grid_config` after `estimate_batch_pde_grid`.
+
+`grid_spec_types.cpp`:
 ```cpp
 std::optional<LogMoneynessRange>
 LogMoneynessRange::of(std::span<const double> nodes) {
@@ -1262,70 +1405,131 @@ LogMoneynessRange::of(std::span<const double> nodes) {
     return LogMoneynessRange{*lo, *hi};
 }
 
-double LogMoneynessRange::reach() const {
-    return std::max(std::abs(lo), std::abs(hi));
+double LogMoneynessRange::reach_from(double x0) const {
+    return std::max(std::abs(lo - x0), std::abs(hi - x0));
 }
 
 namespace {
 
-/// Fold x_coverage into n_sigma for a set of contracts sharing one grid whose
-/// largest sigma*sqrt(T) is `max_sigma_sqrt_T`, then clear it so that
-/// per-contract estimation does not re-apply it with a smaller sigma.  The
-/// boundary must clear the covered range by a few diffusion lengths: boundary
-/// error (and, with discrete dividends, the jump condition's edge fallback)
-/// diffuses inward ~sigma*sqrt(T), and a clearance that is a fixed fraction of
-/// the reach is far thinner than that whenever the reach is large relative to
-/// sigma*sqrt(T) (measured: 0.84 per $100 at the edge nodes of a segmented
-/// Chebyshev fit at sigma ~0.19 with a 10% clearance).  The 10% rule stays as a
-/// floor for tiny sigma*sqrt(T).
-GridAccuracyParams fold_coverage(GridAccuracyParams accuracy, double max_sigma_sqrt_T) {
-    if (!accuracy.x_coverage) return accuracy;
+/// n_sigma (in units of s = sigma*sqrt(T)) that puts [lo, hi] at least
+/// `clearance` diffusion lengths inside a domain symmetric about x0, with a
+/// 10 % widening of the reach as a floor.  Boundary error (and, with discrete
+/// dividends, the jump condition's edge fallback) diffuses inward about one
+/// sigma*sqrt(T), and a clearance that is a fixed fraction of the reach is far
+/// thinner than that whenever the reach is large relative to sigma*sqrt(T)
+/// (measured: 0.84 per $100 at the edge nodes of a segmented Chebyshev fit at
+/// sigma ~0.19 with a 10 % clearance).
+double required_n_sigma(const LogMoneynessRange& range, double x0, double s,
+                        double clearance) {
     constexpr double MARGIN = 1.1;
-    const double s = std::max(max_sigma_sqrt_T, 1e-10);
-    const double reach_sigmas = accuracy.x_coverage->reach() / s;
-    const double required = std::max(reach_sigmas * MARGIN,
-                                     reach_sigmas + accuracy.coverage_clearance_sigmas);
+    const double reach_sigmas = range.reach_from(x0) / std::max(s, 1e-10);
+    return std::max(reach_sigmas * MARGIN,
+                    reach_sigmas + std::max(clearance, 0.0));
+}
+
+bool coverage_usable(const GridAccuracyParams& accuracy) {
+    return accuracy.log_moneyness_coverage
+        && std::isfinite(accuracy.log_moneyness_coverage->lo)
+        && std::isfinite(accuracy.log_moneyness_coverage->hi);
+}
+
+/// Fold coverage into n_sigma for one contract (its own s) and clear it.
+GridAccuracyParams fold_coverage(GridAccuracyParams accuracy, double x0, double s) {
+    if (!coverage_usable(accuracy)) { accuracy.log_moneyness_coverage.reset(); return accuracy; }
+    accuracy.n_sigma = std::max(accuracy.n_sigma,
+        required_n_sigma(*accuracy.log_moneyness_coverage, x0, s,
+                         accuracy.coverage_clearance_sigmas));
+    accuracy.log_moneyness_coverage.reset();
+    return accuracy;
+}
+
+/// Fold coverage for a set of contracts sharing one grid: the largest
+/// sigma*sqrt(T) sets the clearance and the largest required widening is
+/// applied to all, so the contract with s_max alone covers the range.
+GridAccuracyParams fold_coverage(GridAccuracyParams accuracy,
+                                 std::span<const PricingParams> batch) {
+    if (!coverage_usable(accuracy)) { accuracy.log_moneyness_coverage.reset(); return accuracy; }
+    double s_max = 0.0;
+    for (const auto& p : batch) s_max = std::max(s_max, p.volatility * std::sqrt(p.maturity));
+    double required = 0.0;
+    for (const auto& p : batch) {
+        required = std::max(required, required_n_sigma(
+            *accuracy.log_moneyness_coverage, std::log(p.spot / p.strike), s_max,
+            accuracy.coverage_clearance_sigmas));
+    }
     accuracy.n_sigma = std::max(accuracy.n_sigma, required);
-    accuracy.x_coverage.reset();
+    accuracy.log_moneyness_coverage.reset();
     return accuracy;
 }
 
 }  // namespace
 ```
-`estimate_pde_grid`: first line becomes `const GridAccuracyParams acc = fold_coverage(accuracy, params.volatility * std::sqrt(params.maturity));` and every later `accuracy.` in the body reads `acc.`. `estimate_batch_pde_grid`: after the empty-batch early return, compute `max_ssqt` over `params` and `const GridAccuracyParams acc = fold_coverage(accuracy, max_ssqt);`, then use `acc` in the per-param loop and for `alpha` / `max_time_steps`. Add:
-```cpp
-PDEGridConfig estimate_batch_pde_grid_config(std::span<const PricingParams> batch,
-                                             const GridAccuracyParams& accuracy) {
-    auto [grid_spec, time_domain] = estimate_batch_pde_grid(batch, accuracy);
-    return PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
-}
-```
-`american_option_batch.cpp`, in `is_normalized_eligible` and `trace_ineligibility_reason`, replace `estimate_pde_grid(first, grid_accuracy_)` with
-```cpp
-    // Eligibility is judged on the contract's own kink-region grid, not on
-    // the coverage-widened one (#487 tracks judging the grid actually solved).
-    GridAccuracyParams base = grid_accuracy_;
-    base.x_coverage.reset();
-    auto [grid_spec, time_domain] = estimate_pde_grid(first, base);
-```
+`estimate_pde_grid`: first statement `const GridAccuracyParams acc = fold_coverage(accuracy, std::log(params.spot / params.strike), params.volatility * std::sqrt(params.maturity));` and every later `accuracy.` reads `acc.`. `estimate_batch_pde_grid`: after the empty-batch early return, `const GridAccuracyParams acc = fold_coverage(accuracy, params);`, use `acc` in the loop and for `alpha` / `max_time_steps`. Add `estimate_batch_pde_grid_config` (estimate, then `PDEGridConfig{grid_spec, time_domain.n_steps(), {}}`).
 
-- [ ] **Step 4: Run, verify green**: `bazel test //tests:grid_spec_types_test //tests:american_option_batch_test --test_output=errors`. Then the no-behaviour-change check: `bazel test //tests:covering_grid_test //tests:price_table_builder_test //tests:price_table_builder_custom_grid_test //tests:bspline_bit_identity_test //tests:iv_solver_test //tests:quantlib_accuracy_batch_test --test_output=errors` — all PASS (nothing sets `x_coverage` yet, so nothing may change).
+`american_option_batch.cpp`:
+- `is_normalized_eligible` and `trace_ineligibility_reason`: replace `estimate_pde_grid(first, grid_accuracy_)` with
+  ```cpp
+      // Eligibility is judged on the contract's own kink-region grid, not on
+      // the coverage-widened one (D14; #487 tracks judging the grid solved on).
+      GridAccuracyParams base = grid_accuracy_;
+      base.log_moneyness_coverage.reset();
+      auto [grid_spec, time_domain] = estimate_pde_grid(first, base);
+  ```
+- `solve_regular_batch` (D15): keep the existing `resolve_grid` lambda for the `PDEGridConfig` alternative only. Then
+  ```cpp
+      const GridAccuracyParams* custom_accuracy =
+          custom_grid ? std::get_if<GridAccuracyParams>(&*custom_grid) : nullptr;
+      const PDEGridConfig* custom_config =
+          custom_grid ? std::get_if<PDEGridConfig>(&*custom_grid) : nullptr;
+      const GridAccuracyParams& accuracy = custom_accuracy ? *custom_accuracy : grid_accuracy_;
+      // A concrete grid is resolved once and shared verbatim; an accuracy spec
+      // is estimated the way the solver's own accuracy is: over the whole
+      // batch on the shared path, per contract otherwise.
+      std::optional<std::pair<GridSpec<double>, TimeDomain>> resolved_config;
+      if (custom_config && !params.empty()) resolved_config = resolve_grid(*custom_config, params[0]);
+      std::optional<std::pair<GridSpec<double>, TimeDomain>> shared_grid;
+      if (use_shared_grid) {
+          shared_grid = resolved_config ? resolved_config
+                                        : std::optional{estimate_batch_pde_grid(params, accuracy)};
+      }
+      ... per contract, non-shared branch:
+              auto [grid_spec, time_domain] = resolved_config
+                  ? resolved_config.value()
+                  : estimate_pde_grid(params[i], accuracy);
+  ```
+  If anything else in the function used `resolved_custom_grid` (workspace sizing), give it `shared_grid` on the shared path and the per-contract estimate otherwise; report what you found.
 
-- [ ] **Step 5: Commit**: restore the lockfile first; subject "Add log-moneyness coverage to GridAccuracyParams" (46 chars); body: why the requirement belongs on the accuracy spec (spec D12) and that eligibility still judges the base grid (D14).
+- [ ] **Step 5: Run, verify green; record goldens.** `bazel test //tests:grid_spec_types_test //tests:american_option_batch_test //tests:covering_grid_test --test_output=all`. From the identity test's printout fill `GoldensMatchTheRetiredHelper` with the exact `x_min`, `x_max`, `n_points`, `n_time` for cases (a) and (c) as `EXPECT_DOUBLE_EQ` / `EXPECT_EQ`; remove the printout; re-run green. Then the no-behaviour-change check: `bazel test //tests:price_table_builder_test //tests:price_table_builder_custom_grid_test //tests:bspline_bit_identity_test //tests:iv_solver_test //tests:quantlib_accuracy_batch_test //tests:american_option_test --test_output=errors` — all PASS.
 
-### Task 9: Builders declare coverage; delete the helper
+- [ ] **Step 6: Commit** (restore the lockfile first): subject "Add log-moneyness coverage to GridAccuracyParams" (46 chars); body: the requirement belongs on the accuracy spec (D12), eligibility judges the base grid (D14), accuracy custom grids are estimated over the batch / per contract (D15).
+
+### Task 9: Builders declare coverage; delete the helper; bind in Python
 
 **Files:**
-- Modify (each: set `x_coverage`, drop the `covering_grid.hpp` include and Bazel dep, replace `materialize_covering_grid` with `estimate_batch_pde_grid_config` or a gridless call): `src/option/table/chebyshev/chebyshev_adaptive.cpp` (S1, S2), `src/option/table/chebyshev/chebyshev_table_builder.cpp` (S3), `src/option/table/dimensionless/dimensionless_builder.cpp` (S4), `src/option/table/dimensionless/dimensionless_adaptive.cpp` (S5), `src/option/table/bspline/bspline_builder.cpp` (`estimate_pde_grid` member + fallback), `src/option/table/bspline/bspline_builder.hpp` (drop the re-include), `src/option/table/bspline/bspline_adaptive.cpp` (both branches); the four `BUILD.bazel` files (chebyshev, dimensionless, bspline, `src/option/table`)
-- Delete: `src/option/table/covering_grid.hpp`, `src/option/table/covering_grid.cpp`, the `covering_grid` target, `tests/covering_grid_test.cc` and its `tests/BUILD.bazel` entry
-- Modify: the test comments in `tests/adaptive_surface_build_integration_test.cc` (T2/T3) and `tests/chebyshev_surface_test.cc`, `tests/dimensionless_builder_test.cc`, `tests/dimensionless_adaptive_test.cc` only where they name `materialize_covering_grid` / `ensure_moneyness_coverage` (rename to "the coverage folded into `GridAccuracyParams::x_coverage`"); no tolerance or number changes.
+- Modify: `src/option/table/chebyshev/chebyshev_adaptive.cpp` (S1, S2), `src/option/table/chebyshev/chebyshev_table_builder.cpp` (S3), `src/option/table/dimensionless/dimensionless_builder.cpp` (S4), `src/option/table/dimensionless/dimensionless_adaptive.cpp` (S5), `src/option/table/bspline/bspline_builder.cpp`, `src/option/table/bspline/bspline_builder.hpp`, `src/option/table/bspline/bspline_adaptive.cpp`, the `BUILD.bazel` files under `src/option/table/{chebyshev,dimensionless,bspline}` and `src/option/table` (drop the `covering_grid` dep / target)
+- Delete: `src/option/table/covering_grid.hpp`, `src/option/table/covering_grid.cpp`, `tests/covering_grid_test.cc` (+ its `tests/BUILD.bazel` entry)
+- Modify: `src/python/mango_bindings.cpp` (bind `LogMoneynessRange` and the two fields), `tests/test_bindings.py` (round-trip test)
+- Modify: test comments only where they name `materialize_covering_grid` / `ensure_moneyness_coverage`; no tolerance or number changes.
 
-Per-site shape (S1 shown; S2–S4 identical in spirit, `GridAccuracyParams{}` at S3):
+**Routing preservation rule (D14):** do not add or remove any `set_grid_accuracy` call. Fill in this table in your report from the code (before → after) for every site: which accuracy object the solver holds, whether it is the same object as before, and whether `custom_grid` is explicit:
+
+| Site | `set_grid_accuracy` before | after | custom_grid before | after |
+|---|---|---|---|---|
+| S1 chebyshev_adaptive (continuous) | Ultra | Ultra + coverage | materialized | `estimate_batch_pde_grid_config` |
+| S2 chebyshev_adaptive (segmented) | Ultra | Ultra + coverage | materialized | `estimate_batch_pde_grid_config` |
+| S3 chebyshev_table_builder | none | none (accuracy only passed to the estimator) | materialized | `estimate_batch_pde_grid_config(batch, GridAccuracyParams{} + coverage)` |
+| S4 dimensionless_builder | Ultra | Ultra + coverage | materialized | `estimate_batch_pde_grid_config` |
+| S5 dimensionless_adaptive | Ultra | Ultra + coverage | materialized | none (gridless, `use_shared_grid=false`) |
+| bspline_builder primary (`estimate_pde_grid` member) | none | none | explicit (from member) | explicit (member sets coverage, calls `estimate_batch_pde_grid`) |
+| bspline_builder fallback | none | none | materialized | `estimate_batch_pde_grid_config` |
+| bspline_adaptive fallback / accuracy branch | none | none | materialized | `estimate_batch_pde_grid_config` |
+
+Per-site shape (S1 shown; S2 and S4 the same; S3 with `GridAccuracyParams accuracy;`):
 ```cpp
             auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
             // Every moneyness node is read from the slice splines, so the
             // solver must resolve the whole node span (spec D12).
-            accuracy.x_coverage = LogMoneynessRange::of(m_nodes);
+            accuracy.log_moneyness_coverage = LogMoneynessRange::of(m_nodes);
             BatchAmericanOptionSolver solver;
             solver.set_grid_accuracy(accuracy);
             std::vector<double> tau_vec(tau_nodes.begin(), tau_nodes.end());
@@ -1335,16 +1539,40 @@ Per-site shape (S1 shown; S2–S4 identical in spirit, `GridAccuracyParams{}` at
                 std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
                 nullptr, estimate_batch_pde_grid_config(batch, accuracy));
 ```
-S5 (gridless, one contract): `accuracy.x_coverage = LogMoneynessRange{x0, x0};` `solver.set_grid_accuracy(accuracy);` `solver.solve_batch(batch, /*use_shared_grid=*/false);`.
-`PriceTableBuilderND::estimate_pde_grid`: replace the `ensure_moneyness_coverage` line with `accuracy.x_coverage = LogMoneynessRange::of(axes.grids[0]);`. The two explicit-grid fallbacks and `bspline_adaptive.cpp`'s accuracy branch: set `accuracy.x_coverage = LogMoneynessRange::of(<m grid>)` and pass `estimate_batch_pde_grid_config(<batch>, accuracy)`; keep their existing `required_n_sigma` emulation lines; delete the paragraphs that explain materializing because of routing (that reasoning no longer holds) and say instead that the cache wants one grid per cohort.
+S5: `accuracy.log_moneyness_coverage = LogMoneynessRange{x0, x0};` `solver.set_grid_accuracy(accuracy);` `solver.solve_batch(batch, /*use_shared_grid=*/false);`.
+`PriceTableBuilderND::estimate_pde_grid`: replace the `ensure_moneyness_coverage` line with `accuracy.log_moneyness_coverage = LogMoneynessRange::of(axes.grids[0]);`. The two explicit-grid fallbacks and `bspline_adaptive.cpp`'s accuracy branch: `accuracy.log_moneyness_coverage = LogMoneynessRange::of(<m grid>)` and pass `estimate_batch_pde_grid_config(<batch>, accuracy)`; keep their existing `required_n_sigma` emulation; replace the paragraphs about materializing because of routing with one sentence: the cache wants one grid per cohort. Delete the "routing-only" comments at S1–S5.
 
-- [ ] **Step 1: Edit all sites, delete the helper and its test, fix BUILD deps** (`grep -rn "covering_grid\|materialize_covering_grid\|ensure_moneyness_coverage" src tests` must return nothing).
-- [ ] **Step 2: Numeric-identity check** — `bazel test //tests:adaptive_surface_build_integration_test //tests:chebyshev_surface_test //tests:dimensionless_builder_test //tests:dimensionless_adaptive_test //tests:price_table_builder_test //tests:price_table_builder_custom_grid_test //tests:bspline_bit_identity_test //tests:greeks_accuracy_test //tests:price_table_data_test //tests:adaptive_grid_builder_test --test_output=errors`. All PASS with no tolerance edits. Additionally, temporarily print the measured post-fix deviations in T2, T3, T5, T4, T6 (then remove the printing) and confirm they reproduce the numbers in the test comments to the printed precision; report them.
-- [ ] **Step 3: Commit**: restore the lockfile first; subject "Declare node coverage on the accuracy spec" (42 chars); body: the helper leaked solver internals into seven call sites (spec §Rework, D12–D14), numbers unchanged.
+Python (`src/python/mango_bindings.cpp`, next to `GridAccuracyParams`; `pybind11/stl.h` must be included for `std::optional`):
+```cpp
+    py::class_<mango::LogMoneynessRange>(m, "LogMoneynessRange")
+        .def(py::init<>())
+        .def(py::init([](double lo, double hi) { return mango::LogMoneynessRange{lo, hi}; }),
+             py::arg("lo"), py::arg("hi"))
+        .def_readwrite("lo", &mango::LogMoneynessRange::lo)
+        .def_readwrite("hi", &mango::LogMoneynessRange::hi);
+    // on GridAccuracyParams:
+        .def_readwrite("log_moneyness_coverage", &mango::GridAccuracyParams::log_moneyness_coverage)
+        .def_readwrite("coverage_clearance_sigmas", &mango::GridAccuracyParams::coverage_clearance_sigmas)
+```
+`tests/test_bindings.py` (follow the file's existing style):
+```python
+def test_grid_accuracy_coverage_roundtrip():
+    p = mango.GridAccuracyParams()
+    assert p.log_moneyness_coverage is None
+    p.log_moneyness_coverage = mango.LogMoneynessRange(-0.5, 0.5)
+    p.coverage_clearance_sigmas = 2.5
+    assert p.log_moneyness_coverage.lo == -0.5 and p.log_moneyness_coverage.hi == 0.5
+    solver = mango.BatchAmericanOptionSolver()
+    solver.set_grid_accuracy_params(p)      # reachable from the solver API
+```
+
+- [ ] **Step 1:** edit all sites, delete the helper and its test, fix BUILD deps; `grep -rn "covering_grid\|materialize_covering_grid\|ensure_moneyness_coverage" src tests` returns nothing.
+- [ ] **Step 2: Numeric-identity check** — `bazel test //tests:grid_spec_types_test //tests:american_option_batch_test //tests:adaptive_surface_build_integration_test //tests:chebyshev_surface_test //tests:dimensionless_builder_test //tests:dimensionless_adaptive_test //tests:price_table_builder_test //tests:price_table_builder_custom_grid_test //tests:bspline_bit_identity_test //tests:greeks_accuracy_test //tests:price_table_data_test //tests:adaptive_grid_builder_test //tests:python_bindings_test --test_output=errors`. All PASS with no tolerance edits (the Task 8 goldens are the exact-identity proof).
+- [ ] **Step 3: Commit** (restore the lockfile first): subject "Declare node coverage on the accuracy spec" (42 chars); body: the helper leaked solver internals into seven call sites (spec §Rework, D12–D16); numbers unchanged; Python parity.
 
 ### Task 10: Full verification and docs
 
-- [ ] `bazel test //... --test_output=errors` → 151 tests (covering_grid_test removed, grid_spec_types_test added); `bazel build //benchmarks/... //src/python:mango_option` clean.
+- [ ] `bazel test //... --test_output=errors` → 151 tests (`covering_grid_test` removed, `grid_spec_types_test` added); `bazel build //benchmarks/... //src/python:mango_option` clean.
 - [ ] Re-measure the 549 bps pin (`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig`) — must be 548.64 bps as before.
-- [ ] Spec: the earlier §1 helper design and D1/D3/D5/D7/D11 stay as history; add a one-line pointer at the top of §1: "Superseded by §Rework (D12–D14); kept for the review history." Plan Deviations log: add "Rework round: helper replaced by `GridAccuracyParams::x_coverage`; no pinned number changed."
+- [ ] Spec: add a one-line pointer at the top of `### 1. Relocate the covering-grid helpers`: "Superseded by §Rework (D12–D16); kept for the review history." Plan Deviations log: "Rework round: helper replaced by `GridAccuracyParams::log_moneyness_coverage`; no pinned number changed."
 - [ ] Commit docs; push to PR #484.
