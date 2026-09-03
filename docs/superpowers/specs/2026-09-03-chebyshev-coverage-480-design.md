@@ -119,21 +119,29 @@ small `tests:covering_grid_test` (D7).
 
 Bazel wiring, stated here so strict-deps failures are not left to
 implementation discovery: the new target is `visibility =
-["//visibility:public"]` like its siblings, and every target that includes
-the header — directly or through `bspline_builder.hpp` — lists it as a
-direct dep: `//src/option/table/bspline:bspline_builder`,
+["//visibility:public"]` like its siblings; every translation unit that
+calls the helpers includes `mango/option/table/covering_grid.hpp`
+**directly** (no reliance on the `bspline_builder.hpp` re-include, which
+is kept only so the public header's surface is unchanged), and its target
+lists `//src/option/table:covering_grid` as a direct dep:
+`//src/option/table/bspline:bspline_builder`,
+`//src/option/table/bspline:bspline_adaptive`,
 `//src/option/table/chebyshev:chebyshev_adaptive`,
 `//src/option/table/chebyshev:chebyshev_table_builder`,
 `//src/option/table/dimensionless:dimensionless_builder`,
 `//src/option/table/dimensionless:dimensionless_adaptive`, and
-`//tests:covering_grid_test`.
+`//tests:covering_grid_test`. `//tests:dimensionless_adaptive_test` gains
+`//src/option:american_option` and
+`//src/option/table/dimensionless:dimensionless_european` for T6's oracle.
 
 Contract widening (D3): the moneyness-axis argument is renamed
 `log_moneyness_nodes` and its reach is computed as
 `max(|min|, |max|)` over the span with `std::minmax_element`, dropping
-#479's "sorted ascending" precondition. Chebyshev-Gauss-Lobatto nodes from
-`chebyshev_nodes(n, lo, hi)` and CC-level nodes are handed in directly, so
-the helper must not depend on `front()/back()` being the extremes. Empty
+#479's "sorted ascending" precondition. `chebyshev_nodes` and
+`cc_level_nodes` do promise ascending output (`chebyshev_nodes.hpp:10`,
+`:59`), so this is a deliberate generalization of the helper's contract —
+five new call sites hand in node arrays, and the coverage guarantee should
+not rest on a documentation promise of an unrelated generator. Empty
 inputs stay a no-op.
 
 ### 2. Materialize a covering grid at every site
@@ -168,11 +176,16 @@ longer affects the grid.
   used per contract (`american_option_batch.cpp:466-470`). To make this
   site testable (review round 1), the file-static function becomes
   `double detail::dimensionless_reference_eep(double x0, double tau_prime_0,
-  double ln_kappa_0, double K_ref, OptionType option_type)`, declared in
-  `dimensionless_builder.hpp` (the header both dimensionless targets
-  export) and defined where it is today; the adaptive loop calls it
-  unchanged. Semantics are untouched: normalized EEP `max(American −
-  European, 0)`, 0.0 on any solver failure.
+  double ln_kappa_0, double K_ref, OptionType option_type)`, declared in a
+  new header `src/option/table/dimensionless/dimensionless_adaptive_detail.hpp`
+  that is owned by the `dimensionless_adaptive` target (added to its
+  `hdrs`), and defined in `dimensionless_adaptive.cpp` where it lives
+  today; the adaptive loop calls it unchanged. The declaration must not
+  go into `dimensionless_builder.hpp` (review round 2): that header is
+  also exported by the `dimensionless_builder` target, which does not
+  define the symbol, so a consumer of that target alone could compile a
+  call it cannot link. Semantics are untouched: normalized EEP
+  `max(American − European, 0)`, 0.0 on any solver failure.
 
 ### 3. Cache safety across refinement iterations (S1, S2)
 
@@ -207,8 +220,10 @@ value: at Ultra and the 0.5y-floored τ axis (T ≈ 0.694) it is ≈ 3,725
 points today. Widening `n_sigma` to `reach·1.1/(σ_max√T)` scales `Nx` by
 the same factor: for the T2 chain below (reach ≈ 1.09, σ_hi ≈ 0.225) that
 is ≈ 4,760 points, still under the 5,000 clamp, so the widened solves cost
-roughly 28 % more spatial points (and proportionally more time steps,
-since `dt` follows the smallest cell) than today's union grid. This is the
+roughly 28 % more spatial points than today's union grid. The time-step
+count stays approximately constant: width and `Nx` grow by the same
+factor, so with a fixed sinh concentration the smallest cell — which sets
+`dt = c_t·dx_min` (`grid_spec_types.cpp:86`) — barely moves. This is the
 same resolution-for-coverage trade #437 D4 accepted for the B-spline path;
 there is no new policy.
 
@@ -231,8 +246,10 @@ solver default.
 
 - **T1 — helper unit tests** (`tests:covering_grid_test`, small): the four
   #479 tests moved verbatim, plus one new case proving the reach is
-  order-independent (a descending copy of a node array widens exactly as
-  the ascending original).
+  order-independent. A merely reversed array would pass against the old
+  `front()/back()` code (review round 2), so the case uses a permutation
+  whose largest-magnitude node is *interior*, e.g. `{0.0, -0.51, 0.10}`,
+  and asserts it widens exactly as its sorted form does.
 - **T2 — S1 e2e** (`adaptive_surface_build_integration_test`). The chain
   must be derived against the full transformation chain, because
   `extract_chain_domain` (`adaptive_refinement.cpp:1147-1150`) first
@@ -273,9 +290,24 @@ solver default.
   headroom ≈ 0.84). Assert at the *queried* user moneyness endpoints
   (`S = 50` and `S = 200` at `K = 100`, both outside the old PDE domain
   by themselves, not only via hidden support nodes), at τ = maturity, at
-  **both** σ sample endpoints, vs a discrete-dividend FDM solve built the
-  way `make_validate_fn` builds its references (same `PricingParams`
-  including `discrete_dividends`).
+  **both** σ sample endpoints. Two oracles (review round 2), because the
+  table's PDE contract is not the user's: S2 solves with
+  `maturity = 1.01·τ_max` and the dividend's calendar time is anchored to
+  that padded maturity, so at the τ = 0.25 snapshot the event sits at
+  τ = 0.1525 rather than 0.15 — a small, pre-existing timing skew of the
+  segmented Chebyshev path that is out of scope here and gets a follow-up
+  issue.
+  - *Coverage oracle (tight tolerance):* an independent high-accuracy
+    solve on the **same padded timeline** — one normalized batch param
+    (spot = strike = K_ref, maturity 0.2525, the same dividend schedule),
+    snapshot at 0.25, solved on an explicit wide `PDEGridConfig` that
+    covers the queried x, and its snapshot spline evaluated at the queried
+    x. This isolates spatial coverage from the timing skew.
+  - *User-contract oracle (looser tolerance, pinned empirically):* the
+    `make_validate_fn`-style direct solve at maturity 0.25 with the same
+    `discrete_dividends`, which is what a user compares against; its
+    tolerance must sit above the measured timing-skew discrepancy and well
+    below the pre-fix extrapolation error.
 - **T4 — S4 unit** (`dimensionless_builder_test`): axes with
   `max|x| > 7.1·√τ'_max` (e.g. x ∈ [−0.7, 0.7], τ' ≤ 0.004, old
   half-width ≈ 0.45); compare `values` at the x extremes vs
@@ -285,8 +317,8 @@ solver default.
   with a domain whose m reach exceeds `5·σ_hi·√τ_hi` (e.g. m ∈ [−0.7, 0.7],
   τ ∈ [0.01, 0.1], σ ∈ [0.10, 0.20]: old half-width ≈ 0.32); compare
   `surface.price` at the extreme m vs FDM at min-σ and max-σ.
-- **T6 — S5 unit** (`dimensionless_adaptive_test` or
-  `dimensionless_builder_test`): `detail::dimensionless_reference_eep` at a
+- **T6 — S5 unit** (`dimensionless_adaptive_test`, the target that owns
+  the symbol): `detail::dimensionless_reference_eep` at a
   probe with `|x₀| > 1` (beyond the ≈ ±1.0 reach the 0.02 maturity floor
   gives today, e.g. x₀ = −1.3, τ'₀ = 0.005) vs the same normalized EEP
   computed directly: `solve_american_option` at spot = K·e^{x₀}, strike =
@@ -339,19 +371,20 @@ made from code analysis. All are for the design review to validate.
   follow-ups, which leaves known-unsound solves behind a fixed-invariant
   claim.
 - **D3 — Order-independent reach.** Compute the reach with
-  `std::minmax_element` instead of `front()/back()`. Rationale: CGL and CC
-  node arrays are the natural argument at S1–S3 and their ordering is an
-  implementation detail of the node generators; a silent precondition here
-  would be exactly the kind of latent trap #441 hunted. Cost is O(n) on a
-  few dozen nodes. Rejected: requiring callers to pass a sorted two-element
-  `{lo, hi}` — pushes the precondition onto five call sites instead of
-  removing it.
+  `std::minmax_element` instead of `front()/back()`. Rationale (corrected
+  in round 2): the node generators do promise ascending output, so this
+  is a deliberate generalization, not a bug fix — the coverage guarantee
+  at five new call sites should not rest on another component's ordering
+  promise; a silent precondition here would be exactly the kind of latent
+  trap #441 hunted. Cost is O(n) on a few dozen nodes. Rejected: requiring
+  callers to pass a sorted two-element `{lo, hi}` — pushes the
+  precondition onto five call sites instead of removing it.
 - **D4 — Estimate over the batch actually solved.** S1/S2 pass the
   *missing* batch, not the full node product (#437 D3 carried over).
 - **D5 — Keep `set_grid_accuracy`.** It still governs routing eligibility
-  and the estimator used inside `materialize_covering_grid`; removing it
-  would silently change which path is taken. Rejected: dropping it as
-  dead code.
+  (and the tracing that reports it); removing it would silently change
+  which path is taken. It does not feed `materialize_covering_grid`, which
+  takes its `accuracy` explicitly. Rejected: dropping it as dead code.
 - **D6 — No cap on the widening** (#437 D4 carried over). A cap would
   knowingly restore extrapolation; the `MAX_WIDTH` policy gap is
   pre-existing and out of scope.
@@ -369,7 +402,19 @@ made from code analysis. All are for the design review to validate.
   per-group undershoot from a union-grid undershoot). T2's chain is derived
   against the full domain-transformation chain (round 1: the first example
   was covered by the old union grid and would not have been red).
-- **D9 — `reference_eep` becomes a `detail` function** rather than gaining
-  a test-only hook. Rejected: a friend/test-access header — the function
-  has no state to protect and the `detail` namespace is already the
-  convention for shared-but-internal builder machinery (#437 D1).
+- **D9 — `reference_eep` becomes a `detail` function** declared in a new
+  `dimensionless_adaptive_detail.hpp` owned by the `dimensionless_adaptive`
+  target (revised in round 2: declaring it in the shared
+  `dimensionless_builder.hpp` would let `dimensionless_builder`-only
+  consumers compile a call that cannot link). Rejected: a
+  friend/test-access header — the function has no state to protect and
+  the `detail` namespace is already the convention for shared-but-internal
+  builder machinery (#437 D1). Rejected: moving the definition into
+  `dimensionless_builder.cpp` — it needs `dimensionless_european`, which
+  that target does not depend on, and the probe belongs to the adaptive
+  loop.
+- **D10 — T3 gets two oracles** (round 2): a padded-timeline coverage
+  oracle at tight tolerance and a user-contract oracle at a looser,
+  empirically pinned tolerance. The segmented path's dividend-timing skew
+  from the 1.01 maturity padding is pre-existing and filed as a follow-up,
+  not fixed here.
