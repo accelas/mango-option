@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/table/covering_grid.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/math/bspline/bspline_nd_separable.hpp"
 #include "mango/math/bspline/bspline_basis.hpp"
@@ -229,43 +230,6 @@ PriceTableBuilderND<N>::make_batch(const PriceTableAxesND<N>& axes) const {
 
     return batch;
 }
-
-namespace detail {
-
-void ensure_moneyness_coverage(GridAccuracyParams& accuracy,
-                               std::span<const PricingParams> batch,
-                               std::span<const double> log_moneyness_grid)
-{
-    if (batch.empty() || log_moneyness_grid.empty()) return;
-
-    const double log_m_min = log_moneyness_grid.front();
-    const double log_m_max = log_moneyness_grid.back();
-    const double required_half_width =
-        std::max(std::abs(log_m_min), std::abs(log_m_max));
-
-    // Compute max σ√T across the batch (floor to avoid division by zero)
-    double max_sigma_sqrt_T = 0.0;
-    for (const auto& p : batch) {
-        max_sigma_sqrt_T = std::max(max_sigma_sqrt_T,
-                                    p.volatility * std::sqrt(p.maturity));
-    }
-    max_sigma_sqrt_T = std::max(max_sigma_sqrt_T, 1e-10);
-
-    constexpr double MARGIN = 1.1;  // 10% margin for boundary effects
-    double required_n_sigma = (required_half_width / max_sigma_sqrt_T) * MARGIN;
-    accuracy.n_sigma = std::max(accuracy.n_sigma, required_n_sigma);
-}
-
-PDEGridSpec materialize_covering_grid(GridAccuracyParams accuracy,
-                                      std::span<const PricingParams> batch,
-                                      std::span<const double> log_moneyness_grid)
-{
-    ensure_moneyness_coverage(accuracy, batch, log_moneyness_grid);
-    auto [grid_spec, time_domain] = estimate_batch_pde_grid(batch, accuracy);
-    return PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
-}
-
-}  // namespace detail
 
 template <size_t N>
 std::pair<GridSpec<double>, TimeDomain>

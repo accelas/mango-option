@@ -8,6 +8,7 @@
 #include "mango/option/table/bspline/bspline_pde_cache.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/covering_grid.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
 #include "mango/option/table/split_surface.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
