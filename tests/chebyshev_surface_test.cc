@@ -158,9 +158,9 @@ TEST(ChebyshevTableBuilderTest, TailsMatchFdmAtExtremeMoneyness) {
     const double r = 0.06;     // rate node (domain hi)
 
     // Tolerance ($ per K=100): post-fix max |got-ref| measured 1.173e-6;
-    // 10x that is 1.173e-5, floored to 1e-5 for cross-toolchain slack
-    // (well under 1/50 of the 74.14 pre-fix error).
-    constexpr double TOL = 1e-5;
+    // 10x that is 1.173e-5, rounded up to 2e-5 for cross-toolchain slack
+    // (still ~3.7e6x under the 74.14 pre-fix error).
+    constexpr double TOL = 2e-5;
 
     for (double m : {-0.7, 0.7}) {
         for (double sigma : {0.10, 0.20}) {

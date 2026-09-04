@@ -4,6 +4,7 @@
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
+#include "mango/option/grid_spec_types.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
 #include "mango/option/table/bspline/bspline_pde_cache.hpp"
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
