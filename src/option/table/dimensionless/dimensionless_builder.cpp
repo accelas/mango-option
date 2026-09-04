@@ -31,6 +31,10 @@ solve_dimensionless_pde(
 
     const double sigma_eff = std::sqrt(2.0);
     const double pde_maturity = axes.tau_prime.back() * 1.01;
+    auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    // Every log-moneyness node is read from the slice spline, so the solver
+    // must resolve the whole node span (spec D12).
+    accuracy.log_moneyness_coverage = LogMoneynessRange::of(axes.log_moneyness);
     int n_pde_solves = 0;
 
     for (size_t k = 0; k < Nk; ++k) {
@@ -47,12 +51,16 @@ solve_dimensionless_pde(
             sigma_eff);
 
         BatchAmericanOptionSolver batch_solver;
-        batch_solver.set_grid_accuracy(make_grid_accuracy(GridAccuracyProfile::Ultra));
+        batch_solver.set_grid_accuracy(accuracy);
         batch_solver.set_snapshot_times(
             std::span<const double>{axes.tau_prime.data(), axes.tau_prime.size()});
 
         std::vector<PricingParams> batch = {params};
-        auto batch_result = batch_solver.solve_batch(batch, true);
+        // One shared grid for the whole batch.
+        auto batch_result = batch_solver.solve_batch(
+            batch, true, nullptr,
+            estimate_batch_pde_grid_config(
+                std::span<const PricingParams>(batch), accuracy));
         ++n_pde_solves;
 
         if (batch_result.failed_count > 0 || !batch_result.results[0].has_value()) {

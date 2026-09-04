@@ -12,13 +12,14 @@ cc_library(
 cc_library(
     name = "dimensionless_adaptive",
     srcs = ["dimensionless_adaptive.cpp"],
-    hdrs = ["dimensionless_builder.hpp"],
+    hdrs = ["dimensionless_builder.hpp", "dimensionless_adaptive_detail.hpp"],
     copts = ["-fopenmp", "-pthread"],
     linkopts = ["-fopenmp", "-pthread"],
     deps = [
         ":dimensionless_builder",
         ":dimensionless_european",
         "//src/option:american_option_batch",
+        "//src/option:option_spec",
         "//src/option:grid_spec_types",
         "//src/math:cubic_spline_solver",
         ":dimensionless_3d_accessor",

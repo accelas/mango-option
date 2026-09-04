@@ -62,7 +62,11 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
     }
 
     // 6. Grid constraints (dx, width, margins)
-    auto [grid_spec, time_domain] = estimate_pde_grid(first, grid_accuracy_);
+    // Eligibility is judged on the contract's own kink-region grid, not on
+    // the coverage-widened one (D14; #487 tracks judging the grid solved on).
+    GridAccuracyParams base = grid_accuracy_;
+    base.log_moneyness_coverage.reset();
+    auto [grid_spec, time_domain] = estimate_pde_grid(first, base);
     (void)time_domain;  // Not used in eligibility check
     double x_min = grid_spec.x_min();
     double x_max = grid_spec.x_max();
@@ -164,7 +168,11 @@ void BatchAmericanOptionSolver::trace_ineligibility_reason(
     }
 
     // Check grid constraints
-    auto [grid_spec, time_domain] = estimate_pde_grid(first, grid_accuracy_);
+    // Eligibility is judged on the contract's own kink-region grid, not on
+    // the coverage-widened one (D14; #487 tracks judging the grid solved on).
+    GridAccuracyParams base = grid_accuracy_;
+    base.log_moneyness_coverage.reset();
+    auto [grid_spec, time_domain] = estimate_pde_grid(first, base);
     (void)time_domain;  // Not used in trace function
     double x_min = grid_spec.x_min();
     double x_max = grid_spec.x_max();
@@ -404,39 +412,35 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     }
     size_t failed_count = 0;
 
-    // Resolve PDEGridSpec to concrete grid+time pair if provided
-    auto resolve_grid = [](const PDEGridSpec& spec, const PricingParams& p)
+    // Resolve a concrete PDEGridConfig to a grid+time pair.
+    auto resolve_grid = [](const PDEGridConfig& v, const PricingParams& p)
         -> std::pair<GridSpec<double>, TimeDomain> {
-        return std::visit([&](const auto& v) -> std::pair<GridSpec<double>, TimeDomain> {
-            using T = std::decay_t<decltype(v)>;
-            if constexpr (std::is_same_v<T, GridAccuracyParams>) {
-                return estimate_pde_grid(p, v);
-            } else {
-                auto td = v.mandatory_times.empty()
-                    ? TimeDomain::from_n_steps(0.0, p.maturity, v.n_time)
-                    : TimeDomain::with_mandatory_points(0.0, p.maturity,
-                        p.maturity / static_cast<double>(v.n_time), v.mandatory_times);
-                return std::make_pair(v.grid_spec, td);
-            }
-        }, spec);
+        auto td = v.mandatory_times.empty()
+            ? TimeDomain::from_n_steps(0.0, p.maturity, v.n_time)
+            : TimeDomain::with_mandatory_points(0.0, p.maturity,
+                p.maturity / static_cast<double>(v.n_time), v.mandatory_times);
+        return std::make_pair(v.grid_spec, td);
     };
 
-    // Resolved custom grid (pair form) for workspace sizing
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> resolved_custom_grid;
-    if (custom_grid.has_value() && !params.empty()) {
-        resolved_custom_grid = resolve_grid(*custom_grid, params[0]);
+    const GridAccuracyParams* custom_accuracy =
+        custom_grid ? std::get_if<GridAccuracyParams>(&*custom_grid) : nullptr;
+    const PDEGridConfig* custom_config =
+        custom_grid ? std::get_if<PDEGridConfig>(&*custom_grid) : nullptr;
+    const GridAccuracyParams& accuracy = custom_accuracy ? *custom_accuracy : grid_accuracy_;
+
+    // A concrete grid is resolved once and shared verbatim; an accuracy spec
+    // is estimated the way the solver's own accuracy is: over the whole
+    // batch on the shared path, per contract otherwise (D15).
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> resolved_config;
+    if (custom_config && !params.empty()) {
+        resolved_config = resolve_grid(*custom_config, params[0]);
     }
 
     // Precompute shared grid if needed
     std::optional<std::pair<GridSpec<double>, TimeDomain>> shared_grid;
     if (use_shared_grid) {
-        if (resolved_custom_grid.has_value()) {
-            // Use resolved grid directly (bypass auto-estimation)
-            shared_grid = resolved_custom_grid;
-        } else {
-            // Existing path: use grid_accuracy_ member to estimate grid
-            shared_grid = estimate_batch_pde_grid(params, grid_accuracy_);
-        }
+        shared_grid = resolved_config ? resolved_config
+                                      : std::optional{estimate_batch_pde_grid(params, accuracy)};
     }
 
     MANGO_PRAGMA_PARALLEL
@@ -464,9 +468,9 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                     shared_grid->first,
                     shared_grid->second.n_steps(), std::move(mandatory_tau)}};
             } else {
-                auto [grid_spec, time_domain] = resolved_custom_grid.has_value()
-                    ? resolved_custom_grid.value()
-                    : estimate_pde_grid(params[i], grid_accuracy_);
+                auto [grid_spec, time_domain] = resolved_config
+                    ? resolved_config.value()
+                    : estimate_pde_grid(params[i], accuracy);
                 solver_grid_spec = PDEGridSpec{PDEGridConfig{
                     grid_spec, time_domain.n_steps(), std::move(mandatory_tau)}};
             }

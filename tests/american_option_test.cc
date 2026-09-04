@@ -751,7 +751,7 @@ TEST(AmericanOptionTest, DiscreteDivCallRightBoundaryEnvelope) {
 // corner). Bug: the old right BC `u = e^x - forward_discount(t)` dropped
 // the continuous-yield factor `e^{-q*tau}` entirely, so on a grid narrow
 // enough that the Dirichlet boundary error reaches priced nodes (as
-// happens once `ensure_moneyness_coverage` clamps the domain near #437),
+// happens once moneyness coverage clamps the domain near #437),
 // the mispriced boundary corrupts the interior solution, not just an
 // unused far-field node.
 //

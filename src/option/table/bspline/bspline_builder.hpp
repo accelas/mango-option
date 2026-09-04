@@ -229,29 +229,6 @@ inline std::vector<double> sqrt_uniform_grid(double min_val, double max_val, siz
     return grid;
 }
 
-/// Ensure accuracy.n_sigma is large enough that a shared grid estimated by
-/// estimate_batch_pde_grid(batch, accuracy) for a normalized batch
-/// (spot = strike = K_ref, x0 = 0) spans the whole log-moneyness axis:
-/// that grid's baseline half-width is n_sigma * max(sigma*sqrt(T)) over
-/// `batch`, and if it undershoots max(|m_front|, |m_back|), extract_tensor
-/// would extrapolate. Callers must actually solve on such an estimated
-/// grid (passed as a concrete custom grid): BatchAmericanOptionSolver's
-/// gridless routing estimates per normalized group instead and does NOT
-/// realize this width. No-op when either span is empty; expects the grid
-/// sorted ascending (as validated table axes are).
-void ensure_moneyness_coverage(GridAccuracyParams& accuracy,
-                               std::span<const PricingParams> batch,
-                               std::span<const double> log_moneyness_grid);
-
-/// Widen `accuracy` for moneyness coverage, estimate the shared batch
-/// grid, and return it as a concrete PDEGridConfig suitable for
-/// solve_batch's custom_grid parameter (which propagates it into every
-/// normalized group). mandatory_times stays empty: the batch solver
-/// reconstructs per-contract dividend taus itself.
-PDEGridSpec materialize_covering_grid(GridAccuracyParams accuracy,
-                                      std::span<const PricingParams> batch,
-                                      std::span<const double> log_moneyness_grid);
-
 }  // namespace detail
 
 /**

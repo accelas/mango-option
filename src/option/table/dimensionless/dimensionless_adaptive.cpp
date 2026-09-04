@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
+#include "mango/option/table/dimensionless/dimensionless_adaptive_detail.hpp"
 #include "mango/option/table/dimensionless/dimensionless_european.hpp"
 #include "mango/option/table/dimensionless/dimensionless_3d_accessor.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
@@ -10,34 +11,27 @@
 #include "mango/option/grid_spec_types.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <random>
 
 namespace mango {
 
-namespace {
-
-std::vector<double> linspace(double lo, double hi, size_t n) {
-    std::vector<double> v(n);
-    for (size_t i = 0; i < n; ++i)
-        v[i] = lo + (hi - lo) * static_cast<double>(i) / static_cast<double>(n - 1);
-    return v;
-}
-
-double spline_headroom(double domain_width, size_t n_knots) {
-    size_t n = std::max(n_knots, size_t{4});
-    return 3.0 * domain_width / static_cast<double>(n - 1);
-}
+namespace detail {
 
 /// Solve dimensionless PDE at a single probe point for reference EEP
-double reference_eep(double x0, double tau_prime_0, double ln_kappa_0,
-                     double K_ref, OptionType option_type) {
+double dimensionless_reference_eep(double x0, double tau_prime_0, double ln_kappa_0,
+                                   double K_ref, OptionType option_type) {
     double kappa = std::exp(ln_kappa_0);
     double sigma_eff = std::sqrt(2.0);
 
+    auto accuracy = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    // The probe is read at x0, so the solver must resolve that point even
+    // when it lies outside the contract's own n_sigma domain (spec D12).
+    accuracy.log_moneyness_coverage = LogMoneynessRange{x0, x0};
     BatchAmericanOptionSolver solver;
-    solver.set_grid_accuracy(make_grid_accuracy(GridAccuracyProfile::Ultra));
+    solver.set_grid_accuracy(accuracy);
 
     std::vector<double> snap_times = {tau_prime_0};
     solver.set_snapshot_times(std::span<const double>{snap_times});
@@ -73,6 +67,22 @@ double reference_eep(double x0, double tau_prime_0, double ln_kappa_0,
     double american = spline.eval(x0);
     double european = dimensionless_european(x0, tau_prime_0, kappa, option_type);
     return std::max(american - european, 0.0);
+}
+
+}  // namespace detail
+
+namespace {
+
+std::vector<double> linspace(double lo, double hi, size_t n) {
+    std::vector<double> v(n);
+    for (size_t i = 0; i < n; ++i)
+        v[i] = lo + (hi - lo) * static_cast<double>(i) / static_cast<double>(n - 1);
+    return v;
+}
+
+double spline_headroom(double domain_width, size_t n_knots) {
+    size_t n = std::max(n_knots, size_t{4});
+    return 3.0 * domain_width / static_cast<double>(n - 1);
 }
 
 struct SegmentDomain {
@@ -283,8 +293,10 @@ build_dimensionless_surface_adaptive(
 
             if (tp0 < 1e-4) continue;
 
-            double true_eep = reference_eep(x0, tp0, lk0, K_ref, params.option_type);
-            // Surface stores dollar EEP; reference_eep returns normalized EEP (V/K).
+            double true_eep = detail::dimensionless_reference_eep(
+                x0, tp0, lk0, K_ref, params.option_type);
+            // Surface stores dollar EEP; dimensionless_reference_eep returns
+            // normalized EEP (V/K).
             double interp_eep = surface->value({x0, tp0, lk0}) / K_ref;
             double err = std::abs(true_eep - interp_eep);
 

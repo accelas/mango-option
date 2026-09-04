@@ -4,6 +4,7 @@
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/grid_spec_types.hpp"
 #include "mango/option/table/eep/eep_decomposer.hpp"
 
 #include <chrono>
@@ -116,8 +117,16 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     // Solve batch with snapshots at tau CGL nodes
     BatchAmericanOptionSolver solver;
     solver.set_snapshot_times(std::span<const double>(tau_nodes));
+    GridAccuracyParams accuracy;
+    // Every moneyness node is read from the slice splines, so the solver
+    // must resolve the whole node span (spec D12).
+    accuracy.log_moneyness_coverage = LogMoneynessRange::of(m_nodes);
+    // One shared grid for the whole batch.
     auto batch_result = solver.solve_batch(
-        std::span<const PricingParams>(batch), /*use_shared_grid=*/true);
+        std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
+        nullptr,
+        estimate_batch_pde_grid_config(
+            std::span<const PricingParams>(batch), accuracy));
 
     size_t n_pde_solves = batch.size() - batch_result.failed_count;
 

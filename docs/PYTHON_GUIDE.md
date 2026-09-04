@@ -308,7 +308,8 @@ return shape.
 | `PricingParams` | Option contract parameters (spot, strike, maturity, volatility, rate, dividend_yield, option_type, discrete_dividends) |
 | `AmericanOptionResult` | Pricing result with `value_at(spot)`, `delta()`, `gamma()`, `theta()` |
 | `BatchAmericanOptionSolver` | Parallel batch pricing with normalized chain optimization |
-| `GridAccuracyParams` | Fine-grained grid control (tol, n_sigma, alpha, spatial/time limits) |
+| `GridAccuracyParams` | Fine-grained grid control (tol, n_sigma, alpha, spatial/time limits, `log_moneyness_coverage`, `coverage_clearance_sigmas`) |
+| `LogMoneynessRange` | Absolute log-moneyness range (`lo`, `hi`) via `mango.LogMoneynessRange(lo, hi)`; assign a new instance to `GridAccuracyParams.log_moneyness_coverage` — mutating `.lo`/`.hi` on a value already read back is a no-op copy |
 | `YieldCurve` | Term structure via `flat(rate)` or `from_discounts(tenors, discounts)` |
 | `IVQuery` | IV solver input (inherits OptionSpec + market_price) |
 | `IVSolverConfig` | IV solver config with `root_config` and `batch_parallel_threshold` |
