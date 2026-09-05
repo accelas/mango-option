@@ -153,18 +153,18 @@ public:
         return storage_.contract(coeffs);
     }
 
-    /// Compute partial derivative along a given axis using central FD.
-    /// h = 1e-6 * (hi - lo) for the given axis.
+    /// Differentiate the interpolating polynomial, including its interior
+    /// limit at either endpoint. Outside the differentiated axis's domain,
+    /// return zero (the value interface extends the polynomial constantly).
     [[nodiscard]] double partial(size_t axis, std::array<double, N> coords) const {
-        double span = domain_.hi[axis] - domain_.lo[axis];
-        double h = 1e-6 * span;
+        return eval_derivative(axis, coords, 1);
+    }
 
-        auto coords_plus = coords;
-        auto coords_minus = coords;
-        coords_plus[axis] += h;
-        coords_minus[axis] -= h;
-
-        return (eval(coords_plus) - eval(coords_minus)) / (2.0 * h);
+    /// Analytical second partial, with the same endpoint/clamping
+    /// convention as partial(). Used by TransformLeaf's gamma interface.
+    [[nodiscard]] double eval_second_partial(
+        size_t axis, std::array<double, N> coords) const {
+        return eval_derivative(axis, coords, 2);
     }
 
     /// Number of stored doubles in the underlying storage.
@@ -182,6 +182,52 @@ public:
     [[nodiscard]] const Storage& storage() const noexcept { return storage_; }
 
 private:
+    [[nodiscard]] double eval_derivative(
+        size_t axis, std::array<double, N> coords, size_t order) const {
+        // Preserve NaN propagation even when another coordinate is outside.
+        for (double x : coords) {
+            if (std::isnan(x)) return std::numeric_limits<double>::quiet_NaN();
+        }
+        if (coords[axis] < domain_.lo[axis] || coords[axis] > domain_.hi[axis]) {
+            return 0.0;
+        }
+        std::array<std::vector<double>, N> coeffs;
+        for (size_t d = 0; d < N; ++d) {
+            coords[d] = std::clamp(coords[d], domain_.lo[d], domain_.hi[d]);
+            coeffs[d] = barycentric_coeffs(coords[d], d);
+        }
+        for (size_t k = 0; k < order; ++k) {
+            coeffs[axis] = differentiate_coeffs(coeffs[axis], axis);
+        }
+        return storage_.contract(coeffs);
+    }
+
+    /// If b(x) interpolates nodal values, b(x)^T D interpolates their
+    /// polynomial derivative. D_ij = w_j / (w_i * (x_i-x_j)) off diagonal,
+    /// with each diagonal chosen to make the row sum zero. Applying this
+    /// twice gives the second derivative without a query-dependent step or
+    /// divisions by x-x_i, so endpoints and queries near nodes are regular.
+    /// Nothing new is stored: all storage policies use the same contraction.
+    [[nodiscard]] std::vector<double> differentiate_coeffs(
+        const std::vector<double>& coeffs, size_t axis) const {
+        const auto& nodes = nodes_[axis];
+        const auto& weights = weights_[axis];
+        std::vector<double> derivative(nodes.size(), 0.0);
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            if (coeffs[i] == 0.0) continue;
+            double row_sum = 0.0;
+            for (size_t j = 0; j < nodes.size(); ++j) {
+                if (i == j) continue;
+                const double term = coeffs[i] * weights[j]
+                    / (weights[i] * (nodes[i] - nodes[j]));
+                derivative[j] += term;
+                row_sum += term;
+            }
+            derivative[i] -= row_sum;
+        }
+        return derivative;
+    }
+
     /// Validate num_pts/domain and compute the tensor size (overflow-checked).
     /// Returns the total point count, or the error to surface.
     [[nodiscard]] static std::expected<size_t, InterpolationError>

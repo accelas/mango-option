@@ -14,6 +14,36 @@ using namespace mango;
 // Static assertions
 static_assert(SurfaceInterpolant<ChebyshevInterpolant<4, RawTensor<4>>, 4>);
 
+// Regression: the leaf's central second-difference fallback evaluated
+// outside the Chebyshev domain, where clamping creates artificial curvature.
+TEST(ChebyshevSurfaceTest, MathReviewGammaAtAndNearMoneynessEdges) {
+    const Domain<4> domain{
+        .lo = {-1.0, 0.1, 0.1, 0.01},
+        .hi = {1.0, 1.0, 0.5, 0.1}};
+    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build(
+        [](std::array<double, 4> c) { return 3.0 + c[0] + c[0] * c[0]; },
+        domain, {4, 4, 4, 4});
+    ASSERT_TRUE(interp.has_value());
+    ChebyshevTransformLeaf leaf(std::move(*interp), StandardTransform4D{}, 100.0);
+
+    for (double x : {-1.0, -1.0 + 2.5e-5, 0.0, 1.0 - 2.5e-5, 1.0}) {
+        SCOPED_TRACE(x);
+        PricingParams params(
+            OptionSpec{.spot = 100.0 * std::exp(x), .strike = 100.0,
+                       .maturity = 0.5, .rate = 0.05,
+                       .option_type = OptionType::PUT},
+            0.30);
+        ASSERT_NEAR(leaf.price(params.spot, params.strike, params.maturity,
+                               params.volatility, 0.05),
+                    3.0 + x + x * x, 1e-12);
+        auto gamma = leaf.gamma(params);
+        ASSERT_TRUE(gamma.has_value());
+        // For f(x)=3+x+x^2 and K=K_ref, d²V/dS²=(f''-f')/S².
+        const double expected = (1.0 - 2.0 * x) / (params.spot * params.spot);
+        EXPECT_NEAR(*gamma, expected, 1e-7);
+    }
+}
+
 TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
     Domain<4> domain{
         .lo = {-0.5, 0.01, 0.05, 0.01},

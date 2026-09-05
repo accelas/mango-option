@@ -32,6 +32,128 @@ protected:
     }
 };
 
+// Regression: eligibility checked the original spot-centered grid, but
+// the normalized batch solve recenters it at log(S/K)=0 and loses coverage.
+TEST(AmericanOptionTest, MathReviewNormalizedBatchPreservesOffAtmCoverage) {
+    std::vector<PricingParams> batch;
+    for (double spot : {200.0, 210.0}) {
+        batch.emplace_back(
+            OptionSpec{.spot = spot, .strike = 100.0, .maturity = 1.0,
+                       .rate = 0.05, .dividend_yield = 0.0,
+                       .option_type = OptionType::CALL},
+            0.10);
+    }
+
+    BatchAmericanOptionSolver solver;
+    solver.set_use_normalized(true);
+    auto result = solver.solve_batch(batch, /*use_shared_grid=*/true);
+    ASSERT_EQ(result.failed_count, 0u);
+    ASSERT_EQ(result.results.size(), batch.size());
+
+    for (size_t i = 0; i < batch.size(); ++i) {
+        const auto& params = batch[i];
+        SCOPED_TRACE(params.spot);
+        auto direct = solve_american_option(params);
+        ASSERT_TRUE(direct.has_value());
+        ASSERT_TRUE(result.results[i].has_value());
+
+        // With no dividends, American call == European call. Check the
+        // direct solver against this independent oracle before the batch.
+        const double european = EuropeanOptionResult(params).value();
+        ASSERT_NEAR(direct->value(), european, 0.01);
+        const double batch_price = result.results[i]->value();
+        EXPECT_GE(batch_price, params.spot - params.strike - 1e-6);
+        EXPECT_NEAR(batch_price, european, 0.01)
+            << "Shared batch pricing must retain each original query's coverage";
+    }
+}
+
+// Regression: a time-independent intrinsic left boundary undervalued
+// puts with negative rates, which the direct solver explicitly supports.
+TEST(AmericanOptionTest, MathReviewNegativeRatePutEqualsEuropean) {
+    for (const RateSpec& rate :
+         {RateSpec{-0.05}, RateSpec{YieldCurve::flat(-0.05)}}) {
+        SCOPED_TRACE(is_yield_curve(rate) ? "flat curve" : "scalar rate");
+        PricingParams params(
+            OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                       .rate = rate, .dividend_yield = 0.0,
+                       .option_type = OptionType::PUT},
+            0.01);
+        auto result = solve_american_option(params);
+        ASSERT_TRUE(result.has_value());
+
+        // At a constant negative rate and q=0, early put exercise is never
+        // optimal. This prices near $5.12711; the old FDM gave $4.68572.
+        const double european = EuropeanOptionResult(params).value();
+        EXPECT_NEAR(result->value(), european, 1e-3);
+    }
+}
+
+TEST(AmericanOptionTest, NegativeForwardCurvePutEqualsEuropean) {
+    auto curve = YieldCurve::from_points({
+        {0.0, 0.0}, {0.5, 0.015}, {1.0, 0.05}});
+    ASSERT_TRUE(curve.has_value());
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = *curve, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.01);
+    auto result = solve_american_option(params);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->value(), EuropeanOptionResult(params).value(), 1e-3);
+}
+
+TEST(AmericanOptionTest, MixedNormalizedGroupsPreserveCoverageInEitherOrder) {
+    std::vector<PricingParams> batch;
+    for (double sigma : {0.10, 0.08, 0.20}) {
+        for (double spot : {200.0, 210.0}) {
+            batch.emplace_back(
+                OptionSpec{.spot = spot, .strike = 100.0, .maturity = 1.0,
+                           .rate = 0.05, .option_type = OptionType::CALL}, sigma);
+        }
+    }
+    for (bool reverse : {false, true}) {
+        SCOPED_TRACE(reverse);
+        if (reverse) std::reverse(batch.begin(), batch.end());
+        for (bool custom_accuracy : {false, true}) {
+            SCOPED_TRACE(custom_accuracy);
+            std::optional<PDEGridSpec> accuracy;
+            if (custom_accuracy) accuracy = GridAccuracyParams{};
+            BatchAmericanOptionSolver solver;
+            auto result = solver.solve_batch(batch, true, nullptr, accuracy);
+            ASSERT_EQ(result.failed_count, 0u);
+            ASSERT_EQ(result.results.size(), batch.size());
+            for (size_t i = 0; i < batch.size(); ++i) {
+                SCOPED_TRACE(i);
+                ASSERT_TRUE(result.results[i].has_value());
+                EXPECT_NEAR(result.results[i]->value(),
+                            EuropeanOptionResult(batch[i]).value(), 0.01);
+            }
+        }
+    }
+}
+
+TEST(AmericanOptionTest, NegativeRateDividendPutRetainsDiscountedStrike) {
+    PricingParams params(
+        OptionSpec{.spot = 1.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = -0.05, .dividend_yield = 0.0,
+                   .option_type = OptionType::PUT},
+        0.01, {{.calendar_time = 0.5, .amount = 5.0}});
+    // Use the accuracy profile to separate the jump/boundary condition
+    // from the default coarse grid's spatial truncation error.
+    auto solver = AmericanOptionSolver::create(
+        params, make_grid_accuracy(GridAccuracyProfile::High));
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve();
+    ASSERT_TRUE(result.has_value());
+    // The dividend exceeds spot by hundreds of standard deviations. The
+    // absorbing-zero stock leaves a terminal payoff K, discounted at r<0.
+    // A jump fallback of K at the ex-date loses half the discount growth.
+    EXPECT_NEAR(result->value(), 105.1271096376024, 1e-3);
+    const double left_spot = params.strike * std::exp(result->grid()->x().front());
+    EXPECT_NEAR(result->value_at(left_spot), 105.1271096376024, 1e-3);
+}
+
 TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0,

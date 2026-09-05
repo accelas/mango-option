@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/option_spec.hpp"
+#include "mango/option/european_option.hpp"
 #include <cmath>
 
 using namespace mango;
@@ -129,6 +130,44 @@ TEST(IVQueryValidationTest, ArbitragePutExceedsStrike) {
     auto result = validate_iv_query(query);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidMarketPrice);
+}
+
+// Regression: K is not an upper price bound for an American put when
+// negative rates make the discounted strike exceed K.
+TEST(IVQueryValidationTest, MathReviewNegativeRatePutAboveStrikeIsValid) {
+    for (const RateSpec& rate :
+         {RateSpec{-0.05}, RateSpec{YieldCurve::flat(-0.05)}}) {
+        SCOPED_TRACE(is_yield_curve(rate) ? "flat curve" : "scalar rate");
+        const OptionSpec spec{
+            .spot = 1.0, .strike = 100.0, .maturity = 1.0,
+            .rate = rate, .dividend_yield = 0.0,
+            .option_type = OptionType::PUT};
+        // No early-exercise advantage at constant r<0 and q=0, so this
+        // European price is also a legitimate American price (~$104.1271).
+        const double price = EuropeanOptionResult(PricingParams(spec, 0.20)).value();
+        ASSERT_GT(price, spec.strike);
+        EXPECT_TRUE(validate_iv_query(IVQuery(spec, price)).has_value())
+            << "A valid negative-rate price above strike must reach IV solving";
+
+        // Adjusting the bound must still reject actual arbitrage.
+        const double discounted_strike = spec.strike * std::exp(0.05 * spec.maturity);
+        auto invalid = validate_iv_query(IVQuery(spec, discounted_strike + 1.0));
+        ASSERT_FALSE(invalid.has_value());
+        EXPECT_EQ(invalid.error().code, ValidationErrorCode::InvalidMarketPrice);
+    }
+}
+
+TEST(IVQueryValidationTest, PutBoundIncludesIntermediateExerciseDates) {
+    // Discount grows to exp(0.1) at t=1, returns to 1 at expiry, and grows
+    // again after expiry. Only stopping dates within this contract count.
+    auto curve = YieldCurve::from_points({
+        {0.0, 0.0}, {1.0, 0.1}, {2.0, 0.0}, {3.0, 0.5}});
+    ASSERT_TRUE(curve.has_value());
+    const OptionSpec spec{
+        .spot = 1.0, .strike = 100.0, .maturity = 2.0,
+        .rate = *curve, .option_type = OptionType::PUT};
+    EXPECT_TRUE(validate_iv_query(IVQuery(spec, 109.0)).has_value());
+    EXPECT_FALSE(validate_iv_query(IVQuery(spec, 111.0)).has_value());
 }
 
 // ===========================================================================

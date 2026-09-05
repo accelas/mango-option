@@ -1574,6 +1574,7 @@ cc_test(
     size = "small",
     srcs = ["option_spec_test.cc"],
     deps = [
+        "//src/option:european_option",
         "//src/option:option_spec",
         "@googletest//:gtest_main",
     ],

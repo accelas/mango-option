@@ -129,15 +129,16 @@ TemporalEventCallback make_dividend_event(
 
 /// Initialize discrete dividend events on a solver.
 /// Builds a cubic spline for solution interpolation and registers temporal events
-/// at each dividend time. The intrinsic_fallback is the normalized payoff value
-/// used when the shifted spot falls below the grid (1.0 for puts, 0.0 for calls).
+/// at each dividend time. The intrinsic_fallback is the normalized payoff at
+/// zero spot (1.0 for puts, 0.0 for calls). At negative rates, waiting to
+/// expiry increases this value by the remaining discount factor.
 ///
 /// `n_events_applied`, when non-null, is incremented AFTER each dividend jump
 /// fires (spec B3): `process_temporal_events` re-applies boundary conditions
 /// immediately after the callback returns, so bumping the counter first makes
 /// the right-BC evaluator see the pre-dividend side rather than re-deriving
-/// phase from the (ambiguous, at t == tau_j) event time alone. Puts have no
-/// phase-aware boundary and pass nullptr.
+/// phase from the (ambiguous, at t == tau_j) event time alone. The put left
+/// boundary uses the same counter for its dividend-adjusted continuation.
 template<typename Solver>
 void init_dividend_events(Solver& solver, const PricingParams& params,
                           std::shared_ptr<Grid<double>> grid,
@@ -154,9 +155,12 @@ void init_dividend_events(Solver& solver, const PricingParams& params,
     [[maybe_unused]] auto err = dividend_spline.build(
         x, std::span<const double>(scratch.data(), x.size()));
 
+    const auto forward_discount = make_forward_discount_fn(params.rate, params.maturity);
     for (const auto& div : divs) {
         double tau = params.maturity - div.calendar_time;
-        auto jump = make_dividend_event(div.amount, params.strike, intrinsic_fallback,
+        const double fallback = intrinsic_fallback == 0.0 ? 0.0
+            : intrinsic_fallback * std::max(1.0, forward_discount(tau));
+        auto jump = make_dividend_event(div.amount, params.strike, fallback,
                                         &dividend_spline);
         solver.add_temporal_event(tau,
             [jump = std::move(jump), n_events_applied]
@@ -215,12 +219,28 @@ public:
     /// final memory location (e.g. after placement into a std::variant) because
     /// the event callbacks capture &dividend_spline_.
     void init_dividends() {
-        init_dividend_events(*this, params_, grid_, workspace_local_, 1.0, dividend_spline_);
+        init_dividend_events(*this, params_, grid_, workspace_local_, 1.0,
+                             dividend_spline_, &n_events_applied_);
     }
 
     struct LeftBCFunction {
-        double operator()(double /*t*/, double x) const {
-            return log_put_payoff(x);
+        std::function<double(double)> forward_discount;
+        double dividend_yield;
+        std::vector<double> dividend_prefix;
+        const size_t* n_events_applied;
+
+        double operator()(double t, double x) const {
+            // In the left tail the put payoff is affine. Waiting to expiry
+            // is worth DF(t) - (S/K)*exp(-q*t), and dominates immediate
+            // exercise for the supported nonpositive-rate regime.
+            const double df = forward_discount(t);
+            // Cash dividends can exhaust the stock value. Prefixes are
+            // ordered as the backward solver crosses ex-dates; the event
+            // counter distinguishes the two sides of the same instant.
+            const double terminal_stock = std::max(0.0,
+                std::exp(x - dividend_yield * t)
+                - df * dividend_prefix[*n_events_applied]);
+            return std::max(log_put_payoff(x), df - terminal_stock);
         }
     };
 
@@ -230,8 +250,18 @@ public:
         }
     };
 
-    static DirichletBC<LeftBCFunction> create_left_bc() {
-        return DirichletBC(LeftBCFunction{});
+    DirichletBC<LeftBCFunction> create_left_bc() const {
+        auto discount = make_forward_discount_fn(params_.rate, params_.maturity);
+        auto divs = filter_and_merge_dividends(params_.discrete_dividends, params_.maturity);
+        std::vector<double> prefix{0.0};
+        for (auto it = divs.rbegin(); it != divs.rend(); ++it) {
+            const double tau = params_.maturity - it->calendar_time;
+            prefix.push_back(prefix.back() + it->amount / params_.strike
+                * std::exp(-params_.dividend_yield * tau) / discount(tau));
+        }
+        return DirichletBC(LeftBCFunction{
+            std::move(discount), params_.dividend_yield,
+            std::move(prefix), &n_events_applied_});
     }
 
     static DirichletBC<RightBCFunction> create_right_bc() {
@@ -254,6 +284,7 @@ public:
     DirichletBC<RightBCFunction> right_bc_;
     SpatialOpType spatial_op_;
     CubicSpline<double> dividend_spline_;
+    size_t n_events_applied_ = 0;
 };
 
 // ============================================================================

@@ -345,12 +345,36 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
                 .rate = group.rate, .dividend_yield = group.dividend,
                 .option_type = group.option_type}, group.sigma);
 
+        // Normalization changes the grid center, but not the log(S/K)
+        // locations at which the original contracts read the solution.
+        // Declare those locations to the existing estimator and materialize
+        // its grid once. Concrete caller-supplied grids retain precedence.
+        auto group_grid = custom_grid;
+        if (!custom_grid || std::holds_alternative<GridAccuracyParams>(*custom_grid)) {
+            auto accuracy = custom_grid
+                ? std::get<GridAccuracyParams>(*custom_grid) : grid_accuracy_;
+            LogMoneynessRange coverage{0.0, 0.0};
+            if (accuracy.log_moneyness_coverage &&
+                std::isfinite(accuracy.log_moneyness_coverage->lo) &&
+                std::isfinite(accuracy.log_moneyness_coverage->hi)) {
+                coverage = *accuracy.log_moneyness_coverage;
+            }
+            for (size_t idx : group.option_indices) {
+                const double x = std::log(params[idx].spot / params[idx].strike);
+                coverage.lo = std::min(coverage.lo, x);
+                coverage.hi = std::max(coverage.hi, x);
+            }
+            accuracy.log_moneyness_coverage = coverage;
+            group_grid = estimate_batch_pde_grid_config(
+                std::span{&normalized_params, 1}, accuracy);
+        }
+
         // Solve with shared grid to get full surface
         auto solve_result = solve_regular_batch(
             std::span{&normalized_params, 1},
             /*use_shared_grid=*/true,
             setup,
-            custom_grid);
+            group_grid);
 
         if (!solve_result.results[0].has_value()) {
             // Mark all options in this group as failed

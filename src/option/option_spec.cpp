@@ -73,6 +73,24 @@ std::expected<void, ValidationError> validate_iv_query(const IVQuery& query) {
     // Check for arbitrage violations
     double intrinsic = intrinsic_value(query.spot, query.strike, query.option_type);
     double upper_bound = (query.option_type == OptionType::CALL) ? query.spot : query.strike;
+    if (query.option_type == OptionType::PUT) {
+        // Exercise pays at most K, at any date in [0,T]. Negative rates
+        // can make its present value exceed K. Log-linear discount curves
+        // attain their maximum at an endpoint or an interior tenor knot.
+        double max_discount = 1.0;
+        if (const auto* rate = std::get_if<double>(&query.rate)) {
+            max_discount = std::max(max_discount, std::exp(-*rate * query.maturity));
+        } else {
+            const auto& curve = std::get<YieldCurve>(query.rate);
+            max_discount = std::max(max_discount, curve.discount(query.maturity));
+            for (const auto& point : curve.points()) {
+                if (point.tenor > 0.0 && point.tenor < query.maturity) {
+                    max_discount = std::max(max_discount, curve.discount(point.tenor));
+                }
+            }
+        }
+        upper_bound *= max_discount;
+    }
 
     if (query.market_price < intrinsic) {
         return std::unexpected(ValidationError(
