@@ -79,6 +79,56 @@ TEST(BSplineCollocationRegression, CapturedRawDividendSliceFitsAndInterpolates) 
     EXPECT_LT(max_error, 1e-6);
 }
 
+TEST(BSplineCollocationRegression, RejectsNonfiniteDataSitesBeforeFitting) {
+    for (double invalid : {std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity()}) {
+        std::vector<double> grid{0.0, 0.25, 0.5, 0.75, invalid};
+        auto fitter = BSplineCollocation1D<double>::create(grid);
+        ASSERT_FALSE(fitter.has_value());
+        EXPECT_EQ(fitter.error().code, std::isnan(invalid)
+            ? InterpolationErrorCode::NaNInput : InterpolationErrorCode::InfInput);
+        EXPECT_EQ(fitter.error().index, 4u);
+    }
+}
+
+// The backend is a public policy parameter. Its failure must remain distinct
+// from a successful solve whose residual exceeds the requested tolerance.
+struct FailingFactorizationBackend : DefaultBandedBackend {
+    static BandedResult<double> factorize(std::span<double>,
+        std::span<pivot_type>, size_t, size_t) {
+        return BandedResult<double>::error_result("singular pivot");
+    }
+};
+
+TEST(BSplineCollocationRegression, ReportsFactorizationAndResidualFailureStages) {
+    const std::vector<double> grid{0, 1, 2, 3, 4, 5};
+    const std::vector<double> rhs{0.1, 0.7, -0.2, 0.4, 1.3, -0.9};
+    auto broken = BSplineCollocation1D<double, 4, FailingFactorizationBackend>::create(grid);
+    ASSERT_TRUE(broken.has_value());
+    auto fact = broken->factorize();
+    ASSERT_FALSE(fact.has_value());
+    EXPECT_EQ(fact.error().code, InterpolationErrorCode::FittingFailed);
+    EXPECT_NE(fact.error().message.find("factorization"), std::string::npos);
+    EXPECT_NE(fact.error().message.find("singular pivot"), std::string::npos);
+
+    auto fitter = BSplineCollocation1D<double>::create(grid);
+    ASSERT_TRUE(fitter.has_value());
+    auto fit = fitter->fit(rhs, {.tolerance = 1e-30});
+    ASSERT_FALSE(fit.has_value());
+    EXPECT_EQ(fit.error().code, InterpolationErrorCode::FittingFailed);
+    EXPECT_GT(fit.error().max_residual, 1e-30);
+    EXPECT_NE(fit.error().message.find("residual"), std::string::npos);
+}
+
+TEST(BSplineCollocationRegression, RejectsNonfiniteSolvedCoefficients) {
+    auto fitter = BSplineCollocation1D<double>::create({0, 1, 2, 3, 4, 5});
+    ASSERT_TRUE(fitter.has_value());
+    auto fit = fitter->fit({1e308, -1e308, 1e308, -1e308, 1e308, -1e308});
+    ASSERT_FALSE(fit.has_value());
+    EXPECT_EQ(fit.error().code, InterpolationErrorCode::FittingFailed);
+    EXPECT_TRUE(std::isinf(fit.error().max_residual));
+}
+
 // Test fixture for collocation tests
 class BSplineCollocation1DTest : public ::testing::Test {
 protected:
