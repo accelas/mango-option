@@ -127,6 +127,13 @@ IVSolver::validate_query(const IVQuery& query) const {
         return std::unexpected(validation_error_to_iv_error(validation.error()));
     }
 
+    if (const auto* accuracy = std::get_if<GridAccuracyParams>(&config_.grid)) {
+        auto valid = validate_grid_accuracy(*accuracy);
+        if (!valid) return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .final_error = valid.error().value,
+            .last_vol = std::nullopt});
+    }
     return std::monostate{};
 }
 

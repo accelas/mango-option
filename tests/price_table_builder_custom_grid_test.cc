@@ -284,14 +284,14 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
     EXPECT_LT(diff, 2.0) << "Prices should still be in the same ballpark";
 }
 
-// Regression: Explicit-grid fallback path must also cover wide moneyness
-// Bug: When an explicit grid violates solver constraints, the fallback
-// auto-estimation path ignored moneyness axis bounds (same root cause as above).
-TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
-    // Use a coarse explicit grid to trigger the fallback path.
-    // Uniform(-1.0, 1.0, 21): dx = 2.0/20 = 0.1 > MAX_DX (0.05) → fallback
-    auto coarse_grid = GridSpec<double>::uniform(-1.0, 1.0, 21).value();
-    PDEGridConfig explicit_pde{coarse_grid, 200};
+// Automatic coverage under a fixed spatial budget. The previous version
+// supplied 21 explicit points but relied on silently receiving 101 points;
+// #487 makes that requested refinement an automatic accuracy configuration.
+TEST(PriceTableBuilderCustomGridTest, AutomaticGridCoversWideMoneynessUnderPointBudget) {
+    GridAccuracyParams accuracy;
+    accuracy.min_spatial_points = accuracy.max_spatial_points = 101;
+    accuracy.n_sigma = 15.0;
+    accuracy.max_time_steps = 200;
 
     // Wide log-moneyness + low vol/short maturity (same scenario as AutoGridCoversWideMoneyness)
     std::vector<double> log_moneyness = {
@@ -304,33 +304,18 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
     auto setup = PriceTableBuilder::from_vectors(
         log_moneyness, maturity, volatility, rate,
         100.0,
-        explicit_pde,             // triggers fallback due to coarse spacing
+        accuracy,
         OptionType::PUT,
         0.02,
         0.0                       // strict
     );
 
-    // from_vectors may reject if explicit grid doesn't cover log(m) range
-    // (the coverage check at build() line 75-84 only applies to explicit grids
-    // that pass constraints — for fallback, we need to get past from_vectors first)
-    // Note: from_vectors doesn't do the coverage check, build() does.
-    ASSERT_TRUE(setup.has_value()) << "from_vectors failed";
+    ASSERT_TRUE(setup.has_value());
     auto& [builder, axes] = setup.value();
-
     auto result = builder.build(axes);
-
-    // The explicit grid [-1, 1] doesn't cover log(0.5)=-0.69... wait, it does.
-    // But the explicit grid coverage check (lines 73-84) checks explicit grids:
-    // x_min_requested = log(0.5) = -0.69, x_min = -1.0 → covered.
-    // However the grid SPACING violates max_dx, so it hits the fallback path.
-    // The fallback must then produce a grid that covers the moneyness axis.
-    ASSERT_TRUE(result.has_value())
-        << "build() failed — fallback path did not cover moneyness axis";
-
-    EXPECT_EQ(result->failed_pde_slices, 0)
-        << "PDE failures in fallback path";
-    EXPECT_EQ(result->failed_spline_points, 0)
-        << "Spline failures indicate fallback grid under-coverage";
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->failed_pde_slices, 0);
+    EXPECT_EQ(result->failed_spline_points, 0);
 
     auto& spline = result->spline;
     ASSERT_NE(spline, nullptr);
@@ -344,31 +329,15 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
     EXPECT_FALSE(std::isnan(deep_otm));
 }
 
-// Regression (#437 / D6): explicit-grid fallback must materialize one
-// concrete covering grid for the whole batch, not let gridless solve
-// re-estimate per-sigma-width grids that undercut the moneyness axis.
-// Why this triggers the bug:
-// - Fallback triggers: sinh ±0.6/15pts has max_dx > 0.05, and grid width
-//   1.2 < min_required_width = 6·σ_max·√T = 6·0.30·1 = 1.8.
-// - Old gridless path: fallback n_sigma = max(5, 0.6·1.1/0.30) = max(5, 2.2)
-//   = 5; moneyness coverage keeps it at 5 (0.51·1.1/0.30 = 1.87 < 5).
-// - Eligibility check: first param (σ=0.08, T=1) margin = 5·0.08 = 0.40 ≥
-//   0.35 → passes → normalized chain engages, one solve per (σ,r) group.
-// - σ=0.08 groups then get half-width 5·0.08 = 0.40 < 0.51 needed → their
-//   slice grids span only [-0.40, 0.40] → x.front() ≤ -0.51 assertion fails.
-// - σ ≥ 0.12 groups (5·0.12 = 0.60 ≥ 0.51) are covered, only min-σ slices fail.
-// - New code: materialized covering grid half-width 5·σ_max·√T = 1.5
-//   propagates to every group → all slices covered.
-// Pre-fix: sigma=0.08 slices spanned [-0.40, 0.40].
-TEST(PriceTableBuilderCustomGridTest, FallbackGridCoversAxisForAllSlices) {
+// Explicit domains remain intact in every volatility/rate slice, even
+// when coarse spacing disables normalized reuse.
+TEST(PriceTableBuilderCustomGridTest, ExplicitGridCoversAxisForAllSlices) {
     std::vector<double> m = {-0.51, -0.2, 0.0, 0.2, 0.51};
     std::vector<double> tau = {0.25, 0.5, 0.75, 1.0};
     std::vector<double> vol = {0.08, 0.12, 0.20, 0.30};
     std::vector<double> rate = {0.02, 0.03, 0.04, 0.05};
 
-    // Covers the axis (passes build()'s upfront check) but 15 points over
-    // width 1.2 makes max_dx > 0.05 -> stability constraints fail ->
-    // fallback branch.
+    // Covers the axis, but spacing is too coarse for normalized reuse.
     auto grid_spec = mango::GridSpec<double>::sinh_spaced(-0.6, 0.6, 15, 2.0).value();
 
     auto setup = mango::PriceTableBuilder::from_vectors(

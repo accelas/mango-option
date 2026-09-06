@@ -272,78 +272,10 @@ PriceTableBuilderND<N>::solve_batch(
             PDEGridSpec custom_grid = PDEGridConfig{est_grid, est_td.n_steps(), {}};
             return solver.solve_batch(batch, true, nullptr, custom_grid);
         } else {
-            // Explicit grid: check solver stability constraints
-            const auto& grid_spec = grid.grid_spec;
-            const auto n_time = grid.n_time;
-
-            constexpr double MAX_WIDTH = 5.8;   // Convergence limit (log-units)
-            constexpr double MAX_DX = 0.05;     // Von Neumann stability
-
-            const double grid_width = grid_spec.x_max() - grid_spec.x_min();
-
-            // Compute actual max spacing for non-uniform grids
-            double max_dx;
-            if (grid_spec.type() == GridSpec<double>::Type::Uniform) {
-                max_dx = grid_width / static_cast<double>(grid_spec.n_points() - 1);
-            } else {
-                auto grid_buffer = grid_spec.generate();
-                auto spacings = grid_buffer.span() | std::views::pairwise
-                                                   | std::views::transform([](auto pair) {
-                                                         auto [a, b] = pair;
-                                                         return b - a;
-                                                     });
-                max_dx = std::ranges::max(spacings);
-            }
-
-            // Compute minimum required width: ~3σ√τ on each side
-            auto sigma_sqrt_tau = [](const PricingParams& p) {
-                return p.volatility * std::sqrt(p.maturity);
-            };
-            const double max_sigma_sqrt_tau = std::ranges::max(
-                batch | std::views::transform(sigma_sqrt_tau));
-            const double min_required_width = 6.0 * max_sigma_sqrt_tau;
-
-            const bool grid_meets_constraints =
-                (grid_width <= MAX_WIDTH) &&
-                (max_dx <= MAX_DX) &&
-                (grid_width >= min_required_width);
-
-            if (grid_meets_constraints) {
-                const double max_maturity = axes.grids[1].back();
-                TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
-                PDEGridSpec custom_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
-                return solver.solve_batch(batch, true, nullptr, custom_grid);
-            } else {
-                // Grid violates constraints: fall back to auto-estimation
-                GridAccuracyParams accuracy;
-                const size_t n_points = grid_spec.n_points();
-                const size_t clamped = std::clamp(n_points, size_t(100), size_t(1200));
-                accuracy.min_spatial_points = clamped;
-                accuracy.max_spatial_points = clamped;
-                accuracy.max_time_steps = n_time;
-
-                if (grid_spec.type() == GridSpec<double>::Type::SinhSpaced) {
-                    accuracy.alpha = grid_spec.concentration();
-                }
-
-                const double x_min = grid_spec.x_min();
-                const double x_max = grid_spec.x_max();
-                const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
-                constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
-
-                const double safe_sigma_sqrt_tau = std::max(max_sigma_sqrt_tau, 1e-10);
-                double required_n_sigma = (max_abs_x / safe_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
-                accuracy.n_sigma = std::max(5.0, required_n_sigma);
-
-                // Every moneyness node is read from the batch solutions, so
-                // the solver must resolve the whole node span (spec D12).
-                accuracy.log_moneyness_coverage =
-                    LogMoneynessRange::of(axes.grids[0]);
-                // One shared grid for the whole batch.
-                return solver.solve_batch(
-                    batch, true, nullptr,
-                    estimate_batch_pde_grid_config(batch, accuracy));
-            }
+            // A manual grid is an exact numerical constraint. Routing may
+            // disable normalized reuse, but may not replace its coordinates,
+            // density, clustering or mandatory times.
+            return solver.solve_batch(batch, true, nullptr, grid);
         }
     }, config_.pde_grid);
 }

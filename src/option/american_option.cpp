@@ -517,6 +517,12 @@ AmericanOptionSolver::create(
         return std::unexpected(*lcp_validation);
     }
 
+    if (grid) {
+        if (const auto* accuracy = std::get_if<GridAccuracyParams>(&*grid)) {
+            auto valid = validate_grid_accuracy(*accuracy);
+            if (!valid) return std::unexpected(valid.error());
+        }
+    }
     auto grid_config = resolve_grid(params, grid);
 
     return AmericanOptionSolver(params, std::move(grid_config), snapshot_times);
