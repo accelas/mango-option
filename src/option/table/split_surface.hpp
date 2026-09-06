@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <concepts>
 #include <expected>
+#include <limits>
 #include <tuple>
 #include <vector>
 
@@ -39,6 +40,9 @@ public:
 
     [[nodiscard]] double price(double spot, double strike,
                                 double tau, double sigma, double rate) const {
+        if constexpr (requires { split_.contains_maturity(tau); }) {
+            if (!split_.contains_maturity(tau)) return std::numeric_limits<double>::quiet_NaN();
+        }
         auto br = split_.bracket(spot, strike, tau, sigma, rate);
         double result = 0.0;
         for (size_t i = 0; i < br.count; ++i) {
@@ -53,6 +57,9 @@ public:
 
     [[nodiscard]] double vega(double spot, double strike,
                                double tau, double sigma, double rate) const {
+        if constexpr (requires { split_.contains_maturity(tau); }) {
+            if (!split_.contains_maturity(tau)) return std::numeric_limits<double>::quiet_NaN();
+        }
         auto br = split_.bracket(spot, strike, tau, sigma, rate);
         double result = 0.0;
         for (size_t i = 0; i < br.count; ++i) {
@@ -67,6 +74,9 @@ public:
 
     [[nodiscard]] std::expected<double, GreekError>
     greek(Greek g, const PricingParams& params) const {
+        if constexpr (requires { split_.contains_maturity(params.maturity); }) {
+            if (!split_.contains_maturity(params.maturity)) return std::unexpected(GreekError::OutOfDomain);
+        }
         double spot = params.spot, strike = params.strike;
         double tau = params.maturity, sigma = params.volatility;
         double rate = get_zero_rate(params.rate, params.maturity);
@@ -91,6 +101,9 @@ public:
 
     [[nodiscard]] std::expected<double, GreekError>
     gamma(const PricingParams& params) const {
+        if constexpr (requires { split_.contains_maturity(params.maturity); }) {
+            if (!split_.contains_maturity(params.maturity)) return std::unexpected(GreekError::OutOfDomain);
+        }
         double spot = params.spot, strike = params.strike;
         double tau = params.maturity, sigma = params.volatility;
         double rate = get_zero_rate(params.rate, params.maturity);
@@ -114,6 +127,16 @@ public:
     }
 
     [[nodiscard]] size_t num_pieces() const noexcept { return pieces_.size(); }
+    [[nodiscard]] bool contains_maturity(double tau) const noexcept {
+        if constexpr (requires { split_.contains_maturity(tau); }) {
+            return split_.contains_maturity(tau);
+        } else if constexpr (requires { pieces_.front().contains_maturity(tau); }) {
+            for (const auto& piece : pieces_) {
+                if (!piece.contains_maturity(tau)) return false;
+            }
+        }
+        return true;
+    }
     [[nodiscard]] const std::vector<Inner>& pieces() const noexcept { return pieces_; }
     [[nodiscard]] const Split& split() const noexcept { return split_; }
 

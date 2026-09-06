@@ -178,8 +178,9 @@ TauSegmentSplit make_tau_split_from_segments(
 
         tau_start.push_back(start);
         tau_end.push_back(end);
-        tau_min.push_back(0.0);
-        tau_max.push_back(bounds[s + 1] - bounds[s]);
+        // Routing remains contiguous, but the fitted support excludes gaps.
+        tau_min.push_back(bounds[s] - start);
+        tau_max.push_back(bounds[s + 1] - start);
     }
 
     return TauSegmentSplit(

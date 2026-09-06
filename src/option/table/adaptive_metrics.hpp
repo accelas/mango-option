@@ -15,6 +15,7 @@
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/option_spec.hpp"
 #include <vector>
+#include <optional>
 
 namespace mango {
 
@@ -37,9 +38,11 @@ PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& params,
 ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
                               OptionType option_type);
 
-/// Create a ValidateFn that solves a single American option via FD.
+/// Create a direct FD reference. With reference_maturity, the dividends are
+/// anchored to one fixed expiry and rolled to each query's remaining life.
 ValidateFn make_validate_fn(double dividend_yield,
                             OptionType option_type,
-                            const std::vector<Dividend>& discrete_dividends = {});
+                            const std::vector<Dividend>& discrete_dividends = {},
+                            std::optional<double> reference_maturity = std::nullopt);
 
 }  // namespace mango

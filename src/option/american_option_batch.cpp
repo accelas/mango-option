@@ -474,10 +474,10 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
         MANGO_PRAGMA_FOR_STATIC
         for (size_t i = 0; i < params.size(); ++i) {
             // Collect dividend boundary points for this contract.
-            // The shared/custom TimeDomain.n_steps() doesn't carry mandatory
-            // points through PDEGridConfig, so we reconstruct them per-contract
-            // from the dividend schedule. Same filter as estimate_pde_grid.
-            std::vector<double> mandatory_tau;
+            // Retain caller mandatory samples, then add this contract's
+            // dividend events. Resolving to a step count alone loses labels.
+            std::vector<double> mandatory_tau = custom_config
+                ? custom_config->mandatory_times : std::vector<double>{};
             for (const auto& div : params[i].discrete_dividends) {
                 double tau = params[i].maturity - div.calendar_time;
                 if (tau > 0.0 && tau < params[i].maturity) {

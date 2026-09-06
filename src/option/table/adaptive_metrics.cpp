@@ -102,8 +102,9 @@ ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
 
 ValidateFn make_validate_fn(double dividend_yield,
                             OptionType option_type,
-                            const std::vector<Dividend>& discrete_dividends) {
-    return [dividend_yield, option_type, discrete_dividends](
+                            const std::vector<Dividend>& discrete_dividends,
+                            std::optional<double> reference_maturity) {
+    return [dividend_yield, option_type, discrete_dividends, reference_maturity](
         double spot, double strike, double tau,
         double sigma, double rate) -> std::expected<double, SolverError>
     {
@@ -115,14 +116,11 @@ ValidateFn make_validate_fn(double dividend_yield,
         p.dividend_yield = dividend_yield;
         p.option_type = option_type;
         p.volatility = sigma;
-        // A reference solve at maturity tau prices an option whose life ends
-        // at tau: dividends on or after tau are outside it.  Passing the
-        // full build schedule makes solve_american_option reject every
-        // sampled maturity before the last dividend, which the D4
-        // minimum-valid-holdout gate would turn into deterministic
-        // ValidationFailed for valid late-dividend configs.
-        p.discrete_dividends =
-            filter_and_merge_dividends(discrete_dividends, tau);
+        // Segmented surfaces follow one fixed expiry across remaining life.
+        // Ordinary callers without an anchor describe a contract from now.
+        p.discrete_dividends = reference_maturity
+            ? rolled_dividends(discrete_dividends, *reference_maturity, tau)
+            : filter_and_merge_dividends(discrete_dividends, tau);
         auto fd = solve_american_option(p);
         if (!fd.has_value()) return std::unexpected(fd.error());
         return fd->value();

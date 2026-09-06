@@ -180,6 +180,7 @@ static size_t solve_missing_pde_pairs(
     OptionType option_type,
     double dividend_yield,
     const std::vector<Dividend>& discrete_dividends,
+    double reference_maturity,
     std::span<const double> m_nodes,
     std::span<const double> tau_nodes,
     std::span<const double> sigma_nodes,
@@ -193,7 +194,7 @@ static size_t solve_missing_pde_pairs(
     for (auto [si, ri] : missing) {
         PricingParams p(
             OptionSpec{.spot = K_ref, .strike = K_ref,
-                       .maturity = tau_nodes.back() * 1.01,
+                       .maturity = reference_maturity,
                        .rate = rate_nodes[ri],
                        .dividend_yield = dividend_yield,
                        .option_type = option_type},
@@ -212,15 +213,13 @@ static size_t solve_missing_pde_pairs(
     solver.set_snapshot_times(std::span<const double>(tau_vec));
     // One shared grid per cohort (spec D13): keeps every cached slice on
     // the same x grid and the branch's numbers unchanged.
-    // estimate_batch_pde_grid_config's mandatory_times comes back empty,
-    // but that's safe: the batch solver rebuilds each contract's dividend
-    // times from its own discrete_dividends schedule rather than reading
-    // them off the shared config.
+    // These are contract-labelled rows, not nearest-step observations.
+    auto grid_config = estimate_batch_pde_grid_config(
+        std::span<const PricingParams>(batch), accuracy);
+    grid_config.mandatory_times = tau_vec;
     auto batch_result = solver.solve_batch(
         std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
-        nullptr,
-        estimate_batch_pde_grid_config(
-            std::span<const PricingParams>(batch), accuracy));
+        nullptr, PDEGridSpec{std::move(grid_config)});
 
     for (size_t bi = 0; bi < missing.size(); ++bi) {
         auto [si, ri] = missing[bi];
@@ -228,6 +227,12 @@ static size_t solve_missing_pde_pairs(
         const auto& result = batch_result.results[bi].value();
         auto grid = result.grid();
         auto x_grid = grid->x();
+        const auto actual_times = grid->snapshot_times();
+        if (actual_times.size() != tau_nodes.size() ||
+            !std::equal(actual_times.begin(), actual_times.end(), tau_nodes.begin())) {
+            // Missing rows remain absent and extraction refuses the build.
+            continue;
+        }
         for (size_t j = 0; j < tau_nodes.size(); ++j) {
             auto spatial = result.at_time(j);
             cache.store_slice(sigma_nodes[si], rate_nodes[ri],
@@ -317,8 +322,10 @@ build_segment_leaves(
         }
 
         std::vector<double> local_tau(Nt_seg);
+        const double origin = s > 0 && seg_is_gap[s - 1]
+            ? (seg_bounds[s - 1] + seg_bounds[s]) * 0.5 : seg_bounds[s];
         for (size_t j = 0; j < Nt_seg; ++j) {
-            local_tau[j] = tau_nodes[tau_idx[j]] - seg_bounds[s];
+            local_tau[j] = tau_nodes[tau_idx[j]] - origin;
         }
 
         std::vector<double> values(Nm * Nt_seg * Ns * Nr, 0.0);
@@ -550,7 +557,7 @@ static BuildFn make_segmented_chebyshev_build_fn(
 
         size_t new_solves = solve_missing_pde_pairs(
             cache, config.K_ref, config.option_type, config.dividend_yield,
-            config.discrete_dividends, m_nodes, tau_nodes, sigma_nodes,
+            config.discrete_dividends, config.seg_boundaries.back(), m_nodes, tau_nodes, sigma_nodes,
             rate_nodes);
         cache.record_pde_solves(new_solves);
 
@@ -583,42 +590,24 @@ static BuildFn make_segmented_chebyshev_build_fn(
                 const auto& bounds = *seg_copy;
                 const auto& is_gap = *gap_copy;
                 size_t seg_idx = 0;
+                bool supported = false;
                 for (size_t i = n_seg; i > 0; --i) {
                     size_t j = i - 1;
-                    if (j == 0 ? (tau >= bounds[j] && tau <= bounds[j + 1])
-                               : (tau > bounds[j] && tau <= bounds[j + 1])) {
+                    if (!is_gap[j] && tau >= bounds[j] && tau <= bounds[j + 1]) {
                         seg_idx = j;
+                        supported = true;
                         break;
                     }
                 }
                 if (tau <= bounds.front()) seg_idx = 0;
                 else if (tau >= bounds.back()) seg_idx = n_seg - 1;
 
-                // If tau lands in a gap segment, route to nearest real
-                // segment by distance from the gap midpoint.
-                if (is_gap[seg_idx]) {
-                    double gap_mid = (bounds[seg_idx] + bounds[seg_idx + 1]) * 0.5;
-                    // Search outward for nearest non-gap segment
-                    size_t left = seg_idx, right = seg_idx;
-                    while (left > 0 && is_gap[left - 1]) --left;
-                    if (left > 0) left = left - 1;  // non-gap to the left
-                    else left = n_seg;               // sentinel: no left
-                    while (right + 1 < n_seg && is_gap[right + 1]) ++right;
-                    if (right + 1 < n_seg) right = right + 1;  // non-gap to the right
-                    else right = n_seg;                         // sentinel: no right
-                    if (left < n_seg && right < n_seg) {
-                        seg_idx = (tau <= gap_mid) ? left : right;
-                    } else if (left < n_seg) {
-                        seg_idx = left;
-                    } else if (right < n_seg) {
-                        seg_idx = right;
-                    }
-                }
-
-                // Local tau within segment
-                double local_tau = std::clamp(
-                    tau - bounds[seg_idx],
-                    0.0, bounds[seg_idx + 1] - bounds[seg_idx]);
+                // No time substitution: these event neighborhoods have no
+                // sampled representation, including the exact event instant.
+                if (!supported) return std::numeric_limits<double>::quiet_NaN();
+                const double origin = seg_idx > 0 && is_gap[seg_idx - 1]
+                    ? (bounds[seg_idx - 1] + bounds[seg_idx]) * 0.5 : bounds[seg_idx];
+                const double local_tau = tau - origin;
 
                 double v_over_kref = (*leaves_shared)[seg_idx].price(
                     spot, strike, local_tau, sigma, rate);
@@ -648,10 +637,21 @@ build_chebyshev_segmented_pieces(
     std::span<const double> sigma_nodes,
     std::span<const double> rate_nodes)
 {
+    if (seg_bounds.empty()) return std::unexpected(
+        PriceTableError{PriceTableErrorCode::InvalidConfig});
+    for (const auto& div : filter_and_merge_dividends(discrete_dividends, seg_bounds.back())) {
+        const double event_tau = seg_bounds.back() - div.calendar_time;
+        for (double tau : tau_nodes) {
+            // Ordinary solver snapshots are pre-dividend in calendar time.
+            // Do not mislabel such a row as the post-calendar-event value.
+            if (std::abs(tau - event_tau) < 1e-12) return std::unexpected(
+                PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+    }
     ChebyshevPDECache cache;
     size_t pde_solves = solve_missing_pde_pairs(
         cache, K_ref, option_type, dividend_yield,
-        discrete_dividends, m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+        discrete_dividends, seg_bounds.back(), m_nodes, tau_nodes, sigma_nodes, rate_nodes);
 
     auto leaves = detail::build_segment_leaves(
         cache, K_ref, seg_bounds, seg_is_gap,
@@ -847,6 +847,17 @@ ChebyshevSegmentedBuilder::create(
         config.discrete_dividends, config.maturity,
         dom->tau_min, dom->tau_max);
 
+    for (const auto& div : filter_and_merge_dividends(config.discrete_dividends, config.maturity)) {
+        const double event_tau = config.maturity - div.calendar_time;
+        if (event_tau < dom->tau_min || event_tau > dom->tau_max) continue;
+        bool excluded = false;
+        for (size_t s = 0; s < seg_is_gap.size(); ++s) {
+            excluded |= seg_is_gap[s] && event_tau > seg_bounds[s] && event_tau < seg_bounds[s + 1];
+        }
+        if (!excluded) return std::unexpected(
+            PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
     return ChebyshevSegmentedBuilder(
         config, std::move(*K_refs), *dom, *sample_dom,
         std::move(seg_bounds), std::move(seg_is_gap));
@@ -974,7 +985,8 @@ ChebyshevSegmentedBuilder::build_adaptive(
     auto refine_fn = detail::make_segmented_chebyshev_refine_fn(state);
     auto state_hooks = detail::make_chebyshev_state_hooks(state);
     auto validate_fn = make_validate_fn(
-        config_.dividend_yield, config_.option_type, config_.discrete_dividends);
+        config_.dividend_yield, config_.option_type, config_.discrete_dividends,
+        config_.maturity);
     auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
     auto score_fn = make_iv_score_fn(params, config_.option_type);
 

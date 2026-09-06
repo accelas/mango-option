@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
+#include "mango/option/american_option.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
@@ -1273,4 +1274,35 @@ TEST(MakeValidateFnTest, DropsDividendsBeyondSampledMaturity) {
     // The dividend lowers the forward, so the put is worth more than the
     // pre-dividend solve.
     EXPECT_GT(spanning.value(), before.value());
+}
+
+// Regression #485: at tau=.6 on the anchored 1y contract the dividend at
+// calendar .25 has elapsed. A newly issued .6y contract is a different oracle.
+TEST(MakeValidateFnTest, FixedExpiryRollsCalendarInsteadOfChangingExpiry) {
+    auto validate = mango::make_validate_fn(0.0, mango::OptionType::PUT,
+        {{0.25, 3.0}}, 1.0);
+    mango::PricingParams p(mango::OptionSpec{.spot = 100.0, .strike = 100.0,
+        .maturity = 0.6, .rate = 0.05, .option_type = mango::OptionType::PUT}, 0.2);
+    auto direct = mango::solve_american_option(p);
+    ASSERT_TRUE(direct.has_value());
+    auto fixed = validate(100.0, 100.0, 0.6, 0.2, 0.05);
+    ASSERT_TRUE(fixed.has_value());
+    EXPECT_DOUBLE_EQ(*fixed, direct->value());
+    p.discrete_dividends = {{0.25, 3.0}};
+    auto chain = mango::solve_american_option(p);
+    ASSERT_TRUE(chain.has_value());
+    EXPECT_GT(chain->value() - *fixed, 1.0);
+
+    // At tau=.75 the event has elapsed; just above it the rolled offset is
+    // positive. This tests the reference side independently of gap admission.
+    p.maturity = 0.75;
+    p.discrete_dividends.clear();
+    direct = mango::solve_american_option(p);
+    ASSERT_TRUE(direct.has_value());
+    fixed = validate(100.0, 100.0, 0.75, 0.2, 0.05);
+    ASSERT_TRUE(fixed.has_value());
+    EXPECT_DOUBLE_EQ(*fixed, direct->value());
+    auto before = validate(100.0, 100.0, 0.750001, 0.2, 0.05);
+    ASSERT_TRUE(before.has_value());
+    EXPECT_GT(*before - *fixed, 1.0);
 }

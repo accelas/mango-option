@@ -784,7 +784,7 @@ TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
     auto refs_fn = make_fd_vega_refs_fn(
         params, make_validate_fn(seg_config.dividend_yield,
                                  seg_config.option_type,
-                                 seg_config.discrete_dividends));
+                                 seg_config.discrete_dividends, seg_config.maturity));
     auto points = detail::prepare_final_validation(params, ctx, refs_fn,
                                                    params.lhs_seed + 999);
     ASSERT_TRUE(points.has_value());
