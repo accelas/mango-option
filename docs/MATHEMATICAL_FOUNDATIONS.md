@@ -294,7 +294,7 @@ where $h_{\text{binding}}$ is the neighbor spacing on the side the drift can fli
 
 On the library's default auto-selected grids (`estimate_pde_grid`, which scales both domain half-width and spacing with $\sigma$), $\rho$ is *not* $\sigma$-independent: measured medians at ATM, $r=5\%$, $q=0$, $T=1$ are $\approx 0.42$ at $\sigma=1\%$, $\approx 0.08$ at $\sigma=5\%$, and $\approx 0.013$ at $\sigma=20\%$ (docs/superpowers/plans/2026-08-31-drift-upwinding-472-baseline.md) — roughly an $O(1/\sigma)$ trend, since $h_{\text{binding}}$ scales with $\sigma$ (grid width $\propto \sigma$, point count roughly fixed) while $a = \sigma^2/2$ scales with $\sigma^2$, so $\rho \propto |b|\,\sigma / \sigma^2 = |b|/\sigma$ with $b \approx r$ once $\sigma^2/2 \ll r$. Low-volatility grids therefore sit at meaningfully higher cell Péclet than high-volatility ones on default grids — consistent with the cell-Péclet failure mode above being a low-volatility, coarse-grid phenomenon rather than a uniformly-distributed one.
 
-One-pass Brennan-Schwartz exactness still requires, beyond these off-diagonal signs: (1) strict row dominance $1 + \omega \cdot r(t) > 0$, where $\omega$ is the implicit stage weight (i.e. $\gamma\Delta t/2$ or $(1-\gamma)\Delta t/(2-\gamma)$); and (2) an interval active set touching the sweep's starting side (issue #473). `AmericanOptionSolver::create` enforces a grid-independent sufficient domain for both assumptions: every rate must exceed $-2/T$ (all implicit weights are at most $\Delta t/2 \leq T/2$), with a $64\epsilon$ scale-aware safety margin so rounding cannot turn strict dominance into equality, and a piecewise-forward yield curve may not have a numerically meaningful crossing between negative and positive rates during the contract lifetime. Forward rates within a $64\epsilon$ scale-aware neighborhood of zero are classified as zero so log-discount interpolation noise does not spuriously reject a flat segment. With the already-enforced $q \geq 0$, an all-nonnegative curve has the standard one-sided exercise set, while an all-nonpositive curve gives a one-sided or empty set; sign-changing time-inhomogeneous curves are rejected because they can develop a floating exercise interval detached from both grid edges. Practical flat negative rates remain supported. `validate_lcp_kkt` still checks the solved system's KKT conditions — it detects resulting solution defects, not matrix structure, so a clean report is expected but not a structural guarantee. Custom initial conditions are installed through a package-private `detail::AmericanOptionSolverAccess` shim: every chained segment first passes the same factory validation, then reuses a continuation surface produced by the preceding validated segment. The public solver header therefore remains independent of concrete table-builder types.
+One-pass Brennan-Schwartz exactness still requires, beyond these off-diagonal signs: (1) strict row dominance $1 + \omega \cdot r(t) > 0$, where $\omega$ is the implicit stage weight (i.e. $\gamma\Delta t/2$ or $(1-\gamma)\Delta t/(2-\gamma)$); and (2) an interval active set touching the sweep's starting side (issue #473). `AmericanOptionSolver::create` enforces a grid-independent sufficient domain for both assumptions: every rate must exceed $-2/T$ (all implicit weights are at most $\Delta t/2 \leq T/2$), with a $64\epsilon$ scale-aware safety margin so rounding cannot turn strict dominance into equality, and a piecewise-forward yield curve may not have a numerically meaningful crossing between negative and positive rates during the contract lifetime. Forward rates within a $64\epsilon$ scale-aware neighborhood of zero are classified as zero so log-discount interpolation noise does not spuriously reject a flat segment. With the already-enforced $q \geq 0$, an all-nonnegative curve has the standard one-sided exercise set, while an all-nonpositive curve gives a one-sided or empty set; sign-changing time-inhomogeneous curves are rejected because they can develop a floating exercise interval detached from both grid edges. Practical flat negative rates remain supported. `validate_lcp_kkt` still checks the solved system's KKT conditions — it detects resulting solution defects, not matrix structure, so a clean report is expected but not a structural guarantee. The option solver always starts from its payoff. Segmented tables reuse raw snapshots from that validated solve; no table-specific initial-condition hook is needed. The generic PDE solver retains its independent initial-condition interface.
 
 The ghost-eliminated boundary rows deliberately retain the raw (unfitted) diffusion coefficient $a$: their off-diagonal $+2a/h^2$ already has the required sign for any drift (drift enters those rows only through the affine term), so fitting them would add diffusion without buying any structural property. The deep-ITM exercise lock in `solve_implicit_stage_projected` evaluates $L(\psi)$ with BOTH the raw (unfitted) operator (`SpatialOperator::apply_unfitted`) and the fitted one used for residuals/RHS/Jacobian (`SpatialOperator::apply`), requiring both to report $L(\psi) < 0$ before locking a node: the raw check answers the physical question — is the payoff a strict subsolution of the continuous PDE? — and prevents the fitted diffusion's extra $(a_f - a)\cdot\psi'' < 0$ from over-locking concave put payoffs ($\psi'' < 0$ deep ITM) on coarse, asymmetric grids; the fitted check prevents the mirror-image failure for convex call payoffs ($\psi'' > 0$ deep ITM), where that same term is positive and could otherwise impose an identity row that contradicts the fitted LCP the stage actually solves. Requiring both is always safe, since locking fewer nodes just hands them to the projected sweep, which is exact for the fitted M-matrix stage system.
 
@@ -606,14 +606,14 @@ The fixed backward event coordinate is $\tau_i=T_0-d_i$.
 At equality the event has elapsed in calendar time; ordinary solver
 snapshots recorded after a backward jump instead represent the
 pre-dividend calendar side and cannot be used as that exact query value.
-Chebyshev currently refuses its unsampled dividend neighborhoods rather
+Both segmented backends currently refuse their unsampled dividend neighborhoods rather
 than interpolating across the jump or clamping to a different time.
 
 For constant coefficients without dated dividends, autonomous PDE evolution
 allows one long solve to supply shorter-maturity snapshots. For dated
 dividends this reuse supplies the fixed expiry's remaining life, not other
-expiries at the anchor. Chebyshev uses exact mandatory sample times and no
-horizon padding on this path; its adaptive reference solves roll the calendar
+expiries at the anchor. Both backends use exact mandatory sample times and no
+horizon padding on this path; their adaptive reference solves roll the calendar
 by the same remaining-life rule.
 
 ### Maturity Partitioning
@@ -624,19 +624,27 @@ $$0 = \tau_0 < \tau_N < \tau_{N-1} < \cdots < \tau_1 < T$$
 
 where $\tau_k = T - t_k$. Each segment covers $[\tau_{k+1}, \tau_k]$ and has its own B-spline surface.
 
-**Segment 0** ($\tau \in [0, \tau_N]$, nearest to expiry): built in EEP mode (section 8) with the payoff as initial condition.
+For each reference strike, volatility, and rate, one PDE solve starts at the
+payoff and evolves to the fixed expiry's full anchor horizon. Solver-side cash
+dividend callbacks apply the jump condition. All B-spline segments are fitted
+from raw snapshots of that same solve; no segment's spline supplies another
+segment's initial condition. Segment values are normalized raw American prices
+`V/K_ref`, including the segment nearest expiry. The tau=0 row is filled with
+the exact payoff.
 
-**Segment $k > 0$** ($\tau \in [\tau_{N-k+1}, \tau_{N-k}]$): built in raw-price mode. Its initial condition is the previous segment's surface evaluated at the post-dividend spot:
-
-$$V_k(m, \sigma, r)\big|_{\tau = \tau_{N-k+1}} = V_{k-1}\!\left(m - \frac{D_{N-k+1}}{K_\text{ref}},\; \sigma,\; r\right)\bigg|_{\tau = \tau_{N-k+1}}$$
-
-The moneyness shift $m \to \max(m - D/K_\text{ref}, 0)$ accounts for the spot being higher before the dividend — the same jump condition as in the PDE solver (section 5), expressed in moneyness coordinates.
+Sample times are mandatory PDE time points and their returned labels are
+checked exactly. The current temporal topology excludes a neighborhood of
+half-width `5e-4` years around each dividend because one recorded state cannot
+represent both calendar sides. Unsupported event neighborhoods fail query
+admission instead of interpolating a jump or clamping to a different time.
+Missing requested raw rows cause construction failure before fitting.
 
 ### Query-Time Evaluation
 
-At query time, the surface finds the segment covering the requested $\tau$ and evaluates it directly. For the EEP segment, a spot adjustment subtracts dividends that will be paid between the query time and the segment boundary:
-
-$$S_\text{adj} = S - \sum_{\{k : t_\text{query} < t_k \leq t_\text{boundary}\}} D_k$$
+The temporal split chooses the supported segment and subtracts its stored tau
+origin. The leaf evaluates the corresponding raw-price spline; cash jumps have
+already been applied during PDE sampling. No query-time dividend spot shift
+or European add-back is applied to segmented leaves.
 
 ### Multiple Reference Strikes
 

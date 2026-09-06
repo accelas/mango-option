@@ -155,36 +155,23 @@ TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
     EXPECT_LT(result->implied_vol, 3.0);
 }
 
-// The documented limitation, pinned: the *same* config on `BSplineBackend`
-// does not build.  This is why the documentation recommends `ChebyshevBackend`
-// for adaptive discrete-dividend surfaces.
-//
-// The segmented multi-K_ref B-spline fit degrades badly at low vol on the
-// tau segments after a dividend.  At the documented parameters the assembled
-// surface measures **1.550 (15,500 bps) max** and the bumped-grid retry
-// measures 4.079, against the 0.20 bound.  The worst points cluster at
-// sigma <= 0.127 and tau in (0.64, 0.94) -- one returns exactly 0.0 for a put
-// worth $7.62, another returns 44.47 for one worth $7.91.  Denser grids make
-// it worse, not better, so the D9 retry cannot rescue it.
-//
-// This was always true; it was not always visible.  Before the reference
-// solves filtered their dividend schedule by the sampled maturity, every
-// sample below the last dividend date lost its reference, and the surviving
-// long-tau tail happened to miss the pathology at the relaxed parameters the
-// old version of this test used.
-//
-// Tracked as the MultiKRefSplit blend / segmented-fit follow-ups.  When one
-// of them lands this test will start failing, which is the intended signal:
-// re-measure, and if the B-spline path is viable again, promote it back into
-// the documentation.
-TEST(IVSolverFactorySegmented, DocumentedConfigOnBSplineBackendRefuses) {
+// After #488 removes fitted-IC chaining, the exact documented B-spline
+// configuration is viable. Its returned retry measures .00434953 decimal IV
+// (43.5 absolute-IV bps), still above the requested .001 (10 bps) target.
+// Keep accuracy evidence separate from successful construction; final backend
+// selection and strict target enforcement belong to #462 after #458/#460/#459.
+TEST(IVSolverFactorySegmented, DocumentedBSplineConfigBuildsButMissesTarget) {
     auto config = documented_adaptive_dividend_config();
     config.backend = BSplineBackend{.maturity_grid = {0.1, 0.25, 0.5, 1.0}};
 
     auto solver = make_interpolated_iv_solver(config);
-    ASSERT_FALSE(solver.has_value())
-        << "a surface measuring 15,500 bps must not be returned";
-    EXPECT_EQ(solver.error().code, ValidationErrorCode::NoViableSurface);
+    ASSERT_TRUE(solver.has_value()) << static_cast<int>(solver.error().code);
+    auto diagnostics = solver->build_diagnostics();
+    ASSERT_TRUE(diagnostics.has_value());
+    EXPECT_FALSE(diagnostics->target_met);
+    EXPECT_EQ(diagnostics->holdout_points_measured, 64u);
+    EXPECT_EQ(diagnostics->holdout_points_invalid, 0u);
+    EXPECT_NEAR(diagnostics->achieved_max_error, 0.00434953, 1e-5);
 }
 
 // ---------------------------------------------------------------------------

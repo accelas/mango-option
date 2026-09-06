@@ -3,7 +3,7 @@
 #include "mango/option/dividend_utils.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/american_option.hpp"
-#include "mango/option/detail/american_option_solver_access.hpp"
+#include "mango/option/table/adaptive_refinement.hpp"
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -14,28 +14,24 @@ namespace {
 
 constexpr int kCubicSplineDegree = 3;
 
-/// Context for sampling a previous segment's spline as an initial condition.
-struct ChainedICContext {
-    std::shared_ptr<const BSplineND<double, 4>> prev_spline;
-    double K_ref;
-    double prev_tau_end;   ///< Previous segment's local τ at its far boundary
-    double boundary_div;   ///< Discrete dividend amount at this boundary
-};
-
 /// Generate a τ grid for a segment [tau_start, tau_end].
 /// When tau_target_dt > 0, scales points proportionally to segment width.
 /// Otherwise falls back to constant min_points.
 std::vector<double> make_segment_tau_grid(
     double tau_start, double tau_end, int min_points,
-    double tau_target_dt = 0.0, int tau_points_min = 4, int tau_points_max = 30)
+    double tau_target_dt, int tau_points_min, int tau_points_max,
+    size_t& cap_hits)
 {
     double seg_width = tau_end - tau_start;
 
     int n;
     if (tau_target_dt > 0.0) {
         // Width-proportional: wider segments get more points
-        n = static_cast<int>(std::ceil(seg_width / tau_target_dt)) + 1;
-        n = std::clamp(n, tau_points_min, tau_points_max);
+        const double requested = std::ceil(seg_width / tau_target_dt) + 1.0;
+        if (requested > tau_points_max) ++cap_hits;
+        n = static_cast<int>(std::clamp(
+            requested, static_cast<double>(tau_points_min),
+            static_cast<double>(tau_points_max)));
     } else {
         // Legacy constant mode
         n = std::max(min_points, 4);
@@ -186,13 +182,20 @@ expand_log_moneyness_grid(
 
 std::expected<BSplineSegmentedSurface, PriceTableError>
 SegmentedPriceTableBuilder::build(const Config& config) {
+    auto result = build_with_diagnostics(config);
+    if (!result) return std::unexpected(result.error());
+    return std::move(result->surface);
+}
+
+std::expected<SegmentedPriceTableBuilder::BuildResult, PriceTableError>
+SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
     // =====================================================================
     // Validate inputs
     // =====================================================================
-    if (config.K_ref <= 0.0) {
+    if (!(std::isfinite(config.K_ref) && config.K_ref > 0.0)) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
-    if (config.maturity <= 0.0) {
+    if (!(std::isfinite(config.maturity) && config.maturity > 0.0)) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
     if (config.grid.moneyness.size() < 4) {
@@ -203,6 +206,26 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     }
     if (config.grid.rate.size() < 4) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 3});
+    }
+    for (const auto& [axis, values] : {
+             std::pair{size_t{0}, &config.grid.moneyness},
+             std::pair{size_t{2}, &config.grid.vol},
+             std::pair{size_t{3}, &config.grid.rate}}) {
+        for (double value : *values) {
+            if (!std::isfinite(value)) return std::unexpected(
+                PriceTableError{PriceTableErrorCode::InvalidConfig, axis});
+        }
+        if (std::adjacent_find(values->begin(), values->end(),
+                              std::greater_equal<double>{}) != values->end()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::GridNotSorted, axis});
+        }
+    }
+    if (config.grid.vol.front() <= 0.0 ||
+        !std::isfinite(config.dividends.dividend_yield) ||
+        !std::isfinite(config.tau_target_dt) || config.tau_target_dt < 0.0 ||
+        config.tau_points_per_segment < 4 || config.tau_points_min < 4 ||
+        config.tau_points_max < config.tau_points_min) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
     const double T = config.maturity;
@@ -228,9 +251,6 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     }
     boundaries.push_back(T);
 
-    // Number of segments
-    const size_t n_segments = boundaries.size() - 1;
-
     // =====================================================================
     // Step 3: Expand log-moneyness grid downward
     // =====================================================================
@@ -251,161 +271,144 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     auto expanded_log_m_grid = std::move(*grid_result);
 
     // =====================================================================
-    // Step 4: Build segments (last first, then backward)
-    // =====================================================================
-    // Build each segment's surface, then assemble into SegmentedSurface.
-    // Index 0 = closest to expiry.
-    std::vector<BSplineSegmentConfig> segment_configs;
-    segment_configs.reserve(n_segments);
-
-    // The "previous" spline, used to generate chained ICs for earlier segments.
-    std::shared_ptr<const BSplineND<double, 4>> prev_spline;
-
-    for (size_t seg_idx = 0; seg_idx < n_segments; ++seg_idx) {
-        auto seg_result = build_segment(
-            seg_idx, boundaries, config, expanded_log_m_grid,
-            K_ref, dividends, prev_spline);
-        if (!seg_result.has_value()) {
-            return std::unexpected(seg_result.error());
+    // Each sample belongs to one temporal regime. The existing inset topology
+    // excludes event sides not represented by the solver's single snapshot.
+    auto [sample_bounds, gaps] = compute_segment_boundaries(dividends, T, 0.0, T);
+    for (const auto& dividend : dividends) {
+        const double event_tau = T - dividend.calendar_time;
+        bool excluded = false;
+        for (size_t s = 0; s < gaps.size(); ++s) {
+            excluded |= gaps[s] && event_tau > sample_bounds[s]
+                && event_tau < sample_bounds[s + 1];
         }
-        segment_configs.push_back(std::move(*seg_result));
+        if (!excluded) return std::unexpected(
+            PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
+    auto split = make_tau_split_from_segments(sample_bounds, gaps, K_ref);
 
-    // =====================================================================
-    // Step 5: Assemble SegmentedSurface
-    // =====================================================================
-    BSplineSegmentedConfig seg_config{
-        .segments = std::move(segment_configs),
-        .K_ref = K_ref,
-    };
-
-    return build_segmented_surface(std::move(seg_config));
-}
-
-std::expected<BSplineSegmentConfig, PriceTableError>
-SegmentedPriceTableBuilder::build_segment(
-    size_t seg_idx,
-    const std::vector<double>& boundaries,
-    const Config& config,
-    const std::vector<double>& expanded_log_m_grid,
-    double K_ref,
-    const std::vector<Dividend>& dividends,
-    std::shared_ptr<const BSplineND<double, 4>>& prev_spline)
-{
-    double tau_start = boundaries[seg_idx];
-    double tau_end = boundaries[seg_idx + 1];
-    double seg_width = tau_end - tau_start;
-
-    // Local τ grid for this segment
-    auto local_tau = make_segment_tau_grid(
-        0.0, seg_width, config.tau_points_per_segment,
-        config.tau_target_dt, config.tau_points_min, config.tau_points_max);
-
-    // Build PriceTableBuilderND for this segment
-    auto setup = PriceTableBuilder::from_vectors(
-        expanded_log_m_grid, local_tau, config.grid.vol, config.grid.rate,
-        K_ref, config.pde_accuracy, config.option_type,
-        config.dividends.dividend_yield);
-
-    if (!setup.has_value()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    std::vector<std::vector<double>> segment_times;
+    std::vector<double> requested_times;
+    size_t tau_cap_hits = 0;
+    for (size_t s = 0; s < split.tau_start().size(); ++s) {
+        auto local = make_segment_tau_grid(
+            0.0, split.tau_end()[s] - split.tau_start()[s],
+            config.tau_points_per_segment, config.tau_target_dt,
+            config.tau_points_min, config.tau_points_max, tau_cap_hits);
+        local.front() = split.tau_min()[s];
+        local.back() = split.tau_max()[s];
+        std::vector<double> global;
+        for (double t : local) global.push_back(split.tau_start()[s] + t);
+        if (!std::ranges::is_sorted(global) ||
+            std::adjacent_find(global.begin(), global.end()) != global.end()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+        requested_times.insert(requested_times.end(), global.begin(), global.end());
+        segment_times.push_back(std::move(global));
     }
+    std::sort(requested_times.begin(), requested_times.end());
+    requested_times.erase(std::unique(requested_times.begin(), requested_times.end()),
+                          requested_times.end());
 
-    auto& [builder, axes] = *setup;
-    builder.set_allow_tau_zero(true);
-
-    // ------ Manual build path (used for all segments) ------
-
-    // 1. Create batch params
-    auto batch_params = builder.make_batch(axes);
-
-    // 2. Estimate PDE grid (same as builder.build() would)
-    auto [est_grid, est_td] = builder.estimate_pde_grid(batch_params, axes);
-    PDEGridSpec custom_grid = PDEGridConfig{est_grid, est_td.n_steps(), {}};
-
-    // 3. Create batch solver with snapshot times
-    BatchAmericanOptionSolver batch_solver;
-    batch_solver.set_snapshot_times(axes.grids[1]);
-
-    // 4. Build setup callback (chained segments only)
-    BatchAmericanOptionSolver::SetupCallback setup_callback = nullptr;
-
-    if (seg_idx > 0) {
-
-        const auto& vol_grid = config.grid.vol;
-        const auto& rate_grid = config.grid.rate;
-        const size_t Nr = rate_grid.size();
-
-        // τ at the boundary of the previous segment (in its local coords)
-        double prev_seg_tau_local_end = boundaries[seg_idx] - boundaries[seg_idx - 1];
-
-        // Dividend amount at this boundary.
-        double boundary_div = dividends[dividends.size() - seg_idx].amount;
-
-        ChainedICContext ic_ctx{
-            .prev_spline = prev_spline,
-            .K_ref = K_ref,
-            .prev_tau_end = prev_seg_tau_local_end,
-            .boundary_div = boundary_div,
-        };
-
-        setup_callback = [ic_ctx, &vol_grid, &rate_grid, Nr](
-            size_t index, AmericanOptionSolver& solver)
-        {
-            double sigma = vol_grid[index / Nr];
-            double rate = rate_grid[index % Nr];
-
-            // IC maps log-moneyness x → normalized price u = V/K_ref.
-            // Jump condition at dividend date: V(t⁻, S) = V(t⁺, S - D).
-            detail::AmericanOptionSolverAccess::set_initial_condition(
-                solver,
-                [ic_ctx, sigma, rate](
-                    std::span<const double> x, std::span<double> u)
-                {
-                    for (size_t i = 0; i < x.size(); ++i) {
-                        double spot = ic_ctx.K_ref * std::exp(x[i]);
-                        double spot_adj = std::max(spot - ic_ctx.boundary_div, 1e-8);
-                        double x_adj = std::log(spot_adj / ic_ctx.K_ref);
-                        double raw = ic_ctx.prev_spline->eval(
-                            {x_adj, ic_ctx.prev_tau_end, sigma, rate});
-                        u[i] = raw;
-                    }
-                });
-        };
-    }
-
-    // 5. Solve batch with estimated grid
-    auto batch_result = batch_solver.solve_batch(
-        batch_params, true, setup_callback, custom_grid);
-
-    // 6. Failure rate check
-    // Segment 0: strict (0.0), matching builder.build() default.
-    // Chained segments: lenient (0.5), matching old behavior (no check).
-    if (!batch_result.results.empty()) {
-        const double max_rate = (seg_idx == 0) ? 0.0 : 0.5;
-        const double failure_rate = static_cast<double>(batch_result.failed_count) /
-                                    static_cast<double>(batch_result.results.size());
-        if (failure_rate > max_rate) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+    // One fixed-expiry PDE per (sigma, rate), including the actual events.
+    // No fitted surface supplies an initial condition for another solve.
+    std::vector<PricingParams> batch_params;
+    for (double sigma : config.grid.vol) {
+        for (double rate : config.grid.rate) {
+            PricingParams p(OptionSpec{.spot = K_ref, .strike = K_ref,
+                .maturity = T, .rate = rate,
+                .dividend_yield = config.dividends.dividend_yield,
+                .option_type = config.option_type}, sigma);
+            p.discrete_dividends = dividends;
+            batch_params.push_back(std::move(p));
         }
     }
+    auto accuracy = config.pde_accuracy;
+    accuracy.log_moneyness_coverage = LogMoneynessRange::of(expanded_log_m_grid);
+    auto grid = estimate_batch_pde_grid_config(batch_params, accuracy);
+    grid.mandatory_times = requested_times;
+    BatchAmericanOptionSolver solver;
+    solver.set_snapshot_times(requested_times);
+    auto batch = solver.solve_batch(batch_params, true, nullptr, PDEGridSpec{grid});
 
-    // 7-10. Extract tensor, repair, fit, build surface
-    DividendSpec seg_divs{.dividend_yield = config.dividends.dividend_yield,
-                          .discrete_dividends = {}};
-    auto assembly = builder.assemble_surface(
-        batch_result, axes, K_ref, seg_divs);
-    if (!assembly.has_value()) {
-        return std::unexpected(assembly.error());
+    // Missing rows are counted before fitting. This path is strict, without
+    // the previous implicit 50% repair allowance on chained segments.
+    size_t missing_rows = 0;
+    for (const auto& result : batch.results) {
+        if (!result) {
+            missing_rows += requested_times.size();
+            continue;
+        }
+        const auto actual = result->snapshot_times();
+        for (double time : requested_times) {
+            if (!std::binary_search(actual.begin(), actual.end(), time)) ++missing_rows;
+        }
+    }
+    if (batch.results.size() != batch_params.size() || missing_rows != 0) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::ExtractionFailed, 1, missing_rows});
     }
 
-    auto spline_ptr = assembly->spline;
-    prev_spline = spline_ptr;
-
-    return BSplineSegmentConfig{
-        .spline = spline_ptr,
-        .tau_start = tau_start,
-        .tau_end = tau_end,
+    std::vector<BSplineSegmentedLeaf> leaves;
+    const size_t nm = expanded_log_m_grid.size();
+    const size_t nv = config.grid.vol.size(), nr = config.grid.rate.size();
+    for (size_t s = 0; s < segment_times.size(); ++s) {
+        std::vector<double> local_tau;
+        for (double time : segment_times[s]) local_tau.push_back(time - split.tau_start()[s]);
+        auto setup = PriceTableBuilder::from_vectors(
+            expanded_log_m_grid, local_tau, config.grid.vol, config.grid.rate,
+            K_ref, config.pde_accuracy, config.option_type,
+            config.dividends.dividend_yield);
+        if (!setup) return std::unexpected(setup.error());
+        auto& [builder, axes] = *setup;
+        auto tensor = PriceTensorND<4>::create(axes.shape());
+        if (!tensor) return std::unexpected(
+            PriceTableError{PriceTableErrorCode::TensorCreationFailed});
+        for (size_t vi = 0; vi < nv; ++vi) for (size_t ri = 0; ri < nr; ++ri) {
+            const auto& result = *batch.results[vi * nr + ri];
+            auto x = result.grid()->x();
+            if (x.front() > expanded_log_m_grid.front() || x.back() < expanded_log_m_grid.back()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+            }
+            const auto actual_times = result.snapshot_times();
+            for (size_t j = 0; j < segment_times[s].size(); ++j) {
+                const double time = segment_times[s][j];
+                const size_t row = std::lower_bound(actual_times.begin(), actual_times.end(), time)
+                    - actual_times.begin();
+                auto values = result.at_time(row);
+                CubicSpline<double> spatial;
+                if (spatial.build(x, values)) return std::unexpected(
+                    PriceTableError{PriceTableErrorCode::ExtractionFailed, 1, 1});
+                for (size_t i = 0; i < nm; ++i) {
+                    // Fill the exact expiry payoff without spatially smoothing
+                    // its strike kink; all positive times use raw PDE states.
+                    const double value = time == 0.0
+                        ? intrinsic_value(K_ref * std::exp(expanded_log_m_grid[i]),
+                                          K_ref, config.option_type) / K_ref
+                        : spatial.eval(expanded_log_m_grid[i]);
+                    if (!std::isfinite(value)) return std::unexpected(
+                        PriceTableError{PriceTableErrorCode::ExtractionFailed, 1, 1});
+                    tensor->view[i, j, vi, ri] = value;
+                }
+            }
+        }
+        auto fit = builder.fit_coeffs(*tensor, axes);
+        if (!fit) return std::unexpected(fit.error());
+        BSplineND<double, 4>::KnotArray knots;
+        for (size_t d = 0; d < 4; ++d) knots[d] = clamped_knots_cubic(axes.grids[d]);
+        auto spline = BSplineND<double, 4>::create(
+            axes.grids, std::move(knots), std::move(fit->coefficients));
+        if (!spline) return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
+        leaves.emplace_back(SharedBSplineInterp<4>(
+            std::make_shared<const BSplineND<double, 4>>(std::move(*spline))),
+            StandardTransform4D{}, K_ref);
+    }
+    const size_t rows = requested_times.size() * batch_params.size();
+    return BuildResult{
+        .surface = BSplineSegmentedSurface(std::move(leaves), std::move(split)),
+        .pde_solves = batch.results.size(),
+        .sample_rows = rows,
+        .sample_points = rows * nm,
+        .tau_point_cap_hits = tau_cap_hits,
     };
 }
 

@@ -250,7 +250,7 @@ For reference, here are the full type alias expansions. The naming convention is
 | `BSplineMultiKRefSurface` | `PriceTable<SplitSurface<SplitSurface<TransformLeaf<SharedInterp<BSplineND<double,4>,4>, StandardTransform4D>, TauSegmentSplit>, MultiKRefSplit>>` |
 | `ChebyshevMultiKRefSurface` | Same with `ChebyshevInterpolant<4, RawTensor<4>>` |
 
-Segmented leaves do not use `EEPLayer` — they store V/K_ref directly, because the initial condition for each segment comes from the next segment's surface evaluation (not from a closed-form expression), so no clean European decomposition exists.
+Segmented leaves do not use `EEPLayer`: they store raw V/K_ref snapshots of the fixed-expiry PDE with solver-side cash-dividend events. Every temporal segment is fitted independently from those raw states; a fitted spline never supplies another PDE initial condition.
 
 ---
 

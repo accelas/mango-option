@@ -271,20 +271,22 @@ mango::IVSolverFactoryConfig config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
-**Use `ChebyshevBackend` for adaptive discrete-dividend surfaces.** The
-B-spline segmented adaptive path currently refuses realistic dividend configs
-— including this one — with `NoViableSurface` under complete measurement: its
-multi-K_ref fit degrades badly at low vol on the tau segments after a
-dividend, and denser grids make it worse rather than better. Pending the
-MultiKRefSplit blend and segmented-fit follow-ups, Chebyshev is the supported
-backend here; it measures 549 bps against the 2,000 bps viability bound on
-the config above.
+The B-spline segmented path now fits raw snapshots from one fixed-expiry PDE
+solve per reference strike, volatility, and rate. This documented configuration
+builds after removal of fitted-initial-condition chaining; its maximum measured
+IV error is **0.00435 (43.5 absolute-IV bps)**, above the requested 0.001 (10 bps).
+Inspect `build_diagnostics()->target_met` and achieved error rather than treating
+construction as proof of target accuracy. Other B-spline configurations still
+refuse pending clustered fitting and MultiKRef corrections. Final backend
+selection follows the remaining #483 accuracy and certification gates.
 
-Omit `kref_config` to let the builder pick log-spaced K_refs around the spot.
-This exact config is pinned by
-`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig`, and the
-B-spline refusal by
-`IVSolverFactorySegmented.DocumentedConfigOnBSplineBackendRefuses`.
+Both segmented backends exclude currently unrepresented dividend neighborhoods.
+Checked price/Greek/IV queries there fail explicitly; they do not substitute
+another maturity. Omit `kref_config` to use the current automatic reference
+selection. The B-spline measurement is pinned by
+`IVSolverFactorySegmented.DocumentedBSplineConfigBuildsButMissesTarget`;
+the Chebyshev configuration by
+`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig`.
 
 **Pattern 5: Probe-Based FDM IV Solver (Simple API)**
 ```cpp

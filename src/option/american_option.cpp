@@ -609,12 +609,8 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     // capture the post-construction address of dividend_spline_.
     auto solve_result = std::visit([&](auto& pde_solver) {
         pde_solver.init_dividends();
-        if (custom_ic_) {
-            pde_solver.initialize(*custom_ic_);
-        } else {
-            pde_solver.initialize(
-                std::remove_reference_t<decltype(pde_solver)>::payoff);
-        }
+        pde_solver.initialize(
+            std::remove_reference_t<decltype(pde_solver)>::payoff);
         pde_solver.set_config(trbdf2_config_);
         auto result = pde_solver.solve();
         // Copy the report out before the variant (and its pde_solver) is
