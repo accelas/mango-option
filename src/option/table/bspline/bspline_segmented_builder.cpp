@@ -298,10 +298,21 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
         local.back() = split.tau_max()[s];
         std::vector<double> global;
         for (double t : local) global.push_back(split.tau_start()[s] + t);
-        if (!std::ranges::is_sorted(global) ||
-            std::adjacent_find(global.begin(), global.end()) != global.end()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        const auto ordered = [&] {
+            return std::adjacent_find(global.begin(), global.end(),
+                                     std::greater_equal<double>{}) == global.end();
+        };
+        if (!ordered()) {
+            // Endpoint insets can overtake generated interior nodes in a
+            // short regime. Keep the requested count on its valid support.
+            const double lo = global.front(), hi = global.back();
+            for (size_t j = 0; j < global.size(); ++j) {
+                global[j] = std::lerp(lo, hi,
+                    static_cast<double>(j) / static_cast<double>(global.size() - 1));
+            }
         }
+        if (!ordered()) return std::unexpected(
+            PriceTableError{PriceTableErrorCode::InvalidConfig});
         requested_times.insert(requested_times.end(), global.begin(), global.end());
         segment_times.push_back(std::move(global));
     }

@@ -95,6 +95,27 @@ TEST(SegmentedPriceTableBuilderTest, RejectsUnsortedSampleAxesBeforeSolving) {
     EXPECT_EQ(result.error().axis_index, 2u);
 }
 
+// A five-node grid on [0,.002] ends at .0015 after the event inset, which
+// used to duplicate its fourth node. These are generated nodes: keep their
+// requested count and place them inside the actual supported interval.
+TEST(SegmentedPriceTableBuilderTest, NarrowRegimesRetainDistinctRequestedRows) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::PUT,
+        .dividends = {.discrete_dividends = {{0.008, 1.0}}},
+        .grid = {.moneyness = {-0.2, -0.1, 0.0, 0.1, 0.2},
+                 .vol = {0.1, 0.15, 0.2, 0.3},
+                 .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 0.01,
+    };
+    auto result = SegmentedPriceTableBuilder::build_with_diagnostics(config);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_EQ(result->sample_rows, 2u * 5u * 16u);
+    EXPECT_EQ(result->pde_solves, 16u);
+    EXPECT_TRUE(result->surface.contains_maturity(0.001));
+    EXPECT_FALSE(result->surface.contains_maturity(0.002));
+    EXPECT_TRUE(result->surface.contains_maturity(0.003));
+}
+
 TEST(SegmentedPriceTableBuilderTest, RawCallAndPutPricesAndGreeksShareTheSameSurface) {
     std::vector<double> x;
     for (int i = -10; i <= 10; ++i) x.push_back(0.05 * i);
