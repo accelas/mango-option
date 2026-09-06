@@ -631,8 +631,10 @@ cc_test(
 cc_test(
     name = "bspline_collocation_1d_test",
     srcs = ["bspline_collocation_1d_test.cc"],
+    data = ["data/bspline_458_dividend_axis.txt"],
     deps = [
         "//src/math/bspline:bspline_collocation",
+        "//src/math/bspline:bspline_nd",
         "@googletest//:gtest_main",
     ],
     copts = [

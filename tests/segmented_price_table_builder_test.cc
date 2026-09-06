@@ -9,6 +9,43 @@ using namespace mango;
 
 namespace {
 
+// #458: use #488's raw end-to-end snapshots while increasing the real
+// moneyness data sites through the former collocation failure region.
+TEST(SegmentedPriceTableBuilderTest, RawDividendSamplesCrossFormerFittingCliff) {
+    // Existing dividend/support expansion produces 118,160,188,281 actual
+    // sites from these explicit requested grids; no data sites are moved.
+    for (size_t n : {50u, 68u, 80u, 120u}) {
+        SCOPED_TRACE(n);
+        std::vector<double> log_m(n);
+        for (size_t i = 0; i < n; ++i) {
+            log_m[i] = std::log(0.92) + (std::log(1.08)-std::log(0.92))*i/(n-1);
+        }
+        SegmentedPriceTableBuilder::Config config{
+            .K_ref = 100.0, .option_type = OptionType::PUT,
+            .dividends = {.dividend_yield = 0.01,
+                          .discrete_dividends = {{0.25, 1.5}, {0.5, 1.5}}},
+            .grid = {.moneyness = log_m, .vol = {0.1, 0.15, 0.2, 0.3},
+                     .rate = {0.02, 0.03, 0.05, 0.07}},
+            .maturity = 1.0,
+            .tau_points_per_segment = 8,
+            .pde_accuracy = make_grid_accuracy(GridAccuracyProfile::High),
+        };
+        auto surface = SegmentedPriceTableBuilder::build(config);
+        ASSERT_TRUE(surface.has_value()) << surface.error();
+        PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+            .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.01,
+            .option_type = OptionType::PUT}, 0.1);
+        p.discrete_dividends = config.dividends.discrete_dividends;
+        auto solver = AmericanOptionSolver::create(
+            p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::Ultra)});
+        ASSERT_TRUE(solver.has_value());
+        auto reference = solver->solve();
+        ASSERT_TRUE(reference.has_value());
+        EXPECT_NEAR(surface->price(100.0, 100.0, 1.0, 0.1, 0.05),
+                    reference->value(), 0.003);
+    }
+}
+
 std::vector<double> log_m_grid(std::initializer_list<double> moneyness) {
     std::vector<double> out;
     out.reserve(moneyness.size());

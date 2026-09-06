@@ -5,14 +5,79 @@
  */
 
 #include "mango/math/bspline/bspline_collocation.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
 #include <gtest/gtest.h>
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
 #include <thread>
 #include <vector>
 
 using namespace mango;
+
+// #458: a cubic belongs to every cubic spline space, so refinement must
+// preserve its off-node values. A tiny collocation residual alone did not
+// detect the old knot placement's exponentially growing forward error.
+TEST(BSplineCollocationRegression, CubicReproductionAcrossFormerNodeCliff) {
+    for (size_t n : {80u, 120u, 159u, 160u, 161u, 200u, 240u}) {
+        for (int grid_kind : {0, 1, 2}) {
+            SCOPED_TRACE(::testing::Message() << "n=" << n << " grid=" << grid_kind);
+            std::vector<double> x(n), values(n);
+            auto polynomial = [](double z) { return z*z*z - 2*z*z + z + 1; };
+            for (size_t i = 0; i < n; ++i) {
+                const double t = static_cast<double>(i) / (n - 1);
+                x[i] = grid_kind == 0 ? t : grid_kind == 1
+                    ? std::expm1(12*t) / std::expm1(12.0)
+                    : 0.5 + 0.5*std::pow(2*t-1, 5);
+                values[i] = polynomial(x[i]);
+            }
+            auto fitter = BSplineCollocation1D<double>::create(x);
+            ASSERT_TRUE(fitter.has_value()) << fitter.error();
+            auto fit = fitter->fit(values);
+            ASSERT_TRUE(fit.has_value()) << fit.error();
+            auto surface = BSplineND<double, 1>::create(
+                {x}, {clamped_knots_cubic(x)}, std::move(fit->coefficients));
+            ASSERT_TRUE(surface.has_value()) << surface.error();
+            double max_error = 0.0;
+            for (size_t i = 0; i + 1 < n; ++i) {
+                const double midpoint = 0.5*(x[i]+x[i+1]);
+                max_error = std::max(max_error,
+                    std::abs(surface->eval({midpoint})-polynomial(midpoint)));
+            }
+            EXPECT_LT(max_error, 1e-9);
+        }
+    }
+}
+
+// Captured on #488's corrected raw-snapshot builder (69a00191): documented
+// cash model, 120 requested m sites / 281 expanded sites, axis 0, slice 0,
+// dimensions [281,8,4,4]. Axes 3,2,1 succeeded before this RHS was extracted.
+// Original LU/solve INFO=0; residual=.941622267 at tolerance=1e-6,
+// condition~1.014e21. The fixture retains original knots/coefficients for
+// diagnosis; the public fitter regenerates its own cubic knots from the sites.
+TEST(BSplineCollocationRegression, CapturedRawDividendSliceFitsAndInterpolates) {
+    std::ifstream input("tests/data/bspline_458_dividend_axis.txt");
+    ASSERT_TRUE(input.is_open());
+    size_t n;
+    input >> n;
+    std::vector<double> x(n), rhs(n);
+    for (double& value : x) input >> value;
+    for (double& value : rhs) input >> value;
+    ASSERT_TRUE(input.good());
+    auto fitter = BSplineCollocation1D<double>::create(x);
+    ASSERT_TRUE(fitter.has_value()) << fitter.error();
+    auto fit = fitter->fit(rhs, {.tolerance = 1e-6});
+    ASSERT_TRUE(fit.has_value()) << fit.error();
+    auto spline = BSplineND<double, 1>::create(
+        {x}, {clamped_knots_cubic(x)}, std::move(fit->coefficients));
+    ASSERT_TRUE(spline.has_value());
+    double max_error = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        max_error = std::max(max_error, std::abs(spline->eval({x[i]})-rhs[i]));
+    }
+    EXPECT_LT(max_error, 1e-6);
+}
 
 // Test fixture for collocation tests
 class BSplineCollocation1DTest : public ::testing::Test {
