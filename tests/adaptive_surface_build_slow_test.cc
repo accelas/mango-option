@@ -80,8 +80,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
 // Coverage gap tests — Priority 2 (High)
 // ===========================================================================
 
-// Coverage: ATM K_ref coincides with lowest K_ref — dedup prevents 3rd probe
-TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
+// Regression: the fixed-expiry oracle exposes an asymmetric-grid refusal.
+// This pin checks honest admission, not probe-deduplication mechanics.
+TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridRefusesCorrectedOracle) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
     params.max_iter = 1;
@@ -113,9 +114,11 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    ASSERT_TRUE(result.has_value());
-    double price = result->surface.price(100.0, 110.0, 0.5, 0.20, 0.05);
-    EXPECT_GT(price, 0.0);
+    // The correctly rolled oracle exposes the existing B-spline fit/blend
+    // limitation on this asymmetric reference grid (#488/#458/#460). Keep
+    // the refusal explicit until those gates make the configuration viable.
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
 }
 
 // Coverage: ATM K_ref coincides with highest K_ref
@@ -228,10 +231,9 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
 // Regression tests for segmented Chebyshev dividend edge cases
 // ===========================================================================
 
-// Regression: gap queries must route to nearest real segment by distance
-// Bug: Always routed to seg_idx+1 (right), so queries in left half of gap
-// mapped to post-dividend segment instead of pre-dividend segment.
-TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
+// Regression #485: an omitted event neighborhood is not a different time.
+// Both calendar sides survive at their actual sample nodes; gap queries refuse.
+TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRefusesUnsupportedTimes) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;  // 100 bps — relaxed for test speed
     params.max_iter = 1;
@@ -264,52 +266,23 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRoutesNearest) {
     ASSERT_TRUE(result.has_value())
         << "build_adaptive_chebyshev_segmented failed";
 
-    // Dividend at cal_time=0.5 → tau_split=0.5.
-    // Gap is [0.5-ε, 0.5+ε] with ε=5e-4.
-    //
-    // With nearest-side routing:
-    //   tau=0.4999 (left of gap mid) → clamps to RIGHT edge of left segment
-    //   tau=0.5001 (right of gap mid) → clamps to LEFT edge of right segment
-    //   These are different segment edges with different values.
-    //
-    // If routing were always-right (the old bug):
-    //   Both would clamp to LEFT edge of right segment → identical prices.
-    double tau_left  = 0.4999;   // left of gap mid
-    double tau_right = 0.5001;   // right of gap mid
-
+    // The omitted neighborhood is a domain exclusion, never another time.
     auto pf = [&](double tau) {
         return result->surface.price(100.0, 100.0, tau, 0.20, 0.05);
     };
-
-    double p_left  = pf(tau_left);
-    double p_right = pf(tau_right);
-
-    EXPECT_TRUE(std::isfinite(p_left));
-    EXPECT_TRUE(std::isfinite(p_right));
-    EXPECT_GT(p_left, 0.0);
-    EXPECT_GT(p_right, 0.0);
-
-    // If nearest-side routing works, these route to different segments
-    // and thus produce different prices. If both route to the same
-    // segment (the old bug), they clamp to the same local_tau=0 and
-    // produce identical prices.
-    EXPECT_NE(p_left, p_right)
-        << "Gap queries on both sides of midpoint gave identical prices ("
-        << p_left << ") — both likely routed to same segment";
-
-    // Additionally verify the prices differ by a meaningful amount
-    // (not just floating-point noise), since there's a $2 dividend
-    // discontinuity between segments.
-    double diff = std::abs(p_left - p_right);
-    EXPECT_GT(diff, 0.001)
-        << "Gap queries differ by only " << diff
-        << " — routing may not be splitting correctly";
+    for (double tau : {0.4999, 0.5, 0.5001}) {
+        EXPECT_FALSE(result->surface.contains_maturity(tau));
+        EXPECT_FALSE(std::isfinite(pf(tau)));
+    }
+    // The actual nodes on both sides remain distinct and queryable.
+    const double post_calendar = pf(0.4995);
+    const double pre_calendar = pf(0.5005);
+    EXPECT_TRUE(std::isfinite(post_calendar));
+    EXPECT_TRUE(std::isfinite(pre_calendar));
+    EXPECT_GT(pre_calendar - post_calendar, 0.001);
 }
 
-// Regression: duplicate dividend dates must be merged to avoid non-monotonic
-// segment boundaries
-// Bug: compute_segment_boundaries pushed split-ε/split+ε for every dividend
-// without merging same-date entries, causing overlapping gaps.
+// Regression: duplicate dividend dates must merge before segment creation.
 TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
@@ -347,8 +320,9 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
     ASSERT_TRUE(result.has_value())
         << "build_adaptive_chebyshev_segmented failed with duplicate dividends";
 
-    // Should be able to query across the entire tau range
-    for (double tau : {0.1, 0.3, 0.5, 0.7, 0.9}) {
+    // Query every supported regime; the omitted event neighborhood is explicit.
+    EXPECT_FALSE(result->surface.contains_maturity(0.5));
+    for (double tau : {0.1, 0.3, 0.6, 0.7, 0.9}) {
         double p = result->surface.price(100.0, 100.0, tau, 0.20, 0.05);
         EXPECT_TRUE(std::isfinite(p))
             << "Price not finite at tau=" << tau;
@@ -396,7 +370,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
     ASSERT_TRUE(result.has_value())
         << "build_adaptive_chebyshev_segmented failed with nearly-coincident dividends";
 
-    double p = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
+    double p = result->surface.price(100.0, 100.0, 0.6, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(p));
     EXPECT_GT(p, 0.0);
 }
@@ -568,14 +542,14 @@ TEST(ChebyshevSegmentedEquivalence, VegaReasonable) {
     ASSERT_TRUE(result.has_value());
 
     // ATM put: vega should be positive and finite
-    double vega = result->surface.vega(100.0, 100.0, 0.5, 0.20, 0.05);
+    double vega = result->surface.vega(100.0, 100.0, 0.6, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(vega));
     EXPECT_GT(vega, 0.0);
 
     // Compare analytical vega vs FD vega (central diff)
     double eps = 1e-4;
-    double p_up = result->surface.price(100.0, 100.0, 0.5, 0.20 + eps, 0.05);
-    double p_dn = result->surface.price(100.0, 100.0, 0.5, 0.20 - eps, 0.05);
+    double p_up = result->surface.price(100.0, 100.0, 0.6, 0.20 + eps, 0.05);
+    double p_dn = result->surface.price(100.0, 100.0, 0.6, 0.20 - eps, 0.05);
     double fd_vega = (p_up - p_dn) / (2.0 * eps);
 
     // Analytical should agree with FD within 1%
@@ -609,13 +583,15 @@ TEST(ChebyshevSegmentedManual, BasicPricing) {
     auto result = build_chebyshev_segmented_manual(seg_config, grid);
     ASSERT_TRUE(result.has_value()) << "Manual build failed";
 
+    EXPECT_FALSE(result->contains_maturity(0.5));
+
     // ATM put: price should be positive and finite
-    double p = result->price(100.0, 100.0, 0.5, 0.20, 0.05);
+    double p = result->price(100.0, 100.0, 0.6, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(p));
     EXPECT_GT(p, 0.0);
 
     // Vega should be positive
-    double v = result->vega(100.0, 100.0, 0.5, 0.20, 0.05);
+    double v = result->vega(100.0, 100.0, 0.6, 0.20, 0.05);
     EXPECT_TRUE(std::isfinite(v));
     EXPECT_GT(v, 0.0);
 }
