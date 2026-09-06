@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include "mango/option/american_option.hpp"
+#include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/chebyshev/chebyshev_pde_cache.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
@@ -213,4 +214,42 @@ TEST(ChebyshevPDECacheTest, RejectsEventInsideUnsplittableLeaf) {
     auto builder = ChebyshevSegmentedBuilder::create(config, domain);
     ASSERT_FALSE(builder.has_value());
     EXPECT_EQ(builder.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+// Regression #485: a sample without a real segment owner cannot be relabelled
+// as a segment-zero row, changing the apparent CGL cardinality of both leaves.
+TEST(ChebyshevPDECacheTest, RejectsUnmatchedSampleInsteadOfChangingItsOwner) {
+    ChebyshevPDECache cache;
+    std::vector<double> m = {-0.2, 0.2}, tau = {0.1, 0.4, 0.5, 0.6, 1.0};
+    std::vector<double> sigma = {0.1, 0.2}, rate = {0.03, 0.05};
+    for (double s : sigma) for (double r : rate) {
+        for (size_t j = 0; j < tau.size(); ++j) {
+            std::vector<double> x = {-0.3, 0.0, 0.3}, values(3, tau[j]);
+            cache.store_slice(s, r, j, x, values);
+        }
+    }
+    auto leaves = detail::build_segment_leaves(cache, 100.0,
+        {0.1, 0.4, 0.6, 1.0}, {false, true, false}, false, m, tau, sigma, rate);
+    ASSERT_FALSE(leaves.has_value());
+    EXPECT_EQ(leaves.error().code, PriceTableErrorCode::ExtractionFailed);
+}
+
+TEST(ChebyshevPDECacheTest, GeneratedSegmentNodesKeepTheirCardinality) {
+    ChebyshevPDECache cache;
+    const std::vector<double> bounds = {0.01, 0.1495, 0.1505, 0.25};
+    std::vector<double> tau = cc_level_nodes(3, bounds[0], bounds[1]);
+    auto later = cc_level_nodes(3, bounds[2], bounds[3]);
+    tau.insert(tau.end(), later.begin(), later.end());
+    const std::vector<double> m = {-0.2, 0.2}, sigma = {0.1, 0.2}, rate = {0.03, 0.05};
+    for (double s : sigma) for (double r : rate) {
+        for (size_t j = 0; j < tau.size(); ++j) {
+            std::vector<double> x = {-0.3, 0.0, 0.3}, values(3, tau[j]);
+            cache.store_slice(s, r, j, x, values);
+        }
+    }
+    auto leaves = detail::build_segment_leaves(cache, 100.0,
+        bounds, {false, true, false}, false, m, tau, sigma, rate);
+    ASSERT_TRUE(leaves.has_value());
+    ASSERT_EQ(leaves->size(), 2u);
+    for (const auto& leaf : *leaves) EXPECT_EQ(leaf.interpolant().num_pts()[1], 9u);
 }
