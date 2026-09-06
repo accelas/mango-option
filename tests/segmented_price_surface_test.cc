@@ -58,7 +58,7 @@ TEST(SegmentedSurfaceTest, FindsCorrectSegment) {
     EXPECT_GT(p1, p0);
 }
 
-TEST(SegmentedSurfaceTest, BoundaryTauGoesToCorrectSegment) {
+TEST(SegmentedSurfaceTest, UnrepresentedDividendSideIsRefused) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
@@ -77,10 +77,18 @@ TEST(SegmentedSurfaceTest, BoundaryTauGoesToCorrectSegment) {
     auto result = SegmentedPriceTableBuilder::build(config);
     ASSERT_TRUE(result.has_value());
 
-    // Query exactly at boundary τ = 0.5 (at the dividend date)
+    // One solver snapshot cannot stand for both sides of the cash jump.
+    // The current inset topology explicitly excludes the event neighborhood.
     double p_boundary = result->price(100.0, 100.0, 0.5, 0.25, 0.05);
-    EXPECT_GT(p_boundary, 0.0);
-    EXPECT_FALSE(std::isnan(p_boundary));
+    EXPECT_TRUE(std::isnan(p_boundary));
+    EXPECT_FALSE(result->contains_maturity(0.5));
+    EXPECT_TRUE(result->contains_maturity(0.4995));
+    EXPECT_TRUE(result->contains_maturity(0.5005));
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+        .maturity = 0.5, .rate = 0.05, .option_type = OptionType::PUT}, 0.25);
+    auto gamma = result->gamma(p);
+    ASSERT_FALSE(gamma.has_value());
+    EXPECT_EQ(gamma.error(), GreekError::OutOfDomain);
 }
 
 // ---------------------------------------------------------------------------

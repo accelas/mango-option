@@ -199,16 +199,19 @@ TEST(IVSolverFactorySegmented, DiscreteDividends) {
     }
 }
 
-TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
+// Correct raw samples expose a downstream clustered-cubic fitting limitation.
+// The K_ref=110 probe measures 1.26733 IV error on its fixed holdout; a tau
+// refinement reduces it to .845046, still above the .20 viability bound.
+// Its worst tau=.0522771 is before every backward dividend crossing, so the
+// removed fitted initial-condition chain cannot explain this remaining error.
+// Keep this exact configuration pinned pending #458/#460, without returning
+// a surface whose apparent success depended on distorted input samples.
+TEST(IVSolverFactorySegmented, RawSamplesExposeShortMaturityFittingRefusal) {
     IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,
         .spot = 100.0,
         .dividend_yield = 0.02,
-        // The assembled multi-K_ref surface blends K_ref-struck prices
-        // linearly in strike, so the K_refs must both span and resolve the
-        // queryable strike range.  The default +/-30 % moneyness grid with
-        // K_refs {80, 100, 120} measures 8,278 (827,756 bps) on the final
-        // validation and is refused by the viability gate (spec D9).
+        // Preserve the previous configured domain and reference density.
         .grid = IVGrid{
             .moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
             .vol = {0.10, 0.15, 0.20, 0.30},
@@ -228,28 +231,8 @@ TEST(IVSolverFactorySegmented, AdaptiveDiscreteDividends) {
     };
 
     auto solver = make_interpolated_iv_solver(config);
-    ASSERT_TRUE(solver.has_value())
-        << "Factory should succeed with adaptive + discrete dividends";
-
-    // Solve IV for a known option
-    OptionSpec spec{
-        .spot = 100.0, .strike = 100.0, .maturity = 0.5,
-        .rate = 0.05, .dividend_yield = 0.02,
-        .option_type = OptionType::PUT
-    };
-
-    PricingParams pricing_params(spec, 0.20);
-    pricing_params.discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}};
-    auto ref = solve_american_option(pricing_params);
-    ASSERT_TRUE(ref.has_value());
-
-    IVQuery query(spec, ref->value());
-    auto result = solver->solve(query);
-    // The market price comes from a reference solve, so a solve failure here
-    // would be a real regression — assert, don't skip.
-    ASSERT_TRUE(result.has_value());
-    EXPECT_GT(result->implied_vol, 0.0);
-    EXPECT_LT(result->implied_vol, 3.0);
+    ASSERT_FALSE(solver.has_value());
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::NoViableSurface);
 }
 
 // The documentation pins for the adaptive discrete-dividend config published
