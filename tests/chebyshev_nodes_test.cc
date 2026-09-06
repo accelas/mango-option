@@ -128,3 +128,14 @@ TEST(ChebyshevNodesTest, CCNewNodesAtLevelZeroReturnsAll) {
 
 }  // namespace
 }  // namespace mango
+
+// Regression #485: segment membership uses the supplied physical endpoints,
+// so endpoint arithmetic must not put a CGL node outside its own interval.
+TEST(ChebyshevNodesTest, PreservesSuppliedSegmentEndpointsExactly) {
+    for (size_t n : {2u, 3u, 9u, 17u}) {
+        auto nodes = mango::chebyshev_nodes(n, 0.1505, 0.25);
+        ASSERT_EQ(nodes.size(), n);
+        EXPECT_EQ(nodes.front(), 0.1505);  // exact equality, not a ULP tolerance
+        EXPECT_EQ(nodes.back(), 0.25);
+    }
+}
