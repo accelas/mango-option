@@ -268,7 +268,7 @@ build_segment_leaves(
     std::vector<std::vector<size_t>> seg_tau_indices(n_seg);
     for (size_t ti = 0; ti < tau_nodes.size(); ++ti) {
         double t = tau_nodes[ti];
-        size_t s = 0;
+        size_t s = n_seg;
         for (size_t k = 0; k < n_seg; ++k) {
             if (seg_is_gap[k]) continue;
             if (t >= seg_bounds[k] && t <= seg_bounds[k + 1]) {
@@ -276,6 +276,8 @@ build_segment_leaves(
                 break;
             }
         }
+        if (s == n_seg) return std::unexpected(
+            PriceTableError{PriceTableErrorCode::ExtractionFailed});
         seg_tau_indices[s].push_back(ti);
     }
 

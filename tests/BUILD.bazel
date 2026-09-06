@@ -1693,6 +1693,7 @@ cc_test(
     size = "medium",
     srcs = ["chebyshev_pde_cache_test.cc"],
     deps = [
+        "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:american_option",
         "//src/option:interpolated_iv_solver",
         "//src/option/table/chebyshev:chebyshev_adaptive",
