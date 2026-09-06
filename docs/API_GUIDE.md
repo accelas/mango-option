@@ -460,7 +460,7 @@ if (auto diag = solver.build_diagnostics(); diag.has_value()) {
 }
 ```
 
-`build_diagnostics()` returns `std::nullopt` for a manually-built (non-adaptive) table, a table loaded from Parquet, or a build on a factory path that does not honor `.adaptive` — the continuous (non-segmented) Chebyshev path and `DimensionlessBackend`. Diagnostics are never persisted to `PriceTableData`/Parquet. Python exposes the same data via the `build_diagnostics` property (a dict) on `PriceTable` and `InterpolatedIVSolver`.
+`build_diagnostics()` returns `std::nullopt` for a manually-built (non-adaptive) table, a table loaded from Parquet, or a `DimensionlessBackend` build, which does not honor `.adaptive`. Continuous and segmented adaptive Chebyshev builds expose diagnostics, as do both adaptive B-spline paths. Diagnostics are never persisted to `PriceTableData`/Parquet. Python exposes the same data via the `build_diagnostics` property (a dict) on `PriceTable` and `InterpolatedIVSolver`.
 
 If every candidate built during refinement fails the internal viability gate (holdout error above an absolute, target-independent garbage-detection bound — or no holdout point could be measured at all, e.g. a domain where implied vol is everywhere undefined), the build itself fails with `ValidationErrorCode::NoViableSurface` rather than silently returning a broken surface — check for it alongside the usual validation errors.
 
@@ -621,7 +621,9 @@ The factory dispatches on two orthogonal variants:
 - **`backend`**: `BSplineBackend`, `ChebyshevBackend`, or `DimensionlessBackend`
 - **`discrete_dividends`**: When set, uses the segmented surface path (tau splits + K_ref blending)
 
-With optional `adaptive` for automatic grid density tuning to a target IV accuracy. It is honored on three of the factory's paths — continuous `BSplineBackend`, and both segmented (discrete-dividend) paths, B-spline and Chebyshev. The continuous `ChebyshevBackend` and `DimensionlessBackend` paths ignore it and build their fixed grids, reporting no build diagnostics.
+With optional `adaptive` for automatic grid density tuning to a target IV accuracy. It is honored on the continuous and segmented (discrete-dividend) paths for both B-spline and Chebyshev. `DimensionlessBackend` ignores it and builds its fixed grid, reporting no build diagnostics.
+
+For continuous `ChebyshevBackend`, `maturity` supplies the upper requested tau bound and the lower bound is `min(0.01, maturity / 2)`. The adaptive builder applies its existing minimum-spread policy to narrow input ranges and measures the resulting sample domain. Published query bounds cover that measured domain, excluding numerical support headroom. `num_pts` applies only to manual continuous builds; adaptive CC levels are selected by the existing adaptive builder, with all supplied `AdaptiveGridParams` passed through.
 
 **Query-time dividend schedule validation.** `IVQuery::discrete_dividends` is
 optional at query time: leaving it empty against a segmented surface is

@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/american_option.hpp"
+#include "mango/option/price_table_factory.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
@@ -284,6 +285,7 @@ TEST(IVSolverFactoryChebyshev, ContinuousBuildsAndSolves) {
     ASSERT_TRUE(solver.has_value())
         << "Chebyshev continuous build failed: code "
         << static_cast<int>(solver.error().code);
+    EXPECT_FALSE(solver->build_diagnostics().has_value());
 
     // Round-trip: price an ATM put at known vol, then recover IV
     PricingParams params(
@@ -299,6 +301,104 @@ TEST(IVSolverFactoryChebyshev, ContinuousBuildsAndSolves) {
     ASSERT_TRUE(result.has_value())
         << "Chebyshev IV solve failed";
     EXPECT_NEAR(result->implied_vol, 0.20, 0.02);
+}
+
+// #463: the continuous factory used to silently discard adaptive settings.
+// Observe the returned table and reusable solver, including query admission,
+// rather than inferring refinement from timing or tensor node counts.
+TEST(IVSolverFactoryChebyshev, ContinuousAdaptivePublishesDiagnosticsAndSampleDomain) {
+    auto config = make_base_config();
+    config.option_type = OptionType::CALL;
+    config.grid.moneyness = {0.9, 1.0, 1.1};
+    config.grid.vol = {0.15, 0.25, 0.35};
+    config.adaptive = AdaptiveGridParams{
+        .target_iv_error = 0.01,
+        .max_iter = 1,
+        .validation_samples = 16,
+    };
+    config.backend = ChebyshevBackend{
+        .maturity = 1.0,
+        // Invalid for manual construction; adaptive density is selected by
+        // the builder and must not be capped by these manual-only settings.
+        .num_pts = {1, 1, 1, 1},
+    };
+
+    auto table = make_price_table(config);
+    ASSERT_TRUE(table.has_value()) << static_cast<int>(table.error().code);
+    auto diagnostics = table->build_diagnostics();
+    ASSERT_TRUE(diagnostics.has_value());
+    EXPECT_GE(diagnostics->holdout_points_measured, 1u);
+    EXPECT_LE(diagnostics->total_iterations, config.adaptive->max_iter);
+    if (diagnostics->target_met) {
+        EXPECT_LE(diagnostics->achieved_max_error, config.adaptive->target_iv_error);
+    }
+    EXPECT_EQ(table->option_type(), config.option_type);
+    EXPECT_DOUBLE_EQ(table->dividend_yield(), config.dividend_yield);
+
+    auto solver = table->make_iv_solver();
+    ASSERT_TRUE(solver.has_value());
+    auto solver_diagnostics = solver->build_diagnostics();
+    ASSERT_TRUE(solver_diagnostics.has_value());
+    EXPECT_DOUBLE_EQ(solver_diagnostics->achieved_max_error,
+                     diagnostics->achieved_max_error);
+
+    PricingParams p(OptionSpec{
+        .spot = 100.0, .strike = 100.0, .maturity = 0.5,
+        .rate = 0.05, .dividend_yield = DIVIDEND_YIELD,
+        .option_type = OptionType::CALL}, 0.25);
+    ASSERT_TRUE(table->validate_pricing_params(p).has_value());
+    const double price = table->price(p);
+    EXPECT_TRUE(std::isfinite(price));
+    auto reference = solve_american_option(p);
+    ASSERT_TRUE(reference.has_value());
+    auto recovered = solver->solve(IVQuery(static_cast<const OptionSpec&>(p),
+                                          reference->value()));
+    ASSERT_TRUE(recovered.has_value());
+    // Wiring smoke tolerance, matching the existing continuous manual case.
+    EXPECT_NEAR(recovered->implied_vol, p.volatility, 0.02);
+
+    // These queries sit within numerical support headroom but outside the
+    // measured sample domain. Both public query surfaces must refuse them.
+    auto outside = p;
+    outside.maturity = 1.1;
+    EXPECT_FALSE(table->validate_pricing_params(outside).has_value());
+    auto result = solver->solve(IVQuery(static_cast<const OptionSpec&>(outside), price));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::InvalidGridConfig);
+
+    outside = p;
+    outside.maturity = 0.005;
+    EXPECT_FALSE(table->validate_pricing_params(outside).has_value());
+    outside = p;
+    outside.spot = 89.5;
+    EXPECT_FALSE(table->validate_pricing_params(outside).has_value());
+    outside = p;
+    outside.volatility = 0.14;
+    EXPECT_FALSE(table->validate_pricing_params(outside).has_value());
+    outside = p;
+    outside.rate = 0.015;
+    EXPECT_FALSE(table->validate_pricing_params(outside).has_value());
+}
+
+TEST(IVSolverFactoryChebyshev, ContinuousAdaptiveRejectsInvalidControls) {
+    auto config = make_base_config();
+    config.backend = ChebyshevBackend{.maturity = 1.0, .num_pts = {5, 5, 5, 3}};
+    config.adaptive = AdaptiveGridParams{.max_iter = 0};
+
+    auto table = make_price_table(config);
+    ASSERT_FALSE(table.has_value());
+    EXPECT_EQ(table.error().code, ValidationErrorCode::PriceTableBuildFailed);
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_FALSE(solver.has_value());
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::PriceTableBuildFailed);
+}
+
+TEST(IVSolverFactoryChebyshev, ContinuousManualHonorsExplicitNodeCounts) {
+    auto config = make_base_config();
+    config.backend = ChebyshevBackend{.maturity = 1.0, .num_pts = {1, 5, 5, 3}};
+    auto table = make_price_table(config);
+    ASSERT_FALSE(table.has_value());
+    EXPECT_EQ(table.error().code, ValidationErrorCode::PriceTableBuildFailed);
 }
 
 TEST(IVSolverFactoryChebyshev, SegmentedBuildsAndSolves) {
