@@ -106,6 +106,11 @@ struct PriceTableConfig {
 /// @param config Configuration to validate
 /// @return Error message if invalid, nullopt if valid
 inline std::optional<std::string> validate_config(const PriceTableConfig& config) {
+    if (const auto* accuracy = std::get_if<GridAccuracyParams>(&config.pde_grid)) {
+        if (!validate_grid_accuracy(*accuracy)) {
+            return "spatial point bounds must contain an odd count >= 3";
+        }
+    }
     if (config.max_failure_rate < 0.0 || config.max_failure_rate > 1.0) {
         return "max_failure_rate must be in [0.0, 1.0], got " +
                std::to_string(config.max_failure_rate);

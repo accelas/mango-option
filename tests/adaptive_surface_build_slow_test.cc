@@ -172,7 +172,7 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
     chain.rates = {0.01, 0.03, 0.05, 0.10};
 
     AdaptiveGridParams params;
-    params.target_iv_error = 2e-5;  // 2 bps
+    params.target_iv_error = 2e-5;  // 0.2 bps
     // Spec D3: headroom is now 3 * w / (min_moneyness_points - 1) instead of
     // 3 * w / (n_strikes - 1), so this chain's support band shrinks from
     // +/-0.31 to +/-0.03 log-moneyness.  A single build on the seeded grid is
@@ -184,8 +184,10 @@ TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
     // a failure, so the build runs at the default budget.
 
     GridAccuracyParams accuracy;
-    accuracy.min_spatial_points = 200;
-    accuracy.max_spatial_points = 200;
+    // This fixture previously requested 200 but received 201 after odd
+    // rounding. Request its actual intended resolution explicitly (#487).
+    accuracy.min_spatial_points = 201;
+    accuracy.max_spatial_points = 201;
 
     auto result = build_adaptive_bspline(params, chain, accuracy, OptionType::PUT);
     ASSERT_TRUE(result.has_value()) << "Adaptive build failed";

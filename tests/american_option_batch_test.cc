@@ -264,3 +264,87 @@ TEST(BatchAmericanOptionSolver, AccuracyCustomGridIsEstimatedPerContractWithCove
     EXPECT_LE(x1.front(), -(2.5 + 3.0 * 0.40) + 1e-9);
     EXPECT_NE(x0.front(), x1.front());
 }
+
+// Regression (#487): impossible automatic point bounds must be an explicit
+// configuration error at pricing seams, before estimating or entering OpenMP.
+TEST(BatchAmericanOptionSolver, RejectsImpossibleSpatialBounds) {
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+        .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
+    GridAccuracyParams accuracy;
+    accuracy.min_spatial_points = 100;
+    accuracy.max_spatial_points = 100;
+    auto direct = AmericanOptionSolver::create(p, accuracy);
+    ASSERT_FALSE(direct.has_value());
+    EXPECT_EQ(direct.error().code, ValidationErrorCode::InvalidGridSize);
+    for (bool normalized : {false, true}) {
+        for (bool shared : {false, true}) {
+            BatchAmericanOptionSolver solver;
+            solver.set_grid_accuracy(accuracy).set_use_normalized(normalized);
+            auto batch = solver.solve_batch(std::vector{p}, shared);
+            ASSERT_EQ(batch.failed_count, 1u);
+            ASSERT_FALSE(batch.results[0].has_value());
+            EXPECT_EQ(batch.results[0].error().code, SolverErrorCode::InvalidConfiguration);
+        }
+    }
+}
+
+// Regression (#487): routing inspected an unrelated default grid. An explicit
+// fine grid should permit reuse even when automatic point settings are coarse.
+TEST(BatchAmericanOptionSolver, NormalizedReuseUsesTheResolvedGrid) {
+    for (auto type : {OptionType::PUT, OptionType::CALL}) {
+        std::vector<PricingParams> params;
+        for (double strike : {100.0, 105.0}) {
+            params.emplace_back(OptionSpec{.spot = 100.0, .strike = strike,
+                .maturity = 0.5, .rate = 0.05, .option_type = type}, 0.2);
+        }
+        BatchAmericanOptionSolver solver;
+        GridAccuracyParams coarse;
+        coarse.min_spatial_points = coarse.max_spatial_points = 3;
+        solver.set_grid_accuracy(coarse);
+        PDEGridConfig explicit_grid{GridSpec<double>::uniform(-1.0, 1.0, 401).value(), 1000};
+        auto result = solver.solve_batch(params, true, nullptr, explicit_grid);
+        ASSERT_EQ(result.failed_count, 0u);
+        // Normalized chain reuse is visible as the same immutable solution.
+        EXPECT_EQ(result.results[0]->grid(), result.results[1]->grid());
+        EXPECT_EQ(result.results[0]->grid()->n_space(), 401u);
+    }
+}
+
+TEST(BatchAmericanOptionSolver, WideGridRoutesWithoutReplacingOrRejectingIt) {
+    for (auto type : {OptionType::PUT, OptionType::CALL}) {
+        std::vector<PricingParams> params;
+        for (double strike : {100.0, 105.0}) {
+            params.emplace_back(OptionSpec{.spot = 100.0, .strike = strike,
+                .maturity = 0.5, .rate = 0.05, .option_type = type}, 0.2);
+        }
+        PDEGridConfig grid{GridSpec<double>::sinh_spaced(-3.0, 3.0, 401, 2.5).value(), 1000};
+        auto result = BatchAmericanOptionSolver{}.solve_batch(params, true, nullptr, grid);
+        ASSERT_EQ(result.failed_count, 0u);
+        // Width 6 exceeds the reuse heuristic, but is valid for direct PDEs.
+        EXPECT_NE(result.results[0]->grid(), result.results[1]->grid());
+        auto expected = grid.grid_spec.generate();
+        for (size_t i = 0; i < params.size(); ++i) {
+            auto x = result.results[i]->grid()->x();
+            ASSERT_EQ(x.size(), expected.size());
+            for (size_t j = 0; j < x.size(); ++j) EXPECT_DOUBLE_EQ(x[j], expected[j]);
+            auto solver = AmericanOptionSolver::create(params[i], grid);
+            ASSERT_TRUE(solver.has_value());
+            auto direct = solver->solve();
+            ASSERT_TRUE(direct.has_value());
+            EXPECT_DOUBLE_EQ(result.results[i]->value(), direct->value());
+        }
+    }
+}
+
+TEST(BatchAmericanOptionSolver, ExplicitEvenGridOverridesAutomaticPointBounds) {
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
+        .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
+    GridAccuracyParams impossible;
+    impossible.min_spatial_points = impossible.max_spatial_points = 100;
+    BatchAmericanOptionSolver solver;
+    solver.set_grid_accuracy(impossible);
+    PDEGridConfig grid{GridSpec<double>::uniform(-1.0, 1.0, 100).value(), 200};
+    auto result = solver.solve_batch(std::vector{p}, true, nullptr, grid);
+    ASSERT_EQ(result.failed_count, 0u);
+    EXPECT_EQ(result.results[0]->grid()->n_space(), 100u);
+}

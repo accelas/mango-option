@@ -9,6 +9,7 @@
 #include <cmath>
 #include <algorithm>
 #include <ranges>
+#include <limits>
 #include <variant>
 
 namespace mango {
@@ -61,52 +62,8 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
         }
     }
 
-    // 6. Grid constraints (dx, width, margins)
-    // Eligibility is judged on the contract's own kink-region grid, not on
-    // the coverage-widened one (D14; #487 tracks judging the grid solved on).
-    GridAccuracyParams base = grid_accuracy_;
-    base.log_moneyness_coverage.reset();
-    auto [grid_spec, time_domain] = estimate_pde_grid(first, base);
-    (void)time_domain;  // Not used in eligibility check
-    double x_min = grid_spec.x_min();
-    double x_max = grid_spec.x_max();
-    size_t n_space = grid_spec.n_points();
-
-    // Check grid spacing (Von Neumann stability)
-    double dx = (x_max - x_min) / (n_space - 1);
-    if (dx > MAX_DX) {
-        return false;
-    }
-
-    // Check domain width (convergence constraint)
-    double width = x_max - x_min;
-    if (width > MAX_WIDTH) {
-        return false;
-    }
-
-    // Check margins based on moneyness range
-    std::vector<double> moneyness_values;
-    moneyness_values.reserve(params.size());
-    for (const auto& p : params) {
-        double m = p.spot / p.strike;
-        moneyness_values.push_back(m);
-    }
-
-    auto [m_min_it, m_max_it] = std::ranges::minmax_element(moneyness_values);
-    double m_min = *m_min_it;
-    double m_max = *m_max_it;
-
-    double x_min_data = std::log(m_min);
-    double x_max_data = std::log(m_max);
-
-    double margin_left = x_min_data - x_min;
-    double margin_right = x_max - x_max_data;
-    double min_margin = std::max(MIN_MARGIN_ABS, 6.0 * dx);
-
-    if (margin_left < min_margin || margin_right < min_margin) {
-        return false;
-    }
-
+    // Numerical routing is assessed per parameter group after resolving
+    // its actual grid, including caller overrides and required coverage.
     return true;
 }
 
@@ -167,61 +124,7 @@ void BatchAmericanOptionSolver::trace_ineligibility_reason(
         }
     }
 
-    // Check grid constraints
-    // Eligibility is judged on the contract's own kink-region grid, not on
-    // the coverage-widened one (D14; #487 tracks judging the grid solved on).
-    GridAccuracyParams base = grid_accuracy_;
-    base.log_moneyness_coverage.reset();
-    auto [grid_spec, time_domain] = estimate_pde_grid(first, base);
-    (void)time_domain;  // Not used in trace function
-    double x_min = grid_spec.x_min();
-    double x_max = grid_spec.x_max();
-    size_t n_space = grid_spec.n_points();
 
-    // Check grid spacing (Von Neumann stability)
-    double dx = (x_max - x_min) / (n_space - 1);
-    if (dx > MAX_DX) {
-        MANGO_TRACE_NORMALIZED_INELIGIBLE(
-            static_cast<int>(NormalizedIneligibilityReason::GRID_SPACING_TOO_LARGE), dx);
-        return;
-    }
-
-    // Check domain width (convergence constraint)
-    double width = x_max - x_min;
-    if (width > MAX_WIDTH) {
-        MANGO_TRACE_NORMALIZED_INELIGIBLE(
-            static_cast<int>(NormalizedIneligibilityReason::DOMAIN_TOO_WIDE), width);
-        return;
-    }
-
-    // Check margins based on moneyness range
-    std::vector<double> moneyness_values;
-    moneyness_values.reserve(params.size());
-    for (const auto& p : params) {
-        moneyness_values.push_back(p.spot / p.strike);
-    }
-
-    auto [m_min_it, m_max_it] = std::ranges::minmax_element(moneyness_values);
-    double x_min_data = std::log(*m_min_it);
-    double x_max_data = std::log(*m_max_it);
-
-    double margin_left = x_min_data - x_min;
-    double margin_right = x_max - x_max_data;
-    double min_margin = std::max(MIN_MARGIN_ABS, 6.0 * dx);
-
-    if (margin_left < min_margin) {
-        MANGO_TRACE_NORMALIZED_INELIGIBLE(
-            static_cast<int>(NormalizedIneligibilityReason::INSUFFICIENT_LEFT_MARGIN),
-            margin_left);
-        return;
-    }
-
-    if (margin_right < min_margin) {
-        MANGO_TRACE_NORMALIZED_INELIGIBLE(
-            static_cast<int>(NormalizedIneligibilityReason::INSUFFICIENT_RIGHT_MARGIN),
-            margin_right);
-        return;
-    }
 }
 
 std::vector<PDEParameterGroup> BatchAmericanOptionSolver::group_by_pde_parameters(
@@ -283,9 +186,15 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
     SetupCallback setup,
     std::optional<PDEGridSpec> custom_grid)
 {
-    // Ensure grid_accuracy_ is initialized
-    if (grid_accuracy_.tol == 0.0) {
-        grid_accuracy_ = GridAccuracyParams{};
+    const auto* accuracy = custom_grid
+        ? std::get_if<GridAccuracyParams>(&*custom_grid) : &grid_accuracy_;
+    if (accuracy && !validate_grid_accuracy(*accuracy)) {
+        BatchAmericanOptionResult result{.results = {}, .failed_count = params.size()};
+        for (size_t i = 0; i < params.size(); ++i) {
+            result.results.emplace_back(std::unexpected(SolverError{
+                .code = SolverErrorCode::InvalidConfiguration}));
+        }
+        return result;
     }
 
     // Disable normalized path if setup callback is provided
@@ -299,7 +208,6 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
 
     // Automatic routing based on eligibility
     if (use_normalized_ && is_normalized_eligible(params, use_shared_grid)) {
-        MANGO_TRACE_NORMALIZED_SELECTED(params.size());
         return solve_normalized_chain(params, setup, custom_grid);
     } else {
         if (use_normalized_ && !is_normalized_eligible(params, use_shared_grid)) {
@@ -368,6 +276,48 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
             group_grid = estimate_batch_pde_grid_config(
                 std::span{&normalized_params, 1}, accuracy);
         }
+
+        const auto& resolved = std::get<PDEGridConfig>(*group_grid);
+        const auto& spec = resolved.grid_spec;
+        const double width = spec.x_max() - spec.x_min();
+        // Retain the established average-cell routing heuristic, now on
+        // the resolved grid. This is not a local truncation-error bound.
+        const double dx = width / static_cast<double>(spec.n_points() - 1);
+        const double margin = std::max(MIN_MARGIN_ABS, 6.0 * dx);
+        double left_margin = std::numeric_limits<double>::infinity();
+        double right_margin = std::numeric_limits<double>::infinity();
+        for (size_t idx : group.option_indices) {
+            const double query_x = std::log(params[idx].spot / params[idx].strike);
+            left_margin = std::min(left_margin, query_x - spec.x_min());
+            right_margin = std::min(right_margin, spec.x_max() - query_x);
+        }
+        const bool reuse = width <= MAX_WIDTH && dx <= MAX_DX
+            && left_margin >= margin && right_margin >= margin;
+        if (!reuse) {
+            // Width/spacing/margins only route optimization. Keep this exact
+            // resolved grid (and its coverage) when solving original contracts.
+            std::vector<PricingParams> originals;
+            originals.reserve(group.option_indices.size());
+            for (size_t idx : group.option_indices) originals.push_back(params[idx]);
+            auto regular = solve_regular_batch(originals, true, setup, group_grid);
+            failed_count += regular.failed_count;
+            for (size_t i = 0; i < group.option_indices.size(); ++i) {
+                results[group.option_indices[i]] = std::move(regular.results[i]);
+            }
+            MANGO_TRACE_NORMALIZED_INELIGIBLE(
+                static_cast<int>(width > MAX_WIDTH
+                    ? NormalizedIneligibilityReason::DOMAIN_TOO_WIDE
+                    : dx > MAX_DX
+                    ? NormalizedIneligibilityReason::GRID_SPACING_TOO_LARGE
+                    : left_margin < margin
+                    ? NormalizedIneligibilityReason::INSUFFICIENT_LEFT_MARGIN
+                    : NormalizedIneligibilityReason::INSUFFICIENT_RIGHT_MARGIN),
+                width > MAX_WIDTH ? width : dx > MAX_DX ? dx
+                    : left_margin < margin ? left_margin : right_margin);
+            continue;
+        }
+
+        MANGO_TRACE_NORMALIZED_SELECTED(group.option_indices.size());
 
         // Solve with shared grid to get full surface
         auto solve_result = solve_regular_batch(

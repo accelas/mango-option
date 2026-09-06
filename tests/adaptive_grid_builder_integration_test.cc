@@ -191,19 +191,12 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, SurfaceInterpolatesWithinBounds) {
     ASSERT_TRUE(result.has_value());
     ASSERT_NE(result->spline, nullptr);
 
-    auto spline = result->spline;
-
-    // Query the surface at interior points.  The spline's moneyness axis is
-    // LOG-moneyness ln(S/K); the chain spans ln(100/110)..ln(100/90), so ATM
-    // is 0.0.  (This test previously queried 1.0 — S/K = e, far outside the
-    // data — where the true value is ~0 and the strict positivity assertion
-    // passed only on a +1e-18 rounding artifact of -march=native FMA codegen.)
-    double m = 0.0;    // ATM in log-moneyness
-    double tau = 0.5;  // 6 months
-    double sigma = 0.20;
-    double rate = 0.05;
-
-    double price = spline->eval({m, tau, sigma, rate});
+    // The stored spline is an EEP residual, which may legitimately be zero.
+    // Check the physical price through its public reconstruction interface.
+    auto surface = make_bspline_surface(result->spline, result->K_ref,
+        result->dividend_yield, OptionType::PUT);
+    ASSERT_TRUE(surface.has_value());
+    double price = surface->price(100.0, 100.0, 0.5, 0.20, 0.05);
 
     // Price should be positive and reasonable
     EXPECT_GT(price, 0.0) << "Interpolated price should be positive";
