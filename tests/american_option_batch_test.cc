@@ -380,3 +380,54 @@ TEST(BatchAmericanOptionSolver, WideAutomaticCoverageReusesTheSamePde) {
         }
     }
 }
+
+TEST(BatchAmericanOptionSolver, ReusePreservesCoarseGridsAndNarrowMargins) {
+    // These expert grids intentionally have coarse cells or little boundary
+    // clearance. Repeating their PDE cannot improve approximation quality.
+    for (const auto& grid : {
+             PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 200},
+             PDEGridConfig{GridSpec<double>::uniform(-0.1, 0.1, 101).value(), 200}}) {
+        for (auto type : {OptionType::PUT, OptionType::CALL}) {
+            std::vector<PricingParams> params;
+            for (double strike : {100.0, 105.0}) {
+                params.emplace_back(OptionSpec{.spot = 100.0, .strike = strike,
+                    .maturity = 0.5, .rate = 0.05, .option_type = type}, 0.2);
+            }
+            BatchAmericanOptionSolver regular;
+            regular.set_use_normalized(false);
+            auto reference = regular.solve_batch(params, true, nullptr, grid);
+            auto reused = BatchAmericanOptionSolver{}.solve_batch(params, true, nullptr, grid);
+            ASSERT_EQ(reference.failed_count, 0u);
+            ASSERT_EQ(reused.failed_count, 0u);
+            EXPECT_EQ(reused.results[0]->grid(), reused.results[1]->grid());
+            for (size_t i = 0; i < params.size(); ++i) {
+                EXPECT_DOUBLE_EQ(reused.results[i]->value(), reference.results[i]->value());
+                auto x = reused.results[i]->grid()->x();
+                auto ref_x = reference.results[i]->grid()->x();
+                ASSERT_EQ(x.size(), ref_x.size());
+                for (size_t j = 0; j < x.size(); ++j) EXPECT_DOUBLE_EQ(x[j], ref_x[j]);
+            }
+        }
+    }
+}
+
+TEST(BatchAmericanOptionSolver, ReusePreservesPdeConfigurationFailures) {
+    // This rate lies outside the projected LCP solver's admissible domain.
+    // Model grouping must not bypass the regular solver's validation.
+    std::vector<PricingParams> params;
+    for (double strike : {100.0, 105.0}) {
+        params.emplace_back(OptionSpec{.spot = 100.0, .strike = strike,
+            .maturity = 1.0, .rate = -3.0, .option_type = OptionType::PUT}, 0.2);
+    }
+    PDEGridConfig grid{GridSpec<double>::uniform(-1.0, 1.0, 101).value(), 200};
+    for (bool normalized : {false, true}) {
+        BatchAmericanOptionSolver solver;
+        solver.set_use_normalized(normalized);
+        auto result = solver.solve_batch(params, true, nullptr, grid);
+        ASSERT_EQ(result.failed_count, params.size());
+        for (const auto& failure : result.results) {
+            ASSERT_FALSE(failure.has_value());
+            EXPECT_EQ(failure.error().code, SolverErrorCode::InvalidConfiguration);
+        }
+    }
+}
