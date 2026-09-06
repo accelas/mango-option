@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <limits>
 #include <set>
+#include <string_view>
 #include <vector>
 
 using namespace mango;
@@ -61,7 +62,54 @@ int batch_characterization() {
     return 0;
 }
 
-int main(int argc, char**) {
+int constraint_characterization() {
+    std::puts("type,grid,contracts,nx,nt,regular_solutions,reused_solutions,regular_us,reused_us,max_regular_price_difference");
+    for (auto type : {OptionType::PUT, OptionType::CALL}) {
+        std::vector<PricingParams> contracts;
+        for (int i = 0; i < 20; ++i) {
+            contracts.emplace_back(OptionSpec{.spot = 100.0, .strike = 90.0 + i,
+                .maturity = 0.5, .rate = 0.05, .option_type = type}, 0.2);
+        }
+        for (bool narrow : {false, true}) {
+            const double bound = narrow ? 0.15 : 3.0;
+            PDEGridConfig grid{GridSpec<double>::uniform(-bound, bound, 101).value(), 200};
+            auto measure = [&](bool reuse) {
+                BatchAmericanOptionSolver solver;
+                solver.set_use_normalized(reuse);
+                BatchAmericanOptionResult result{.results = {}, .failed_count = 0};
+                const auto begin = std::chrono::steady_clock::now();
+                for (int i = 0; i < 10; ++i) {
+                    result = solver.solve_batch(contracts, true, nullptr, grid);
+                }
+                const double us = std::chrono::duration<double, std::micro>(
+                    std::chrono::steady_clock::now() - begin).count() / 10.0;
+                return std::pair{std::move(result), us};
+            };
+            auto [regular, regular_us] = measure(false);
+            auto [reused, reused_us] = measure(true);
+            if (regular.failed_count || reused.failed_count) return 1;
+            std::set<const Grid<double>*> regular_grids, reused_grids;
+            double difference = 0.0;
+            for (size_t i = 0; i < contracts.size(); ++i) {
+                regular_grids.insert(regular.results[i]->grid().get());
+                reused_grids.insert(reused.results[i]->grid().get());
+                difference = std::max(difference,
+                    std::abs(regular.results[i]->value() - reused.results[i]->value()));
+            }
+            std::printf("%s,%s,%zu,101,200,%zu,%zu,%.3f,%.3f,%.9g\n",
+                type == OptionType::PUT ? "put" : "call", narrow ? "narrow" : "coarse",
+                contracts.size(), regular_grids.size(), reused_grids.size(),
+                regular_us, reused_us, difference);
+            std::fflush(stdout);
+        }
+    }
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    if (argc > 1 && std::string_view(argv[1]) == "constraints") {
+        return constraint_characterization();
+    }
     if (argc > 1) return batch_characterization();
     struct Case { const char* name; double sigma; double maturity; bool cash; };
     constexpr std::array cases{

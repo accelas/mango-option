@@ -9,7 +9,6 @@
 #include <cmath>
 #include <algorithm>
 #include <ranges>
-#include <limits>
 #include <variant>
 
 namespace mango {
@@ -62,8 +61,8 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
         }
     }
 
-    // Numerical routing is assessed per parameter group after resolving
-    // its actual grid, including caller overrides and required coverage.
+    // Numerical validity is assessed by the actual per-group solve, after
+    // resolving caller overrides and required coverage.
     return true;
 }
 
@@ -277,46 +276,11 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
                 std::span{&normalized_params, 1}, accuracy);
         }
 
-        const auto& resolved = std::get<PDEGridConfig>(*group_grid);
-        const auto& spec = resolved.grid_spec;
-        const double width = spec.x_max() - spec.x_min();
-        // Retain the established average-cell routing heuristic, now on
-        // the resolved grid. This is not a local truncation-error bound.
-        const double dx = width / static_cast<double>(spec.n_points() - 1);
-        const double margin = std::max(MIN_MARGIN_ABS, 6.0 * dx);
-        double left_margin = std::numeric_limits<double>::infinity();
-        double right_margin = std::numeric_limits<double>::infinity();
-        for (size_t idx : group.option_indices) {
-            const double query_x = std::log(params[idx].spot / params[idx].strike);
-            left_margin = std::min(left_margin, query_x - spec.x_min());
-            right_margin = std::min(right_margin, spec.x_max() - query_x);
-        }
-        const bool reuse = width <= MAX_WIDTH && dx <= MAX_DX
-            && left_margin >= margin && right_margin >= margin;
-        if (!reuse) {
-            // Width/spacing/margins only route optimization. Keep this exact
-            // resolved grid (and its coverage) when solving original contracts.
-            std::vector<PricingParams> originals;
-            originals.reserve(group.option_indices.size());
-            for (size_t idx : group.option_indices) originals.push_back(params[idx]);
-            auto regular = solve_regular_batch(originals, true, setup, group_grid);
-            failed_count += regular.failed_count;
-            for (size_t i = 0; i < group.option_indices.size(); ++i) {
-                results[group.option_indices[i]] = std::move(regular.results[i]);
-            }
-            MANGO_TRACE_NORMALIZED_INELIGIBLE(
-                static_cast<int>(width > MAX_WIDTH
-                    ? NormalizedIneligibilityReason::DOMAIN_TOO_WIDE
-                    : dx > MAX_DX
-                    ? NormalizedIneligibilityReason::GRID_SPACING_TOO_LARGE
-                    : left_margin < margin
-                    ? NormalizedIneligibilityReason::INSUFFICIENT_LEFT_MARGIN
-                    : NormalizedIneligibilityReason::INSUFFICIENT_RIGHT_MARGIN),
-                width > MAX_WIDTH ? width : dx > MAX_DX ? dx
-                    : left_margin < margin ? left_margin : right_margin);
-            continue;
-        }
-
+        // On a fixed resolved grid, every eligible contract solves the
+        // same normalized PDE, payoff, obstacle and boundary conditions.
+        // Width, spacing and boundary clearance affect both routes equally;
+        // duplicating that solve cannot improve its numerical quality.
+        // The regular solver below validates and solves the actual config.
         MANGO_TRACE_NORMALIZED_SELECTED(group.option_indices.size());
 
         // Solve with shared grid to get full surface
