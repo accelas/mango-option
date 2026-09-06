@@ -216,7 +216,6 @@ private:
     std::optional<TRBDF2Config> trbdf2_config_;
 
     // Normalized chain solver eligibility constants
-    static constexpr double MAX_WIDTH = 5.8;       ///< Optimization routing heuristic (log-units)
     static constexpr double MAX_DX = 0.05;         ///< Conservative reuse spacing heuristic
     static constexpr double MIN_MARGIN_ABS = 0.35; ///< 6-cell ghost zone minimum
 

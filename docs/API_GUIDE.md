@@ -820,13 +820,15 @@ This optimization is automatic — `solve_batch()` routes eligible batches to th
 - `use_shared_grid = true`
 - No discrete dividends (these break scale invariance)
 - Positive spot and strike values
-- The resolved grid meets normalized-reuse spacing, width, and margin heuristics
+- The resolved grid meets normalized-reuse spacing and margin heuristics
 - No `SetupCallback` (per-option callbacks are incompatible with shared PDE solves)
 
 The solver assesses each parameter group's actual grid, after automatic
-coverage estimation or an explicit override. Width 5.8 is a reuse-routing
-heuristic, not a universal PDE validity limit. When reuse is unsuitable,
-original contracts are solved on the same resolved grid, preserving coverage.
+coverage estimation or an explicit override. Width alone does not disable
+reuse: on the same grid, homogeneous contracts solve the same normalized
+PDE. The historical width-5.8 cutoff has been retired. When the remaining
+spacing/margin heuristics disable reuse, original contracts are solved on
+the same resolved grid, preserving coverage.
 
 **Disabling chain solving:**
 

@@ -291,10 +291,13 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
             left_margin = std::min(left_margin, query_x - spec.x_min());
             right_margin = std::min(right_margin, spec.x_max() - query_x);
         }
-        const bool reuse = width <= MAX_WIDTH && dx <= MAX_DX
+        // Width alone cannot invalidate homogeneous reuse: on this same
+        // resolved grid, original contracts solve the identical normalized
+        // PDE. The fitted operator has no universal width-stability bound.
+        const bool reuse = dx <= MAX_DX
             && left_margin >= margin && right_margin >= margin;
         if (!reuse) {
-            // Width/spacing/margins only route optimization. Keep this exact
+            // Spacing/margins only route optimization. Keep this exact
             // resolved grid (and its coverage) when solving original contracts.
             std::vector<PricingParams> originals;
             originals.reserve(group.option_indices.size());
@@ -305,14 +308,12 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
                 results[group.option_indices[i]] = std::move(regular.results[i]);
             }
             MANGO_TRACE_NORMALIZED_INELIGIBLE(
-                static_cast<int>(width > MAX_WIDTH
-                    ? NormalizedIneligibilityReason::DOMAIN_TOO_WIDE
-                    : dx > MAX_DX
+                static_cast<int>(dx > MAX_DX
                     ? NormalizedIneligibilityReason::GRID_SPACING_TOO_LARGE
                     : left_margin < margin
                     ? NormalizedIneligibilityReason::INSUFFICIENT_LEFT_MARGIN
                     : NormalizedIneligibilityReason::INSUFFICIENT_RIGHT_MARGIN),
-                width > MAX_WIDTH ? width : dx > MAX_DX ? dx
+                dx > MAX_DX ? dx
                     : left_margin < margin ? left_margin : right_margin);
             continue;
         }

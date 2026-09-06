@@ -82,3 +82,33 @@ estimation with 101 points and keeps its price assertions. A separate regression
 requires exact manual-grid fidelity. Coarse manual grids can expose approximation
 errors previously hidden by replacement; the later physical-price certification
 and measured-accuracy gates must assess/refuse inadequate final surfaces.
+
+## Matched ceiling comparison
+
+The same benchmark source was compiled with `-c opt` against `003bf126` and
+the completed grid-policy sources (`a470bbab`). Both direct populations contain
+56 successful candidates. Only the low-short scenarios change spatial count:
+1201 to 1199 under the 1200 ceiling. Fixed-alpha time steps change from 40 to 39;
+geometry-alpha steps from 1441 to 1439. The largest change in measured maximum
+error is 1.776585e-5 quote units. Other scenarios' prices are unchanged.
+
+## Width and normalized reuse
+
+The initial implementation applied the historical width-5.8 routing heuristic
+to the resolved grid. A matched batch with coverage [-3,3] then performed 20
+original-contract solves instead of one normalized solve, increasing latency
+from roughly .9 ms to 18 ms with identical points, time steps and prices.
+That experiment does not justify the categorical cutoff; it has been removed.
+
+On a fixed log-moneyness grid, contracts in an eligible group have the same
+sigma, rate curve, continuous yield, maturity and option type, with no cash
+dividends. Their normalized value V/K satisfies the same PDE, normalized
+payoff, obstacle and boundary conditions. Spot only selects where the resolved
+solution is evaluated. Changing quote units cannot introduce an independent
+grid-width stability constraint. Il'in fitting and the solver's existing
+admissibility checks apply equally to either solve.
+
+Public regressions now require shared reuse on an explicit width-six grid and
+on the full 20-contract automatic wide-coverage population, for both calls and
+puts. Every quote agrees exactly with an independent regular solve on the same
+grid. Coverage, explicit coordinates and spatial ceilings remain unchanged.
