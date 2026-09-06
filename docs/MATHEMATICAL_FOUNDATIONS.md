@@ -646,10 +646,17 @@ cardinal probes separately keep the sampled PDE error below 1.67e-5.
 
 For this one-reference, two-segment build, stored values increase from 8,910
 to 115,650 doubles (about 70 to 904 KiB), and parameter-pair PDE solves from
-15 to 25. An optimized local probe with two OpenMP threads measured roughly
-31–37 microseconds per query versus 2.8–2.9 previously; build times were
-roughly 66–68 seconds versus 34–37. These are workload measurements, not
-uniform accuracy or latency guarantees. This price regression does not
+15 to 25. Three paired optimized put builds with two OpenMP threads measured
+the following medians and ranges. Each query run evaluated the same 10,000
+queries cycling 127 positions inside the domain, after a short warmup.
+
+| Timing | Previous median (range) | Current median (range) |
+|---|---:|---:|
+| Build, seconds | 29.15 (27.77–29.55) | 53.84 (52.29–54.46) |
+| Query, microseconds | 2.34 (2.27–2.45) | 27.67 (25.92–27.73) |
+
+These shared-host workload measurements are not uniform accuracy or latency
+guarantees. This price regression does not
 establish Greek accuracy, IV identifiability, monotonicity certification, or
 off-reference-strike accuracy. Generic manual requested-accuracy refusal
 belongs to the acceptance/certification gates (#462/#459).
