@@ -741,13 +741,14 @@ auto solver = mango::make_interpolated_iv_solver(config);
 **Use `ChebyshevBackend` for adaptive discrete-dividend surfaces.** The
 B-spline segmented adaptive path currently refuses realistic dividend
 configs — this one included — with `NoViableSurface` under complete
-measurement. Its multi-K_ref segmented fit degrades badly at low volatility on
-the tau segments following a dividend: on the config above it measures
-15,500 bps against the 2,000 bps viability bound, with the worst points at
-σ ≤ 0.13 and τ ∈ (0.64, 0.94), and because denser grids make the fit *worse*
-rather than better the builder's bumped-grid retry cannot rescue it. Pending
-the MultiKRefSplit blend and segmented-fit follow-ups, Chebyshev is the
-supported backend for this shape; it measures 549 bps on the same config.
+measurement. The corrected fixed-expiry oracle still produces a refusal;
+the earlier 15,500 bps figure used a superseded oracle and is retired.
+Pending the MultiKRefSplit blend and segmented-fit follow-ups, Chebyshev is
+the supported backend for this shape. On 2026-09-06 it measured 74.4 bps
+maximum absolute IV error over 64 measured points, with zero invalid points.
+This passes the 2,000 bps viability bound but exceeds the requested 10 bps
+target. The current builder can return viable results above its requested
+target; inspect `build_diagnostics().target_met`.
 Both facts are pinned:
 `IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig` for the
 Chebyshev config, and
