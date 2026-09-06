@@ -280,6 +280,11 @@ construction as proof of target accuracy. Other B-spline configurations still
 refuse pending clustered fitting and MultiKRef corrections. Final backend
 selection follows the remaining #483 accuracy and certification gates.
 
+The corrected fixed-expiry Chebyshev oracle measured 0.00744049 maximum
+absolute IV error (74.4 bps) over 64 measured points on 2026-09-06, with
+zero invalid points. This passes the current 0.20 viability bound but exceeds
+the requested 0.001 target; strict target admission is a later #483 gate.
+
 Both segmented backends exclude currently unrepresented dividend neighborhoods.
 Checked price/Greek/IV queries there fail explicitly; they do not substitute
 another maturity. Omit `kref_config` to use the current automatic reference

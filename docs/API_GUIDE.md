@@ -748,6 +748,12 @@ IV error (43.5 absolute-IV bps)**. This exceeds the requested 0.001 (10 bps), so
 that the requested target was met. Other configurations still refuse while
 clustered fitting and reference-strike semantics are corrected; final backend
 selection follows the remaining #483 accuracy and certification work.
+
+The corrected fixed-expiry Chebyshev oracle measured 0.00744049 maximum
+absolute IV error (74.4 bps) over 64 measured points on 2026-09-06, with zero
+invalid points. This passes the current 0.20 viability bound but exceeds the
+requested 0.001 target; strict target admission is a later #483 gate.
+
 Both facts are pinned:
 `IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig` for the
 Chebyshev config, and

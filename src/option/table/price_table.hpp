@@ -4,6 +4,7 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/greek_types.hpp"
 #include <expected>
+#include <cmath>
 
 namespace mango {
 
@@ -57,7 +58,7 @@ public:
     [[nodiscard]] double tau_min() const noexcept { return bounds_.tau_min; }
     [[nodiscard]] double tau_max() const noexcept { return bounds_.tau_max; }
     [[nodiscard]] bool contains_maturity(double tau) const noexcept {
-        if (tau < tau_min() || tau > tau_max()) return false;
+        if (!std::isfinite(tau) || tau < tau_min() || tau > tau_max()) return false;
         if constexpr (requires { inner_.contains_maturity(tau); }) {
             return inner_.contains_maturity(tau);
         }

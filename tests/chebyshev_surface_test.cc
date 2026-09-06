@@ -211,3 +211,19 @@ TEST(ChebyshevTableBuilderTest, TailsMatchFdmAtExtremeMoneyness) {
         }
     }
 }
+
+TEST(ChebyshevSurfaceTest, NonfiniteMaturityIsOutsideContinuousDomain) {
+    const Domain<4> domain{{-0.2, 0.1, 0.1, 0.01}, {0.2, 1.0, 0.3, 0.1}};
+    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build(
+        [](std::array<double, 4>) { return 1.0; }, domain, {2, 2, 2, 2});
+    ASSERT_TRUE(interp.has_value());
+    ChebyshevTransformLeaf leaf(std::move(*interp), StandardTransform4D{}, 100.0);
+    PriceTable<ChebyshevTransformLeaf> table(std::move(leaf),
+        SurfaceBounds{-0.2, 0.2, 0.1, 1.0, 0.1, 0.3, 0.01, 0.1},
+        OptionType::PUT, 0.0);
+    EXPECT_TRUE(table.contains_maturity(0.1));
+    EXPECT_TRUE(table.contains_maturity(1.0));
+    EXPECT_FALSE(table.contains_maturity(std::numeric_limits<double>::quiet_NaN()));
+    EXPECT_FALSE(table.contains_maturity(std::numeric_limits<double>::infinity()));
+    EXPECT_FALSE(table.contains_maturity(-std::numeric_limits<double>::infinity()));
+}
