@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
+#include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include "mango/option/american_option.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
@@ -200,6 +202,58 @@ TEST(ChebyshevPDECacheTest, SegmentedRoutingPreservesLabelledTime) {
     auto iv = solver->solve(query);
     ASSERT_FALSE(iv.has_value());
     EXPECT_EQ(iv.error().code, IVErrorCode::InvalidGridConfig);
+}
+
+// #486: an unrepresentable manual CC level is a configuration error.
+// The node helper formerly shifted 1u by the unchecked requested level.
+TEST(ChebyshevPDECacheTest, RejectsUnrepresentableManualLevels) {
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0, .option_type = OptionType::PUT,
+        .discrete_dividends = {{0.01, 1.0}}, .maturity = 0.025,
+        .kref_config = {.K_refs = {100.0}}};
+    IVGrid domain{.moneyness = {-0.1, 0.0, 0.1},
+        .vol = {0.15, 0.25}, .rate = {0.03, 0.05}};
+    auto builder = ChebyshevSegmentedBuilder::create(config, domain);
+    ASSERT_TRUE(builder.has_value());
+    std::vector<std::array<size_t, 4>> invalid_levels;
+    for (size_t axis = 0; axis < 4; ++axis) {
+        for (size_t invalid : {size_t{std::numeric_limits<unsigned>::digits},
+                               size_t{std::numeric_limits<size_t>::digits},
+                               std::numeric_limits<size_t>::max()}) {
+            std::array<size_t, 4> levels{1, 1, 1, 1};
+            levels[axis] = invalid;
+            invalid_levels.push_back(levels);
+        }
+    }
+    invalid_levels.push_back({20, 20, 20, 20});  // overflowing tensor cardinality
+    for (const auto& levels : invalid_levels) {
+        auto table = builder->build(levels);
+        ASSERT_FALSE(table.has_value());
+        EXPECT_EQ(table.error().code, PriceTableErrorCode::InvalidConfig);
+        auto convenience = build_chebyshev_segmented_manual(config, domain, levels);
+        ASSERT_FALSE(convenience.has_value());
+        EXPECT_EQ(convenience.error().code, PriceTableErrorCode::InvalidConfig);
+    }
+}
+
+// #486: an explicit manual level request is a constraint, even when defaults
+// use more nodes. Requested-accuracy acceptance is a separate builder policy.
+TEST(ChebyshevPDECacheTest, ExplicitManualLevelsRemainConstraints) {
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0, .option_type = OptionType::PUT,
+        .discrete_dividends = {{0.01, 1.0}}, .maturity = 0.025,
+        .kref_config = {.K_refs = {100.0}}};
+    IVGrid domain{.moneyness = {std::log(0.9), 0.0, std::log(1.1)},
+        .vol = {0.15, 0.25}, .rate = {0.03, 0.05}};
+    auto builder = ChebyshevSegmentedBuilder::create(config, domain);
+    ASSERT_TRUE(builder.has_value());
+    auto table = builder->build({3, 2, 1, 1});
+    ASSERT_TRUE(table.has_value());
+    const auto& segments = table->inner().pieces().front();
+    ASSERT_EQ(segments.num_pieces(), 2u);
+    for (const auto& leaf : segments.pieces()) {
+        EXPECT_EQ(leaf.interpolant().num_pts(), (std::array<size_t, 4>{9, 5, 3, 3}));
+    }
 }
 
 TEST(ChebyshevPDECacheTest, RejectsEventInsideUnsplittableLeaf) {

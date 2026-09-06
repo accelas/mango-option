@@ -1265,6 +1265,24 @@ cc_test(
     ],
 )
 
+# Fixed manual defaults against converged references over a declared cohort.
+# Keep the complete numerical population in the nightly suite.
+cc_test(
+    name = "manual_chebyshev_accuracy_test",
+    size = "enormous",
+    shard_count = 2,
+    srcs = ["manual_chebyshev_accuracy_test.cc"],
+    tags = ["slow"],
+    deps = [
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/option:american_option",
+        "//src/option:grid_spec_types",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Heavy end-to-end adaptive builds: segmented Chebyshev edge handling,
 # numeric equivalence, and accuracy regressions, each spending tens of
 # seconds of real PDE solves per case (~536s CPU local fastbuild, slowest
