@@ -3,6 +3,7 @@
 
 #include "mango/option/table/split_surface.hpp"
 #include <algorithm>
+#include <cmath>
 #include <tuple>
 #include <vector>
 

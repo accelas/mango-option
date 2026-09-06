@@ -279,6 +279,8 @@ Inspect `build_diagnostics()->target_met` and achieved error rather than treatin
 construction as proof of target accuracy. Other B-spline configurations still
 refuse pending clustered fitting and MultiKRef corrections. Final backend
 selection follows the remaining #483 accuracy and certification gates.
+The corrected Chebyshev path measures 0.00744 (74.4 absolute-IV bps) on
+the same 64-point holdout; it also misses the requested target.
 
 Both segmented backends exclude currently unrepresented dividend neighborhoods.
 Checked price/Greek/IV queries there fail explicitly; they do not substitute
