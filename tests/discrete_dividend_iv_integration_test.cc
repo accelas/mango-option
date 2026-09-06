@@ -45,7 +45,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8,
             .rate = 0.05, .option_type = OptionType::PUT},
-        0.20, {{.calendar_time = 0.5, .amount = 2.0}});
+        0.20, {{.calendar_time = 0.3, .amount = 2.0}});
 
     auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
@@ -78,7 +78,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 0.8,
             .rate = 0.05, .option_type = OptionType::PUT},
-        0.25, {{.calendar_time = 0.5, .amount = 2.0}});
+        0.25, {{.calendar_time = 0.3, .amount = 2.0}});
 
     auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
@@ -347,7 +347,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ExtraDividendRejected) {
 
 // Prefix rule: a shorter-dated query only carries dividends inside its
 // life. Build dividend at t=0.5; a query with maturity 0.4 must pass with
-// an empty schedule and be rejected if it claims the t=0.5 dividend.
+// an empty schedule: the anchored d=.5 dividend elapsed at valuation .6.
 TEST_F(DiscreteDividendIVIntegrationTest, PrefixWindowSemantics) {
     IVQuery query;
     query.spot = 100.0;
