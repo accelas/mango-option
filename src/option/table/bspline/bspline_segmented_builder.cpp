@@ -198,6 +198,9 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
     if (!(std::isfinite(config.maturity) && config.maturity > 0.0)) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
+    if (!validate_grid_accuracy(config.pde_accuracy)) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
     if (config.grid.moneyness.size() < 4) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0});
     }

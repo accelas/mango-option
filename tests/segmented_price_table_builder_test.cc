@@ -81,6 +81,23 @@ TEST(SegmentedPriceTableBuilderTest, DiagnosticsCountRawRowsAndSingleExpirySolve
     EXPECT_TRUE(result->surface.contains_maturity(0.8));
 }
 
+// Regression #487/#488: invalid automatic grid bounds must return the
+// builder's typed configuration error rather than escape as an exception.
+TEST(SegmentedPriceTableBuilderTest, RejectsInvalidGridAccuracyWithTypedError) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::PUT,
+        .dividends = {.discrete_dividends = {{0.5, 1.0}}},
+        .grid = {.moneyness = {-0.2, -0.1, 0.0, 0.1, 0.2},
+                 .vol = {0.1, 0.15, 0.2, 0.3},
+                 .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 1.0,
+        .pde_accuracy = {.min_spatial_points = 201, .max_spatial_points = 200},
+    };
+    auto result = SegmentedPriceTableBuilder::build_with_diagnostics(config);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
 TEST(SegmentedPriceTableBuilderTest, RejectsUnsortedSampleAxesBeforeSolving) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = 100.0, .option_type = OptionType::PUT,
