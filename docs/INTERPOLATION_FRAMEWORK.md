@@ -161,9 +161,21 @@ concept SplitPolicy = requires(const S& s, ...) {
 
 `TauSegmentSplit` always returns one piece (weight = 1.0); it remaps tau to the segment's local range and replaces strike with K_ref. `MultiKRefSplit` returns two pieces (the bracketing K_ref values) with complementary weights; it normalizes each piece's value by its K_ref (converting to V/K_ref basis) and denormalizes by multiplying by the actual strike.
 
+For a dated-dividend table, tau follows one fixed expiry: a dividend at
+anchor offset `d` has the fixed backward coordinate `T0 - d`. The temporal
+router and its leaf must use the same local origin. Routing bounds can be
+contiguous while the leaf's actual sampled support excludes an event gap;
+`contains_maturity` propagates that exclusion through composition and public
+admission. An unchecked scalar lookup in a gap returns NaN, and Greek/IV
+interfaces return domain errors instead of allowing the leaf to clamp time.
+
+Chebyshev sampling keeps each row's exact physical time and segment owner.
+Generated CGL endpoints equal the supplied bounds exactly; a row outside all
+real segments fails extraction rather than being assigned to segment zero.
+
 ### Layer 3: PriceTable
 
-`PriceTable<Inner>` is a thin outermost wrapper. All its methods delegate to `inner_`. It exists to carry runtime metadata — `SurfaceBounds`, `OptionType`, `dividend_yield` — that the IV solver needs but the mathematical layers should not know about.
+`PriceTable<Inner>` is a thin outermost wrapper. Price and Greek methods delegate to `inner_`; maturity admission also checks the published bounds. It exists to carry runtime metadata — `SurfaceBounds`, `OptionType`, `dividend_yield` — that the IV solver needs but the mathematical layers should not know about.
 
 Why not fold the metadata into the inner layers? Because `TransformLeaf` and `EEPLayer` are pure mathematical transformations. They do not know whether they are being used for puts or calls, or what the domain bounds are. This separation means the same `EEPLayer<TransformLeaf<...>, AnalyticalEEP>` can be constructed with different bounds and option types without any template parameter changes.
 

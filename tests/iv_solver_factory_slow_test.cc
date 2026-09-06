@@ -12,6 +12,8 @@
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/american_option.hpp"
 #include <cmath>
+#include <iostream>
+#include <chrono>
 
 using namespace mango;
 
@@ -108,14 +110,15 @@ IVSolverFactoryConfig documented_adaptive_dividend_config() {
 // S/K in [0.92, 1.08] means strikes in [92.6, 108.7], served here by K_refs
 // at 2.5 % spacing across [90, 110].
 //
-// Measured on this config: **0.0549 (549 bps) max, 0.0145 avg, 64 of 64
-// holdout points measured**, against the 0.20 viability bound -- roughly 3.6x
-// of margin.  `target_met` is false (549 bps does not reach the 10 bps
-// target), which is honest and expected: viability, not the target, is what
-// gates the build.  Runtime ~57 s.
+// Corrected fixed-expiry oracle, 2026-09-06: max 0.00744049 (74.4 bps),
+// 64 measured / 0 invalid points. The 0.001 (10 bps) target is still unmet;
+// this gate retains current viability admission and the historical ceiling.
+// Default fastbuild at 2 threads took 1445.6s on the shared test host; the live
+// stack showed bounded final assembly over 9 K_refs after refinement finished.
 TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
     auto config = documented_adaptive_dividend_config();
 
+    auto start = std::chrono::steady_clock::now();
     auto solver = make_interpolated_iv_solver(config);
     ASSERT_TRUE(solver.has_value())
         << "the documented adaptive discrete-dividend config must build a "
@@ -124,29 +127,35 @@ TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
 
     auto diag = solver->build_diagnostics();
     ASSERT_TRUE(diag.has_value()) << "an adaptive build must report diagnostics";
+    std::cout << "DOCUMENTED_CHEB max_iv=" << diag->achieved_max_error
+              << " measured=" << diag->holdout_points_measured
+              << " invalid=" << diag->holdout_points_invalid
+              << " build_s=" << std::chrono::duration<double>(
+                     std::chrono::steady_clock::now() - start).count() << '\n';
     EXPECT_GT(diag->holdout_points_measured, 0u)
         << "a surface measured nowhere certifies nothing";
     EXPECT_LE(diag->achieved_max_error, 0.20)
         << "measured " << diag->achieved_max_error * 1e4 << " bps against the "
            "0.20 viability bound";
-    // Generous headroom over the measured 0.0549 -- this pins the config
-    // against silent degradation, not against ordinary numerical drift.
+    // Preserve the historical non-regression ceiling; retuning is Gate 7.
     EXPECT_LE(diag->achieved_max_error, 0.10)
-        << "the documented config measured 549 bps when it was written; "
-           "measuring " << diag->achieved_max_error * 1e4
+        << "the corrected oracle measured 74.4 bps; now measuring "
+        << diag->achieved_max_error * 1e4
         << " bps means it has degraded materially";
 
     OptionSpec spec{
-        .spot = 100.0, .strike = 95.0, .maturity = 0.5,
+        .spot = 100.0, .strike = 95.0, .maturity = 0.6,
         .rate = 0.05, .dividend_yield = 0.01,
         .option_type = OptionType::PUT
     };
     PricingParams pricing_params(spec, 0.20);
-    pricing_params.discrete_dividends = config.discrete_dividends->discrete_dividends;
+    // At tau=.6, .4 years elapsed: d=.25 is past; d=.5 is .1 ahead.
+    // Explicit offsets make this a separate oracle for schedule conversion.
+    pricing_params.discrete_dividends = {{0.1, 1.5}};
     auto ref = solve_american_option(pricing_params);
     ASSERT_TRUE(ref.has_value());
 
-    IVQuery query(spec, ref->value());
+    IVQuery query(spec, ref->value(), pricing_params.discrete_dividends);
     auto result = solver->solve(query);
     ASSERT_TRUE(result.has_value())
         << "the documented config must also solve, not merely build: code "
@@ -159,31 +168,17 @@ TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
 // does not build.  This is why the documentation recommends `ChebyshevBackend`
 // for adaptive discrete-dividend surfaces.
 //
-// The segmented multi-K_ref B-spline fit degrades badly at low vol on the
-// tau segments after a dividend.  At the documented parameters the assembled
-// surface measures **1.550 (15,500 bps) max** and the bumped-grid retry
-// measures 4.079, against the 0.20 bound.  The worst points cluster at
-// sigma <= 0.127 and tau in (0.64, 0.94) -- one returns exactly 0.0 for a put
-// worth $7.62, another returns 44.47 for one worth $7.91.  Denser grids make
-// it worse, not better, so the D9 retry cannot rescue it.
-//
-// This was always true; it was not always visible.  Before the reference
-// solves filtered their dividend schedule by the sampled maturity, every
-// sample below the last dividend date lost its reference, and the surviving
-// long-tau tail happened to miss the pathology at the relaxed parameters the
-// old version of this test used.
-//
-// Tracked as the MultiKRefSplit blend / segmented-fit follow-ups.  When one
-// of them lands this test will start failing, which is the intended signal:
-// re-measure, and if the B-spline path is viable again, promote it back into
-// the documentation.
+// Re-measured after #485 with the fixed-expiry oracle: still NoViableSurface.
+// The old 15,500 bps value used a different oracle and is no longer a valid
+// accuracy claim. Failed builds currently expose the typed refusal without
+// candidate error diagnostics. Revisit after #488/#458/#460.
 TEST(IVSolverFactorySegmented, DocumentedConfigOnBSplineBackendRefuses) {
     auto config = documented_adaptive_dividend_config();
     config.backend = BSplineBackend{.maturity_grid = {0.1, 0.25, 0.5, 1.0}};
 
     auto solver = make_interpolated_iv_solver(config);
     ASSERT_FALSE(solver.has_value())
-        << "a surface measuring 15,500 bps must not be returned";
+        << "the documented B-spline configuration must retain honest refusal";
     EXPECT_EQ(solver.error().code, ValidationErrorCode::NoViableSurface);
 }
 

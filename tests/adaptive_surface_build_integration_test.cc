@@ -582,8 +582,10 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     ASSERT_TRUE(surface.has_value())
         << "Narrow real segments should produce valid prices, not errors";
 
-    // Price at ATM should be positive
-    double p = surface->price(100.0, 100.0, 0.01, 0.20, 0.05);
+    // The exact event is unsupported; the real narrow segment still prices.
+    EXPECT_FALSE(surface->contains_maturity(0.01));
+    EXPECT_FALSE(std::isfinite(surface->price(100.0, 100.0, 0.01, 0.20, 0.05)));
+    double p = surface->price(100.0, 100.0, 0.012, 0.20, 0.05);
     EXPECT_GT(p, 0.0) << "ATM put price should be positive";
 }
 
