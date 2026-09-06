@@ -38,4 +38,17 @@ inline std::vector<Dividend> filter_and_merge_dividends(
     return merged;
 }
 
+/// Remaining schedule of one fixed expiry observed after its build anchor.
+/// At an exact event the dividend has elapsed (post-dividend calendar side).
+inline std::vector<Dividend> rolled_dividends(
+    const std::vector<Dividend>& anchored, double T0, double tau)
+{
+    auto rolled = filter_and_merge_dividends(anchored, T0);
+    for (auto& div : rolled) {
+        const double event_tau = T0 - div.calendar_time;
+        div.calendar_time = tau > event_tau ? tau - event_tau : 0.0;
+    }
+    return filter_and_merge_dividends(rolled, tau);
+}
+
 }  // namespace mango

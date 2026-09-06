@@ -1187,6 +1187,7 @@ cc_test(
     size = "small",
     srcs = ["adaptive_refinement_unit_test.cc"],
     deps = [
+        "//src/option:american_option",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:adaptive_metrics",
         "//src/option/table:adaptive_refinement",
@@ -1689,9 +1690,11 @@ cc_test(
 
 cc_test(
     name = "chebyshev_pde_cache_test",
-    size = "small",
+    size = "medium",
     srcs = ["chebyshev_pde_cache_test.cc"],
     deps = [
+        "//src/option:american_option",
+        "//src/option:interpolated_iv_solver",
         "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option/table/chebyshev:chebyshev_pde_cache",
         "@googletest//:gtest_main",

@@ -274,6 +274,9 @@ private:
 
     /// Check if query parameters are within surface bounds
     bool is_in_bounds(const IVQuery& query, double vol) const {
+        if constexpr (requires { surface_.contains_maturity(query.maturity); }) {
+            if (!surface_.contains_maturity(query.maturity)) return false;
+        }
         const double x = std::log(query.spot / query.strike);
 
         // Extract zero rate for bounds check - must match what solve uses
@@ -417,6 +420,9 @@ public:
     [[nodiscard]] double m_max() const noexcept { return table_->m_max(); }
     [[nodiscard]] double tau_min() const noexcept { return table_->tau_min(); }
     [[nodiscard]] double tau_max() const noexcept { return table_->tau_max(); }
+    [[nodiscard]] bool contains_maturity(double tau) const noexcept {
+        return table_->contains_maturity(tau);
+    }
     [[nodiscard]] double sigma_min() const noexcept { return table_->sigma_min(); }
     [[nodiscard]] double sigma_max() const noexcept { return table_->sigma_max(); }
     [[nodiscard]] double rate_min() const noexcept { return table_->rate_min(); }
@@ -564,29 +570,17 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
     // Discrete dividend schedule check (#440 item 1). An empty query
     // schedule is always valid: for segmented surfaces the build-time
     // schedule is authoritative. A non-empty schedule must match the
-    // build schedule restricted to the query's life, when it is known.
+    // build schedule rolled to the query valuation, when it is known.
     //
-    // Both sides are canonicalized with the same rules the table builders
-    // apply via filter_and_merge_dividends: same-date entries are merged,
-    // and non-positive-time/non-positive-amount entries are dropped. On the
-    // build side, entries at or after the surface maturity are also dropped
-    // (that's what the builders actually priced), which is why
-    // build_dividends_ is stored pre-canonicalized. The query side is
-    // deliberately NOT window-filtered against query.maturity here: a query
-    // claiming a dividend beyond its own maturity window must still surface
-    // as an extra entry and be rejected (see PrefixWindowSemantics test).
+    // The build schedule is anchored at tau_max. Roll it forward by
+    // tau_max-query.maturity before comparison. At an exact dividend instant
+    // that event has elapsed (post-dividend calendar side). A query's own
+    // out-of-life entries stay visible so they cannot validate accidentally.
     if (!query.discrete_dividends.empty() && build_dividends_.has_value()) {
         constexpr double kTimeTol = 1e-6;    // years (~30 seconds)
         constexpr double kAmountTol = 1e-6;  // dollars
-        // build_dividends_ is already canonicalized (sorted, merged) by the
-        // factory, so only the window filter is needed here.
-        std::vector<Dividend> expected;
-        expected.reserve(build_dividends_->size());
-        for (const auto& d : *build_dividends_) {
-            if (d.calendar_time <= query.maturity + kTimeTol) {
-                expected.push_back(d);
-            }
-        }
+        auto expected = rolled_dividends(
+            *build_dividends_, tau_range_.second, query.maturity);
         std::vector<Dividend> actual = filter_and_merge_dividends(
             query.discrete_dividends, std::numeric_limits<double>::infinity());
         if (expected.size() != actual.size()) {

@@ -1065,3 +1065,25 @@ TEST(AmericanOptionTest, DriftSignCrossingSolvesCleanly) {
 
 }  // namespace
 }  // namespace mango
+
+// Regression #485: regular batch routing must retain caller mandatory times,
+// including tightly spaced samples on opposite calendar sides of an event.
+TEST(AmericanOptionBatchTimeline, RetainsExactMandatorySnapshotLabels) {
+    using namespace mango;
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+        .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT},
+        0.2, {{0.25, 3.0}});
+    std::vector<double> samples = {0.013579, 0.7495, 0.7505, 0.999123};
+    auto grid = GridSpec<double>::sinh_spaced(-2.0, 2.0, 301, 2.0);
+    ASSERT_TRUE(grid.has_value());
+    PDEGridSpec config = PDEGridConfig{*grid, 100, samples};
+    BatchAmericanOptionSolver solver;
+    solver.set_snapshot_times(samples);
+    auto results = solver.solve_batch(std::span{&p, 1}, true, nullptr, config);
+    ASSERT_EQ(results.failed_count, 0u);
+    auto actual = results.results[0]->grid()->snapshot_times();
+    ASSERT_EQ(actual.size(), samples.size());
+    for (size_t i = 0; i < samples.size(); ++i) {
+        EXPECT_DOUBLE_EQ(actual[i], samples[i]);
+    }
+}

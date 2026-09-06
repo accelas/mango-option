@@ -338,7 +338,15 @@ BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>
               └── TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>
 ```
 
-**Backward chaining:** Segments are built from expiry backward. The last segment (dividend-free) solves the standard American PDE. Earlier segments use the next segment's price as their initial condition (after adjusting spot for the dividend drop). This propagates the dividend effect through the full maturity range.
+**Fixed-expiry sampling:** A segmented table stores one expiry across remaining
+life. Query schedules and adaptive references roll anchored dividend offsets
+by `T0 - tau`. The Chebyshev builder solves once per parameter pair to `T0`
+and registers exact mandatory rows. Its routing and leaf coordinates share
+one origin; excluded event gaps are checked domain failures. The ordinary
+PDE snapshot is after the backward jump, so its exact event value is the
+pre-dividend calendar side; this is not the supported exact query convention.
+
+**B-spline backward chaining (pending #488):** Segments are built from expiry backward. The last segment (dividend-free) solves the standard American PDE. Earlier segments use the next segment's price as their initial condition (after adjusting spot for the dividend drop). This propagates the dividend effect through the full maturity range.
 
 **Multi-K_ref:** With continuous dividends, American option prices are homogeneous in strike: P(S, K) = K * f(S/K). Cash dividends break this property because the dividend amount is absolute, not proportional. To maintain interpolation accuracy, multiple reference strikes (K_ref) are used. Each K_ref produces a separate segmented surface, and queries interpolate across K_ref values weighted by proximity to the actual strike.
 

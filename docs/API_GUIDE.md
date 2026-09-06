@@ -570,9 +570,33 @@ This solves a single smooth PDE without temporal events. The tradeoff: continuou
 
 The [Price Table Pre-Computation](#price-table-pre-computation) workflow assumes scale invariance in strike, which breaks with discrete dividends. The segmented surface builder is the price table equivalent for discrete dividends — it pre-computes price surfaces that can be queried in microseconds, enabling fast interpolated IV over a dividend schedule.
 
+**Time contract.** A dated-dividend table represents one fixed expiry across
+its remaining life. Let `T0` be `DiscreteDividendConfig::maturity` and `d` a
+build-time dividend offset. At remaining maturity `tau`, elapsed time is
+`T0 - tau`, so the query-relative dividend offset is `d - (T0 - tau)`.
+Elapsed dividends are removed. For example, a 1-year table with a dividend
+at 0.25 years, queried at `tau=0.9`, has that dividend 0.15 years ahead;
+at `tau=0.6` it has already elapsed. This is not a table of different expiries
+observed on the build date; the caller selects its expiry-specific table.
+
+Chebyshev construction uses one end-to-end PDE solve per parameter pair,
+with the contractual horizon and exact mandatory snapshot times. Each leaf
+uses the same local-time origin as its `TauSegmentSplit` router.
+
+Chebyshev's current event topology omits `5e-4` years (4.38 hours) on each
+side of each dividend. Queries in these gaps, including the exact event,
+are unsupported: `validate_pricing_params` reports `OutOfRange`, Greeks
+report `OutOfDomain`, and interpolated IV reports `InvalidGridConfig`.
+Unchecked scalar price/vega methods return NaN. No neighboring-time price
+is substituted. Topologies that put an event inside a fitted leaf are
+rejected as `InvalidConfig`. These exclusions matter for intraday use.
+An exact event, if represented by a backend, means the post-dividend
+calendar side. The solver's ordinary snapshots are taken after backward
+jump callbacks, which is the pre-dividend calendar side.
+
 **Why segmentation?** A single B-spline surface cannot fit the discontinuity at a dividend date. The builder splits the maturity axis into segments separated by dividend dates and solves each independently.
 
-**How segments connect.** The builder works backward from expiry:
+**How B-spline segments connect (the chaining follow-up is #488).** The builder works backward from expiry:
 
 1. **Segment 0** (nearest to expiry, τ ∈ [0, τ₁]): Built with standard EEP (Early Exercise Premium) decomposition. The initial condition is the option payoff.
 
@@ -629,8 +653,8 @@ For continuous `ChebyshevBackend`, `maturity` supplies the upper requested tau b
 optional at query time: leaving it empty against a segmented surface is
 valid, since the surface's build-time schedule is authoritative and is what
 actually prices the query. If you do pass a schedule, it is checked against
-the build-time schedule restricted to dividends within the query's maturity
-window, and a mismatch is rejected with `IVErrorCode::DiscreteDividendMismatch`.
+the build-time schedule rolled by `T0 - query.maturity`, retaining only
+future dividends before expiry, and a mismatch is rejected with `IVErrorCode::DiscreteDividendMismatch`.
 In particular, a non-empty query schedule against a continuous
 (dividend-free) surface is always rejected, since there is no build-time
 schedule to match — this guarantee holds for solvers built via

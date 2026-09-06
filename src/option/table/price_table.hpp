@@ -56,6 +56,13 @@ public:
     [[nodiscard]] double m_max() const noexcept { return bounds_.m_max; }
     [[nodiscard]] double tau_min() const noexcept { return bounds_.tau_min; }
     [[nodiscard]] double tau_max() const noexcept { return bounds_.tau_max; }
+    [[nodiscard]] bool contains_maturity(double tau) const noexcept {
+        if (tau < tau_min() || tau > tau_max()) return false;
+        if constexpr (requires { inner_.contains_maturity(tau); }) {
+            return inner_.contains_maturity(tau);
+        }
+        return true;
+    }
     [[nodiscard]] double sigma_min() const noexcept { return bounds_.sigma_min; }
     [[nodiscard]] double sigma_max() const noexcept { return bounds_.sigma_max; }
     [[nodiscard]] double rate_min() const noexcept { return bounds_.rate_min; }

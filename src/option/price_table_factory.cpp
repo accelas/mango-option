@@ -812,8 +812,7 @@ AnyPriceTable::validate_pricing_params(const PricingParams& params) const {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::OutOfRange, log_moneyness, 0});
         }
-        if (params.maturity < table_ptr->tau_min() ||
-            params.maturity > table_ptr->tau_max()) {
+        if (!table_ptr->contains_maturity(params.maturity)) {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::OutOfRange, params.maturity, 1});
         }
