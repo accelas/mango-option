@@ -441,9 +441,10 @@ TEST_F(BSplineCollocation1DTest, ExtremelyClustered) {
 
     auto result = solver.fit(values);
 
-    // Should either fail or have astronomical condition number
+    // Clustering still makes this difficult, but generated-knot stability
+    // must not be judged by the old policy's larger condition estimate.
     if (result.has_value()) {
-        EXPECT_GT(result->condition_estimate, 1e12);
+        EXPECT_GT(result->condition_estimate, 1e8);
     } else {
         EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::FittingFailed);
     }

@@ -182,7 +182,17 @@ TEST(SegmentedPriceTableBuilderTest, RawCallAndPutPricesAndGreeksShareTheSameSur
             const double up = price(100 + hs, tau, 0.2, 0.05);
             const double down = price(100 - hs, tau, 0.2, 0.05);
             EXPECT_NEAR(*delta, (up - down) / (2 * hs), 1e-7);
-            EXPECT_NEAR(*gamma, (up - 2 * mid + down) / (hs * hs), 1e-7);
+            // At a cubic knot the third derivative can jump, giving this
+            // central second difference an O(h) term. Cancel that term at
+            // two successive scales; preserve the existing Greek tolerance.
+            const auto gamma_fd = [&](double step) {
+                return (price(100 + step, tau, 0.2, 0.05) - 2 * mid
+                      + price(100 - step, tau, 0.2, 0.05)) / (step * step);
+            };
+            const double gamma_ref = 2 * gamma_fd(hs / 2) - gamma_fd(hs);
+            const double gamma_finer = 2 * gamma_fd(hs / 4) - gamma_fd(hs / 2);
+            ASSERT_NEAR(gamma_ref, gamma_finer, 1e-7);
+            EXPECT_NEAR(*gamma, gamma_finer, 1e-7);
             EXPECT_NEAR(surface->vega(100, 100, tau, 0.2, 0.05),
                 (price(100, tau, 0.2 + h, 0.05) - price(100, tau, 0.2 - h, 0.05)) / (2 * h), 1e-6);
             EXPECT_NEAR(*theta,
