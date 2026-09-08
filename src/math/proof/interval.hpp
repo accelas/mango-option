@@ -30,6 +30,9 @@ class Interval {
     friend Interval hull(const Interval &a, const Interval &b);
     friend Interval operator*(const Interval &a, const Interval &b);
     friend Interval operator/(const Interval &a, const Interval &b);
+    friend Interval intersection(const Interval &a, const Interval &b);
+    friend Interval acos(const Interval &value);
+    friend Interval cos(const Interval &value);
     friend Interval exp(const Interval &value);
     friend Interval log(const Interval &value);
     friend Interval sqrt(const Interval &value);

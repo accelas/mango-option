@@ -58,3 +58,9 @@ pocket between 17 positive scan points; a square with a negative coarse
 Bernstein coefficient; legitimate flat then rising intervals; nonuniform
 cubic identities; all four tensor derivative axes; and witness sign retention
 below binary64's smallest subnormal. Runtime financial evaluation is untouched.
+
+The explicit opt-in Chebyshev modal representation and its restricted-box proof
+support are described in
+[CHEBYSHEV_POLYNOMIAL.md](../chebyshev/CHEBYSHEV_POLYNOMIAL.md). They share the
+stored polynomial between values, Greeks, and proof; existing barycentric
+financial evaluators are not switched by this preparation module.

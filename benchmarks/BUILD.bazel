@@ -636,3 +636,16 @@ cc_binary(
     ],
     tags = ["manual"],
 )
+
+cc_binary(
+    name = "chebyshev_polynomial_characterization",
+    srcs = ["chebyshev_polynomial_characterization.cc"],
+    deps = [
+        "//src/math/chebyshev:chebyshev_polynomial",
+        "//src/math/chebyshev:chebyshev_tensor",
+        "//src/math/proof:chebyshev",
+    ],
+    copts = ["-O3", "-march=x86-64-v3", "-fopenmp"],
+    linkopts = ["-fopenmp"],
+    tags = ["manual"],
+)

@@ -44,3 +44,16 @@ TEST(ProofIntervalTest, RestrictedExternalExponentRangeCannotRoundImportedConsta
     ASSERT_EQ(mpfr_set_emin(-10), 0);
     EXPECT_FALSE(Interval(1e-25).finite());
 }
+
+TEST(ProofIntervalTest, TrigonometricEnclosuresIncludeInteriorExtrema) {
+    using namespace mango::detail::proof;
+    auto positive = cos(Interval::hull(-1, 1));
+    EXPECT_EQ(positive.upper_bound(), 1);
+    EXPECT_GT(positive.lower_bound(), .54);
+    auto negative = cos(Interval::hull(2, 4));
+    EXPECT_EQ(negative.lower_bound(), -1);
+    EXPECT_LT(negative.upper_bound(), -.41);
+    EXPECT_TRUE(cos(acos(Interval(.5))).contains(.5));
+    EXPECT_FALSE(acos(Interval(2)).finite());
+    EXPECT_FALSE(intersection(Interval::hull(-1, 0), Interval::hull(1, 2)).finite());
+}
