@@ -6,6 +6,7 @@ cc_library(
     deps = [
         "//src/option:option_spec",
         "//src/option/table:strike_bounds",
+        "//src/option/table:moneyness_bounds",
         "//src/option/table:fixed_expiry",
     ],
     visibility = ["//visibility:public"],

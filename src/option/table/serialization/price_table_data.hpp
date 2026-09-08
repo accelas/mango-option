@@ -4,6 +4,7 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/fixed_expiry.hpp"
 #include "mango/option/table/strike_bounds.hpp"
+#include "mango/option/table/moneyness_bounds.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -23,6 +24,8 @@ struct PriceTableData {
     /// Physical query domain and numerical model identity, never inferred
     /// from support reference strikes or the largest published maturity.
     std::optional<StrikeBounds> strike_bounds;
+    /// Required numerical query-domain provenance in current payloads.
+    std::optional<MoneynessBounds> ratio_bounds;
     std::optional<FixedExpiryMetadata> fixed_expiry;
     /// Largest published query maturity; not the numerical expiry anchor.
     double maturity = 0.0;
@@ -67,6 +70,7 @@ inline constexpr const char* kChebyshev3DRaw = "chebyshev_3d_raw";
 /// Validate model/domain provenance at both in-memory and file boundaries.
 /// Reference support is allowed to exceed the declared strike interval.
 [[nodiscard]] inline bool valid_price_table_metadata(const PriceTableData& data) {
+    if (!data.ratio_bounds || !data.ratio_bounds->valid()) return false;
     if ((data.strike_bounds && !data.strike_bounds->valid()) ||
         (data.fixed_expiry && !data.fixed_expiry->valid(data.bounds_tau_max))) {
         return false;
