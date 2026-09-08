@@ -77,10 +77,11 @@ TEST_P(ManualChebyshevAccuracy, DefaultsMeetDeclaredPriceCohort) {
     SegmentedAdaptiveConfig config{
         .spot = 100.0, .option_type = type,
         .discrete_dividends = {{0.1, 1.0}}, .maturity = 0.25,
-        .kref_config = {.K_refs = {100.0}}};
+        .kref_config = {.K_refs = {100.0}},
+        .strike_bounds = StrikeBounds{100.0, 100.0}};
     IVGrid domain{
         .moneyness = {std::log(0.5), 0.0, std::log(2.0)},
-        .vol = {0.10}, .rate = {0.03, 0.05}};
+        .vol = {0.05, 0.15}, .rate = {0.03, 0.05}};
     auto table = build_chebyshev_segmented_manual(config, domain);
     ASSERT_TRUE(table.has_value());
 
@@ -124,6 +125,14 @@ TEST_P(ManualChebyshevAccuracy, DefaultsMeetDeclaredPriceCohort) {
                 const double r = rate[shape[3] / 2];
                 SCOPED_TRACE(testing::Message() << "cardinal segment=" << j
                     << " S=" << query.spot << " tau=" << query.tau);
+                if (query.tau == 0.0) {
+                    const double payoff = type == OptionType::PUT
+                        ? std::max(100.0 - query.spot, 0.0)
+                        : std::max(query.spot - 100.0, 0.0);
+                    EXPECT_NEAR(segmented.price(query.spot, 100.0, 0.0, query.sigma, r),
+                                payoff, 1e-10);
+                    continue;
+                }
                 const auto reference = converged_reference(query, r, type);
                 ASSERT_TRUE(reference.has_value());
                 EXPECT_NEAR(table->price(query.spot, 100.0, query.tau, query.sigma, r),

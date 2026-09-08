@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/american_option.hpp"
+#include "mango/option/european_option.hpp"
+#include "mango/math/bspline/bspline_collocation.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
@@ -26,6 +29,180 @@ TEST(BuildDiagnosticsTest, DefaultsAreEmpty) {
     mango::BuildDiagnostics d;
     EXPECT_FALSE(d.target_met);
     EXPECT_EQ(d.holdout_points, 0u);
+}
+
+TEST(RefinementAggregation, ExactUnionRetainsEveryAxisAndBothTemporalRegimes) {
+    const mango::SeededGrids required{
+        .moneyness = {-1.0, -0.2, 0.2, 1.0},
+        .tau = {0.0, 0.1, 0.3, 0.4, 0.6, 0.7, 0.9, 1.0},
+        .vol = {0.1, 0.2, 0.4, 0.5},
+        .rate = {0.0, 0.02, 0.04, 0.06},
+    };
+    mango::RefinementResult first{.moneyness = {-1.0, -0.6, -0.2, 0.2, 1.0},
+        .tau = {0.0, 0.1, 0.2, 0.3, 0.4, 0.6, 0.7, 0.9, 1.0},
+        .vol = {0.1, 0.2, 0.3, 0.4, 0.5}, .rate = required.rate};
+    mango::RefinementResult second{.moneyness = required.moneyness,
+        .tau = {0.0, 0.1, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0},
+        .vol = required.vol, .rate = {0.0, 0.02, 0.03, 0.04, 0.06}};
+    const std::vector<mango::RefinementResult> probes{first, second};
+    const std::vector<std::pair<double, double>> regimes{{0.0, 0.4}, {0.6, 1.0}};
+    auto plan = mango::aggregate_refinement_grids(probes, required, 6, regimes);
+    ASSERT_TRUE(plan.has_value());
+    ASSERT_EQ(plan->size(), 1u);
+    EXPECT_EQ(plan->front().moneyness, first.moneyness);
+    EXPECT_EQ(plan->front().vol, first.vol);
+    EXPECT_EQ(plan->front().rate, second.rate);
+    EXPECT_EQ(plan->front().tau,
+        (std::vector<double>{0.0, 0.1, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0}));
+    // The ceiling belongs to each leaf axis, not the flattened row total.
+    EXPECT_GT(plan->front().tau.size(), 6u);
+}
+
+TEST(RefinementAggregation, OverflowProducesBoundedDeterministicSeedPreservingCandidates) {
+    const mango::SeededGrids required{
+        .moneyness = {-1.0, -0.2, 0.2, 1.0}, .tau = {0.0, 0.2, 0.8, 1.0},
+        .vol = {0.1, 0.2, 0.4, 0.5}, .rate = {0.0, 0.02, 0.04, 0.06}};
+    mango::RefinementResult first{.moneyness = {-1.0, -0.6, -0.2, 0.2, 1.0},
+        .tau = required.tau, .vol = required.vol, .rate = required.rate};
+    auto second = first;
+    second.moneyness = {-1.0, -0.2, 0.2, 0.6, 1.0};
+    std::vector<mango::RefinementResult> probes{first, second};
+    auto plan = mango::aggregate_refinement_grids(probes, required, 5);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_LE(plan->size(), 4u);
+    EXPECT_GE(plan->size(), 2u);
+    bool retains_left = false, retains_right = false;
+    for (const auto& candidate : *plan) {
+        EXPECT_LE(candidate.moneyness.size(), 5u);
+        EXPECT_TRUE(std::includes(candidate.moneyness.begin(), candidate.moneyness.end(),
+                                  required.moneyness.begin(), required.moneyness.end()));
+        retains_left |= candidate.moneyness == first.moneyness;
+        retains_right |= candidate.moneyness == second.moneyness;
+    }
+    EXPECT_TRUE(retains_left);
+    EXPECT_TRUE(retains_right);
+    std::reverse(probes.begin(), probes.end());
+    auto reversed = mango::aggregate_refinement_grids(probes, required, 5);
+    ASSERT_TRUE(reversed.has_value());
+    ASSERT_EQ(reversed->size(), plan->size());
+    for (size_t i = 0; i < plan->size(); ++i) {
+        EXPECT_EQ((*plan)[i].moneyness, (*reversed)[i].moneyness);
+        EXPECT_EQ((*plan)[i].tau, (*reversed)[i].tau);
+        EXPECT_EQ((*plan)[i].vol, (*reversed)[i].vol);
+        EXPECT_EQ((*plan)[i].rate, (*reversed)[i].rate);
+    }
+}
+
+TEST(RefinementAggregation, RetryInsertsWithinLeafCapsWithoutReplacingCoordinates) {
+    const mango::SeededGrids retained{
+        .moneyness = {-1.0, -0.7, -0.2, 0.2, 1.0},
+        .tau = {0.0, 0.03, 0.1, 0.3, 0.4, 0.6, 0.7, 0.9, 1.0},
+        .vol = {0.1, 0.13, 0.2, 0.4, 0.5},
+        .rate = {0.0, 0.02, 0.04, 0.06},
+    };
+    const std::vector<std::pair<double, double>> regimes{{0.0, 0.4}, {0.6, 1.0}};
+    auto retry = mango::refine_aggregate_grids(retained, 6, regimes);
+    ASSERT_TRUE(retry.has_value());
+    for (const auto& pair : {std::pair{&retained.moneyness, &retry->moneyness},
+                            std::pair{&retained.tau, &retry->tau},
+                            std::pair{&retained.vol, &retry->vol},
+                            std::pair{&retained.rate, &retry->rate}}) {
+        EXPECT_TRUE(std::includes(pair.second->begin(), pair.second->end(),
+                                  pair.first->begin(), pair.first->end()));
+    }
+    EXPECT_EQ(retry->moneyness.size(), 6u);
+    EXPECT_EQ(retry->vol.size(), 6u);
+    EXPECT_EQ(retry->rate.size(), 5u);
+    EXPECT_EQ(retry->tau.size(), 12u);  // six per leaf, no nodes in the gap
+    EXPECT_FALSE(std::ranges::any_of(retry->tau, [](double t) { return t > 0.4 && t < 0.6; }));
+}
+
+TEST(RefinementAggregation, RequiredSeedsCannotBeDroppedToMeetACap) {
+    const mango::SeededGrids required{
+        .moneyness = {-1.0, -0.2, 0.0, 0.2, 1.0}, .tau = {0.0, 0.2, 0.8, 1.0},
+        .vol = {0.1, 0.2, 0.4, 0.5}, .rate = {0.0, 0.02, 0.04, 0.06}};
+    const mango::RefinementResult probe{.moneyness = required.moneyness, .tau = required.tau,
+        .vol = required.vol, .rate = required.rate};
+    auto plan = mango::aggregate_refinement_grids(std::span{&probe, 1}, required, 4);
+    ASSERT_FALSE(plan.has_value());
+    EXPECT_EQ(plan.error().code, mango::PriceTableErrorCode::InvalidConfig);
+    EXPECT_EQ(plan.error().axis_index, 0u);
+}
+
+TEST(RefinementAggregation, SkippedProbeContributesItsActualSeedCoordinates) {
+    const mango::SeededGrids required{
+        .moneyness = {-1.0, -0.23, 0.13, 1.0}, .tau = {0.0, 0.03, 0.8, 1.0},
+        .vol = {0.1, 0.13, 0.4, 0.5}, .rate = {0.0, 0.01, 0.04, 0.06}};
+    mango::RefinementResult skipped{.moneyness = required.moneyness, .tau = required.tau,
+        .vol = required.vol, .rate = required.rate};
+    skipped.iterations.push_back(mango::IterationStats{.refined_dim = -3});
+    auto plan = mango::aggregate_refinement_grids(std::span{&skipped, 1}, required, 4);
+    ASSERT_TRUE(plan.has_value());
+    ASSERT_EQ(plan->size(), 1u);
+    EXPECT_EQ(plan->front().moneyness, required.moneyness);
+    EXPECT_EQ(plan->front().tau, required.tau);
+    EXPECT_EQ(plan->front().vol, required.vol);
+    EXPECT_EQ(plan->front().rate, required.rate);
+}
+
+TEST(RefinementAggregation, TemporalRefinementStaysInsideEachSupportedRegime) {
+    mango::AdaptiveGridParams params;
+    params.max_points_per_dim = 6;
+    params.refinement_factor = 1.5;
+    auto refine = mango::make_segmented_bspline_refine_fn(params, {{0.0, 0.4}, {0.6, 1.0}});
+    std::vector<double> m{-1.0, -0.2, 0.2, 1.0}, vol{0.1, 0.2, 0.4, 0.5}, rate{0.0, 0.02, 0.04, 0.06};
+    std::vector<double> tau{0.0, 0.1, 0.3, 0.4, 0.6, 0.7, 0.9, 1.0};
+    const auto before = tau;
+    const std::vector<std::pair<double, double>> focus{{0.64, 0.86}};
+    const auto changed = refine(1, focus, m, tau, vol, rate);
+    EXPECT_TRUE(changed.changed);
+    EXPECT_EQ(changed.changed_dim, 1);
+    EXPECT_EQ(tau.size(), 10u);  // four unchanged left nodes, six right nodes
+    EXPECT_TRUE(std::includes(tau.begin(), tau.end(), before.begin(), before.end()));
+    EXPECT_FALSE(std::ranges::any_of(tau, [](double t) { return t > 0.4 && t < 0.6; }));
+    EXPECT_FALSE(refine(1, focus, m, tau, vol, rate).changed);
+}
+
+TEST(RefinementAggregation, FixedAnalyticOracleCanSelectAnotherCappedCandidate) {
+    using namespace mango;
+    const SeededGrids required{.moneyness = {-0.1, -0.02, 0.02, 0.1},
+        .tau = {0.0, 0.2, 0.8, 1.0}, .vol = {0.1, 0.2, 0.4, 0.5},
+        .rate = {0.0, 0.02, 0.04, 0.06}};
+    RefinementResult first{.moneyness = {-0.1, -0.06, -0.02, 0.02, 0.1},
+        .tau = required.tau, .vol = required.vol, .rate = required.rate};
+    auto second = first;
+    second.moneyness = {-0.1, -0.02, 0.02, 0.06, 0.1};
+    const std::vector<RefinementResult> probes{first, second};
+    auto plan = aggregate_refinement_grids(probes, required, 5);
+    ASSERT_TRUE(plan.has_value());
+    ASSERT_EQ(plan->size(), 2u);
+    // One fixed analytic option-price slice, reused for every candidate.
+    const double query_m = 0.06, tau = 0.01, sigma = 0.2;
+    const auto price = [&](double x) { return bs_price(100 * std::exp(x), 100, tau, sigma, 0.05, 0, OptionType::CALL); };
+    const double reference = price(query_m);
+    const double vega = bs_vega(100 * std::exp(query_m), 100, tau, sigma, 0.05);
+    std::vector<detail::FinalScore> scores;
+    for (const auto& candidate : *plan) {
+        auto fitter = BSplineCollocation1D<double>::create(candidate.moneyness);
+        ASSERT_TRUE(fitter.has_value());
+        std::vector<double> values;
+        for (double x : candidate.moneyness) values.push_back(price(x));
+        auto fit = fitter->fit(values);
+        ASSERT_TRUE(fit.has_value());
+        auto curve = BSplineND<double, 1>::create({candidate.moneyness},
+            {clamped_knots_cubic(candidate.moneyness)}, std::move(fit->coefficients));
+        ASSERT_TRUE(curve.has_value());
+        detail::FinalScore score;
+        score.max_error = std::abs(curve->eval({query_m}) - reference) / vega;
+        score.avg_error = score.max_error;
+        score.measured = 1;
+        scores.push_back(score);
+    }
+    EXPECT_FALSE(scores[0].viable());
+    EXPECT_TRUE(scores[1].viable());
+    EXPECT_EQ(detail::select_final_surface(scores[0], scores[1]), detail::FinalPick::Retry);
+    auto failed = scores[0];
+    EXPECT_EQ(detail::select_final_surface(failed, failed), detail::FinalPick::None);
 }
 
 // ===========================================================================
@@ -1305,4 +1482,86 @@ TEST(MakeValidateFnTest, FixedExpiryRollsCalendarInsteadOfChangingExpiry) {
     auto before = validate(100.0, 100.0, 0.750001, 0.2, 0.05);
     ASSERT_TRUE(before.has_value());
     EXPECT_GT(*before - *fixed, 1.0);
+}
+
+TEST(RunRefinementTest, SegmentedSamplesRespectIndependentStrikeAndMoneynessDomain) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.ctx.sample_bounds.strike_bounds = mango::StrikeBounds{90.0, 110.0};
+    std::vector<std::pair<double, double>> physical_queries;
+    h.price_override = [&](double spot, double strike, double tau, double, double rate) {
+        physical_queries.emplace_back(spot, strike);
+        return analytic_ref(spot, strike, tau, rate);
+    };
+    auto result = h.run();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->achieved_max_error, 0.0, 1e-12);
+    ASSERT_FALSE(physical_queries.empty());
+    bool moving_spot = false;
+    for (const auto& [spot, strike] : physical_queries) {
+        EXPECT_GE(strike, 90.0);
+        EXPECT_LE(strike, 110.0);
+        EXPECT_GE(spot, strike * std::exp(h.ctx.sample_bounds.m_min));
+        EXPECT_LE(spot, strike * std::exp(h.ctx.sample_bounds.m_max));
+        moving_spot |= spot != h.ctx.spot;
+    }
+    EXPECT_TRUE(moving_spot);
+    for (double x : {h.ctx.sample_bounds.m_min, h.ctx.sample_bounds.m_max}) {
+        for (double k : {90.0, 110.0}) {
+            EXPECT_TRUE(std::any_of(physical_queries.begin(), physical_queries.end(),
+                [&](const auto& q) { return q.second == k && q.first == k * std::exp(x); }));
+        }
+    }
+}
+
+TEST(RunRefinementTest, MandatoryCornersKeepOriginalRatioInputs) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.ctx.sample_bounds.m_min = std::log(0.1);
+    h.ctx.sample_bounds.m_max = std::log(0.3);
+    h.ctx.sample_bounds.ratio_bounds = mango::MoneynessBounds{0.1, 0.3};
+    h.ctx.sample_bounds.strike_bounds = mango::StrikeBounds{100.0, 110.0};
+    std::vector<std::pair<double, double>> queries;
+    h.price_override = [&](double s, double k, double t, double, double r) {
+        queries.emplace_back(s, k);
+        return analytic_ref(s, k, t, r);
+    };
+    auto result = h.run();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(std::ranges::any_of(queries, [](const auto& q) {
+        return q.first == 10.0 && q.second == 100.0;
+    }));
+}
+
+TEST(RunRefinementTest, RefusesUnrepresentableMandatoryQuoteCorner) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.ctx.sample_bounds.m_min = std::log(0.6);
+    h.ctx.sample_bounds.m_max = std::log(0.9);
+    h.ctx.sample_bounds.ratio_bounds = mango::MoneynessBounds{0.6, 0.9};
+    const double strike = 2.0 * std::numeric_limits<double>::denorm_min();
+    h.ctx.sample_bounds.strike_bounds = mango::StrikeBounds{strike, strike};
+    auto result = h.run();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::InvalidConfig);
+    EXPECT_EQ(h.build_calls, 0u);
+}
+
+TEST(RunRefinementTest, MeasurementSamplesUseOnlyAdmittedMaturityIntervals) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.ctx.sample_bounds.strike_bounds = mango::StrikeBounds{90.0, 110.0};
+    h.ctx.maturity_intervals = std::vector<std::pair<double, double>>{{.1, .4}, {.6, 1.0}};
+    std::vector<double> maturities;
+    h.price_override = [&](double spot, double strike, double tau, double, double rate) {
+        maturities.push_back(tau);
+        return analytic_ref(spot, strike, tau, rate);
+    };
+    auto result = h.run();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->achieved_max_error, 0.0, 1e-12);
+    ASSERT_FALSE(maturities.empty());
+    for (double tau : maturities) {
+        EXPECT_TRUE((tau >= .1 && tau <= .4) || (tau >= .6 && tau <= 1.0)) << tau;
+    }
 }

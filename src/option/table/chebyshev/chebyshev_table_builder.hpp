@@ -17,6 +17,7 @@ struct ChebyshevTableConfig {
     double K_ref;
     OptionType option_type;
     double dividend_yield = 0.0;
+    std::optional<MoneynessBounds> ratio_bounds = std::nullopt;
 };
 
 struct ChebyshevTableResult {

@@ -264,6 +264,13 @@ For reference, here are the full type alias expansions. The naming convention is
 
 Segmented leaves do not use `EEPLayer`: they store raw V/K_ref snapshots of the fixed-expiry PDE with solver-side cash-dividend events. Every temporal segment is fitted independently from those raw states; a fitted spline never supplies another PDE initial condition.
 
+The B-spline raw builder consumes supplied interpolation axes exactly, including
+an optional explicit physical `tau_grid`. Its shared temporal-grid resolver
+preserves each row's segment owner. Adaptive probes, aggregation, and retries
+carry those coordinates; point ceilings apply to each actual leaf, including
+its separate tau axis. PDE spatial headroom remains the grid estimator's job.
+
+
 ---
 
 ## Key Source Files

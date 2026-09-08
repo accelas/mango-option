@@ -595,10 +595,9 @@ TEST(ExpandSegmentedDomainTest, NoDividends) {
     // Rate: [0.03, 0.05] width=0.02 < 0.04 → should expand to 0.04 wide
     EXPECT_LT(result->rate_min, 0.03);
     EXPECT_GT(result->rate_max, 0.05);
-    // Tau: min(0.01, 0.5) = 0.01, max=1.0; width=0.99 > 0.1 → no extra push
-    // Tau capped at maturity
-    EXPECT_LE(result->tau_max, maturity);
-    EXPECT_GT(result->tau_min, 0.0);
+    // Numerical support includes the exact analytical payoff row.
+    EXPECT_EQ(result->tau_max, maturity);
+    EXPECT_EQ(result->tau_min, 0.0);
 }
 
 TEST(ExpandSegmentedDomainTest, WithDividends) {
@@ -881,7 +880,7 @@ std::vector<detail::ValidationPoint> make_points(size_t n) {
     for (size_t i = 0; i < n; ++i) {
         pts.push_back(detail::ValidationPoint{
             .coords = {0.0, 0.5, 0.20 + 0.01 * static_cast<double>(i), 0.05},
-            .strike = 100.0,
+            .strike = 100.0, .spot = 100.0,
             .refs = {.ref_price = 10.0, .vega = 1.0}});
     }
     return pts;

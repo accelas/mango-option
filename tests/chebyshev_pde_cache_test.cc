@@ -210,7 +210,8 @@ TEST(ChebyshevPDECacheTest, RejectsUnrepresentableManualLevels) {
     SegmentedAdaptiveConfig config{
         .spot = 100.0, .option_type = OptionType::PUT,
         .discrete_dividends = {{0.01, 1.0}}, .maturity = 0.025,
-        .kref_config = {.K_refs = {100.0}}};
+        .kref_config = {.K_refs = {100.0}},
+        .strike_bounds = StrikeBounds{100.0, 100.0}};
     IVGrid domain{.moneyness = {-0.1, 0.0, 0.1},
         .vol = {0.15, 0.25}, .rate = {0.03, 0.05}};
     auto builder = ChebyshevSegmentedBuilder::create(config, domain);
@@ -242,7 +243,8 @@ TEST(ChebyshevPDECacheTest, ExplicitManualLevelsRemainConstraints) {
     SegmentedAdaptiveConfig config{
         .spot = 100.0, .option_type = OptionType::PUT,
         .discrete_dividends = {{0.01, 1.0}}, .maturity = 0.025,
-        .kref_config = {.K_refs = {100.0}}};
+        .kref_config = {.K_refs = {100.0}},
+        .strike_bounds = StrikeBounds{100.0, 100.0}};
     IVGrid domain{.moneyness = {std::log(0.9), 0.0, std::log(1.1)},
         .vol = {0.15, 0.25}, .rate = {0.03, 0.05}};
     auto builder = ChebyshevSegmentedBuilder::create(config, domain);
@@ -259,11 +261,12 @@ TEST(ChebyshevPDECacheTest, ExplicitManualLevelsRemainConstraints) {
 TEST(ChebyshevPDECacheTest, RejectsEventInsideUnsplittableLeaf) {
     SegmentedAdaptiveConfig config{
         .spot = 100.0, .option_type = OptionType::PUT,
-        .discrete_dividends = {{0.9895, 1.0}}, .maturity = 1.0,
-        .kref_config = {.K_refs = {100.0}}};
+        .discrete_dividends = {{0.9995, 1.0}}, .maturity = 1.0,
+        .kref_config = {.K_refs = {100.0}},
+        .strike_bounds = StrikeBounds{100.0, 100.0}};
     IVGrid domain{.moneyness = {-0.2, 0.0, 0.2},
         .vol = {0.1, 0.2}, .rate = {0.03, 0.05}};
-    // Backward event .0105 is too close to the published lower bound .01
+    // Backward event .0005 is too close to the construction lower bound 0
     // for this topology's inset. Dropping the split would cross the jump.
     auto builder = ChebyshevSegmentedBuilder::create(config, domain);
     ASSERT_FALSE(builder.has_value());
@@ -306,4 +309,24 @@ TEST(ChebyshevPDECacheTest, GeneratedSegmentNodesKeepTheirCardinality) {
     ASSERT_TRUE(leaves.has_value());
     ASSERT_EQ(leaves->size(), 2u);
     for (const auto& leaf : *leaves) EXPECT_EQ(leaf.interpolant().num_pts()[1], 9u);
+}
+
+TEST(ChebyshevPDECacheTest, SegmentedPayoffRowUsesAnalyticalIntrinsicValues) {
+    const auto m = mango::cc_level_nodes(2, -.00005, .01);
+    const auto tau = mango::cc_level_nodes(2, 0.0, 1.0);
+    const auto sigma = mango::cc_level_nodes(1, .1, .3);
+    const auto rate = mango::cc_level_nodes(1, .03, .05);
+    for (auto type : {mango::OptionType::PUT, mango::OptionType::CALL}) {
+        auto pieces = mango::build_chebyshev_segmented_pieces(
+            100.0, type, 0.0, {}, {0.0, 1.0}, {false}, m, tau, sigma, rate);
+        ASSERT_TRUE(pieces.has_value());
+        for (double x : m) {
+            const double spot = 100.0 * std::exp(x);
+            const double expected = mango::intrinsic_value(spot, 100.0, type);
+            const double got = 100.0 * pieces->leaves.front().price(
+                spot, 100.0, 0.0, .2, .04);
+            EXPECT_NEAR(got, expected, 1e-10) << "x=" << x;
+        }
+        EXPECT_GT(pieces->leaves.front().price(100.0, 100.0, 1.0, .2, .04), 0.0);
+    }
 }
