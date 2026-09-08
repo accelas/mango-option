@@ -847,6 +847,13 @@ std::expected<ChebyshevSegmentedBuilder, PriceTableError>
 ChebyshevSegmentedBuilder::create(
     const SegmentedAdaptiveConfig& config, const IVGrid& domain)
 {
+    if (!make_fixed_expiry_metadata(config.maturity, config.discrete_dividends).valid(config.maturity)) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+    auto strikes = resolve_strike_bounds_from_log_nodes(
+        config.strike_bounds, config.spot, domain.moneyness);
+    if (!strikes) return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+
     auto K_refs = resolve_k_refs(config.kref_config, config.spot);
     if (!K_refs) return std::unexpected(K_refs.error());
 
@@ -863,6 +870,9 @@ ChebyshevSegmentedBuilder::create(
     auto sample_dom = expand_segmented_domain(
         domain, config.maturity, config.dividend_yield, {}, K_refs->front());
     if (!sample_dom) return std::unexpected(sample_dom.error());
+
+    sample_dom->strike_bounds = *strikes;
+    dom->strike_bounds = *strikes;
 
     auto [seg_bounds, seg_is_gap] = compute_segment_boundaries(
         config.discrete_dividends, config.maturity,
@@ -939,7 +949,8 @@ ChebyshevSegmentedBuilder::build_all_krefs(
     return AssembleResult{
         .surface = ChebyshevMultiKRefSurface(
             std::move(inner), bounds,
-            config_.option_type, config_.dividend_yield),
+            config_.option_type, config_.dividend_yield,
+            make_fixed_expiry_metadata(config_.maturity, config_.discrete_dividends)),
         .pde_solves = total_pde_solves,
     };
 }

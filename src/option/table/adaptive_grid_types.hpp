@@ -2,6 +2,7 @@
 #pragma once
 
 #include "mango/option/option_spec.hpp"
+#include "mango/option/table/strike_bounds.hpp"
 #include <array>
 #include <vector>
 #include <cstddef>
@@ -75,6 +76,7 @@ struct SegmentedAdaptiveConfig {
     std::vector<Dividend> discrete_dividends;
     double maturity;
     MultiKRefConfig kref_config;
+    std::optional<StrikeBounds> strike_bounds = std::nullopt;
 };
 
 /// Per-iteration diagnostics

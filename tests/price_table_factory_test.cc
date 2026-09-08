@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cmath>
+#include <limits>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -427,6 +429,100 @@ TEST(PriceTableFactoryTest, AtMaturityDividendCanonicalizedOutOfProvenance) {
     auto matching = solver->solve(query);
     if (!matching.has_value()) {
         EXPECT_NE(matching.error().code, IVErrorCode::DiscreteDividendMismatch);
+    }
+}
+
+// A segmented table's published strike interval comes from the requested
+// option domain, even when extra reference strikes provide interpolation support.
+TEST(AnyPriceTableTest, SegmentedAdmissionKeepsAbsoluteStrikeDomain) {
+    auto config = bspline_4d_config();
+    config.dividend_yield = 0.0;
+    config.grid.moneyness = {0.8, 0.9, 1.0, 1.3};
+    config.discrete_dividends = DiscreteDividendConfig{
+        .maturity = 1.0,
+        .discrete_dividends = {},
+        .kref_config = {.K_refs = {70.0, 100.0, 130.0}},
+    };
+    auto table = make_price_table(config);
+    ASSERT_TRUE(table.has_value());
+    ASSERT_TRUE(table->strike_bounds().has_value());
+    EXPECT_DOUBLE_EQ(table->strike_bounds()->min, 100.0 / 1.3);
+    EXPECT_DOUBLE_EQ(table->strike_bounds()->max, 125.0);
+    ASSERT_TRUE(table->fixed_expiry().has_value());
+    EXPECT_DOUBLE_EQ(table->fixed_expiry()->reference_maturity, 1.0);
+    EXPECT_TRUE(table->fixed_expiry()->discrete_dividends.empty());
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+        .maturity = 0.37, .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
+    for (double strike : {100.0 / 1.3, 100.0, 111.111111111, 125.0}) {
+        p.spot = p.strike = strike;
+        EXPECT_TRUE(table->validate_pricing_params(p).has_value());
+    }
+    for (double strike : {70.0, 130.0, 200.0}) {
+        p.spot = p.strike = strike;  // identical S/K, different absolute K
+        auto admission = table->validate_pricing_params(p);
+        EXPECT_FALSE(admission.has_value()) << "strike=" << strike;
+        if (!admission) {
+            EXPECT_EQ(admission.error().code, ValidationErrorCode::OutOfRange);
+        }
+    }
+}
+
+TEST(AnyPriceTableTest, SegmentedGreeksAndIvEnforceStrikeDomain) {
+    auto config = bspline_4d_config();
+    config.dividend_yield = 0.0;
+    config.grid.moneyness = {0.8, 0.9, 1.0, 1.3};
+    config.discrete_dividends = DiscreteDividendConfig{
+        .maturity = 1.0, .discrete_dividends = {},
+        .kref_config = {.K_refs = {70.0, 100.0, 130.0}},
+    };
+    auto table = make_price_table(config);
+    ASSERT_TRUE(table.has_value());
+    PricingParams p(OptionSpec{.spot = 200.0, .strike = 200.0,
+        .maturity = 0.37, .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
+    for (auto result : {table->delta(p), table->gamma(p), table->theta(p), table->rho(p)}) {
+        EXPECT_FALSE(result.has_value());
+        if (!result) {
+            EXPECT_EQ(result.error(), GreekError::OutOfDomain);
+        }
+    }
+    auto solver = table->make_iv_solver();
+    ASSERT_TRUE(solver.has_value());
+    auto result = solver->solve(off_grid_iv_query(p, 10.0));
+    EXPECT_FALSE(result.has_value());
+    if (!result) {
+        EXPECT_EQ(result.error().code, IVErrorCode::InvalidGridConfig);
+    }
+}
+
+TEST(AnyPriceTableTest, PhysicalMoneynessEndpointsDoNotNeedToleranceWidening) {
+    auto config = bspline_4d_config();
+    config.dividend_yield = 0.0;
+    config.grid.moneyness = {0.8, 0.9, 1.0, 1.3};
+    config.discrete_dividends = DiscreteDividendConfig{
+        .maturity = 1.0, .discrete_dividends = {},
+        .kref_config = {.K_refs = {70.0, 100.0, 130.0}},
+    };
+    auto table = make_price_table(config);
+    ASSERT_TRUE(table.has_value());
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+        .maturity = 0.37, .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
+    for (double strike : {100.0 / 1.3, 100.0, 111.111111111, 125.0}) {
+        p.strike = strike;
+        for (double m : {0.8, 1.3}) {
+            p.spot = m * strike;
+            EXPECT_TRUE(table->validate_pricing_params(p).has_value())
+                << "strike=" << strike << " S/K endpoint=" << m;
+            p.spot = std::nextafter(p.spot, m == 0.8 ? 0.0
+                : std::numeric_limits<double>::infinity());
+            EXPECT_FALSE(table->validate_pricing_params(p).has_value())
+                << "one quote-space ULP outside m=" << m;
+        }
+    }
+    for (double strike : {
+             std::nextafter(100.0 / 1.3, 0.0),
+             std::nextafter(125.0, std::numeric_limits<double>::infinity())}) {
+        p.spot = p.strike = strike;
+        EXPECT_FALSE(table->validate_pricing_params(p).has_value());
     }
 }
 

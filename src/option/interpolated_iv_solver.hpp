@@ -248,6 +248,7 @@ private:
         OptionType option_type,
         double dividend_yield,
         std::optional<std::vector<Dividend>> build_dividends,
+        double reference_maturity,
         const InterpolatedIVSolverConfig& config)
         : surface_(std::move(surface))
         , m_range_(m_range)
@@ -258,6 +259,7 @@ private:
         , option_type_(option_type)
         , dividend_yield_(dividend_yield)
         , build_dividends_(std::move(build_dividends))
+        , reference_maturity_(reference_maturity)
     {}
 
     Surface surface_;
@@ -268,6 +270,7 @@ private:
     /// Discrete schedule the surface was built with. nullopt = unknown
     /// (deserialized segmented tables) — schedule validation is skipped.
     std::optional<std::vector<Dividend>> build_dividends_;
+    double reference_maturity_;
 
     /// Evaluate option price using surface interpolation with strike scaling
     double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const;
@@ -277,13 +280,23 @@ private:
         if constexpr (requires { surface_.contains_maturity(query.maturity); }) {
             if (!surface_.contains_maturity(query.maturity)) return false;
         }
-        const double x = std::log(query.spot / query.strike);
+        if constexpr (requires { surface_.contains_strike(query.strike); }) {
+            if (!surface_.contains_strike(query.strike)) return false;
+        }
+        const bool moneyness_inside = [&] {
+            if constexpr (requires { surface_.contains_moneyness(query.spot, query.strike); }) {
+                return surface_.contains_moneyness(query.spot, query.strike);
+            } else {
+                const double x = std::log(query.spot / query.strike);
+                return x >= m_range_.first && x <= m_range_.second;
+            }
+        }();
 
         // Extract zero rate for bounds check - must match what solve uses
         // Using get_zero_rate() ensures consistency: -ln(D(T))/T for curves
         double rate_value = get_zero_rate(query.rate, query.maturity);
 
-        return x >= m_range_.first && x <= m_range_.second &&
+        return moneyness_inside &&
                query.maturity >= tau_range_.first && query.maturity <= tau_range_.second &&
                vol >= sigma_range_.first && vol <= sigma_range_.second &&
                rate_value >= r_range_.first && rate_value <= r_range_.second;
@@ -335,6 +348,7 @@ struct DiscreteDividendConfig {
     double maturity = 1.0;                  ///< Surface maturity
     std::vector<Dividend> discrete_dividends;
     MultiKRefConfig kref_config;            ///< defaults to auto
+    std::optional<StrikeBounds> strike_bounds = std::nullopt; ///< requested absolute K interval
 };
 
 /// Configuration for the IV solver factory
@@ -389,6 +403,7 @@ namespace detail {
 template <typename Table>
 class SharedPriceTableSurface {
 public:
+    static constexpr bool requires_fixed_expiry = Table::requires_fixed_expiry;
     using inner_type = typename Table::inner_type;
 
     explicit SharedPriceTableSurface(std::shared_ptr<const Table> table)
@@ -420,6 +435,15 @@ public:
     [[nodiscard]] double m_max() const noexcept { return table_->m_max(); }
     [[nodiscard]] double tau_min() const noexcept { return table_->tau_min(); }
     [[nodiscard]] double tau_max() const noexcept { return table_->tau_max(); }
+    [[nodiscard]] const std::optional<FixedExpiryMetadata>& fixed_expiry() const noexcept {
+        return table_->fixed_expiry();
+    }
+    [[nodiscard]] bool contains_moneyness(double spot, double strike) const noexcept {
+        return table_->contains_moneyness(spot, strike);
+    }
+    [[nodiscard]] bool contains_strike(double strike) const noexcept {
+        return table_->contains_strike(strike);
+    }
     [[nodiscard]] bool contains_maturity(double tau) const noexcept {
         return table_->contains_maturity(tau);
     }
@@ -520,15 +544,34 @@ InterpolatedIVSolver<Surface>::create(
     auto option_type = surface.option_type();
     auto dividend_yield = surface.dividend_yield();
 
-    // Canonicalize an explicitly supplied schedule before storing it.
-    // This is the single authoritative choke point: every construction
-    // path (direct create() calls and both factory paths) funnels
-    // through here, so validate_query can always assume build_dividends_
-    // is sorted and same-date-merged. The factory-side canonicalization
-    // in price_table_factory.cpp is now redundant defense-in-depth
-    // (filter_and_merge_dividends is idempotent) and is left as-is.
-    if (build_dividends.has_value()) {
-        build_dividends = filter_and_merge_dividends(*build_dividends, tau_range.second);
+    double reference_maturity = tau_range.second;
+    if constexpr (requires { surface.fixed_expiry(); }) {
+        const auto& model = surface.fixed_expiry();
+        if (model) {
+            if (!model->valid(tau_range.second)) {
+                return std::unexpected(ValidationError{ValidationErrorCode::InvalidBounds});
+            }
+            reference_maturity = model->reference_maturity;
+            if (build_dividends) {
+                const auto supplied = filter_and_merge_dividends(*build_dividends, reference_maturity);
+                const bool same = supplied.size() == model->discrete_dividends.size()
+                    && std::equal(supplied.begin(), supplied.end(), model->discrete_dividends.begin(),
+                        [](const Dividend& a, const Dividend& b) {
+                            return a.calendar_time == b.calendar_time && a.amount == b.amount;
+                        });
+                if (!same) return std::unexpected(
+                    ValidationError{ValidationErrorCode::DiscreteDividendMismatch});
+            }
+            build_dividends = model->discrete_dividends;
+        } else if constexpr (requires { Surface::requires_fixed_expiry; }) {
+            if (Surface::requires_fixed_expiry) return std::unexpected(
+                ValidationError{ValidationErrorCode::InvalidBounds});
+        }
+    }
+    // Raw custom surfaces may still supply their own known schedule. A real
+    // price table's immutable model metadata always controls the anchor.
+    if (build_dividends) {
+        build_dividends = filter_and_merge_dividends(*build_dividends, reference_maturity);
     }
 
     return InterpolatedIVSolver(
@@ -540,6 +583,7 @@ InterpolatedIVSolver<Surface>::create(
         option_type,
         dividend_yield,
         std::move(build_dividends),
+        reference_maturity,
         config);
 }
 
@@ -572,15 +616,15 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
     // schedule is authoritative. A non-empty schedule must match the
     // build schedule rolled to the query valuation, when it is known.
     //
-    // The build schedule is anchored at tau_max. Roll it forward by
-    // tau_max-query.maturity before comparison. At an exact dividend instant
+    // Roll the schedule from its numerical model anchor, which may exceed
+    // the largest published query maturity. At an exact dividend instant
     // that event has elapsed (post-dividend calendar side). A query's own
     // out-of-life entries stay visible so they cannot validate accidentally.
     if (!query.discrete_dividends.empty() && build_dividends_.has_value()) {
         constexpr double kTimeTol = 1e-6;    // years (~30 seconds)
         constexpr double kAmountTol = 1e-6;  // dollars
         auto expected = rolled_dividends(
-            *build_dividends_, tau_range_.second, query.maturity);
+            *build_dividends_, reference_maturity_, query.maturity);
         std::vector<Dividend> actual = filter_and_merge_dividends(
             query.discrete_dividends, std::numeric_limits<double>::infinity());
         if (expected.size() != actual.size()) {

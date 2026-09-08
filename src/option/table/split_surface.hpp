@@ -32,9 +32,19 @@ concept SplitPolicy = requires(const S& s, double spot, double strike,
 
 /// Composable surface split. Routes queries to pieces via SplitPolicy,
 /// with per-slice remapping and value normalization.
+/// A split with a nonidentity linear spot map supplies spot_scale(index, K)
+/// so first/second spot derivatives include the corresponding chain factors.
 template <typename Inner, SplitPolicy Split>
 class SplitSurface {
 public:
+    static constexpr bool requires_strike_bounds = [] {
+        if constexpr (requires { Split::requires_strike_bounds; }) {
+            return Split::requires_strike_bounds;
+        } else if constexpr (requires { Inner::requires_strike_bounds; }) {
+            return Inner::requires_strike_bounds;
+        }
+        return false;
+    }();
     SplitSurface(std::vector<Inner> pieces, Split split)
         : pieces_(std::move(pieces)), split_(std::move(split)) {}
 
@@ -93,7 +103,9 @@ public:
                 lv);
             auto piece_greek = pieces_[br.entries[i].index].greek(g, local_params);
             if (!piece_greek.has_value()) return std::unexpected(piece_greek.error());
-            double norm = split_.normalize(br.entries[i].index, strike, *piece_greek);
+            const double chain = g == Greek::Delta
+                ? local_spot_scale(br.entries[i].index, strike) : 1.0;
+            double norm = split_.normalize(br.entries[i].index, strike, *piece_greek * chain);
             result += br.entries[i].weight * norm;
         }
         return split_.denormalize(result, spot, strike, tau, sigma, rate);
@@ -120,7 +132,8 @@ public:
                 lv);
             auto piece_gamma = pieces_[br.entries[i].index].gamma(local_params);
             if (!piece_gamma.has_value()) return std::unexpected(piece_gamma.error());
-            double norm = split_.normalize(br.entries[i].index, strike, *piece_gamma);
+            const double chain = local_spot_scale(br.entries[i].index, strike);
+            double norm = split_.normalize(br.entries[i].index, strike, *piece_gamma * chain * chain);
             result += br.entries[i].weight * norm;
         }
         return split_.denormalize(result, spot, strike, tau, sigma, rate);
@@ -137,10 +150,23 @@ public:
         }
         return true;
     }
+    [[nodiscard]] bool contains_strike(double strike) const noexcept {
+        if constexpr (requires { split_.contains_strike(strike); }) {
+            return split_.contains_strike(strike);
+        }
+        return true;
+    }
     [[nodiscard]] const std::vector<Inner>& pieces() const noexcept { return pieces_; }
     [[nodiscard]] const Split& split() const noexcept { return split_; }
 
 private:
+    [[nodiscard]] double local_spot_scale(size_t index, double strike) const noexcept {
+        if constexpr (requires { split_.spot_scale(index, strike); }) {
+            return split_.spot_scale(index, strike);
+        }
+        return 1.0;
+    }
+
     std::vector<Inner> pieces_;
     Split split_;
 };
