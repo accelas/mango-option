@@ -33,6 +33,7 @@ bounds_from_data(const PriceTableData& data) {
         .sigma_min = data.bounds_sigma_min, .sigma_max = data.bounds_sigma_max,
         .rate_min = data.bounds_rate_min, .rate_max = data.bounds_rate_max,
         .strike_bounds = data.strike_bounds,
+        .ratio_bounds = data.ratio_bounds,
     };
     // Validate finite
     if (!std::isfinite(b.m_min) || !std::isfinite(b.m_max) ||

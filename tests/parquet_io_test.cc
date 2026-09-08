@@ -91,6 +91,7 @@ PriceTableData model_payload() {
     data.bounds_rate_min = 0.02;
     data.bounds_rate_max = 0.08;
     data.strike_bounds = StrikeBounds{95, 105};
+    data.ratio_bounds = MoneynessBounds{std::exp(-.3), std::exp(.3)};
     data.fixed_expiry = FixedExpiryMetadata{2.0, {{1.5, 2.0}, {1.8, 3.0}}};
     for (double k : {80.0, 120.0}) {
         PriceTableData::Segment segment;
@@ -141,6 +142,31 @@ TEST_F(ParquetIOTest, PublicLoadUsesPersistedAnchorBeyondPublishedMaturities) {
     EXPECT_DOUBLE_EQ(data->bounds_tau_max, 1.0);
 }
 
+
+TEST_F(ParquetIOTest, RoundTripRetainsOriginalRatioAdmission) {
+    auto data = model_payload();
+    data.bounds_m_min = std::log(.1);
+    data.bounds_m_max = std::log(.13);
+    data.ratio_bounds = MoneynessBounds{.1,.13};
+    for (auto& segment : data.segments) {
+        segment.domain_lo[0] = data.bounds_m_min;
+        segment.domain_hi[0] = data.bounds_m_max;
+    }
+    ASSERT_TRUE(write_parquet(data,temp_path_));
+    auto loaded = load_price_table(temp_path_);
+    ASSERT_TRUE(loaded);
+    PricingParams query(OptionSpec{.spot=10,.strike=100,.maturity=.2,.rate=.04,
+        .dividend_yield=data.dividend_yield,.option_type=OptionType::PUT},.2);
+    EXPECT_TRUE(loaded->validate_pricing_params(query));
+    auto restored = read_parquet(temp_path_);
+    ASSERT_TRUE(restored);
+    ASSERT_TRUE(restored->ratio_bounds);
+    EXPECT_EQ(restored->ratio_bounds->min,.1);
+    EXPECT_EQ(restored->ratio_bounds->max,.13);
+    data.ratio_bounds.reset();
+    EXPECT_FALSE(write_parquet(data,temp_path_));
+}
+
 TEST_F(ParquetIOTest, ModelMetadataIsBoundToPayloadChecksum) {
     const auto data = model_payload();
     ASSERT_TRUE(write_parquet(data, temp_path_));
@@ -155,6 +181,7 @@ TEST_F(ParquetIOTest, ModelMetadataIsBoundToPayloadChecksum) {
     // integrity binding, not merely range checks on a nonsensical value.
     for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
              {"mango.strike_min", "96"}, {"mango.strike_max", "104"},
+             {"mango.ratio_min", "0.75"}, {"mango.ratio_max", "1.34"},
              {"mango.reference_maturity", "2.1"},
              {"mango.dividend.0.time", "1.6"}, {"mango.dividend.1.amount", "3.1"},
              {"mango.dividend_count", "1"},
@@ -183,7 +210,7 @@ TEST_F(ParquetIOTest, RejectsLegacyOrMissingModelMetadata) {
     std::shared_ptr<arrow::Table> table;
     ASSERT_TRUE((*reader)->ReadTable(&table).ok());
     ASSERT_TRUE((*infile)->Close().ok());
-    for (const auto& key : {"mango.format_version", "mango.strike_min",
+    for (const auto& key : {"mango.format_version", "mango.ratio_min", "mango.ratio_max", "mango.strike_min",
                            "mango.strike_max", "mango.has_fixed_expiry",
                            "mango.has_strike_bounds", "mango.reference_maturity",
                            "mango.dividend_count", "mango.dividend.0.time",
@@ -191,7 +218,7 @@ TEST_F(ParquetIOTest, RejectsLegacyOrMissingModelMetadata) {
         SCOPED_TRACE(key);
         auto metadata = table->schema()->metadata()->Copy();
         if (std::string(key) == "mango.format_version") {
-            ASSERT_TRUE(metadata->Set(key, "2.0").ok());
+            ASSERT_TRUE(metadata->Set(key, "3.0").ok());
         } else {
             ASSERT_TRUE(metadata->Delete(key).ok());
         }

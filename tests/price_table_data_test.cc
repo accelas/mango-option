@@ -68,6 +68,9 @@ TEST(PriceTableDataTest, SegmentedReconstructionRejectsIncompleteOrInvalidModelM
     bad.strike_bounds.reset();
     expect_rejected(bad);
     bad = data;
+    bad.ratio_bounds.reset();
+    expect_rejected(bad);
+    bad = data;
     bad.fixed_expiry.reset();
     expect_rejected(bad);
     for (auto bounds : {StrikeBounds{0, 105}, StrikeBounds{106, 105},
@@ -656,3 +659,19 @@ TEST(PriceTableDataTest, MetadataPreservation) {
 
 }  // namespace
 }  // namespace mango
+
+namespace mango {
+TEST(PriceTableDataTest, PreservesOriginalRatioEndpointsAcrossReconstruction) {
+    const auto source = metadata_surface();
+    SurfaceBounds bounds{std::log(.1), std::log(.13), .01, 1, .1, .4, .02, .08,
+                         StrikeBounds{95,105}};
+    bounds.ratio_bounds = MoneynessBounds{.1,.13};
+    ChebyshevMultiKRefSurface original(source.inner(),bounds,OptionType::PUT,.02,source.fixed_expiry());
+    ASSERT_TRUE(original.contains_moneyness(10,100));
+    auto reconstructed = from_data<ChebyshevMultiKRefInner>(to_data(original));
+    ASSERT_TRUE(reconstructed);
+    EXPECT_EQ(reconstructed->ratio_bounds().min,.1);
+    EXPECT_EQ(reconstructed->ratio_bounds().max,.13);
+    EXPECT_TRUE(reconstructed->contains_moneyness(10,100));
+}
+}
