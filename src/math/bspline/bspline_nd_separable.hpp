@@ -40,6 +40,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <optional>
 
 namespace mango {
 
@@ -211,17 +212,9 @@ public:
         std::array<size_t, N> failed{};
 
         // Fit each axis in cache-optimal order (reverse: N-1 → 0)
-        fit_all_axes<N-1>(coeffs, config.tolerance, max_residuals, conditions, failed);
-
-        // Check if any axis had failures
-        size_t total_failures = 0;
-        for (size_t i = 0; i < N; ++i) {
-            total_failures += failed[i];
-        }
-        if (total_failures > 0) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed,
-                total_failures});
+        if (auto error = fit_all_axes<N-1>(
+                coeffs, config.tolerance, max_residuals, conditions, failed)) {
+            return std::unexpected(std::move(*error));
         }
 
         return BSplineNDSeparableResult<T, N>{
@@ -265,19 +258,25 @@ private:
     /// Processes axes in reverse order (N-1, N-2, ..., 1, 0) for cache locality.
     /// Fastest-varying dimension (stride=1) is processed first.
     template<size_t Axis>
-    void fit_all_axes(
+    std::optional<InterpolationError> fit_all_axes(
         std::vector<T>& coeffs,
         T tolerance,
         std::array<T, N>& max_residuals,
         std::array<T, N>& conditions,
         std::array<size_t, N>& failed)
     {
-        fit_axis<Axis>(coeffs, tolerance, max_residuals, conditions, failed);
+        if (auto error = fit_axis<Axis>(
+                coeffs, tolerance, max_residuals, conditions, failed)) {
+            // A partially fitted tensor is not valid input for another axis.
+            return error;
+        }
 
         // Recursively fit remaining axes
         if constexpr (Axis > 0) {
-            fit_all_axes<Axis - 1>(coeffs, tolerance, max_residuals, conditions, failed);
+            return fit_all_axes<Axis - 1>(
+                coeffs, tolerance, max_residuals, conditions, failed);
         }
+        return std::nullopt;
     }
 
     /// Generic axis fitting using template parameter
@@ -297,7 +296,7 @@ private:
     /// @param conditions Output: condition estimate per axis
     /// @param failed Output: failed slice count per axis
     template<size_t Axis>
-    void fit_axis(
+    std::optional<InterpolationError> fit_axis(
         std::vector<T>& coeffs,
         T tolerance,
         std::array<T, N>& max_residuals,
@@ -315,11 +314,15 @@ private:
             max_residuals[Axis] = T{0};
             conditions[Axis] = T{0};
             failed[Axis] = n_slices;  // one singular matrix fails every slice
-            return;
+            auto error = fact.error();
+            error.index = Axis;
+            return error;
         }
 
         T max_residual = T{0};
         size_t failed_count = 0;
+        std::optional<InterpolationError> first_error;
+        size_t first_failed_slice = n_slices;
 
         MANGO_PRAGMA_PARALLEL
         {
@@ -327,6 +330,8 @@ private:
             std::vector<T> coeff_buffer(n_axis);
             T local_max_residual = T{0};
             size_t local_failed = 0;
+            std::optional<InterpolationError> local_first_error;
+            size_t local_first_slice = n_slices;
 
             MANGO_PRAGMA_FOR
             for (size_t slice_idx = 0; slice_idx < n_slices; ++slice_idx) {
@@ -350,6 +355,10 @@ private:
                     }
                 } else {
                     ++local_failed;
+                    if (slice_idx < local_first_slice) {
+                        local_first_slice = slice_idx;
+                        local_first_error = result.error();
+                    }
                 }
             }
 
@@ -357,12 +366,22 @@ private:
             {
                 max_residual = std::max(max_residual, local_max_residual);
                 failed_count += local_failed;
+                if (local_first_slice < first_failed_slice) {
+                    first_failed_slice = local_first_slice;
+                    first_error = std::move(local_first_error);
+                }
             }
         }
 
         max_residuals[Axis] = max_residual;
         conditions[Axis] = fact->condition_estimate;  // one matrix, one estimate
         failed[Axis] = failed_count;
+        if (first_error) {
+            first_error->index = Axis;
+            first_error->message += " (axis " + std::to_string(Axis)
+                + ", slice " + std::to_string(first_failed_slice) + ")";
+        }
+        return first_error;
     }
 
     /// Calculate total number of slices perpendicular to given axis

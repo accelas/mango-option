@@ -34,9 +34,9 @@ std::vector<double> to_log_m(std::initializer_list<double> sk) {
 }
 
 
-// Same low-budget configuration as the public factory refusal pin: raw
-// samples expose a short-tau fit error of .845046 after two iterations.
-TEST(AdaptiveGridBuilderTest, RawSamplesRefuseInadequateShortTauFit) {
+// The same low-budget configuration as the factory regression. #488's raw
+// samples previously exposed .845046 IV fit error; #458 makes the fit viable.
+TEST(AdaptiveGridBuilderTest, StableFittingReportsShortTauBestEffortAccuracy) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;  // 50 bps — relaxed for test speed
     params.max_iter = 2;
@@ -56,8 +56,38 @@ TEST(AdaptiveGridBuilderTest, RawSamplesRefuseInadequateShortTauFit) {
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_FALSE(result->target_met);
+    EXPECT_NEAR(result->achieved_max_error, 0.00686596, 1e-5);
+    EXPECT_EQ(result->diagnostics.holdout_points_measured, 15u);
+    EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
+    std::cout << "#458 short-tau achieved IV error=" << result->achieved_max_error
+              << " measured=" << result->diagnostics.holdout_points_measured
+              << " invalid=" << result->diagnostics.holdout_points_invalid << '\n';
+
+    // At this fixed-expiry valuation point the payment has already occurred.
+    // Price remains meaningful even if this deep-ITM put has negligible vega.
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 105.0,
+        .maturity = 0.0522771, .rate = 0.05, .dividend_yield = 0.02,
+        .option_type = OptionType::PUT}, 0.1);
+    auto high = AmericanOptionSolver::create(
+        p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::High)});
+    auto ultra = AmericanOptionSolver::create(
+        p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::Ultra)});
+    ASSERT_TRUE(high.has_value());
+    ASSERT_TRUE(ultra.has_value());
+    auto reference = high->solve();
+    auto converged = ultra->solve();
+    ASSERT_TRUE(reference.has_value());
+    ASSERT_TRUE(converged.has_value());
+    ASSERT_NEAR(reference->value(), converged->value(), 0.001);
+    // This IV-filtered point still exceeds the final 0.01 price target.
+    // Record the limitation without treating a viable fit as target success;
+    // #462 owns price checks on filtered points and strict build acceptance.
+    const double price_error = std::abs(
+        result->surface.price(100.0, 105.0, p.maturity, 0.1, 0.05)
+        - converged->value());
+    EXPECT_NEAR(price_error, 0.02029886, 1e-5);
 }
 
 // ===========================================================================
@@ -857,4 +887,3 @@ TEST(AdaptiveRegressionTest, Q0BifurcationRetainedAndScreened) {
 
 }  // namespace
 }  // namespace mango
-

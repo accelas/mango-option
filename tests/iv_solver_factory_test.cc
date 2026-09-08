@@ -198,14 +198,10 @@ TEST(IVSolverFactorySegmented, DiscreteDividends) {
     }
 }
 
-// Correct raw samples expose a downstream clustered-cubic fitting limitation.
-// The K_ref=110 probe measures 1.26733 IV error on its fixed holdout; a tau
-// refinement reduces it to .845046, still above the .20 viability bound.
-// Its worst tau=.0522771 is before every backward dividend crossing, so the
-// removed fitted initial-condition chain cannot explain this remaining error.
-// Keep this exact configuration pinned pending #458/#460, without returning
-// a surface whose apparent success depended on distorted input samples.
-TEST(IVSolverFactorySegmented, RawSamplesExposeShortMaturityFittingRefusal) {
+// #488's correct raw samples exposed a clustered-cubic fitting refusal here
+// (probe IV error .845046, above .20 viability). #458 repairs that fit while
+// retaining this exact low-budget factory configuration.
+TEST(IVSolverFactorySegmented, StableFittingAcceptsRawShortMaturitySamples) {
     IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,
         .spot = 100.0,
@@ -230,8 +226,15 @@ TEST(IVSolverFactorySegmented, RawSamplesExposeShortMaturityFittingRefusal) {
     };
 
     auto solver = make_interpolated_iv_solver(config);
-    ASSERT_FALSE(solver.has_value());
-    EXPECT_EQ(solver.error().code, ValidationErrorCode::NoViableSurface);
+    ASSERT_TRUE(solver.has_value()) << static_cast<int>(solver.error().code);
+    auto diagnostics = solver->build_diagnostics();
+    ASSERT_TRUE(diagnostics.has_value());
+    EXPECT_LE(diagnostics->achieved_max_error, 0.20);
+    EXPECT_GT(diagnostics->holdout_points_measured, 0u);
+    EXPECT_EQ(diagnostics->holdout_points_invalid, 0u);
+    if (diagnostics->target_met) {
+        EXPECT_LE(diagnostics->achieved_max_error, config.adaptive->target_iv_error);
+    }
 }
 
 // The documentation pins for the adaptive discrete-dividend config published

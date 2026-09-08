@@ -67,17 +67,16 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, RefinementIncreasesGridSize) {
 
     ASSERT_TRUE(result.has_value());
 
-    // With 3 iterations and tight target, grid should have grown
+    // With 3 iterations and a tight target, refinement should be attempted.
+    // Retention may return the seed if a larger candidate scores worse.
     if (result->iterations.size() >= 2) {
         auto& first = result->iterations.front();
-        auto& last = result->iterations.back();
 
-        // At least one dimension should have grown
+        // At least one attempted candidate should have grown.
         bool any_grew = false;
-        for (size_t d = 0; d < 4; ++d) {
-            if (last.grid_sizes[d] > first.grid_sizes[d]) {
-                any_grew = true;
-                break;
+        for (const auto& candidate : result->iterations) {
+            for (size_t d = 0; d < 4; ++d) {
+                any_grew |= candidate.grid_sizes[d] > first.grid_sizes[d];
             }
         }
         EXPECT_TRUE(any_grew) << "Grid should refine when target not met";

@@ -274,10 +274,10 @@ auto solver = mango::make_interpolated_iv_solver(config);
 The B-spline segmented path now fits raw snapshots from one fixed-expiry PDE
 solve per reference strike, volatility, and rate. This documented configuration
 builds after removal of fitted-initial-condition chaining; its maximum measured
-IV error is **0.00435 (43.5 absolute-IV bps)**, above the requested 0.001 (10 bps).
+IV error is **0.00452 (45.2 absolute-IV bps)** after the cubic fitting repair,
+above the requested 0.001 (10 bps).
 Inspect `build_diagnostics()->target_met` and achieved error rather than treating
-construction as proof of target accuracy. Other B-spline configurations still
-refuse pending clustered fitting and MultiKRef corrections. Final backend
+construction as proof of target accuracy. MultiKRef corrections remain pending. Final backend
 selection follows the remaining #483 accuracy and certification gates.
 The corrected Chebyshev path measures 0.00744 (74.4 absolute-IV bps) on
 the same 64-point holdout; it also misses the requested target.

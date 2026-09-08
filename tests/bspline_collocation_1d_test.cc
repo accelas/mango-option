@@ -123,10 +123,20 @@ TEST(BSplineCollocationRegression, ReportsFactorizationAndResidualFailureStages)
 TEST(BSplineCollocationRegression, RejectsNonfiniteSolvedCoefficients) {
     auto fitter = BSplineCollocation1D<double>::create({0, 1, 2, 3, 4, 5});
     ASSERT_TRUE(fitter.has_value());
-    auto fit = fitter->fit({1e308, -1e308, 1e308, -1e308, 1e308, -1e308});
+    const std::vector<double> rhs{1e308, -1e308, 1e308, -1e308, 1e308, -1e308};
+    auto fit = fitter->fit(rhs);
     ASSERT_FALSE(fit.has_value());
     EXPECT_EQ(fit.error().code, InterpolationErrorCode::FittingFailed);
     EXPECT_TRUE(std::isinf(fit.error().max_residual));
+    auto fact = fitter->factorize();
+    ASSERT_TRUE(fact.has_value());
+    std::vector<double> coefficients(rhs.size());
+    auto factored = fitter->solve_factored(*fact, rhs, coefficients);
+    ASSERT_FALSE(factored.has_value());
+    EXPECT_TRUE(std::isinf(factored.error().max_residual));
+    auto buffered = fitter->fit_with_buffer(rhs, coefficients);
+    ASSERT_FALSE(buffered.has_value());
+    EXPECT_TRUE(std::isinf(buffered.error().max_residual));
 }
 
 // Test fixture for collocation tests
