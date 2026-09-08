@@ -685,8 +685,9 @@ schedule to match — this guarantee holds for solvers built via
 Segmented tables retain the canonical schedule and numerical anchor through
 `to_data`/`from_data` and `AnyPriceTable::save`/`load_price_table`, so loaded
 solvers validate schedules in the same way as freshly built solvers. Parquet
-format 3.0 preserves the explicit absolute-strike interval independently of
-support references, and the fixed-expiry anchor independently of `tau_max`.
+format 4.0 preserves original moneyness ratio endpoints, the explicit
+absolute-strike interval independently of support references, and the
+fixed-expiry anchor independently of `tau_max`.
 All these fields are covered by the payload checksum. Older formats and
 segmented payloads lacking valid metadata are refused; rebuild those tables.
 Homogeneous continuous tables may omit the strike interval and fixed-expiry

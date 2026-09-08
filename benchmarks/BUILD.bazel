@@ -636,3 +636,10 @@ cc_binary(
     ],
     tags = ["manual"],
 )
+
+cc_binary(
+    name = "reference_selection_probe",
+    srcs = ["reference_selection_probe.cc"],
+    tags = ["manual"],
+    deps = ["//src/option/table:reference_strike_evaluator"],
+)

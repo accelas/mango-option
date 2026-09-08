@@ -2007,3 +2007,9 @@ cc_test(
     srcs = ["moneyness_bounds_test.cc"],
     deps = ["//src/option/table:moneyness_bounds", "@googletest//:gtest_main"],
 )
+
+cc_test(
+    name = "reference_strike_evaluator_test",
+    srcs = ["reference_strike_evaluator_test.cc"],
+    deps = ["//src/option/table:reference_strike_evaluator", "@googletest//:gtest_main"],
+)
