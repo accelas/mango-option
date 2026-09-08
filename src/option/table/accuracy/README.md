@@ -46,3 +46,37 @@ Remaining activation seams:
 
 The focused tests exercise policy through `assess`, using declared measured
 summaries. They do not establish numerical accuracy or certify any backend.
+
+## Private physical-reference collector
+
+`collect` accepts a fixed population of `PhysicalReferenceRow` values and
+callbacks for final price and actual IV inversion. Each row carries complete
+`PricingParams`, including its already rolled query-relative cash schedule.
+The IV callback receives an `IVQuery` with the same contract and the qualified
+reference quote; the collector compares its result to the known reference
+volatility. It does not implement another root solver or infer measurability
+from fitted prices/sensitivities.
+
+Measured rows require an explicit analytic/converged-numerical source, a
+nonzero qualification-record digest, a valid physical query, and qualified
+finite reference values/uncertainties. The digest identifies independent
+method/convergence/contract evidence; a final adapter must verify that record
+and its applicability to the requested targets. A digest alone is not proof
+that a coarse PDE run converged. Time-value/vega filters are supplied from that
+independent qualification, with their separate reasons preserved.
+
+Every input row remains in the immutable result ledger. Channel applicability
+is predeclared and distinct from IV filtering; it must not be changed after
+seeing backend results. Applicable price and IV rows retain unresolved/refused
+reference outcomes, backend refusals, nonfinite outputs, and measured errors.
+Backend callback failures are reported as `std::nullopt`; successful IV values
+must come from the existing solver's successful, conditioned inversion path.
+Price callback failure does not remove an independently measurable IV row.
+All-filtered IV produces absent error statistics, never invented zero errors.
+
+The compact `Assessment` is tagged `AbsoluteIvError`. The full row ledger also
+retains provenance and individual errors for later stratum reporting. RMS uses
+scaled accumulation to avoid overflow/underflow of squared errors; positive
+RMS below representable range reports the smallest positive double rather
+than false exactness. This collector remains private; factory hooks, qualified
+cohort adapters, certification tokens, and persistence binding are pending.
