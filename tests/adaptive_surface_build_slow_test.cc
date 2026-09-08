@@ -34,7 +34,9 @@ std::vector<double> to_log_m(std::initializer_list<double> sk) {
 }
 
 
-TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
+// Same low-budget configuration as the public factory refusal pin: raw
+// samples expose a short-tau fit error of .845046 after two iterations.
+TEST(AdaptiveGridBuilderTest, RawSamplesRefuseInadequateShortTauFit) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;  // 50 bps — relaxed for test speed
     params.max_iter = 2;
@@ -54,21 +56,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_TRUE(result.has_value())
-        << "build_adaptive_bspline_segmented failed: code "
-        << static_cast<int>(result.error().code);
-
-    // On a K_ref, where the multi-K_ref bracket resolves to a single entry
-    double price = result->surface.price(100.0, 100.0, 0.5, 0.20, 0.05);
-    EXPECT_GT(price, 0.0);
-    EXPECT_TRUE(std::isfinite(price));
-
-    // And off every K_ref: 97.5 sits midway between 95 and 100, so the query
-    // exercises the two-entry blend rather than resolving to one surface.
-    double price2 = result->surface.price(100.0, 97.5, 0.5, 0.20, 0.05);
-    EXPECT_GT(price2, 0.0);
-    EXPECT_TRUE(std::isfinite(price2));
-    EXPECT_LT(price2, price) << "a lower-struck put must be worth less";
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
 }
 
 // ===========================================================================
@@ -153,7 +142,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    double price = result->surface.price(100.0, 90.0, 0.5, 0.20, 0.05);
+    EXPECT_FALSE(result->surface.contains_maturity(0.5));
+    double price = result->surface.price(100.0, 90.0, 0.6, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
 }
 
