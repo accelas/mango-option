@@ -229,9 +229,9 @@ TEST(EstimateBatchPdeGridConfig, WrapsTheSharedGrid) {
 }
 
 // Exact goldens recorded from the retired covering-grid helper on the
-// parent revision. Bounds and time-step goldens remain fixed; spatial
-// counts now obey the declared ceiling rather than the retired odd-up rule.
-TEST(EstimateBatchPdeGrid, GoldensMatchTheRetiredHelper) {
+// parent revision. Bounds stay fixed; spatial counts obey the ceiling.
+// The dividend time count reflects the corrected asymmetric grid map.
+TEST(EstimateBatchPdeGrid, CoverageGoldensWithCorrectedSpacing) {
     // (a) clamp-binding Ultra chain batch (T2-like): sigma nodes over
     //     [0.01, 0.225] at T = 0.694375, coverage [-1.0881, 1.0881].
     {
@@ -258,7 +258,9 @@ TEST(EstimateBatchPdeGrid, GoldensMatchTheRetiredHelper) {
         EXPECT_DOUBLE_EQ(grid.x_min(), -1.1009491447542108);
         EXPECT_DOUBLE_EQ(grid.x_max(), 1.0713222014752199);
         EXPECT_EQ(grid.n_points(), 4999u);
-        EXPECT_EQ(td.n_steps(), 20001u);
+        // Boundary crowding previously forced this otherwise modest grid to
+        // the 20000-step cap. Preserve the new measured scheduling result.
+        EXPECT_EQ(td.n_steps(), 4136u);
     }
 }
 
