@@ -89,6 +89,13 @@ PhysicalCellProof prove_continuous_bspline_cell(const BSplineND<double, 4> &spli
     }
     Box physical;
     for (std::size_t d = 0; d < 4; ++d) {
+        const auto &grid = spline.grid(d);
+        for (std::size_t i = 0; i < grid.size(); ++i) {
+            if (!std::isfinite(grid[i]) || (i && !(grid[i - 1] < grid[i]))) {
+                result.reason = proof::StopReason::Arithmetic;
+                return result;
+            }
+        }
         const double a = knots[d][spans[d]], b = knots[d][spans[d] + 1];
         if (a < spline.grid(d).front() || b > spline.grid(d).back()) {
             result.reason = proof::StopReason::Arithmetic;

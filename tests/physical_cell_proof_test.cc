@@ -91,3 +91,19 @@ TEST(PhysicalCellProofTest, ExhaustedBudgetsAndUnreachableNegativityAreIndetermi
         prove_continuous_bspline_cell(spline, {3, 3, 3, 3}, 100, OptionType::PUT, 0, b);
     EXPECT_EQ(reachable.status, PriceProofStatus::NegativeWitness);
 }
+
+TEST(PhysicalCellProofTest, InvalidClampMetadataCannotReceiveCellEvidence) {
+    const SurfaceBounds b{-.001, .001, .99, 1.01, .19, .21, -.001, .001};
+    auto source = bezier({0, 0, 0, 0}, b);
+    std::array<std::vector<double>, 4> grids, knots;
+    for (std::size_t d = 0; d < 4; ++d) {
+        grids[d] = source.grid(d);
+        knots[d] = source.knots(d);
+    }
+    grids[0][0] = std::numeric_limits<double>::quiet_NaN();
+    auto invalid =
+        BSplineND<double, 4>::create(std::move(grids), std::move(knots), source.coefficients());
+    ASSERT_TRUE(invalid); // Raw math construction does not validate this metadata.
+    auto result = prove_continuous_bspline_cell(*invalid, {3, 3, 3, 3}, 100, OptionType::PUT, 0, b);
+    EXPECT_EQ(result.status, PriceProofStatus::Indeterminate);
+}
