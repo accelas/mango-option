@@ -110,24 +110,24 @@ TEST(BSplineNDSurfaceTest, Build3DReturnsCorrectTemplateType) {
 }
 
 
-TEST(BSplineNDSurfaceTest, PartialClampsBeyondBounds) {
+TEST(BSplineNDSurfaceTest, PartialOfClampedExtensionIsZeroBeyondBounds) {
     std::array<std::vector<double>, 2> grids = {{
         {0.8, 0.9, 1.0, 1.1},  // moneyness
         {0.1, 0.5, 1.0, 1.5},  // maturity
     }};
 
-    std::vector<double> coeffs(16, 1.0);
+    std::vector<double> coeffs(16);
+    for (size_t i = 0; i < 4; ++i)
+        for (size_t j = 0; j < 4; ++j) coeffs[i * 4 + j] = static_cast<double>(i);
     auto spline = make_bspline<2>(grids, std::move(coeffs)).value();
 
-    // Query partial at m=0.5 (below m_min=0.8) should produce same result as at m_min
-    double partial_oob = spline.partial(0, {0.5, 0.5});
-    double partial_boundary = spline.partial(0, {0.8, 0.5});
-    EXPECT_DOUBLE_EQ(partial_oob, partial_boundary);
+    // This is linear in the first coordinate inside the grid and constant
+    // outside it. A boundary slope is not the derivative of that extension.
+    EXPECT_NEAR(spline.partial(0, {0.8, 0.5}), 10.0, 1e-12);
+    EXPECT_DOUBLE_EQ(spline.partial(0, {0.5, 0.5}), 0.0);
+    EXPECT_DOUBLE_EQ(spline.eval_second_partial(0, {0.5, 0.5}), 0.0);
+    EXPECT_DOUBLE_EQ(spline.eval({0.5 + 1e-4, 0.5}), spline.eval({0.5 - 1e-4, 0.5}));
 
-    // Same for second_partial
-    double second_oob = spline.eval_second_partial(0, {0.5, 0.5});
-    double second_boundary = spline.eval_second_partial(0, {0.8, 0.5});
-    EXPECT_DOUBLE_EQ(second_oob, second_boundary);
 }
 
 } // namespace

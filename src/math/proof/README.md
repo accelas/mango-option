@@ -48,8 +48,7 @@ shape, and the requested positive-width cell. Interior knot multiplicity above
 three is refused: such a discontinuity would need a separate join-direction
 proof. It currently validates the entire input on each extraction; a future
 immutable validated payload can amortize that work. The function does not
-certify all cells, grid clamping, right-endpoint tolerance snapping in the
-existing B-spline evaluator, EEP/floors, dimensionless coordinates, Chebyshev
+certify all cells, grid clamping, EEP/floors, dimensionless coordinates, Chebyshev
 expressions, temporal routing, or reference-strike blends. Those are remaining
 publication obligations, not implicitly certified extensions of this seam.
 
@@ -64,3 +63,9 @@ support are described in
 [CHEBYSHEV_POLYNOMIAL.md](../chebyshev/CHEBYSHEV_POLYNOMIAL.md). They share the
 stored polynomial between values, Greeks, and proof; existing barycentric
 financial evaluators are not switched by this preparation module.
+
+B-spline endpoint evaluation now uses the exact closed endpoint and its
+interior one-sided derivatives. Derivatives outside a clamped coordinate are
+zero, with NaN input propagation retained. There is no approximate endpoint
+neighborhood snap to a different coefficient; physical proof still needs the
+coordinate clamping branches around the raw cell polynomials.

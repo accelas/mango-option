@@ -7,8 +7,8 @@ namespace mango::detail::proof {
 /// Extract one raw cubic B-spline knot cell (or its indicated partial) using
 /// the exact stored binary64 knots and coefficients. No financial transform,
 /// floor, EEP add-back, split, or public surface certification is performed.
-/// In particular this does not certify BSplineND's grid clamping or the
-/// evaluator's approximate right-endpoint snap; publication must cover them.
+/// This does not apply BSplineND's grid clamping; publication must bound
+/// those coordinate branches around the extracted raw polynomials.
 ///
 /// Each knot vector must be finite, sorted, clamped four times at either end,
 /// with interior multiplicity at most three (a continuous raw function).

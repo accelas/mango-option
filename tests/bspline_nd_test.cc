@@ -541,3 +541,29 @@ TEST_F(BSplineNDTest, EvalStillClampsInfQuery) {
     EXPECT_DOUBLE_EQ(spline->eval({inf}), spline->eval({1.0}));
     EXPECT_DOUBLE_EQ(spline->eval({-inf}), spline->eval({0.0}));
 }
+
+TEST_F(BSplineNDTest, ValuesAndGreeksDescribeTheSameClampedPolynomial) {
+    const std::vector<double> grid{0,1.0/3,2.0/3,1};
+    const std::vector<double> knots{0,0,0,0,1,1,1,1};
+    // Exact Bernstein coefficients of 3*x*x.
+    auto spline=BSplineND<double,1>::create({grid},{knots},{0,0,1,3});
+    ASSERT_TRUE(spline);
+    const double near_end=1-16*std::numeric_limits<double>::epsilon();
+    EXPECT_LT(spline->eval({near_end}),spline->eval({1}));
+    EXPECT_DOUBLE_EQ(spline->eval({near_end}),3*near_end*near_end);
+    EXPECT_DOUBLE_EQ(spline->eval_partial(0,{1}),6);
+    EXPECT_DOUBLE_EQ(spline->eval_second_partial(0,{1}),6);
+    EXPECT_DOUBLE_EQ(spline->eval_partial(0,{2}),0);
+    EXPECT_DOUBLE_EQ(spline->eval_second_partial(0,{2}),0);
+    EXPECT_DOUBLE_EQ(spline->eval_second_partial(0,{-1}),0);
+}
+
+TEST_F(BSplineNDTest, ClampedDerivativeDoesNotMaskNaNInAnotherCoordinate) {
+    const std::vector<double> grid{0,1.0/3,2.0/3,1};
+    const std::vector<double> knots{0,0,0,0,1,1,1,1};
+    auto spline=BSplineND<double,2>::create({grid,grid},{knots,knots},std::vector<double>(16,1));
+    ASSERT_TRUE(spline);
+    const auto nan=std::numeric_limits<double>::quiet_NaN();
+    EXPECT_TRUE(std::isnan(spline->eval_partial(0,{2,nan})));
+    EXPECT_TRUE(std::isnan(spline->eval_second_partial(0,{2,nan})));
+}
