@@ -53,7 +53,7 @@ public:
         DividendSpec dividends;  ///< Continuous yield + discrete schedule
 
         /// Grid specification:
-        /// - grid.moneyness: log-moneyness ln(S/K_ref)
+        /// - grid.moneyness: exact log-moneyness sites ln(S/K_ref)
         /// - grid.vol: volatility
         /// - grid.rate: rate
         IVGrid grid;
@@ -74,6 +74,12 @@ public:
         /// PDE grid accuracy for the fixed-expiry solve cohort.
         /// Default GridAccuracyParams{} gives ~100 spatial points.
         GridAccuracyParams pde_accuracy = {};
+
+        /// Exact physical remaining-maturity coordinates. When nonempty,
+        /// replaces count-based placement and must include every supported
+        /// segment's endpoints and at least four nodes per segment. Event
+        /// gaps are excluded; coordinates are never moved or discarded.
+        std::vector<double> tau_grid{};
     };
 
     /// Counts describe requested (tau, sigma, rate) spatial rows, including
@@ -89,11 +95,16 @@ public:
     static std::expected<BuildResult, PriceTableError>
     build_with_diagnostics(const Config& config);
 
+    /// Resolve exact physical sampling coordinates without solving the PDE.
+    /// Shared by adaptive seeding and construction; preserves event ownership.
+    static std::expected<std::vector<double>, PriceTableError>
+    make_tau_grid(const Config& config);
+
     /// Build a SegmentedSurface from the given configuration.
     ///
     /// Algorithm:
     ///   1. Filter dividends outside (0, T), sort, compute segment boundaries in τ.
-    ///   2. Expand moneyness grid downward to accommodate spot adjustment.
+    ///   2. Preserve supplied fit axes; estimate independent PDE spatial coverage.
     ///   3. Solve each (sigma, rate) end to end with exact mandatory samples.
     ///   4. Fit temporal regimes from raw snapshots, refusing missing rows.
     ///   5. Assemble into SegmentedSurface.

@@ -53,6 +53,9 @@ struct RefinementContext {
     OptionType option_type;
     SurfaceBounds bounds;         ///< fit domain (support incl. headroom)
     SurfaceBounds sample_bounds;  ///< user-facing measurement domain
+    /// Admitted physical tau intervals for measurement, excluding gaps.
+    /// nullopt means the full sample tau interval; an engaged empty set is invalid.
+    std::optional<std::vector<std::pair<double, double>>> maturity_intervals = std::nullopt;
 };
 
 /// Absolute holdout-error ceiling above which a candidate surface is treated
@@ -296,6 +299,11 @@ SegmentBoundaries compute_segment_boundaries(
     const std::vector<Dividend>& dividends, double maturity,
     double tau_min, double tau_max);
 
+/// Exact admitted physical tau intervals from a split, clipped to the
+/// requested measurement range. These are sampling domains, not query snaps.
+std::vector<std::pair<double, double>> admitted_maturity_intervals(
+    const TauSegmentSplit& split, double tau_min, double tau_max);
+
 /// Collapse gap segments into adjacent real segments for TauSegmentSplit.
 /// Each real segment's range extends to the midpoint of its adjacent gap.
 /// Only real segments are kept; gaps are absorbed.
@@ -329,6 +337,23 @@ struct SeededGrids {
     std::vector<double> vol;
     std::vector<double> rate;
 };
+
+/// Retain actual probe coordinates, preserving required seeds and endpoints.
+/// Tau intervals identify separate leaf domains; the point ceiling applies
+/// to each interval independently. Returned candidates must be measured on
+/// one fixed reference set before selecting a final financial surface.
+[[nodiscard]] std::expected<std::vector<SeededGrids>, PriceTableError>
+aggregate_refinement_grids(
+    std::span<const RefinementResult> probes, const SeededGrids& required,
+    size_t max_points_per_dim,
+    std::span<const std::pair<double, double>> tau_intervals = {});
+
+/// Bounded final retry: insert into retained grids without moving existing
+/// sites. Tau insertion occurs within each supplied temporal leaf interval.
+[[nodiscard]] std::expected<SeededGrids, PriceTableError>
+refine_aggregate_grids(
+    const SeededGrids& retained, size_t max_points_per_dim,
+    std::span<const std::pair<double, double>> tau_intervals = {});
 
 /// Seed the working grids over the fit domain exactly as `run_refinement`
 /// does (user knots where given, linspace otherwise, moneyness padded to
@@ -378,6 +403,7 @@ namespace detail {
 struct ValidationPoint {
     std::array<double, 4> coords{};  ///< m, tau, sigma, rate
     double strike = 0.0;
+    double spot = 0.0;  ///< physical S, independent of the numerical build anchor
     ErrorRefs refs;
 };
 
@@ -477,12 +503,23 @@ void scan_monotonicity(const std::vector<ValidationPoint>& points,
 
 }  // namespace detail
 
-/// Resolve K_ref values from a MultiKRefConfig.
-/// If config.K_refs is non-empty, returns them sorted.
-/// Otherwise generates K_ref_count log-spaced values spanning
-/// [spot*(1-span), spot*(1+span)].
+/// Validate an explicit numerical support set without inventing a published
+/// domain. Returns a sorted copy, preserving every input value exactly.
 [[nodiscard]] std::expected<std::vector<double>, PriceTableError>
-resolve_k_refs(const MultiKRefConfig& config, double spot);
+validate_k_ref_values(std::span<const double> values, size_t maximum_count);
+
+/// Cheap reference-request validation. Explicit values are preserved and
+/// sorted after finite/positive/unique/coverage checks. Automatic requests
+/// receive a covering seed within their ceiling; build-time measurements
+/// choose final density. The requested absolute interval is authoritative.
+[[nodiscard]] std::expected<std::vector<double>, PriceTableError>
+resolve_k_refs(const MultiKRefConfig& config, const StrikeBounds& bounds);
+
+/// Preserve the requested log-moneyness, volatility and rate endpoints.
+/// Remaining life spans (0, maturity]; zero is an analytical construction row.
+[[nodiscard]] std::expected<SurfaceBounds, PriceTableError>
+requested_segmented_domain(const IVGrid& domain, double maturity,
+                           std::optional<MoneynessBounds> ratios = std::nullopt);
 
 /// Expand domain bounds for segmented (discrete-dividend) surface building.
 ///

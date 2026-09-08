@@ -226,11 +226,20 @@ bool build_factory_config(const MangoIvFactoryConfig* c,
     dd.maturity = d->maturity;
     if (!build_dividends(d->dividends, d->n_dividends, dd.discrete_dividends, err))
       return false;
+    // Transitional ABI slots: only the legacy automatic defaults have a
+    // meaning now. Never reinterpret a caller's count/span as new limits.
+    if (d->kref_config.n_K_refs == 0 &&
+        ((d->kref_config.K_ref_count != 0 && d->kref_config.K_ref_count != 11) ||
+         d->kref_config.K_ref_span != 0.3)) {
+      set_err(err, MANGO_ERR_VALIDATION, "legacy reference count/span controls are unsupported");
+      return false;
+    }
+    if ((d->kref_config.n_K_refs > 0 && d->kref_config.K_refs == nullptr) ||
+        d->kref_config.n_K_refs > dd.kref_config.max_references) {
+      set_err(err, MANGO_ERR_VALIDATION, "invalid explicit reference array or count");
+      return false;
+    }
     dd.kref_config.K_refs = to_vec(d->kref_config.K_refs, d->kref_config.n_K_refs);
-    dd.kref_config.K_ref_count =
-        (d->kref_config.n_K_refs == 0 && d->kref_config.K_ref_count <= 0)
-            ? 11 : d->kref_config.K_ref_count;
-    dd.kref_config.K_ref_span = d->kref_config.K_ref_span;
     out.discrete_dividends = dd;
   }
   return true;

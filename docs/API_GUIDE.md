@@ -583,8 +583,8 @@ Chebyshev construction uses one end-to-end PDE solve per parameter pair,
 with the contractual horizon and exact mandatory snapshot times. Each leaf
 uses the same local-time origin as its `TauSegmentSplit` router.
 
-Manual segmented Chebyshev defaults use CC levels `{8,3,2,2}` (257
-moneyness, 9 time nodes per segment, 5 volatility, and 5 rate nodes).
+Manual segmented Chebyshev defaults use CC levels `{8,4,2,2}` (257
+moneyness, 17 time nodes per segment, 5 volatility, and 5 rate nodes).
 Explicit levels supplied to `ChebyshevSegmentedBuilder::build` or
 `build_chebyshev_segmented_manual` are honored. See the
 [measured default accuracy and cost](MATHEMATICAL_FOUNDATIONS.md#manual-chebyshev-defaults)
@@ -645,7 +645,21 @@ mango::IVSolverFactoryConfig config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
-The moneyness grid and the `K_refs` must agree: the assembled surface blends K_ref-struck prices linearly in strike, so the K_refs must span **and resolve** the strike range the moneyness grid implies — `S/K ∈ [0.92, 1.08]` means strikes in `[92.6, 108.7]`, served by K_refs at 2.5% spacing across `[90, 110]`. This manual path has no viability gate (that arrives with `.adaptive`), so config coherence is the caller's job here: an incoherent pairing builds a surface and prices off it rather than refusing.
+Segmented tables publish the requested moneyness, volatility and rate
+endpoints, with positive remaining life `(0,T0]` subject to event exclusions.
+Numerical support expansion does not enlarge those query ranges. The `tau=0`
+construction row is the exact intrinsic payoff and is not a pricing query.
+Original ratio endpoints survive conversion to log coordinates, so an input
+ratio of `0.1` admits the physical endpoint `S=10, K=100`; the next quote
+below it remains outside.
+
+The supported absolute strike interval is independent of moving spot. Unless
+`strike_bounds` is supplied, it is derived from the build spot and requested
+ratios: `S/K ∈ [0.92,1.08]` at spot100 requests `[100/1.08,100/0.92]`.
+Explicit references must be finite, positive, unique and cover that interval;
+invalid sets fail before solving and are never repaired. Reference blending
+uses positive linear weights in absolute strike and maps each query spot to
+`S*K_ref/K`. Numerical support references do not widen the published domain.
 
 The factory dispatches on two orthogonal variants:
 
@@ -725,7 +739,13 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 ### Discrete Dividends with Adaptive Grid
 
-Adaptive grid also works with discrete dividends. The builder probes 2–3 representative K_ref values using segmented PDE surfaces, takes per-axis maximum grid sizes across probes, then builds all segments with a uniform grid:
+Adaptive grid also works with discrete dividends. The builder retains the
+actual refined coordinates from representative reference-strike probes.
+It uses their union within the point ceilings, or evaluates a bounded set of
+seed-preserving alternatives when that union is too large. Retries insert
+points into retained grids. Tau positions stay in their own dividend regimes;
+`max_points_per_dim` applies to each leaf axis, while total snapshot rows are
+reported separately. No uniform reconstruction from grid sizes occurs:
 
 ```cpp
 mango::IVSolverFactoryConfig config{

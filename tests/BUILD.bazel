@@ -1,4 +1,14 @@
 # SPDX-License-Identifier: MIT
+cc_test(
+    name = "reference_selection_test",
+    size = "small",
+    srcs = ["reference_selection_test.cc"],
+    deps = [
+        "//src/option/table:reference_selection",
+        "@googletest//:gtest_main",
+    ],
+)
+
 
 # Shared LCP enumeration/reference-solve test helpers (Task 1 + Task 9,
 # issues #439/#455): used by thomas_solver_lcp_test here and by
@@ -1189,7 +1199,10 @@ cc_test(
     size = "small",
     srcs = ["adaptive_refinement_unit_test.cc"],
     deps = [
+        "//src/math/bspline:bspline_collocation",
+        "//src/math/bspline:bspline_nd",
         "//src/option:american_option",
+        "//src/option:european_option",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:adaptive_metrics",
         "//src/option/table:adaptive_refinement",
@@ -1256,6 +1269,7 @@ cc_test(
         "//src/option/table/chebyshev:chebyshev_surface",
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:american_option",
+        "//src/option:european_option",
         "//src/option:american_option_batch",
         "//src/option:interpolated_iv_solver",
         "//src/option:option_grid",
@@ -1494,7 +1508,9 @@ cc_test(
     # Includes corrected raw-dividend fitting/Greek regressions (~158s).
     size = "large",
     srcs = ["segmented_price_table_builder_test.cc"],
+    data = ["data/bspline_458_dividend_axis.txt"],
     deps = [
+        "//src/option:european_option",
         "//src/option/table/bspline:bspline_segmented_builder",
         "@googletest//:gtest_main",
     ],

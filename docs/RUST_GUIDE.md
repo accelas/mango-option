@@ -375,18 +375,17 @@ let mut config = config;
 config.discrete_dividends = Some(DiscreteDividendConfig {
     maturity: 1.0,
     dividends: vec![Dividend { calendar_time: 0.5, amount: 2.0 }],
-    kref_config: MultiKRef {
-        k_refs: vec![90.0, 100.0, 110.0],
-        ..MultiKRef::default()
-    },
+    kref_config: MultiKRef::default(),
 });
 let solver = InterpIvSolver::new(&config)?;
 ```
 
-Queries against this solver must carry the **same** `discrete_dividends` in their
-`OptionSpec`. `MultiKRef::default()` supplies sensible `k_ref_count` /
-`k_ref_span` defaults; an empty `k_refs` lets the builder pick reference strikes
-automatically.
+An empty query dividend schedule uses the stored model. A supplied schedule
+must match that model rolled to the query's remaining maturity.
+`MultiKRef::default()` requests automatic reference selection over the requested
+strike domain. An explicit `k_refs` array must cover that full domain and is
+preserved exactly. Retired count/span controls are no longer part of the safe
+Rust configuration; the temporary C ABI slots retain only their old defaults.
 
 ## Error handling
 
@@ -443,7 +442,7 @@ match price_american(&params) {
 | `IvGrid` | Grid axes: `moneyness` (S/K), `vol`, `rate` (each >= 4 points) |
 | `InterpSolverConfig` | Newton config: `max_iter`, `tolerance`, `sigma_min`, `sigma_max`, `vega_threshold` |
 | `AdaptiveGridParams` | Adaptive refinement: `target_iv_error`, `max_iter`, `max_points_per_dim`, … |
-| `MultiKRef` | Reference strikes: `k_refs`, `k_ref_count`, `k_ref_span` |
+| `MultiKRef` | Reference strikes: explicit `k_refs` or domain-based automatic selection |
 | `DiscreteDividendConfig` | `maturity`, `dividends`, `kref_config` |
 | `InterpIvSolver` | Interpolated IV solver (`new`, `solve`, `solve_batch`); `Send + Sync` |
 | `BatchResult` | Batch output: `results: Vec<Result<IvSuccess, Error>>`, `failed: usize` |

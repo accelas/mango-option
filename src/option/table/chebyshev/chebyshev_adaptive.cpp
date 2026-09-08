@@ -280,7 +280,8 @@ build_segment_leaves(
     std::span<const double> m_nodes,
     std::span<const double> tau_nodes,
     std::span<const double> sigma_nodes,
-    std::span<const double> rate_nodes)
+    std::span<const double> rate_nodes,
+    std::optional<OptionType> payoff_type)
 {
     // Map tau nodes to segments (skip gaps in mapping)
     const size_t n_seg = seg_bounds.size() - 1;
@@ -355,16 +356,18 @@ build_segment_leaves(
             for (size_t ri = 0; ri < Nr; ++ri) {
                 double rate = rate_nodes[ri];
                 for (size_t jt = 0; jt < Nt_seg; ++jt) {
-                    auto* spline = cache.get_slice(
-                        sigma, rate, tau_idx[jt]);
-                    if (!spline) {
-                        // A slice needed here was never solved or failed its
-                        // spline build — fail loudly, never zero-fill (D6)
+                    const bool payoff = payoff_type && tau_nodes[tau_idx[jt]] == 0.0;
+                    auto* spline = payoff ? nullptr : cache.get_slice(sigma, rate, tau_idx[jt]);
+                    if (!payoff && !spline) {
                         return std::unexpected(PriceTableError{
                             PriceTableErrorCode::ExtractionFailed});
                     }
                     for (size_t mi = 0; mi < Nm; ++mi) {
-                        double v_over_k = spline->eval(m_nodes[mi]);
+                        // The tau-zero construction row is the exact payoff,
+                        // independent of the solver's spatial IC smoothing.
+                        double v_over_k = payoff
+                            ? intrinsic_value(std::exp(m_nodes[mi]), 1.0, *payoff_type)
+                            : spline->eval(m_nodes[mi]);
                         size_t flat =
                             mi * (Nt_seg * Ns * Nr)
                             + jt * (Ns * Nr)
@@ -585,7 +588,7 @@ static BuildFn make_segmented_chebyshev_build_fn(
         auto leaves = detail::build_segment_leaves(
             cache, config.K_ref, config.seg_boundaries, config.seg_is_gap,
             /*include_gaps=*/true,
-            m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+            m_nodes, tau_nodes, sigma_nodes, rate_nodes, config.option_type);
         if (!leaves.has_value()) {
             return std::unexpected(leaves.error());
         }
@@ -677,7 +680,7 @@ build_chebyshev_segmented_pieces(
     auto leaves = detail::build_segment_leaves(
         cache, K_ref, seg_bounds, seg_is_gap,
         /*include_gaps=*/false,
-        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes, option_type);
     if (!leaves.has_value()) {
         return std::unexpected(leaves.error());
     }
@@ -854,7 +857,7 @@ ChebyshevSegmentedBuilder::create(
         config.strike_bounds, config.spot, domain.moneyness);
     if (!strikes) return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
 
-    auto K_refs = resolve_k_refs(config.kref_config, config.spot);
+    auto K_refs = resolve_k_refs(config.kref_config, *strikes);
     if (!K_refs) return std::unexpected(K_refs.error());
 
     // Support domain: the user's ranges widened for the cumulative discrete
@@ -864,11 +867,8 @@ ChebyshevSegmentedBuilder::create(
         config.discrete_dividends, K_refs->front());
     if (!dom) return std::unexpected(dom.error());
 
-    // Measurement domain: the same construction *without* the dividend
-    // widening (spec D2 -- accuracy is measured only where the user can
-    // query, never in the support band).
-    auto sample_dom = expand_segmented_domain(
-        domain, config.maturity, config.dividend_yield, {}, K_refs->front());
+    // Publication and validation use the requested physical ranges.
+    auto sample_dom = requested_segmented_domain(domain, config.maturity, config.ratio_bounds);
     if (!sample_dom) return std::unexpected(sample_dom.error());
 
     sample_dom->strike_bounds = *strikes;
@@ -981,7 +981,7 @@ ChebyshevSegmentedBuilder::build(std::array<size_t, 4> cc_levels) const
     }
 
     auto assembled = build_all_krefs(
-        m_nodes, tau_nodes, sigma_nodes, rate_nodes, domain_);
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes, sample_domain_);
     if (!assembled) return std::unexpected(assembled.error());
     return std::move(assembled->surface);
 }
@@ -1048,6 +1048,9 @@ ChebyshevSegmentedBuilder::build_adaptive(
     // CC-extended node span, the sample domain is the user's own range
     // (sample_domain_ -- domain_ still carries the discrete-dividend
     // widening, which is support, not a queryable range).
+    const auto tau_split = make_tau_split_from_segments(seg_bounds_, seg_is_gap_, K_refs_.front());
+    const auto admitted_times = admitted_maturity_intervals(
+        tau_split, sample_domain_.tau_min, sample_domain_.tau_max);
     RefinementContext ctx{
         .spot = config_.spot,
         .dividend_yield = config_.dividend_yield,
@@ -1059,6 +1062,7 @@ ChebyshevSegmentedBuilder::build_adaptive(
             .rate_min = state.rate_lo, .rate_max = state.rate_hi,
         },
         .sample_bounds = sample_domain_,
+        .maturity_intervals = admitted_times,
     };
 
     // Level counters roll back with the grids on every backtracking reset

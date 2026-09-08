@@ -3,19 +3,23 @@
 
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/strike_bounds.hpp"
+#include "mango/option/table/moneyness_bounds.hpp"
 #include <array>
 #include <vector>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 namespace mango {
+
+struct ReferenceSelectionResult;
 
 /// Configuration for multi-K_ref surface construction.
 /// Used by both manual and adaptive grid builders.
 struct MultiKRefConfig {
     std::vector<double> K_refs;   ///< explicit list; if empty, use auto selection
-    int K_ref_count = 11;         ///< used when K_refs is empty
-    double K_ref_span = 0.3;      ///< +/-span around spot for auto mode (log-spaced)
+    size_t max_references = 65;   ///< strict ceiling, including explicit refs
+    size_t max_selection_rounds = 7;  ///< seed counts as the first measured candidate
 };
 
 /// Grid specification for IV solver: explicit grid points for each axis.
@@ -42,7 +46,9 @@ struct AdaptiveGridParams {
     /// Maximum refinement iterations (default: 8)
     size_t max_iter = 8;
 
-    /// Maximum points per dimension ceiling (default: 160, High profile)
+    /// Maximum points per interpolant leaf dimension (default: 160).
+    /// Segmented tau axes obey this ceiling separately in each regime;
+    /// the concatenated physical snapshot vector can be longer.
     size_t max_points_per_dim = 160;
 
     /// Minimum moneyness grid points (default: 60)
@@ -77,6 +83,8 @@ struct SegmentedAdaptiveConfig {
     double maturity;
     MultiKRefConfig kref_config;
     std::optional<StrikeBounds> strike_bounds = std::nullopt;
+    /// Original ratio endpoints retained by factory adapters; log APIs may omit.
+    std::optional<MoneynessBounds> ratio_bounds = std::nullopt;
 };
 
 /// Per-iteration diagnostics
@@ -92,7 +100,9 @@ struct SegmentedAdaptiveConfig {
 ///     loop was skipped and only its seed grid sizes were contributed.
 struct IterationStats {
     size_t iteration = 0;                    ///< Iteration number (0-indexed)
-    std::array<size_t, 4> grid_sizes = {};   ///< [m, tau, sigma, r] sizes
+    /// [m, tau, sigma, r] working sizes. Segmented tau counts the complete
+    /// physical sampling vector; individual temporal leaves obey the cap.
+    std::array<size_t, 4> grid_sizes = {};
     size_t pde_solves_table = 0;             ///< Slices computed for table
     size_t pde_solves_validation = 0;        ///< Fresh solves for validation
     double max_error = 0.0;                  ///< Max IV error observed
@@ -127,6 +137,9 @@ struct BuildDiagnostics {
     /// Per-iteration forensics; see IterationStats for the refined_dim
     /// sentinels (-2 final rebuild, -3 skipped probe).
     std::vector<IterationStats> iterations;
+    /// Reference-selection history, shared by manual and adaptive builds.
+    /// Independent of table ownership; null when no reference selection ran.
+    std::shared_ptr<const ReferenceSelectionResult> reference_selection;
 };
 
 }  // namespace mango

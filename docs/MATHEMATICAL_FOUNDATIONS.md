@@ -618,48 +618,42 @@ by the same remaining-life rule.
 
 ### Manual Chebyshev defaults
 
-Manual segmented Chebyshev construction uses CC levels `{8,3,2,2}`: 257
-moneyness, 9 time nodes per real segment, 5 volatility, and 5 rate nodes.
-The previous default was `{5,3,2,1}`, with 33 moneyness nodes; the old
-nine-moneyness-node explanation of issue #486 was stale. Explicit manual
-levels remain constraints. Volatility and rate nodes span their resolved
-domains without extra headroom; moneyness retains one nominal interval of
-padding beyond the dividend-widened domain. Extending parameter support can
-introduce exercise transitions outside the requested domain and degrade the
-global polynomial inside it. Adaptive levels and headroom are unchanged.
+Manual segmented Chebyshev construction uses CC levels `{8,4,2,2}`: 257
+moneyness, 17 time nodes per real segment, 5 volatility, and 5 rate nodes.
+Explicit manual levels remain constraints. Volatility and rate nodes span
+the numerical support domain without extra headroom; moneyness retains one
+nominal interval of padding beyond the dividend-widened domain. Published
+query bounds preserve the requested physical ranges independently of that
+support. The first segment includes an exact analytical intrinsic row at
+zero remaining life; pricing queries require positive remaining life.
 
-The `manual_chebyshev_accuracy_test` regression measures 258 fixed-expiry
-queries with K=K_ref=100, S from 50 to 200, remaining maturity .01 to .25,
-volatility .05 to .15, rate .05, zero continuous yield, and a cash dividend
-of 1 at anchor offset .1. Both option types, off-node volatility, narrow
-exercise transitions, tails, and both sides of the event are included.
-High/Ultra direct-oracle disagreement is at most 4.59e-5 quote units; 36
-cardinal probes separately keep the sampled PDE error below 1.67e-5.
+The `manual_chebyshev_accuracy_test` regression measures the same 258
+fixed-expiry queries with K=K_ref=100, S from 50 to 200, remaining maturity
+.01 to .25, volatility .05 to .15, rate .05, zero continuous yield, and a cash
+dividend of 1 at anchor offset .1. Both option types, off-node volatility,
+narrow exercise transitions, tails, and both sides of the event are included.
+The fixture now declares its sigma interval and singleton strike interval
+explicitly; neither the physical population nor its one-cent threshold changed.
 
-| Measured price error | Previous defaults | Current defaults |
+Adding actual support down to zero exposed near-expiry temporal fit error at
+the previous 9-node temporal default. Increasing only the default time level
+restored the one-cent criterion:
+
+| Price error on the unchanged population | 9 time nodes with tau0 | 17 time nodes with tau0 |
 |---|---:|---:|
-| Put maximum | .608521 | .005371 |
-| Call maximum | .287317 | .003597 |
-| Put RMS | .162779 | .000899 |
-| Call RMS | .083524 | .000645 |
-| Queries exceeding .01 | 164 / 258 | 0 / 258 |
+| Put maximum | .0247195 | .00533827 |
+| Call maximum | .0248180 | .00417915 |
+| Put RMS | .00317816 | .00102063 |
+| Call RMS | .00308597 | .000817307 |
 
-For this one-reference, two-segment build, stored values increase from 8,910
-to 115,650 doubles (about 70 to 904 KiB), and parameter-pair PDE solves from
-15 to 25. Three paired optimized put builds with two OpenMP threads measured
-the following medians and ranges. Each query run evaluated the same 10,000
-queries cycling 127 positions inside the domain, after a short warmup.
-
-| Timing | Previous median (range) | Current median (range) |
-|---|---:|---:|
-| Build, seconds | 29.15 (27.77–29.55) | 53.84 (52.29–54.46) |
-| Query, microseconds | 2.34 (2.27–2.45) | 27.67 (25.92–27.73) |
-
-These shared-host workload measurements are not uniform accuracy or latency
-guarantees. This price regression does not
-establish Greek accuracy, IV identifiability, monotonicity certification, or
-off-reference-strike accuracy. Generic manual requested-accuracy refusal
-belongs to the acceptance/certification gates (#462/#459).
+All 258 queries pass the current price threshold. Cardinal rows are checked
+separately against the direct FDE oracle at positive time and analytical
+intrinsic at zero. For this one-reference, two-segment build, storage grows
+from 115,650 to 218,450 doubles when time nodes increase from 9 to 17; the
+25 parameter-pair PDE solves are unchanged. This population does not establish
+a uniform guarantee near expiry, Greek accuracy, IV identifiability,
+monotonicity certification, or off-reference-strike accuracy. Generic manual
+requested-accuracy refusal belongs to the acceptance/certification gates.
 
 ### Maturity Partitioning
 
@@ -697,21 +691,28 @@ Cash dividends break the scale invariance that American options normally have in
 
 ### Adaptive Grid Refinement for Segmented Surfaces
 
-The adaptive grid builder (section 10) extends to segmented surfaces via a probe-and-max strategy. Rather than building the full multi-K_ref surface at each refinement iteration, the builder:
+Segmented adaptation refines single-reference probe surfaces and retains their
+actual four-dimensional coordinates. The final assembly uses a sorted union of
+those coordinates when it fits the point ceilings. If a union is too large,
+the builder forms a bounded deterministic set of candidates from the selected
+positions, preserving required seeds and support endpoints. It measures each
+candidate against the same cached independent references before choosing one.
 
-1. **Selects 2–3 probe K_ref values** from the full list: the lowest, highest, and the one closest to ATM (deduplicated if ATM coincides with an endpoint).
+Tau coordinates are physical remaining maturities, grouped by their actual
+temporal regimes. Refinement and retry insertion never cross an excluded
+dividend gap. The point ceiling applies separately to each interpolant leaf's
+tau axis; the total physical snapshot vector can therefore exceed that ceiling.
+The returned `tau_grid` records exact positions, and `tau_points_per_segment`
+reports the maximum actual count among leaves.
 
-2. **Runs independent refinement loops** on each probe, building single-K_ref `BSplineSegmentedSurface` instances. Each probe validates at strike = K_ref (the only strike that single-K_ref raw segments can price exactly).
+A final retry inserts coordinates into the selected grids without replacing
+existing positions. If no bounded candidate is viable, construction refuses.
+No general monotonic-accuracy claim is made as the number of nodes grows.
 
-3. **Takes the per-axis maximum** grid sizes across probes — the worst-case K_ref determines each axis.
-
-4. **Builds the full `SegmentedMultiKRefSurface`** once, using uniform grids at the maximum sizes with `skip_moneyness_expansion = true` (the domain was pre-expanded in step 1).
-
-5. **Final validation** at arbitrary strikes against fresh PDE reference prices. If the error exceeds the target, all grids are bumped by one refinement step and the surface is rebuilt (one retry).
-
-The moneyness domain is pre-expanded before probing using the worst-case (smallest) K_ref: $m_\text{min}' = \max(m_\text{min} - \sum D_k / K_\text{ref,min},\; 0.01)$. This ensures all K_refs share the same expanded domain.
-
-The tau axis is refined via the `tau_points_per_segment` scalar (minimum 4 for B-spline), which the refinement loop increments when tau is the worst dimension.
+The raw segmented sampler consumes its supplied interpolation axes exactly.
+It adds no interpolation knots for dividend jumps: the PDE grid estimator
+owns numerical spatial coverage and jump support. Adaptive builders own any
+additional fit support and must include it in their interpolation point budgets.
 
 ---
 
