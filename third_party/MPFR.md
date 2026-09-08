@@ -33,3 +33,9 @@ MPFR is LGPL-3.0-or-later; GMP offers its upstream LGPL/GPL licensing choices.
 Retain their distributed licensing files and satisfy the applicable source
 and relinking requirements when shipping binaries that link the proof module.
 The new kernel is not yet linked into the public pricing or binding libraries.
+
+Upstream MPFR's own C test harness also needs its GNU/POSIX declarations under
+this toolchain. Its arithmetic, exp/log/sqrt, conversion, and subnormal tests
+pass with `--per_file_copt=external/mpfr.*/tests/.*@-D_GNU_SOURCE`; the flag is
+restricted to upstream test sources. The project's proof tests and binding
+builds pass without that test-only flag.
