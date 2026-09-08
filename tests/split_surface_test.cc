@@ -246,3 +246,13 @@ TEST(SplitSurfaceTest, TypedGreeksRejectUnsupportedSigmaRateAndModel) {
     params.dividend_yield = .01;
     rejected(params);
 }
+
+TEST(SplitSurfaceTest, RequestedTimeBoundsDoNotAdmitMissingEdgeSegments) {
+    using Segmented = SplitSurface<SmoothHomogeneousPrice, TauSegmentSplit>;
+    PriceTable<Segmented> table(Segmented(std::vector<SmoothHomogeneousPrice>(1),
+        TauSegmentSplit({.2}, {.8}, {0.}, {.6}, 100.)),
+        SurfaceBounds{-.3, .3, 0., 1., .1, .4, .01, .1}, OptionType::CALL, 0.);
+    EXPECT_FALSE(table.contains_maturity(.1));
+    EXPECT_TRUE(table.contains_maturity(.5));
+    EXPECT_FALSE(table.contains_maturity(.9));
+}
