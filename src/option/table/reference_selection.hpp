@@ -116,7 +116,11 @@ struct ReferenceSelectionFailure {
 ///
 /// Accepting decisions require complete ideal evidence (at least one measured
 /// or structurally exact row, no unresolved/refused/untested rows). Adequate
-/// may instead use complete total evidence with total_target_met=true.
+/// may instead use complete total evidence with total_target_met=true: every
+/// composed price row must be measured, and composed IV evidence cannot use
+/// ideal structural identities. The callback owns which targets were requested;
+/// an absent or legitimately filtered IV channel need not prevent price-only
+/// acceptance.
 /// IvUnmeasured may instead use a complete measured composed-price assessment;
 /// missing composed IV observations remain untested/unresolved, not structurally
 /// exact or filtered by an ideal-blend identity. This makes no whole-IV claim.

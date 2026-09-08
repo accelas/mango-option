@@ -48,6 +48,11 @@ bool measured_evidence(const ReferenceAccuracySummary& summary) {
         || (summary.iv && summary.iv->measured > 0);
 }
 
+bool complete_composed_price(const ReferenceAccuracySummary& summary) {
+    return summary.price && summary.price->requested > 0
+        && summary.price->measured == summary.price->requested;
+}
+
 bool valid_metrics(const ReferenceCandidateMetrics& metrics) {
     if (!std::isfinite(metrics.elapsed_seconds) || metrics.elapsed_seconds < 0.0) return false;
     for (const auto* channel : {&metrics.ideal_blend, &metrics.fit, &metrics.total}) {
@@ -56,7 +61,9 @@ bool valid_metrics(const ReferenceCandidateMetrics& metrics) {
     switch (metrics.decision) {
         case ReferenceCandidateDecision::Adequate:
             return complete_evidence(metrics.ideal_blend)
-                || (metrics.total_target_met == true && complete_evidence(metrics.total));
+                || (metrics.total_target_met == true && complete_composed_price(metrics.total)
+                    && complete_evidence(metrics.total)
+                    && (!metrics.total.iv || metrics.total.iv->structurally_exact == 0));
         case ReferenceCandidateDecision::RefineReferences:
         case ReferenceCandidateDecision::ThresholdAmbiguous:
             return measured_evidence(metrics.ideal_blend);
@@ -67,8 +74,7 @@ bool valid_metrics(const ReferenceCandidateMetrics& metrics) {
             // adequacy without an IV claim. Ideal structural identities do
             // not qualify composed prices or fill missing IV observations.
             return complete_evidence(metrics.ideal_blend)
-                || (metrics.total.price && metrics.total.price->requested > 0
-                    && metrics.total.price->measured == metrics.total.price->requested);
+                || complete_composed_price(metrics.total);
         case ReferenceCandidateDecision::FitLimited:
             return complete_evidence(metrics.ideal_blend);
     }
