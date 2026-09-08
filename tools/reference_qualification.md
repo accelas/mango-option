@@ -27,8 +27,8 @@ python3 tools/reference_qualification.py \
   --mode inventory
 ```
 
-Use `--mode analytic` to evaluate every eligible no-future-cash, q=0,
-nonnegative-rate CALL analytically. Use `--mode all --ids-file pilot-ids.txt
+Use `--mode analytic` to evaluate every eligible no-future-cash analytic
+CALL/PUT reference. Use `--mode all --ids-file pilot-ids.txt
 --audit-analytic --quantlib --rounds 1` for a predeclared pilot. The ID file
 contains one immutable manifest ID per line. Selection is recorded before
 any solve; it changes execution scheduling, never the denominator.
@@ -50,13 +50,15 @@ solver-grid defect. Do not interpret the initial pilot as a passing subset.
 
 **Analytic anchors.** A separate Boost.Multiprecision Black–Scholes calculation
 at 50 and 100 decimal digits prices q=0, r>=0 CALLs with no future cash payments.
-American and European values coincide in this regime. The worker returns price,
+It also prices no-future-cash PUTs when r<=0 and r<=q, including boundary
+equalities, by [Healy, Proposition 2](https://arxiv.org/pdf/2109.15157).
+American and European values coincide in these regimes. The worker returns price,
 delta, gamma, vega, theta, and rho, with cross-precision disagreement, binary64
 conversion error, and a conservative floating-point allowance. The identity is
 explicitly refused outside its regime. At an exact cash event, any such theta
 is labelled as post-calendar one-sided evidence; an ordinary two-sided theta
 across the jump is not defined. Rho at r=0 is labelled on the nonnegative-rate
-side of the analytic regime.
+side of the call regime (nonpositive-rate side for puts).
 
 **General American references.** Public `AmericanOptionSolver::create/solve`
 receives the manifest's exact binary64 physical OptionSpec and frozen rolled
@@ -84,9 +86,13 @@ bound. High/Ultra comparison is an additional consistency check, not a substitut
 for independent space/time/domain refinement. Their difference is not a backend
 fit error and does not determine a new acceptance tolerance.
 
-**Vega and identifiability.** Vega uses three sigma bump sizes, each evaluated
+**Vega and identifiability.** Vega uses three sigma bump sizes (by default 1%, .5%, .25% of sigma), each evaluated
 on all three independent mesh ladders. Mesh and bump-size evidence remain
-separate. The price oracle must resolve <=.001 quote units. An IV-measurable
+separate. `--vega-bump-fraction` controls the largest bump; subsequent bumps
+halve it. Differences hidden by mesh uncertainty are labelled `mesh-limited`,
+not machine roundoff or independently resolved truncation. A wider bump sequence
+can expose the truncation trend without changing a price/IV acceptance budget.
+The price oracle must resolve <=.001 quote units. An IV-measurable
 point must additionally resolve <=2e-6 decimal volatility (0.02 absolute-IV bp)
 using the lower numerically supported vega endpoint. A .001 price check alone
 cannot establish the IV budget.

@@ -36,20 +36,30 @@ std::string quote(const std::string& value) {
 }
 
 template<class R>
-std::array<R, 6> analytic_call(const mango::PricingParams& p) {
+std::array<R, 6> analytic_european(const mango::PricingParams& p) {
     const R S(p.spot), K(p.strike), T(p.maturity), sigma(p.volatility);
-    const R r(std::get<double>(p.rate));
-    const R root_t = sqrt(T), discount = exp(-r * T);
-    const R d1 = (log(S / K) + (r + sigma * sigma / 2) * T) / (sigma * root_t);
+    const R r(std::get<double>(p.rate)), q(p.dividend_yield);
+    const R root_t = sqrt(T), discount = exp(-r * T), yield_discount = exp(-q * T);
+    const R d1 = (log(S / K) + (r - q + sigma * sigma / 2) * T) / (sigma * root_t);
     const R d2 = d1 - sigma * root_t;
     const R sqrt_two = sqrt(R(2));
     const R n1 = boost::math::erfc(-d1 / sqrt_two) / 2;
     const R n2 = boost::math::erfc(-d2 / sqrt_two) / 2;
     const R density = exp(-d1 * d1 / 2) / sqrt(2 * boost::math::constants::pi<R>());
-    return {S * n1 - K * discount * n2, n1,
-            density / (S * sigma * root_t), S * root_t * density,
-            -S * density * sigma / (2 * root_t) - r * K * discount * n2,
-            K * T * discount * n2};
+    const R gamma = yield_discount * density / (S * sigma * root_t);
+    const R vega = S * yield_discount * root_t * density;
+    const R diffusion_theta = -S * yield_discount * density * sigma / (2 * root_t);
+    if (p.option_type == mango::OptionType::CALL) {
+        return {S * yield_discount * n1 - K * discount * n2, yield_discount * n1,
+                gamma, vega, diffusion_theta + q * S * yield_discount * n1 - r * K * discount * n2,
+                K * T * discount * n2};
+    }
+    // Evaluate negative tails directly; 1-Phi(d) loses deep-tail precision.
+    const R put_n1 = boost::math::erfc(d1 / sqrt_two) / 2;
+    const R put_n2 = boost::math::erfc(d2 / sqrt_two) / 2;
+    return {K * discount * put_n2 - S * yield_discount * put_n1, -yield_discount * put_n1,
+            gamma, vega, diffusion_theta - q * S * yield_discount * put_n1 + r * K * discount * put_n2,
+            -K * T * discount * put_n2};
 }
 
 long aligned_days(double years) {
@@ -111,12 +121,16 @@ void run(const std::string& line) {
     if (!valid) throw std::invalid_argument("invalid_option_spec_" + std::to_string(int(valid.error().code)));
     const auto start = Clock::now();
     if (provider == "analytic") {
-        if (type != 0 || rate < 0 || p.dividend_yield != 0 || !p.discrete_dividends.empty())
+        const bool call_identity = type == 0 && rate >= 0 && p.dividend_yield == 0;
+        // Healy (2021), Proposition 2: no early exercise when r<=0 and r<=q.
+        // This applies only without future cash dividends.
+        const bool put_identity = type == 1 && rate <= 0 && rate <= p.dividend_yield;
+        if ((!call_identity && !put_identity) || !p.discrete_dividends.empty())
             throw std::invalid_argument("analytic_regime_not_applicable");
         using Low = boost::multiprecision::cpp_dec_float_50;
         using High = boost::multiprecision::cpp_dec_float_100;
-        const auto low = analytic_call<Low>(p);
-        const auto high = analytic_call<High>(p);
+        const auto low = analytic_european<Low>(p);
+        const auto high = analytic_european<High>(p);
         const std::array<const char*, 6> names = {"price", "delta", "gamma", "vega", "theta", "rho"};
         std::cout << "{\"ok\":true,\"provider\":\"analytic-bsm-50-100\"";
         for (size_t i = 0; i < names.size(); ++i) {

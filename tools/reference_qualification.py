@@ -11,18 +11,20 @@ VEGA_FLOOR = 1e-4
 TV_RATIO_FLOOR = 1e-4
 
 
-def convergence(values, roundoff):
+def convergence(values, roundoff, *, floor_kind="roundoff"):
     """Conservative empirical Richardson evidence, not an error proof."""
     if len(values) != 3 or not all(math.isfinite(v) for v in values):
         return {"stable": False, "uncertainty": None, "reason": "nonfinite-or-incomplete"}
     d0, d1 = values[1] - values[0], values[2] - values[1]
     if max(abs(d0), abs(d1)) <= roundoff:
-        return {"stable": True, "uncertainty": roundoff, "reason": "roundoff-limited"}
+        return {"stable": True, "uncertainty": roundoff, "reason": f"{floor_kind}-limited"}
     if d0 * d1 <= 0 or abs(d1) >= 0.75 * abs(d0):
         return {"stable": False, "uncertainty": None, "reason": "noncontracting-or-oscillating"}
     ratio = abs(d1 / d0)
-    error = max(roundoff, 2 * abs(d1) * ratio / (1 - ratio))
+    tail = 2 * abs(d1) * ratio / (1 - ratio)
+    error = max(roundoff, tail)
     return {"stable": True, "uncertainty": error, "observed_ratio": ratio,
+            "unfloored_tail_estimate": tail, "resolution_floor": roundoff,
             "reason": "three-level-contracting"}
 
 
@@ -137,8 +139,12 @@ def audit_schedule(row):
 
 
 def analytic_eligible(row):
-    return (row["option_type"] == "CALL" and row["rate"] >= 0
-            and row["dividend_yield"] == 0 and not row["rolled_dividends"])
+    if row["rolled_dividends"]:
+        return False
+    if row["option_type"] == "CALL":
+        return row["rate"] >= 0 and row["dividend_yield"] == 0
+    return (row["option_type"] == "PUT" and row["rate"] <= 0
+            and row["rate"] <= row["dividend_yield"])
 
 
 def exact_cash_event(row):
@@ -207,6 +213,8 @@ def mesh_plan(row, round_index):
 
 
 def request_line(row, provider, grid=None):
+    if row["option_type"] not in ("CALL", "PUT"):
+        raise ValueError("unknown option type in reference request")
     grid = grid or {"kind": "H", "nx": 0, "nt": 0, "radius": 0, "alpha": 0}
     args = [provider, row["spot"], row["strike"], row["maturity"], row["volatility"],
             row["rate"], row["dividend_yield"], 0 if row["option_type"] == "CALL" else 1,
@@ -268,8 +276,8 @@ def controlled_price(worker, row, plan):
             "directions": directions, "observations": observations, "roundoff_floor": floor}
 
 
-def vega_reference(worker, row, plan):
-    hs = [row["volatility"] * 0.01 / (2 ** i) for i in range(3)]
+def vega_reference(worker, row, plan, bump_fraction=0.01):
+    hs = [row["volatility"] * bump_fraction / (2 ** i) for i in range(3)]
     values, errors, evidence = [], [], []
     for h in hs:
         up = dict(row, volatility=row["volatility"] + h)
@@ -292,12 +300,14 @@ def vega_reference(worker, row, plan):
                     "evidence": evidence, "reason": "vega-mesh-convergence"}
         values.append(finest_value)
         errors.append(sum(axis_errors))
-    bump = convergence(values, max(errors))
+    bump = convergence(values, max(errors), floor_kind="mesh")
     if not bump["stable"]:
         return {"status": "oracle-unresolved", "value": values[-1], "uncertainty": None,
                 "evidence": evidence, "bump": bump, "reason": "vega-bump-convergence"}
     return {"status": "qualified-numerical-sequence", "value": values[-1],
             "uncertainty": max(errors) + bump["uncertainty"],
+            "mesh_uncertainty": max(errors), "bump_uncertainty_allowance": bump["uncertainty"],
+            "bump_trend_observed": bump["reason"] == "three-level-contracting",
             "evidence": evidence, "bump": bump}
 
 
@@ -321,7 +331,7 @@ def ql_crosscheck(worker, row, round_index, direct):
     return result
 
 
-def general_reference(worker, row, rounds, quantlib):
+def general_reference(worker, row, rounds, quantlib, bump_fraction=0.01):
     profiles = {kind: worker.query(row, grid={"kind": kind, "nx": 0, "nt": 0, "radius": 0, "alpha": 0})
                 for kind in ("H", "U")}
     history = []
@@ -337,7 +347,7 @@ def general_reference(worker, row, rounds, quantlib):
                 price["uncertainty"] + profile_noise + price["roundoff_floor"])
         price_ok = (price["stable"] and profile_compatible
                     and price_qualified(price["price"], intrinsic, price["uncertainty"]))
-        vega = vega_reference(worker, row, plan) if price_ok else {
+        vega = vega_reference(worker, row, plan, bump_fraction) if price_ok else {
             "status": "oracle-unresolved", "value": None, "uncertainty": None, "reason": "price-first"}
         iv = iv_eligibility(price["price"] or 0, intrinsic, row["strike"],
                             price["uncertainty"] if price_ok else None,
@@ -372,7 +382,8 @@ def qualify(worker, row, args):
         if not a.get("ok"):
             outcome = {"status": "oracle-unresolved", "price_status": "oracle-unresolved", "error": a}
         else:
-            intrinsic = max(row["spot"] - row["strike"], 0)
+            intrinsic = max((row["spot"] - row["strike"]) *
+                            (1 if row["option_type"] == "CALL" else -1), 0)
             iv = iv_eligibility(a["price"], intrinsic, row["strike"], a["price_error"], a["vega"], a["vega_error"])
             price_ok = price_qualified(a["price"], intrinsic, a["price_error"])
             outcome = {"status": "qualified" if price_ok and iv["status"] != "oracle-unresolved" else "oracle-unresolved",
@@ -385,13 +396,14 @@ def qualify(worker, row, args):
                 outcome["greeks"]["theta"].update(status="one-sided-analytic",
                     calendar_side="post", two_sided_defined=False)
             if row["rate"] == 0:
-                outcome["greeks"]["rho"]["regime_side"] = "nonnegative-rate-side"
+                outcome["greeks"]["rho"]["regime_side"] = ("nonnegative-rate-side"
+                    if row["option_type"] == "CALL" else "nonpositive-rate-side")
             if args.audit_analytic:
-                fd = general_reference(worker, row, args.rounds, args.quantlib)
+                fd = general_reference(worker, row, args.rounds, args.quantlib, args.vega_bump_fraction)
                 fd["analytic_error"] = abs(fd["price"] - a["price"]) if fd.get("price") is not None else None
                 outcome["fd_audit"] = fd
     else:
-        outcome = general_reference(worker, row, args.rounds, args.quantlib)
+        outcome = general_reference(worker, row, args.rounds, args.quantlib, args.vega_bump_fraction)
     return dict(outcome, id=row["id"], row=row, sample_keys=sorted(worker.sample_keys),
                 rounds_requested=args.rounds, quantlib_requested=args.quantlib,
                 elapsed_seconds=time.monotonic() - start)
@@ -445,12 +457,15 @@ def main(argv=None):
     parser.add_argument("--max-cases", type=int, default=0)
     parser.add_argument("--rounds", type=int, default=1, help="Each round independently uses three mesh levels")
     parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--vega-bump-fraction", type=float, default=0.01,
+                        help="Largest sigma bump as a fraction of sigma; next bumps halve it")
     parser.add_argument("--expected-count", type=int, default=8628)
     parser.add_argument("--quantlib", action="store_true", help="Date-aligned no-cash supplementary checks")
     parser.add_argument("--audit-analytic", action="store_true", help="Also run FDE convergence at selected analytic anchors")
     args = parser.parse_args(argv)
-    if not 1 <= args.rounds <= 6 or not 1 <= args.workers <= 4 or args.max_cases < 0:
-        parser.error("1..6 rounds, 1..4 workers and nonnegative max-cases required")
+    if (not 1 <= args.rounds <= 6 or not 1 <= args.workers <= 4 or args.max_cases < 0
+            or not 0 < args.vega_bump_fraction < 0.25):
+        parser.error("1..6 rounds, 1..4 workers, nonnegative max-cases and bump fraction in (0,.25) required")
     rows, manifests = load_manifests(args.manifest)
     if len(rows) != args.expected_count:
         raise ValueError(f"expected {args.expected_count} frozen primary IDs, got {len(rows)}")
@@ -462,8 +477,10 @@ def main(argv=None):
     libraries = runtime_libraries(worker_path)
     effective_worker_hash = digest(encoded({"binary": binary_hash, "libraries": libraries}).encode())
     version = json.loads(subprocess.check_output([worker_path, "--version"], text=True))
-    policy = {"version": "reference-qualification-v1", "price_budget": PRICE_BUDGET, "iv_budget": IV_BUDGET,
+    policy = {"version": "reference-qualification-v2",
+              "analytic_put_provenance": "Healy 2021 Proposition 2, https://arxiv.org/pdf/2109.15157", "price_budget": PRICE_BUDGET, "iv_budget": IV_BUDGET,
               "vega_floor": VEGA_FLOOR, "tv_ratio_floor": TV_RATIO_FLOOR,
+              "vega_bump_fraction": args.vega_bump_fraction,
               "driver_sha256": digest(Path(__file__).read_bytes()), "worker_sha256": binary_hash,
               "runtime_libraries": libraries, "effective_worker_hash": effective_worker_hash,
               "manifest_checksums": [m["checksum_file_sha256"] for m in manifests]}

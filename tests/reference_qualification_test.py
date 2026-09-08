@@ -16,6 +16,11 @@ class ConvergenceTest(unittest.TestCase):
         for values in ([1, 1.1, 1.2], [1, 1.1, 1.09], [1, math.nan, 1]):
             self.assertFalse(rq.convergence(values, 1e-14)["stable"])
 
+    def test_mesh_limited_bumps_are_not_called_roundoff(self):
+        result = rq.convergence([37.9, 37.90001, 37.900015], 0.001, floor_kind="mesh")
+        self.assertTrue(result["stable"])
+        self.assertEqual(result["reason"], "mesh-limited")
+
     def test_flat_sequence_keeps_roundoff_floor(self):
         result = rq.convergence([7, 7, 7], 1e-12)
         self.assertTrue(result["stable"])
@@ -45,6 +50,14 @@ class EligibilityTest(unittest.TestCase):
 
 
 class AdmissionAndResumeTest(unittest.TestCase):
+    def test_put_no_exercise_region_preserves_cash_restriction(self):
+        row = {"option_type": "PUT", "rate": -0.05, "dividend_yield": 0.02,
+               "rolled_dividends": []}
+        self.assertTrue(rq.analytic_eligible(row))
+        self.assertFalse(rq.analytic_eligible(dict(row, rate=0.01)))
+        self.assertFalse(rq.analytic_eligible(dict(row, dividend_yield=-0.06)))
+        self.assertFalse(rq.analytic_eligible(dict(row, rolled_dividends=[{"calendar_time": 0.1, "amount": 1}])))
+
     def test_known_intrinsic_violation_is_not_a_qualified_price(self):
         self.assertFalse(rq.price_qualified(9.0, 10.0, 1e-5))
         self.assertTrue(rq.price_qualified(10.0, 10.0, 1e-5))

@@ -38,6 +38,27 @@ class WorkerTest(unittest.TestCase):
         self.assertLess(result["price_error"], 2e-10)
         self.assertGreater(result["price_error"], 0)
 
+    def test_nonpositive_rate_put_anchors_and_boundary(self):
+        deep = self.query(dict(row("PUT"), spot=1.0, rate=-0.05))
+        self.assertTrue(deep["ok"])
+        self.assertGreater(deep["price"], 100.0)
+        self.assertAlmostEqual(deep["price"], 100 * math.exp(0.05) - 1, delta=1e-10)
+        put = self.query(dict(row("PUT"), rate=0.0))
+        call = self.query(dict(row(), rate=0.0))
+        self.assertTrue(put["ok"])
+        self.assertAlmostEqual(put["price"], call["price"], places=12)
+        self.assertAlmostEqual(call["delta"] - put["delta"], 1.0, places=12)
+        self.assertAlmostEqual(put["vega"], call["vega"], places=12)
+        self.assertAlmostEqual(call["rho"] - put["rho"], 100.0, places=11)
+        self.assertAlmostEqual(call["theta"], put["theta"], places=12)
+        negative = dict(row("PUT"), rate=-0.05, dividend_yield=0.02)
+        exact = self.query(negative)
+        ql = self.query(negative, "ql", {"kind": "S", "nx": 800, "nt": 1600,
+                                        "radius": 1, "alpha": 4})
+        self.assertTrue(exact["ok"])
+        self.assertTrue(ql["ok"])
+        self.assertAlmostEqual(exact["price"], ql["price"], delta=0.001)
+
     def test_analytic_identity_refuses_other_models(self):
         for value in (row("PUT"), dict(row(), rate=-0.01), dict(row(), dividend_yield=0.02),
                       dict(row(), rolled_dividends=[{"calendar_time": 0.5, "amount": 1.0}])):
