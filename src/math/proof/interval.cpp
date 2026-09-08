@@ -187,6 +187,22 @@ Interval cos(const Interval &value) {
     return result;
 }
 bool Interval::nonpositive() const { return finite() && mpfr_sgn(upper_) <= 0; }
+Interval Interval::lower_endpoint() const {
+    if (!finite())
+        return invalid();
+    Interval result;
+    mpfr_set(result.lower_, lower_, MPFR_RNDN);
+    mpfr_set(result.upper_, lower_, MPFR_RNDN);
+    return result;
+}
+Interval Interval::upper_endpoint() const {
+    if (!finite())
+        return invalid();
+    Interval result;
+    mpfr_set(result.lower_, upper_, MPFR_RNDN);
+    mpfr_set(result.upper_, upper_, MPFR_RNDN);
+    return result;
+}
 Interval Interval::pi() {
     Interval result;
     mpfr_const_pi(result.lower_, MPFR_RNDD);

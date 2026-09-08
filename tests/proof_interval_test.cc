@@ -57,3 +57,12 @@ TEST(ProofIntervalTest, TrigonometricEnclosuresIncludeInteriorExtrema) {
     EXPECT_FALSE(acos(Interval(2)).finite());
     EXPECT_FALSE(intersection(Interval::hull(-1, 0), Interval::hull(1, 2)).finite());
 }
+
+TEST(ProofIntervalTest, PartitionEndpointsRetainSignsBelowBinary64) {
+    using namespace mango::detail::proof;
+    const auto tiny = Interval(std::numeric_limits<double>::denorm_min()) / Interval(2);
+    const auto bounds = hull(Interval(0) - tiny, tiny);
+    EXPECT_TRUE(bounds.lower_endpoint().strictly_negative());
+    EXPECT_TRUE(bounds.upper_endpoint().strictly_positive());
+    EXPECT_TRUE((bounds.lower_endpoint() + bounds.upper_endpoint()).exact_zero());
+}

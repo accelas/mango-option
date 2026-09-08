@@ -26,6 +26,39 @@ Interval BernsteinTensor::bounds() const {
         result = hull(result, value);
     return result;
 }
+std::expected<BernsteinTensor, InputError>
+BernsteinTensor::restrict_axis(std::size_t axis, const Interval &lower,
+                               const Interval &upper) const {
+    if (axis >= degrees_.size())
+        return std::unexpected(InputError::Axis);
+    if (!lower.finite() || !upper.finite())
+        return std::unexpected(InputError::Nonfinite);
+    const auto degree = degrees_[axis];
+    std::size_t stride = 1;
+    for (std::size_t d = axis + 1; d < degrees_.size(); ++d)
+        stride *= degrees_[d] + 1;
+    auto restricted = coefficients_;
+    std::vector<Interval> line(degree + 1);
+    for (std::size_t base = 0; base < coefficients_.size(); ++base) {
+        if ((base / stride) % (degree + 1) != 0)
+            continue;
+        // The j-th restricted Bernstein coefficient is the polar form
+        // (blossom) at degree-j copies of lower and j copies of upper.
+        // This avoids division by 1-lower on clamped endpoint faces.
+        for (std::size_t j = 0; j <= degree; ++j) {
+            for (std::size_t i = 0; i <= degree; ++i)
+                line[i] = coefficients_[base + i * stride];
+            for (std::size_t level = 0; level < degree; ++level) {
+                const auto &t = level < degree - j ? lower : upper;
+                for (std::size_t i = 0; i < degree - level; ++i) {
+                    line[i] = line[i] + t * (line[i + 1] - line[i]);
+                }
+            }
+            restricted[base + j * stride] = std::move(line[0]);
+        }
+    }
+    return create(degrees_, std::move(restricted));
+}
 std::expected<std::pair<BernsteinTensor, BernsteinTensor>, InputError>
 BernsteinTensor::split(std::size_t axis) const {
     if (axis >= degrees_.size())
