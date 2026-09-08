@@ -41,6 +41,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <string>
+#include <string_view>
 
 namespace mango {
 
@@ -130,6 +133,15 @@ public:
                 grid.size()});
         }
 
+        // Nonfinite coordinates can pass ordering/spacing comparisons and
+        // otherwise reach the basis recursion or LAPACK as invalid matrices.
+        for (size_t i = 0; i < grid.size(); ++i) {
+            if (std::isnan(grid[i])) return std::unexpected(InterpolationError{
+                InterpolationErrorCode::NaNInput, grid.size(), i});
+            if (std::isinf(grid[i])) return std::unexpected(InterpolationError{
+                InterpolationErrorCode::InfInput, grid.size(), i});
+        }
+
         // Validate grid is sorted
         if (!std::is_sorted(grid.begin(), grid.end())) {
             return std::unexpected(InterpolationError{
@@ -202,35 +214,31 @@ public:
         Backend::pack(std::span<const T>{band_values_},
                       std::span<const int>{band_col_start_},
                       n_, BANDWIDTH, std::span<T>{factors});
-        if (!Backend::factorize(std::span<T>{factors},
+        auto factorize_status = Backend::factorize(std::span<T>{factors},
                                 std::span<typename Backend::pivot_type>{pivots},
-                                n_, BANDWIDTH).ok()) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed,
-                n_});
+                                n_, BANDWIDTH);
+        if (!factorize_status.ok()) {
+            return std::unexpected(fitting_failure("factorization", factorize_status.message()));
         }
 
         // Solve for coefficients (in-place on a copy of the RHS)
         std::vector<T> coeffs(n_);
         std::copy(values.begin(), values.end(), coeffs.begin());
-        if (!Backend::solve(std::span<const T>{factors},
+        auto solve_status = Backend::solve(std::span<const T>{factors},
                             std::span<const typename Backend::pivot_type>{pivots},
-                            std::span<T>{coeffs}, n_, BANDWIDTH).ok()) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed,
-                n_});
+                            std::span<T>{coeffs}, n_, BANDWIDTH);
+        if (!solve_status.ok()) {
+            return std::unexpected(fitting_failure("solve", solve_status.message()));
         }
 
         // Compute residuals: ||B·c - f||
         const T max_residual = compute_residual(coeffs, values);
 
         // Check residual tolerance
-        if (max_residual > config.tolerance) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed,
-                n_,
-                0,
-                static_cast<double>(max_residual)});
+        if (!std::isfinite(max_residual) || max_residual > config.tolerance) {
+            return std::unexpected(fitting_failure("residual",
+                std::isfinite(max_residual) ? "tolerance exceeded" : "non-finite result",
+                max_residual));
         }
 
         // Estimate condition number
@@ -293,33 +301,29 @@ public:
         Backend::pack(std::span<const T>{band_values_},
                       std::span<const int>{band_col_start_},
                       n_, BANDWIDTH, std::span<T>{factors});
-        if (!Backend::factorize(std::span<T>{factors},
+        auto factorize_status = Backend::factorize(std::span<T>{factors},
                                 std::span<typename Backend::pivot_type>{pivots},
-                                n_, BANDWIDTH).ok()) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed,
-                n_});
+                                n_, BANDWIDTH);
+        if (!factorize_status.ok()) {
+            return std::unexpected(fitting_failure("factorization", factorize_status.message()));
         }
 
         // Solve in place on coeffs_out (copy of the RHS)
         std::copy(values.begin(), values.end(), coeffs_out.begin());
-        if (!Backend::solve(std::span<const T>{factors},
+        auto solve_status = Backend::solve(std::span<const T>{factors},
                             std::span<const typename Backend::pivot_type>{pivots},
-                            coeffs_out, n_, BANDWIDTH).ok()) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed,
-                n_});
+                            coeffs_out, n_, BANDWIDTH);
+        if (!solve_status.ok()) {
+            return std::unexpected(fitting_failure("solve", solve_status.message()));
         }
 
         // Compute residuals
         const T max_residual = compute_residual_from_span(coeffs_out, values);
 
-        if (max_residual > config.tolerance) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed,
-                n_,
-                0,
-                static_cast<double>(max_residual)});
+        if (!std::isfinite(max_residual) || max_residual > config.tolerance) {
+            return std::unexpected(fitting_failure("residual",
+                std::isfinite(max_residual) ? "tolerance exceeded" : "non-finite result",
+                max_residual));
         }
 
         // Estimate condition number
@@ -391,26 +395,26 @@ public:
         std::copy(band_storage.begin(), band_storage.end(), factor_storage.begin());
 
         // Factorize using workspace factor_storage and pivots
-        if (!Backend::factorize(factor_storage, ws.pivots(), n_, BANDWIDTH).ok()) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed, n_});
+        auto factorize_status = Backend::factorize(factor_storage, ws.pivots(), n_, BANDWIDTH);
+        if (!factorize_status.ok()) {
+            return std::unexpected(fitting_failure("factorization", factorize_status.message()));
         }
 
         // Solve into ws.coeffs() (in-place on a copy of the RHS)
         auto coeffs = ws.coeffs();
         std::copy(values.begin(), values.end(), coeffs.begin());
-        if (!Backend::solve(factor_storage, ws.pivots(), coeffs, n_, BANDWIDTH).ok()) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed, n_});
+        auto solve_status = Backend::solve(factor_storage, ws.pivots(), coeffs, n_, BANDWIDTH);
+        if (!solve_status.ok()) {
+            return std::unexpected(fitting_failure("solve", solve_status.message()));
         }
 
         // Compute residuals
         const T max_residual = compute_residual_from_span(ws.coeffs(), values);
 
-        if (max_residual > config.tolerance) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed, n_, 0,
-                static_cast<double>(max_residual)});
+        if (!std::isfinite(max_residual) || max_residual > config.tolerance) {
+            return std::unexpected(fitting_failure("residual",
+                std::isfinite(max_residual) ? "tolerance exceeded" : "non-finite result",
+                max_residual));
         }
 
         // Estimate condition number
@@ -446,11 +450,11 @@ public:
                       std::span<const int>{band_col_start_},
                       n_, BANDWIDTH, std::span<T>{fact.lu});
 
-        if (!Backend::factorize(std::span<T>{fact.lu},
+        auto factorize_status = Backend::factorize(std::span<T>{fact.lu},
                                 std::span<typename Backend::pivot_type>{fact.pivots},
-                                n_, BANDWIDTH).ok()) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed, n_});
+                                n_, BANDWIDTH);
+        if (!factorize_status.ok()) {
+            return std::unexpected(fitting_failure("factorization", factorize_status.message()));
         }
 
         const T norm_A = compute_matrix_norm1();
@@ -514,16 +518,18 @@ public:
                 InterpolationErrorCode::InfInput, n_, i});
         }
         std::copy(values.begin(), values.end(), coeffs_out.begin());
-        if (!Backend::solve(std::span<const T>{fact.lu},
+        auto solve_status = Backend::solve(std::span<const T>{fact.lu},
                             std::span<const typename Backend::pivot_type>{fact.pivots},
-                            coeffs_out, n_, BANDWIDTH).ok()) {
-            return std::unexpected(InterpolationError{
-                InterpolationErrorCode::FittingFailed, n_});
+                            coeffs_out, n_, BANDWIDTH);
+        if (!solve_status.ok()) {
+            return std::unexpected(fitting_failure("solve", solve_status.message()));
         }
         const T max_residual = compute_residual_from_span(coeffs_out, values);
-        if (max_residual > config.tolerance) return std::unexpected(InterpolationError{
-            InterpolationErrorCode::FittingFailed, n_, 0,
-            static_cast<double>(max_residual)});
+        if (!std::isfinite(max_residual) || max_residual > config.tolerance) {
+            return std::unexpected(fitting_failure("residual",
+                std::isfinite(max_residual) ? "tolerance exceeded" : "non-finite result",
+                max_residual));
+        }
         return max_residual;
     }
 
@@ -531,6 +537,14 @@ public:
     [[nodiscard]] size_t size() const noexcept { return n_; }
 
 private:
+    [[nodiscard]] InterpolationError fitting_failure(
+        std::string_view stage, std::string_view detail, T residual = T{0}) const {
+        InterpolationError error{InterpolationErrorCode::FittingFailed, n_, 0,
+                                 static_cast<double>(residual)};
+        error.message = std::string(stage) + ": " + std::string(detail);
+        return error;
+    }
+
     /// Private constructor (use factory method)
     explicit BSplineCollocation1D(std::vector<T> grid)
         : grid_(std::move(grid))
@@ -619,6 +633,7 @@ private:
                 Bc_i = std::fma(b_ij, coeffs[j], Bc_i);
             }
 
+            if (!std::isfinite(Bc_i)) return std::numeric_limits<T>::infinity();
             const T residual = std::abs(Bc_i - values[i]);
             max_res = std::max(max_res, residual);
         }
@@ -644,6 +659,7 @@ private:
                 Bc_i = std::fma(band[i, k], coeffs[col_start + k], Bc_i);
             }
 
+            if (!std::isfinite(Bc_i)) return std::numeric_limits<T>::infinity();
             const T residual = std::abs(Bc_i - values[i]);
             max_residual = std::max(max_residual, residual);
         }

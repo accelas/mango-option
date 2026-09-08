@@ -201,6 +201,45 @@ TEST(GridSpecTest, MultiSinhSingleClusterMatchesSinhSpaced) {
     }
 }
 
+TEST(GridSpecTest, MultiSinhOffCenterDoesNotClusterAtBoundary) {
+    // A dividend can widen one side of the PDE domain. The requested strike
+    // cluster must still have finer spacing than either outer boundary.
+    // Clipping an unnormalized sinh map used to manufacture tiny edge cells.
+    for (const auto& bounds : {std::pair{-1.1, 1.0}, std::pair{-1.0, 1.1},
+                              std::pair{-3.0, 1.0}, std::pair{-1.0, 3.0}}) {
+        SCOPED_TRACE(bounds.first);
+        auto spec = mango::GridSpec<>::multi_sinh_spaced(
+            bounds.first, bounds.second, 101,
+            {{.center_x = 0.0, .alpha = 4.0, .weight = 1.0}});
+        ASSERT_TRUE(spec.has_value());
+        auto grid = spec->generate();
+        size_t hi = 1;
+        while (grid[hi] < 0.0) ++hi;
+        const double strike_spacing = grid[hi] - grid[hi - 1];
+        EXPECT_GT(grid[1] - grid[0], strike_spacing);
+        EXPECT_GT(grid[100] - grid[99], strike_spacing);
+        EXPECT_DOUBLE_EQ(grid[0], bounds.first);
+        EXPECT_DOUBLE_EQ(grid[100], bounds.second);
+    }
+}
+
+TEST(GridSpecTest, MultiSinhDuplicateClustersKeepTheSameMap) {
+    auto single = mango::GridSpec<>::multi_sinh_spaced(-1.1, 1.0, 101,
+        {{.center_x = 0.0, .alpha = 4.0, .weight = 1.0}});
+    auto duplicate = mango::GridSpec<>::multi_sinh_spaced(-1.1, 1.0, 101,
+        {{.center_x = 0.0, .alpha = 4.0, .weight = 0.25},
+         {.center_x = 0.0, .alpha = 4.0, .weight = 0.75}}, false);
+    ASSERT_TRUE(single.has_value());
+    ASSERT_TRUE(duplicate.has_value());
+    auto expected = single->generate();
+    auto actual = duplicate->generate();
+    double max_difference = 0.0;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        max_difference = std::max(max_difference, std::abs(actual[i] - expected[i]));
+    }
+    EXPECT_LT(max_difference, 1e-14);
+}
+
 TEST(GridSpecTest, MultiSinhMergedClusterPreservesLocation) {
     // Test that merged clusters preserve their weighted-average location
     // Auto-merge only deduplicates overlapping centers, it doesn't recenter them
@@ -728,8 +767,7 @@ TEST(GridSpecTest, MultiSinhSingleOffCenterPreserved) {
     if (idx_far > 0 && idx_far < 50) {
         double spacing_far = grid[idx_far + 1] - grid[idx_far];
         double spacing_near = grid[idx_center + 1] - grid[idx_center];
-        // Off-center grids with monotonicity enforcement have reduced contrast,
-        // but spacing far should still be coarser than spacing near the center
+        // Spacing far from the requested center should be coarser.
         EXPECT_GT(spacing_far, spacing_near * 0.9)
             << "Spacing should be coarser far from requested center";
     }

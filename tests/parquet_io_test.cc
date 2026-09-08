@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "mango/option/price_table_factory.hpp"
 #include "mango/option/table/serialization/to_data.hpp"
 #include "mango/option/table/serialization/from_data.hpp"
 #include "mango/option/table/parquet/parquet_io.hpp"
@@ -76,6 +77,151 @@ protected:
         std::filesystem::remove(temp_path_);
     }
 };
+
+// Minimal valid segmented payload for admission/integrity tests.
+PriceTableData model_payload() {
+    PriceTableData data;
+    data.surface_type = surface_types::kChebyshev4DSegmented;
+    data.bounds_m_min = -0.3;
+    data.bounds_m_max = 0.3;
+    data.bounds_tau_min = 0.01;
+    data.bounds_tau_max = data.maturity = 1.0;
+    data.bounds_sigma_min = 0.1;
+    data.bounds_sigma_max = 0.4;
+    data.bounds_rate_min = 0.02;
+    data.bounds_rate_max = 0.08;
+    data.strike_bounds = StrikeBounds{95, 105};
+    data.fixed_expiry = FixedExpiryMetadata{2.0, {{1.5, 2.0}, {1.8, 3.0}}};
+    for (double k : {80.0, 120.0}) {
+        PriceTableData::Segment segment;
+        segment.segment_id = static_cast<int32_t>(data.segments.size());
+        segment.K_ref = k;
+        segment.tau_end = segment.tau_max = 1.0;
+        segment.tau_min = 0.01;
+        segment.interp_type = "chebyshev";
+        segment.domain_lo = {-0.3, 0.01, 0.1, 0.02};
+        segment.domain_hi = {0.3, 1.0, 0.4, 0.08};
+        segment.num_pts = {2, 2, 2, 2};
+        segment.values = std::vector<double>(16, .1);
+        data.segments.push_back(std::move(segment));
+    }
+    return data;
+}
+
+TEST_F(ParquetIOTest, PublicLoadUsesPersistedAnchorBeyondPublishedMaturities) {
+    ASSERT_TRUE(write_parquet(model_payload(), temp_path_));
+    auto loaded = load_price_table(temp_path_);
+    ASSERT_TRUE(loaded.has_value());
+    ASSERT_TRUE(loaded->fixed_expiry());
+    EXPECT_DOUBLE_EQ(loaded->fixed_expiry()->reference_maturity, 2.0);
+    auto solver = loaded->make_iv_solver();
+    ASSERT_TRUE(solver.has_value());
+    IVQuery query;
+    query.spot = query.strike = 100.0;
+    query.maturity = .8;
+    query.rate = .05;
+    query.option_type = OptionType::PUT;
+    query.market_price = 10.0;
+    // T0=2 and tau=.8 imply elapsed=1.2: dividends roll to .3 and .6.
+    query.discrete_dividends = {{.3, 2.0}, {.6, 3.0}};
+    auto correct = solver->solve(query);
+    if (!correct) {
+        EXPECT_NE(correct.error().code, IVErrorCode::DiscreteDividendMismatch);
+    }
+    // An anchor inferred from tau_max=1 would retain neither dividend.
+    query.discrete_dividends = {{.3, 3.0}};
+    auto mismatch = solver->solve(query);
+    ASSERT_FALSE(mismatch.has_value());
+    EXPECT_EQ(mismatch.error().code, IVErrorCode::DiscreteDividendMismatch);
+    ASSERT_TRUE(loaded->save(temp_path_));
+    auto data = read_parquet(temp_path_);
+    ASSERT_TRUE(data.has_value());
+    ASSERT_TRUE(data->fixed_expiry);
+    EXPECT_DOUBLE_EQ(data->fixed_expiry->reference_maturity, 2.0);
+    EXPECT_DOUBLE_EQ(data->bounds_tau_max, 1.0);
+}
+
+TEST_F(ParquetIOTest, ModelMetadataIsBoundToPayloadChecksum) {
+    const auto data = model_payload();
+    ASSERT_TRUE(write_parquet(data, temp_path_));
+    auto infile = arrow::io::ReadableFile::Open(temp_path_.string());
+    ASSERT_TRUE(infile.ok());
+    auto reader = parquet::arrow::OpenFile(*infile, arrow::default_memory_pool());
+    ASSERT_TRUE(reader.ok());
+    std::shared_ptr<arrow::Table> table;
+    ASSERT_TRUE((*reader)->ReadTable(&table).ok());
+    ASSERT_TRUE((*infile)->Close().ok());
+    // Each mutation remains numerically well formed; rejection must come from
+    // integrity binding, not merely range checks on a nonsensical value.
+    for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
+             {"mango.strike_min", "96"}, {"mango.strike_max", "104"},
+             {"mango.reference_maturity", "2.1"},
+             {"mango.dividend.0.time", "1.6"}, {"mango.dividend.1.amount", "3.1"},
+             {"mango.dividend_count", "1"},
+             {"mango.has_strike_bounds", "0"}, {"mango.has_fixed_expiry", "0"}}) {
+        SCOPED_TRACE(key);
+        auto metadata = table->schema()->metadata()->Copy();
+        ASSERT_TRUE(metadata->Set(key, value).ok());
+        auto corrupted = table->ReplaceSchemaMetadata(metadata);
+        auto output = arrow::io::FileOutputStream::Open(temp_path_.string());
+        ASSERT_TRUE(output.ok());
+        ASSERT_TRUE(parquet::arrow::WriteTable(
+            *corrupted, arrow::default_memory_pool(), *output, 1024).ok());
+        ASSERT_TRUE((*output)->Close().ok());
+        auto result = read_parquet(temp_path_);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, PriceTableErrorCode::SerializationFailed);
+    }
+}
+
+TEST_F(ParquetIOTest, RejectsLegacyOrMissingModelMetadata) {
+    ASSERT_TRUE(write_parquet(model_payload(), temp_path_));
+    auto infile = arrow::io::ReadableFile::Open(temp_path_.string());
+    ASSERT_TRUE(infile.ok());
+    auto reader = parquet::arrow::OpenFile(*infile, arrow::default_memory_pool());
+    ASSERT_TRUE(reader.ok());
+    std::shared_ptr<arrow::Table> table;
+    ASSERT_TRUE((*reader)->ReadTable(&table).ok());
+    ASSERT_TRUE((*infile)->Close().ok());
+    for (const auto& key : {"mango.format_version", "mango.strike_min",
+                           "mango.strike_max", "mango.has_fixed_expiry",
+                           "mango.has_strike_bounds", "mango.reference_maturity",
+                           "mango.dividend_count", "mango.dividend.0.time",
+                           "mango.dividend.1.amount"}) {
+        SCOPED_TRACE(key);
+        auto metadata = table->schema()->metadata()->Copy();
+        if (std::string(key) == "mango.format_version") {
+            ASSERT_TRUE(metadata->Set(key, "2.0").ok());
+        } else {
+            ASSERT_TRUE(metadata->Delete(key).ok());
+        }
+        auto output = arrow::io::FileOutputStream::Open(temp_path_.string());
+        ASSERT_TRUE(output.ok());
+        ASSERT_TRUE(parquet::arrow::WriteTable(*table->ReplaceSchemaMetadata(metadata),
+            arrow::default_memory_pool(), *output, 1024).ok());
+        ASSERT_TRUE((*output)->Close().ok());
+        EXPECT_FALSE(read_parquet(temp_path_).has_value());
+    }
+}
+
+TEST_F(ParquetIOTest, WriterRejectsIncompleteOrInvalidSegmentedMetadata) {
+    const auto data = model_payload();
+    for (bool remove_strikes : {false, true}) {
+        auto bad = data;
+        if (remove_strikes) bad.strike_bounds.reset();
+        else bad.fixed_expiry.reset();
+        EXPECT_FALSE(write_parquet(bad, temp_path_).has_value());
+    }
+    auto bad = data;
+    bad.fixed_expiry->reference_maturity = .5;
+    EXPECT_FALSE(write_parquet(bad, temp_path_).has_value());
+    bad = data;
+    bad.fixed_expiry->discrete_dividends[0].amount = -1;
+    EXPECT_FALSE(write_parquet(bad, temp_path_).has_value());
+    bad = data;
+    bad.strike_bounds = StrikeBounds{95, 121};
+    EXPECT_FALSE(write_parquet(bad, temp_path_).has_value());
+}
 
 // ===========================================================================
 // Helper: verify prices match between two surfaces at sample points (4D)
@@ -373,8 +519,10 @@ TEST_F(ParquetIOTest, BSplineSegmentedRoundTrip) {
         .rate_max = 0.05,
     };
 
+    bounds.strike_bounds = StrikeBounds{100.0, 100.0};
     BSplineMultiKRefSurface surface(
-        std::move(*multi), bounds, OptionType::PUT, 0.02);
+        std::move(*multi), bounds, OptionType::PUT, 0.02,
+        make_fixed_expiry_metadata(config.maturity, config.dividends.discrete_dividends));
 
     auto data = to_data(surface);
     auto write_result = write_parquet(data, temp_path_);
@@ -1086,10 +1234,11 @@ TEST_F(ParquetIOTest, ChebyshevSegmentedMultiKRefRoundTrip) {
         .tau_min = 0.01, .tau_max = 1.0,
         .sigma_min = 0.10, .sigma_max = 0.40,
         .rate_min = 0.02, .rate_max = 0.08,
+        .strike_bounds = StrikeBounds{95.0, 105.0},
     };
 
     ChebyshevMultiKRefSurface surface(std::move(inner), bounds,
-                                       OptionType::PUT, 0.02);
+                                       OptionType::PUT, 0.02, FixedExpiryMetadata{2.0, {{1.5, 2.0}}});
 
     // Round-trip through Parquet
     auto data = to_data(surface);
@@ -1104,6 +1253,17 @@ TEST_F(ParquetIOTest, ChebyshevSegmentedMultiKRefRoundTrip) {
 
     auto loaded = from_data<ChebyshevMultiKRefInner>(*read_result);
     ASSERT_TRUE(loaded.has_value()) << "from_data failed";
+    ASSERT_TRUE(loaded->fixed_expiry());
+    EXPECT_DOUBLE_EQ(loaded->fixed_expiry()->reference_maturity, 2.0);
+    ASSERT_EQ(loaded->fixed_expiry()->discrete_dividends.size(), 1u);
+    EXPECT_DOUBLE_EQ(loaded->fixed_expiry()->discrete_dividends[0].calendar_time, 1.5);
+    EXPECT_DOUBLE_EQ(loaded->fixed_expiry()->discrete_dividends[0].amount, 2.0);
+    EXPECT_DOUBLE_EQ(loaded->tau_max(), 1.0);
+    ASSERT_TRUE(loaded->strike_bounds());
+    EXPECT_DOUBLE_EQ(loaded->strike_bounds()->min, 95.0);
+    EXPECT_DOUBLE_EQ(loaded->strike_bounds()->max, 105.0);
+    EXPECT_FALSE(loaded->contains_strike(80.0));
+    EXPECT_FALSE(loaded->contains_strike(std::nextafter(105.0, 120.0)));
 
     // Verify prices match at sample points
     struct TestPoint { double spot, strike, tau, sigma, rate; };
@@ -1157,8 +1317,10 @@ TEST_F(ParquetIOTest, TauSegmentGapRejected) {
         .rate_min = 0.02, .rate_max = 0.05,
     };
 
+    bounds.strike_bounds = StrikeBounds{100.0, 100.0};
     BSplineMultiKRefSurface surface(
-        std::move(*multi), bounds, OptionType::PUT, 0.02);
+        std::move(*multi), bounds, OptionType::PUT, 0.02,
+        make_fixed_expiry_metadata(config.maturity, config.dividends.discrete_dividends));
 
     auto data = to_data(surface);
     ASSERT_GE(data.segments.size(), 2u);

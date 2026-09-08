@@ -63,6 +63,7 @@ struct BSplineSegmentedAdaptiveResult {
     /// surface must use this as the queryable bounds, not the aggregated
     /// grids' own span (which includes fit-domain support headroom).
     SurfaceBounds sample_bounds{};
+    FixedExpiryMetadata fixed_expiry{};
 };
 
 /// Create a RefineFn that does B-spline midpoint insertion, targeted at the

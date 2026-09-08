@@ -26,6 +26,7 @@
 #include <limits>
 #include <cmath>
 #include <cassert>
+#include <numeric>
 
 namespace mango {
 
@@ -34,8 +35,11 @@ namespace mango {
 /// For n data points, creates n+4 knots with repeated endpoints:
 ///   [x₀, x₀, x₀, x₀, t₁, ..., tₘ, xₙ₋₁, xₙ₋₁, xₙ₋₁, xₙ₋₁]
 ///
-/// The interior knots t₁...tₘ are placed between data sites to ensure
-/// the Schoenberg-Whitney condition holds (collocation matrix is non-singular).
+/// Interior knots follow x₂,...,xₙ₋₃, with the outer two moved halfway
+/// toward x₁ and xₙ₋₂. Aligning the bulk of the knots with the data sites
+/// avoids the near-dependence produced by proportional site-index placement;
+/// the half-interval endpoint supports retain accuracy on coarse graded grids.
+/// All data sites remain unchanged. With only one interior knot (n=5), use x₂.
 ///
 /// **Boundary interpolation:** Clamping ensures B-spline interpolates exactly
 /// at the first and last data points (multiplicity p+1 = 4 for cubics).
@@ -51,37 +55,13 @@ template<std::floating_point T>
     // Left clamp: repeat first point 4 times
     std::fill_n(t.begin(), 4, x.front());
 
-    // Interior knots positioned strictly between data sites (midpoints)
-    if (n > 4) {
-        const int interior = n - 4;
-        const int intervals = n - 1;
-
-        for (int idx = 0; idx < interior; ++idx) {
-            // Proportional placement: map idx → continuous position
-            const T ratio = static_cast<T>(idx + 1) / static_cast<T>(interior + 1);
-            T pos = ratio * static_cast<T>(intervals);
-
-            // Find interval containing this position
-            int low = static_cast<int>(std::floor(pos));
-            if (low >= intervals) {
-                low = intervals - 1;
-            }
-
-            // Interpolate knot position within interval
-            const T frac = pos - static_cast<T>(low);
-            const T left = x[low];
-            const T right = x[low + 1];
-            T knot = (T{1} - frac) * left + frac * right;
-
-            // Clamp to interior of interval (avoid coinciding with data sites)
-            const T spacing = right - left;
-            const T eps = std::max(T{128} * std::numeric_limits<T>::epsilon() * spacing,
-                                  std::numeric_limits<T>::epsilon() *
-                                      std::max(std::abs(right), T{1}));
-            knot = std::clamp(knot, left + eps, right - eps);
-
-            t[4 + idx] = knot;
-        }
+    // With four sites there are no interior knots (a single cubic).
+    for (int idx = 0; idx < n - 4; ++idx) {
+        t[4 + idx] = x[2 + idx];
+    }
+    if (n > 5) {
+        t[4] = std::midpoint(x[1], x[2]);
+        t[n - 1] = std::midpoint(x[n - 3], x[n - 2]);
     }
 
     // Right clamp: repeat last point 4 times

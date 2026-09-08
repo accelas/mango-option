@@ -24,11 +24,15 @@ namespace {
 /// Validates all bounds are finite and min < max.
 std::expected<SurfaceBounds, PriceTableError>
 bounds_from_data(const PriceTableData& data) {
+    if (!valid_price_table_metadata(data)) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
     SurfaceBounds b{
         .m_min = data.bounds_m_min, .m_max = data.bounds_m_max,
         .tau_min = data.bounds_tau_min, .tau_max = data.bounds_tau_max,
         .sigma_min = data.bounds_sigma_min, .sigma_max = data.bounds_sigma_max,
         .rate_min = data.bounds_rate_min, .rate_max = data.bounds_rate_max,
+        .strike_bounds = data.strike_bounds,
     };
     // Validate finite
     if (!std::isfinite(b.m_min) || !std::isfinite(b.m_max) ||
@@ -75,7 +79,7 @@ from_data<BSplineLeaf>(const PriceTableData& data) {
     if (!bounds) return std::unexpected(bounds.error());
 
     return PriceTable<BSplineLeaf>(
-        std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield);
+        std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
 // ============================================================================
@@ -123,7 +127,7 @@ from_data<BSplineMultiKRefInner>(const PriceTableData& data) {
     if (!bounds) return std::unexpected(bounds.error());
 
     return PriceTable<BSplineMultiKRefInner>(
-        std::move(inner), *bounds, data.option_type, data.dividend_yield);
+        std::move(inner), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
 // ============================================================================
@@ -154,7 +158,7 @@ from_data<ChebyshevLeaf>(const PriceTableData& data) {
     if (!bounds) return std::unexpected(bounds.error());
 
     return PriceTable<ChebyshevLeaf>(
-        std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield);
+        std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
 // ============================================================================
@@ -202,7 +206,7 @@ from_data<ChebyshevMultiKRefInner>(const PriceTableData& data) {
     if (!bounds) return std::unexpected(bounds.error());
 
     return PriceTable<ChebyshevMultiKRefInner>(
-        std::move(inner), *bounds, data.option_type, data.dividend_yield);
+        std::move(inner), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
 // ============================================================================
@@ -231,7 +235,7 @@ from_data<BSpline3DLeaf>(const PriceTableData& data) {
     if (!bounds) return std::unexpected(bounds.error());
 
     return PriceTable<BSpline3DLeaf>(
-        std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield);
+        std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
 // ============================================================================
@@ -262,7 +266,7 @@ from_data<Chebyshev3DLeaf>(const PriceTableData& data) {
     if (!bounds) return std::unexpected(bounds.error());
 
     return PriceTable<Chebyshev3DLeaf>(
-        std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield);
+        std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
 }  // namespace mango
