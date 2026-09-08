@@ -63,6 +63,12 @@ bool valid_metrics(const ReferenceCandidateMetrics& metrics) {
         case ReferenceCandidateDecision::ReferenceUnqualified:
             return true;
         case ReferenceCandidateDecision::IvUnmeasured:
+            // A complete composed-price assessment can establish reference
+            // adequacy without an IV claim. Ideal structural identities do
+            // not qualify composed prices or fill missing IV observations.
+            return complete_evidence(metrics.ideal_blend)
+                || (metrics.total.price && metrics.total.price->requested > 0
+                    && metrics.total.price->measured == metrics.total.price->requested);
         case ReferenceCandidateDecision::FitLimited:
             return complete_evidence(metrics.ideal_blend);
     }

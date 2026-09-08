@@ -422,5 +422,40 @@ TEST(ReferenceSelectionTest, IvFilteringCannotRemovePriceObligations) {
     EXPECT_EQ(result.error().stop_reason, ReferenceSelectionStopReason::InvalidMetrics);
 }
 
+TEST(ReferenceSelectionTest, ComposedPriceCanRescueReferencesWithoutAnIvClaim) {
+    for (bool complete_price : {false, true}) {
+        auto result=select_k_refs(MultiKRefConfig{.K_refs={90,100,110}}, {90,110},
+            [=](std::span<const double>)
+                -> std::expected<ReferenceCandidateMetrics, PriceTableError> {
+                ReferenceCandidateMetrics metrics;
+                metrics.decision=ReferenceCandidateDecision::IvUnmeasured;
+                metrics.ideal_blend.price=ReferenceErrorSummary{.requested=6, .unresolved=6};
+                metrics.ideal_blend.iv=ReferenceErrorSummary{.requested=6, .unresolved=6};
+                metrics.total.price=complete_price
+                    ? ReferenceErrorSummary{.requested=6, .measured=6, .max_error=0.001}
+                    : ReferenceErrorSummary{.requested=6, .measured=5,
+                        .unresolved=1, .max_error=0.001};
+                // Ideal homogeneity does not measure composed IV accuracy:
+                // retain unassessed rows rather than inventing filtered IVs.
+                metrics.total.iv=ReferenceErrorSummary{.requested=6, .untested=6};
+                return metrics;
+            });
+        if (!complete_price) {
+            ASSERT_FALSE(result.has_value());
+            EXPECT_EQ(result.error().stop_reason, ReferenceSelectionStopReason::InvalidMetrics);
+            continue;
+        }
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(result->refs, (std::vector<double>{90,100,110}));
+        EXPECT_EQ(result->stop_reason, ReferenceSelectionStopReason::IvUnmeasured);
+        ASSERT_EQ(result->candidates.size(), 1u);
+        const auto& metrics=*result->candidates[0].metrics;
+        EXPECT_FALSE(metrics.total_target_met.has_value());
+        EXPECT_EQ(metrics.ideal_blend.price->unresolved, 6u);
+        EXPECT_EQ(metrics.total.iv->untested, 6u);
+        EXPECT_FALSE(metrics.total.iv->max_error.has_value());
+    }
+}
+
 }  // namespace
 }  // namespace mango

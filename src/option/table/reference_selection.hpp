@@ -117,6 +117,9 @@ struct ReferenceSelectionFailure {
 /// Accepting decisions require complete ideal evidence (at least one measured
 /// or structurally exact row, no unresolved/refused/untested rows). Adequate
 /// may instead use complete total evidence with total_target_met=true.
+/// IvUnmeasured may instead use a complete measured composed-price assessment;
+/// missing composed IV observations remain untested/unresolved, not structurally
+/// exact or filtered by an ideal-blend identity. This makes no whole-IV claim.
 /// RefineReferences/ThresholdAmbiguous require a measured ideal witness;
 /// remaining probes may be explicitly untested. Malformed count/statistic
 /// reports stop with InvalidMetrics and remain in the diagnostic history.
