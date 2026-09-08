@@ -656,3 +656,14 @@ cc_binary(
     tags = ["manual"],
     deps = ["//src/option/table:reference_strike_evaluator"],
 )
+
+# Reference qualification only: deliberately no price-table dependencies.
+cc_binary(
+    name = "reference_oracle_worker",
+    visibility = ["//tests:__pkg__"],
+    srcs = ["reference_oracle_worker.cc"],
+    copts = ["-Wall", "-Wextra"],
+    linkopts = ["-lQuantLib"],
+    deps = ["//src/option:american_option"],
+    tags = ["manual"],
+)

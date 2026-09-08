@@ -1,1 +1,9 @@
 # SPDX-License-Identifier: MIT
+
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "reference_qualification",
+    srcs = ["reference_qualification.py"],
+    visibility = ["//visibility:public"],
+)

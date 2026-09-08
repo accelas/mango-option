@@ -2012,6 +2012,21 @@ cc_test(
     ],
 )
 
+py_test(
+    name = "reference_qualification_test",
+    srcs = ["reference_qualification_test.py"],
+    deps = ["//tools:reference_qualification"],
+    size = "small",
+)
+
+py_test(
+    name = "reference_worker_test",
+    srcs = ["reference_worker_test.py"],
+    deps = ["//tools:reference_qualification"],
+    data = ["//benchmarks:reference_oracle_worker"],
+    size = "small",
+)
+
 cc_test(
     name = "proof_interval_test",
     srcs = ["proof_interval_test.cc"],
