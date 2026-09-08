@@ -616,6 +616,44 @@ expiries at the anchor. Both backends use exact mandatory sample times and no
 horizon padding on this path; their adaptive reference solves roll the calendar
 by the same remaining-life rule.
 
+### Manual Chebyshev defaults
+
+Manual segmented Chebyshev construction uses CC levels `{8,3,2,2}`: 257
+moneyness, 9 time nodes per real segment, 5 volatility, and 5 rate nodes.
+The previous default was `{5,3,2,1}`, with 33 moneyness nodes; the old
+nine-moneyness-node explanation of issue #486 was stale. Explicit manual
+levels remain constraints. Volatility and rate nodes span their resolved
+domains without extra headroom; moneyness retains one nominal interval of
+padding beyond the dividend-widened domain. Extending parameter support can
+introduce exercise transitions outside the requested domain and degrade the
+global polynomial inside it. Adaptive levels and headroom are unchanged.
+
+The `manual_chebyshev_accuracy_test` regression measures 258 fixed-expiry
+queries with K=K_ref=100, S from 50 to 200, remaining maturity .01 to .25,
+volatility .05 to .15, rate .05, zero continuous yield, and a cash dividend
+of 1 at anchor offset .1. Both option types, off-node volatility, narrow
+exercise transitions, tails, and both sides of the event are included.
+High/Ultra direct-oracle disagreement is at most 4.59e-5 quote units; 36
+cardinal probes separately keep the sampled PDE error below 1.67e-5.
+
+| Measured price error | Previous defaults | Current defaults |
+|---|---:|---:|
+| Put maximum | .608521 | .005371 |
+| Call maximum | .287317 | .003597 |
+| Put RMS | .162779 | .000899 |
+| Call RMS | .083524 | .000645 |
+| Queries exceeding .01 | 164 / 258 | 0 / 258 |
+
+For this one-reference, two-segment build, stored values increase from 8,910
+to 115,650 doubles (about 70 to 904 KiB), and parameter-pair PDE solves from
+15 to 25. An optimized local probe with two OpenMP threads measured roughly
+31–37 microseconds per query versus 2.8–2.9 previously; build times were
+roughly 66–68 seconds versus 34–37. These are workload measurements, not
+uniform accuracy or latency guarantees. This price regression does not
+establish Greek accuracy, IV identifiability, monotonicity certification, or
+off-reference-strike accuracy. Generic manual requested-accuracy refusal
+belongs to the acceptance/certification gates (#462/#459).
+
 ### Maturity Partitioning
 
 For $N$ dividends at calendar times $t_1 < t_2 < \cdots < t_N$, the backward-time boundaries are:

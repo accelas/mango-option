@@ -583,6 +583,13 @@ Chebyshev construction uses one end-to-end PDE solve per parameter pair,
 with the contractual horizon and exact mandatory snapshot times. Each leaf
 uses the same local-time origin as its `TauSegmentSplit` router.
 
+Manual segmented Chebyshev defaults use CC levels `{8,3,2,2}` (257
+moneyness, 9 time nodes per segment, 5 volatility, and 5 rate nodes).
+Explicit levels supplied to `ChebyshevSegmentedBuilder::build` or
+`build_chebyshev_segmented_manual` are honored. See the
+[measured default accuracy and cost](MATHEMATICAL_FOUNDATIONS.md#manual-chebyshev-defaults)
+for the tested domain and the distinction between price accuracy and IV/Greek guarantees.
+
 Chebyshev's current event topology omits `5e-4` years (4.38 hours) on each
 side of each dividend. Queries in these gaps, including the exact event,
 are unsupported: `validate_pricing_params` reports `OutOfRange`, Greeks

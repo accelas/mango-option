@@ -1020,24 +1020,20 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     }
 }
 
-// Padded-timeline coverage oracle for the segmented Chebyshev path: the
-// table solves a normalized contract with maturity 1.01 * tau_max and the
-// dividend's calendar time anchored to THAT maturity, so at the tau_query
-// snapshot the event sits at tau = 1.01*tau_query - calendar_time, not at
-// tau_query - calendar_time.  Reproduce exactly that contract on an
-// explicit wide grid and read the snapshot at the queried moneyness, so
-// the comparison isolates spatial coverage from the (pre-existing,
-// out-of-scope) timing skew.  Returns a dollar price for strike K.
+// Direct pricing oracle for the contract at the query valuation point.
+// The anchor-maturity regression below has no schedule roll; shorter-maturity
+// tests must supply their independently rolled fixed-expiry dividends.
 double dividend_fdm_reference_price(double S, double K, double tau,
                                     double sigma, double rate,
-                                    const std::vector<Dividend>& dividends) {
+                                    const std::vector<Dividend>& dividends,
+                                    GridAccuracyProfile profile = GridAccuracyProfile::High) {
     PricingParams p(
         OptionSpec{.spot = S, .strike = K, .maturity = tau, .rate = rate,
                    .dividend_yield = 0.0, .option_type = OptionType::PUT},
         sigma);
     p.discrete_dividends = dividends;
     auto solver = AmericanOptionSolver::create(
-        p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::High)});
+        p, PDEGridSpec{make_grid_accuracy(profile)});
     if (!solver.has_value()) {
         ADD_FAILURE() << "dividend_fdm_reference_price solver create failed"
                       << " for S=" << S << " sigma=" << sigma;
@@ -1097,15 +1093,18 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevTailsMatchFdmAtExtremeMoneyness)
     const double tau = 0.25;
     const double r = 0.05;
 
-    // Keep the existing tighter user-contract fit budget. Raw timeline
-    // accuracy is checked separately at cardinal nodes in the cache tests;
-    // off-node tail interpolation across an exercise kink remains #486.
-    constexpr double TOL_USER = 0.1;
+    // #486: defaults must meet the requested one-cent price budget on this
+    // declared tail cohort. The original coverage-only tolerance was 0.10.
+    // Raw timeline accuracy remains separately pinned at cardinal nodes.
+    constexpr double TOL_USER = 0.01;
 
     for (double S : {50.0, 200.0}) {
         for (double sigma : {0.05, 0.15}) {
             const double got = surface->price(S, K, tau, sigma, r);
-            const double usr = dividend_fdm_reference_price(S, K, tau, sigma, r, dividends);
+            const double coarse = dividend_fdm_reference_price(S, K, tau, sigma, r, dividends);
+            const double usr = dividend_fdm_reference_price(
+                S, K, tau, sigma, r, dividends, GridAccuracyProfile::Ultra);
+            ASSERT_NEAR(coarse, usr, 0.001) << "direct oracle must converge";
             std::cout << "TAIL S=" << S << " sigma=" << sigma
                       << " got=" << got << " direct=" << usr << '\n';
             EXPECT_NEAR(got, usr, TOL_USER)

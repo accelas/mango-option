@@ -54,6 +54,25 @@ struct SegmentedChebyshevBuildConfig {
     std::vector<bool> seg_is_gap;  ///< true for synthetic dividend gap segments
 };
 
+// cc_level_nodes forms its count with 1u << level. Check every axis before
+// node generation, and reject tensor sizes that cannot be represented.
+bool valid_manual_cc_levels(const std::array<size_t, 4>& levels) {
+    constexpr size_t shift_bits = std::min(
+        std::numeric_limits<unsigned>::digits,
+        std::numeric_limits<size_t>::digits);
+    for (size_t level : levels) {
+        if (level >= shift_bits) return false;
+    }
+    const size_t max_values = std::vector<double>{}.max_size();
+    size_t total = 1;
+    for (size_t level : levels) {
+        const size_t count = (size_t{1} << level) + 1;
+        if (total > max_values / count) return false;
+        total *= count;
+    }
+    return true;
+}
+
 }  // anonymous namespace
 
 namespace detail {
@@ -939,11 +958,22 @@ ChebyshevSegmentedBuilder::build_all_krefs(
 std::expected<ChebyshevMultiKRefSurface, PriceTableError>
 ChebyshevSegmentedBuilder::build(std::array<size_t, 4> cc_levels) const
 {
-    auto ext = compute_headroom(cc_levels);
-
-    auto m_nodes = cc_level_nodes(cc_levels[0], ext.m_lo, ext.m_hi);
-    auto sigma_nodes = cc_level_nodes(cc_levels[2], ext.sigma_lo, ext.sigma_hi);
-    auto rate_nodes = cc_level_nodes(cc_levels[3], ext.rate_lo, ext.rate_hi);
+    if (!valid_manual_cc_levels(cc_levels)) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+    // Manual fits use the resolved parameter domains. Extra sigma/rate
+    // headroom can introduce exercise transitions outside the query domain
+    // and make a fixed-degree global polynomial inaccurate inside it (#486).
+    // Keep one nominal moneyness interval beyond the dividend-widened domain;
+    // PDE spatial clearance is independently owned by the grid estimator.
+    const double m_padding = (domain_.m_max - domain_.m_min)
+        / static_cast<double>(std::max(size_t{1} << cc_levels[0], size_t{3}));
+    auto m_nodes = cc_level_nodes(
+        cc_levels[0], domain_.m_min - m_padding, domain_.m_max + m_padding);
+    auto sigma_nodes = cc_level_nodes(
+        cc_levels[2], domain_.sigma_min, domain_.sigma_max);
+    auto rate_nodes = cc_level_nodes(
+        cc_levels[3], domain_.rate_min, domain_.rate_max);
     auto tau_nodes = generate_tau_nodes(cc_levels[1]);
     if (tau_nodes.empty()) {
         return std::unexpected(
@@ -1135,6 +1165,9 @@ build_chebyshev_segmented_manual(
     const IVGrid& domain,
     std::array<size_t, 4> cc_levels)
 {
+    if (!valid_manual_cc_levels(cc_levels)) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
     auto builder = ChebyshevSegmentedBuilder::create(config, domain);
     if (!builder) return std::unexpected(builder.error());
     return builder->build(cc_levels);
