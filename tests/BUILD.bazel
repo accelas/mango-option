@@ -2030,6 +2030,14 @@ py_test(
 )
 
 py_test(
+    name = "reference_cohort_test",
+    srcs = ["reference_cohort_test.py"],
+    deps = ["//tools:reference_qualification"],
+    data = ["//benchmarks/data/483_reference_cohort:fixtures"],
+    size = "small",
+)
+
+py_test(
     name = "reference_worker_test",
     srcs = ["reference_worker_test.py"],
     deps = ["//tools:reference_qualification"],

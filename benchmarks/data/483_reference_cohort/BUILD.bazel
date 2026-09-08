@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MIT
+
+filegroup(
+    name = "fixtures",
+    srcs = [
+        "SHA256SUMS",
+        "cohort-v1.tar.gz",
+        "dimensionless-addendum-v1.tar.gz",
+    ],
+    visibility = ["//visibility:public"],
+)
