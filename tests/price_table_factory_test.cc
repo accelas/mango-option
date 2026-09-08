@@ -222,6 +222,62 @@ TEST(PriceTableFactoryTest, ParquetRoundTripPreserves4DBSplineSurface) {
     EXPECT_TRUE(loaded.make_iv_solver().has_value());
 }
 
+TEST(PriceTableFactoryTest, SegmentedSaveLoadKeepsDomainAndRolledSchedule) {
+    for (bool chebyshev : {false, true}) {
+        SCOPED_TRACE(chebyshev ? "Chebyshev" : "B-spline");
+        auto config = segmented_bspline_config();
+        config.discrete_dividends->strike_bounds = StrikeBounds{95.0, 105.0};
+        if (chebyshev) config.backend = ChebyshevBackend{};
+        auto original = make_price_table(config);
+        ASSERT_TRUE(original.has_value());
+        TempDirectory temp_dir;
+        auto path = temp_dir.path() / "segmented.parquet";
+        ASSERT_TRUE(original->save(path));
+        auto loaded = load_price_table(path);
+        ASSERT_TRUE(loaded.has_value());
+        ASSERT_TRUE(loaded->strike_bounds());
+        EXPECT_DOUBLE_EQ(loaded->strike_bounds()->min, 95.0);
+        EXPECT_DOUBLE_EQ(loaded->strike_bounds()->max, 105.0);
+        ASSERT_TRUE(loaded->fixed_expiry());
+        EXPECT_DOUBLE_EQ(loaded->fixed_expiry()->reference_maturity, 1.0);
+        ASSERT_EQ(loaded->fixed_expiry()->discrete_dividends.size(), 1u);
+        EXPECT_DOUBLE_EQ(loaded->fixed_expiry()->discrete_dividends[0].calendar_time, .5);
+        auto p = off_grid_pricing_params();
+        p.maturity = .8;
+        p.dividend_yield = 0;
+        p.discrete_dividends = {{.3, 2.0}};
+        EXPECT_NEAR(loaded->price(p), original->price(p), 1e-10);
+        for (double k : {95.0, 100.0, 105.0}) {
+            p.spot = p.strike = k;
+            EXPECT_TRUE(loaded->validate_pricing_params(p));
+        }
+        for (double k : {80.0, std::nextafter(95.0, 0.0),
+                         std::nextafter(105.0, 120.0), 120.0}) {
+            p.spot = p.strike = k;
+            EXPECT_FALSE(loaded->validate_pricing_params(p));
+        }
+        p.spot = p.strike = 100;
+        auto solver = loaded->make_iv_solver();
+        ASSERT_TRUE(solver.has_value());
+        auto query = off_grid_iv_query(p, loaded->price(p));
+        query.discrete_dividends = {{.3, 3.0}};
+        auto mismatch = solver->solve(query);
+        ASSERT_FALSE(mismatch.has_value());
+        EXPECT_EQ(mismatch.error().code, IVErrorCode::DiscreteDividendMismatch);
+        query.discrete_dividends = {{.3, 2.0}};
+        auto matching = solver->solve(query);
+        if (!matching) {
+            EXPECT_NE(matching.error().code, IVErrorCode::DiscreteDividendMismatch);
+        }
+        // Re-saving a loaded table must not lose provenance on the second hop.
+        ASSERT_TRUE(loaded->save(path));
+        auto reloaded = load_price_table(path);
+        ASSERT_TRUE(reloaded.has_value());
+        EXPECT_DOUBLE_EQ(reloaded->strike_bounds()->max, 105.0);
+        EXPECT_DOUBLE_EQ(reloaded->fixed_expiry()->reference_maturity, 1.0);
+    }
+}
+
 TEST(PriceTableFactoryTest, InterpolatedIVSolverConvenienceStillWorks) {
     auto solver_result = make_interpolated_iv_solver(bspline_4d_config());
     ASSERT_TRUE(solver_result.has_value()) << "legacy convenience factory failed";

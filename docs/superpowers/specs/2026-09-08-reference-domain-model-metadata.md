@@ -56,8 +56,14 @@ through direct PriceTable to_data/from_data as well as AnyPriceTable save/load.
 The persistence slice must reject missing/invalid segmented metadata, preserve
 the numeric anchor even when tau_max is smaller, version the corrected mapping,
 and bind all metadata to integrity checks. It must not infer metadata from the
-reference hull or published maturity. Persistence implementation is delegated
-separately from the reference resolver/density work.
+reference hull or published maturity. Parquet format 3.0 stores both metadata fields with explicit presence markers.
+Its payload CRC includes the presence markers, strike endpoints, anchor,
+dividend count, and every canonical dividend time/amount. Older formats are
+refused. The in-memory reconstruction and Parquet writer/reader share metadata
+validation: segmented tables require both fields, a valid canonical schedule
+and anchor, and reference support covering the declared strike interval.
+The interval may be a singleton and may be narrower than the reference hull.
+No clock timestamps or inferred anchors are introduced.
 
 ## Focused evidence
 

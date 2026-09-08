@@ -667,11 +667,16 @@ In particular, a non-empty query schedule against a continuous
 schedule to match — this guarantee holds for solvers built via
 `make_interpolated_iv_solver` / `AnyPriceTable::make_iv_solver`, which record
 "no build-time dividends" explicitly; a solver created directly via
-`InterpolatedIVSolver::create` without a `build_dividends` argument instead
-defaults to "unknown provenance" and skips this check. One exception:
-segmented tables loaded from Parquet have no persisted build schedule, so
-their non-empty query schedules are accepted unverified — the caller is
-responsible for consistency in that case. Both the build-time and
+`InterpolatedIVSolver::create` reads known model metadata from its table.
+Segmented tables retain the canonical schedule and numerical anchor through
+`to_data`/`from_data` and `AnyPriceTable::save`/`load_price_table`, so loaded
+solvers validate schedules in the same way as freshly built solvers. Parquet
+format 3.0 preserves the explicit absolute-strike interval independently of
+support references, and the fixed-expiry anchor independently of `tau_max`.
+All these fields are covered by the payload checksum. Older formats and
+segmented payloads lacking valid metadata are refused; rebuild those tables.
+Homogeneous continuous tables may omit the strike interval and fixed-expiry
+metadata. Both the build-time and
 query-time schedules are canonicalized with the same rules the table
 builders use (`filter_and_merge_dividends`): same-date entries are merged,
 and non-positive-time/non-positive-amount entries are ignored — and, on the

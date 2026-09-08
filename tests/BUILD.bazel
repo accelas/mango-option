@@ -1947,6 +1947,7 @@ cc_test(
     linkopts = ["-fopenmp"],
     tags = ["manual"],  # Requires system Arrow/Parquet libraries
     deps = [
+        "//src/option:price_table_factory",
         "//src/option/table/serialization:to_data",
         "//src/option/table/serialization:from_data",
         "//src/option/table/parquet:parquet_io",
