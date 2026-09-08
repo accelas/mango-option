@@ -201,6 +201,28 @@ TEST(GridSpecTest, MultiSinhSingleClusterMatchesSinhSpaced) {
     }
 }
 
+TEST(GridSpecTest, MultiSinhOffCenterDoesNotClusterAtBoundary) {
+    // A dividend can widen one side of the PDE domain. The requested strike
+    // cluster must still have finer spacing than either outer boundary.
+    // Clipping an unnormalized sinh map used to manufacture tiny edge cells.
+    for (const auto& bounds : {std::pair{-1.1, 1.0}, std::pair{-1.0, 1.1},
+                              std::pair{-3.0, 1.0}, std::pair{-1.0, 3.0}}) {
+        SCOPED_TRACE(bounds.first);
+        auto spec = mango::GridSpec<>::multi_sinh_spaced(
+            bounds.first, bounds.second, 101,
+            {{.center_x = 0.0, .alpha = 4.0, .weight = 1.0}});
+        ASSERT_TRUE(spec.has_value());
+        auto grid = spec->generate();
+        size_t hi = 1;
+        while (grid[hi] < 0.0) ++hi;
+        const double strike_spacing = grid[hi] - grid[hi - 1];
+        EXPECT_GT(grid[1] - grid[0], strike_spacing);
+        EXPECT_GT(grid[100] - grid[99], strike_spacing);
+        EXPECT_DOUBLE_EQ(grid[0], bounds.first);
+        EXPECT_DOUBLE_EQ(grid[100], bounds.second);
+    }
+}
+
 TEST(GridSpecTest, MultiSinhMergedClusterPreservesLocation) {
     // Test that merged clusters preserve their weighted-average location
     // Auto-merge only deduplicates overlapping centers, it doesn't recenter them
