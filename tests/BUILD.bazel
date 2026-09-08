@@ -2016,6 +2016,14 @@ cc_test(
     deps = ["//src/math/proof:chebyshev", "@googletest//:gtest_main"],
 )
 
+# Public contract REDs awaiting final #459 activation after #460/#461.
+cc_test(
+    name = "financial_certification_red_test",
+    srcs = ["financial_certification_red_test.cc"],
+    deps = ["//src/option/table/bspline:bspline_surface", "//src/option:price_table_factory", "@googletest//:gtest_main"],
+    tags = ["manual"],
+)
+
 cc_test(
     name = "moneyness_bounds_test",
     srcs = ["moneyness_bounds_test.cc"],
