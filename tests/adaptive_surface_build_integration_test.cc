@@ -386,21 +386,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedEmptyProbeBandSkipped) {
     EXPECT_EQ(skipped, 1u) << "the K_ref = 50 probe should be recorded skipped";
 }
 
-// Coverage: Single auto-generated K_ref (count=1)
-//
-// One K_ref cannot serve a +/-30 % strike range.  The assembled surface
-// prices every query as (K / K_ref) * P(S, K_ref) -- the multi-K_ref split
-// substitutes K_ref for the query strike while holding the spot fixed -- so
-// it measures 4.69 (46,924 bps) on the final validation and the build
-// refuses (spec D9).  The coverage here is that `K_ref_count = 1` resolves
-// to a single K_ref and the build runs all the way to the final gate rather
-// than failing configuration validation.
-//
-// Revisit when MultiKRefSplit spot-scaling is fixed (follow-up): a split
-// that mapped the query onto the K_ref problem instead of substituting the
-// strike would make a single K_ref usable, and this test would go back to
-// asserting a successful build.
-TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
+// A broad requested interval needs at least its two endpoints. A budget
+// of one reference must refuse before solving, not publish a clamped span.
+TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsOneReferenceBudgetForBroadDomain) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
     params.max_iter = 1;
@@ -413,7 +401,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
         .dividend_yield = 0.0,
         .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
         .maturity = 1.0,
-        .kref_config = {.K_refs = {}, .K_ref_count = 1, .K_ref_span = 0.3},
+        .kref_config = {.K_refs = {}, .max_references = 1},
     };
 
     auto m = to_log_m({0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3});
@@ -423,9 +411,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_FALSE(result.has_value())
         << "a lone K_ref cannot serve a +/-30 % strike range";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface)
-        << "K_ref_count = 1 must resolve and build, then fail the final "
-           "viability gate -- not fail configuration validation";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
 // Coverage: Very short maturity — tau domain compressed, max_tau clamped

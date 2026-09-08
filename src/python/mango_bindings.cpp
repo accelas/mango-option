@@ -949,8 +949,8 @@ PYBIND11_MODULE(mango_option, m) {
     py::class_<mango::MultiKRefConfig>(m, "MultiKRefConfig")
         .def(py::init<>())
         .def_readwrite("K_refs", &mango::MultiKRefConfig::K_refs)
-        .def_readwrite("K_ref_count", &mango::MultiKRefConfig::K_ref_count)
-        .def_readwrite("K_ref_span", &mango::MultiKRefConfig::K_ref_span);
+        .def_readwrite("max_references", &mango::MultiKRefConfig::max_references)
+        .def_readwrite("max_selection_rounds", &mango::MultiKRefConfig::max_selection_rounds);
 
     // BSplineBackend
     py::class_<mango::BSplineBackend>(m, "BSplineBackend")

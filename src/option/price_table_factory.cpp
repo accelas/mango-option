@@ -139,32 +139,15 @@ GridBounds extract_bounds(const IVGrid& grid) {
 }
 
 std::expected<BSplineMultiKRefInner, PriceTableError> build_multi_kref_manual(
-    double spot,
     OptionType option_type,
     const DividendSpec& dividends,
     const IVGrid& log_grid,
     double maturity,
-    const MultiKRefConfig& kref_config)
+    const MultiKRefConfig& kref_config, const StrikeBounds& strikes)
 {
-    std::vector<double> K_refs = kref_config.K_refs;
-    if (K_refs.empty()) {
-        if (kref_config.K_ref_count < 1) {
-            return std::unexpected(PriceTableError{
-                PriceTableErrorCode::InvalidConfig});
-        }
-        if (kref_config.K_ref_count == 1) {
-            K_refs.push_back(spot);
-        } else {
-            K_refs.reserve(static_cast<size_t>(kref_config.K_ref_count));
-            const double log_low = std::log(spot) - kref_config.K_ref_span;
-            const double log_high = std::log(spot) + kref_config.K_ref_span;
-            for (int i = 0; i < kref_config.K_ref_count; ++i) {
-                const double t = static_cast<double>(i) /
-                                 static_cast<double>(kref_config.K_ref_count - 1);
-                K_refs.push_back(std::exp(log_low + t * (log_high - log_low)));
-            }
-        }
-    }
+    auto resolved = resolve_k_refs(kref_config, strikes);
+    if (!resolved) return std::unexpected(resolved.error());
+    const auto& K_refs = *resolved;
 
     std::vector<BSplineMultiKRefEntry> entries;
     entries.reserve(K_refs.size());
@@ -269,8 +252,8 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
     };
 
     auto surface = build_multi_kref_manual(
-        config.spot, config.option_type, dividends,
-        log_grid, divs.maturity, divs.kref_config);
+        config.option_type, dividends,
+        log_grid, divs.maturity, divs.kref_config, *strikes);
     if (!surface.has_value()) {
         return std::unexpected(detail::to_validation_error(surface.error()));
     }

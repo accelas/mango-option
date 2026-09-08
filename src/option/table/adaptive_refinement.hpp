@@ -494,12 +494,17 @@ void scan_monotonicity(const std::vector<ValidationPoint>& points,
 
 }  // namespace detail
 
-/// Resolve K_ref values from a MultiKRefConfig.
-/// If config.K_refs is non-empty, returns them sorted.
-/// Otherwise generates K_ref_count log-spaced values spanning
-/// [spot*(1-span), spot*(1+span)].
+/// Validate an explicit numerical support set without inventing a published
+/// domain. Returns a sorted copy, preserving every input value exactly.
 [[nodiscard]] std::expected<std::vector<double>, PriceTableError>
-resolve_k_refs(const MultiKRefConfig& config, double spot);
+validate_k_ref_values(std::span<const double> values, size_t maximum_count);
+
+/// Cheap reference-request validation. Explicit values are preserved and
+/// sorted after finite/positive/unique/coverage checks. Automatic requests
+/// receive a covering seed within their ceiling; build-time measurements
+/// choose final density. The requested absolute interval is authoritative.
+[[nodiscard]] std::expected<std::vector<double>, PriceTableError>
+resolve_k_refs(const MultiKRefConfig& config, const StrikeBounds& bounds);
 
 /// Expand domain bounds for segmented (discrete-dividend) surface building.
 ///

@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -34,6 +35,84 @@
 
 namespace mango {
 namespace {
+
+// Synthetic payload isolates persistence from PDE/fitting accuracy.
+ChebyshevMultiKRefSurface metadata_surface() {
+    std::vector<ChebyshevTauSegmented> references;
+    for (double k : {80.0, 120.0}) {
+        auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build_from_values(
+            std::vector<double>(16, 0.1),
+            Domain<4>{{-0.3, 0.01, 0.1, 0.02}, {0.3, 1.0, 0.4, 0.08}},
+            std::array<size_t, 4>{2, 2, 2, 2}).value();
+        std::vector<ChebyshevSegmentedLeaf> leaves;
+        leaves.emplace_back(std::move(interp), StandardTransform4D{}, k);
+        references.emplace_back(std::move(leaves),
+            TauSegmentSplit({0.0}, {1.0}, {0.01}, {1.0}, k));
+    }
+    SurfaceBounds bounds{-0.3, 0.3, 0.01, 1.0, 0.1, 0.4, 0.02, 0.08,
+                         StrikeBounds{95.0, 105.0}};
+    return ChebyshevMultiKRefSurface(
+        ChebyshevMultiKRefInner(std::move(references), MultiKRefSplit({80.0, 120.0})),
+        bounds, OptionType::PUT, 0.02,
+        FixedExpiryMetadata{2.0, {{1.5, 2.0}, {1.8, 3.0}}});
+}
+
+TEST(PriceTableDataTest, SegmentedReconstructionRejectsIncompleteOrInvalidModelMetadata) {
+    const auto data = to_data(metadata_surface());
+    auto expect_rejected = [](const PriceTableData& bad) {
+        auto result = from_data<ChebyshevMultiKRefInner>(bad);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+    };
+    auto bad = data;
+    bad.strike_bounds.reset();
+    expect_rejected(bad);
+    bad = data;
+    bad.fixed_expiry.reset();
+    expect_rejected(bad);
+    for (auto bounds : {StrikeBounds{0, 105}, StrikeBounds{106, 105},
+                        StrikeBounds{79, 105}, StrikeBounds{95, 121},
+                        StrikeBounds{95, std::numeric_limits<double>::infinity()}}) {
+        bad = data;
+        bad.strike_bounds = bounds;
+        expect_rejected(bad);
+    }
+    for (auto fixed : {FixedExpiryMetadata{0.5, {}},
+                       FixedExpiryMetadata{2.0, {{1.5, -1.0}}},
+                       FixedExpiryMetadata{2.0, {{1.5, 1}, {1.5, 2}}},
+                       FixedExpiryMetadata{2.0, {{2.0, 1}}},
+                       FixedExpiryMetadata{2.0, {{1.8, 1}, {1.5, 2}}}}) {
+        bad = data;
+        bad.fixed_expiry = fixed;
+        expect_rejected(bad);
+    }
+    auto singleton = data;
+    singleton.strike_bounds = StrikeBounds{100, 100};
+    EXPECT_TRUE(from_data<ChebyshevMultiKRefInner>(singleton).has_value());
+}
+
+TEST(PriceTableDataTest, DirectRoundTripPreservesDeclaredDomainAndNumericalAnchor) {
+    auto original = metadata_surface();
+    auto loaded = from_data<ChebyshevMultiKRefInner>(to_data(original));
+    ASSERT_TRUE(loaded.has_value());
+    ASSERT_TRUE(loaded->strike_bounds().has_value());
+    EXPECT_DOUBLE_EQ(loaded->strike_bounds()->min, 95.0);
+    EXPECT_DOUBLE_EQ(loaded->strike_bounds()->max, 105.0);
+    EXPECT_TRUE(loaded->contains_strike(95.0));
+    EXPECT_FALSE(loaded->contains_strike(std::nextafter(95.0, 0.0)));
+    EXPECT_FALSE(loaded->contains_strike(80.0));
+    const double lower_spot = 100.0 * std::exp(-0.3);
+    EXPECT_TRUE(loaded->contains_moneyness(lower_spot, 100.0));
+    EXPECT_FALSE(loaded->contains_moneyness(std::nextafter(lower_spot, 0.0), 100.0));
+    ASSERT_TRUE(loaded->fixed_expiry().has_value());
+    EXPECT_DOUBLE_EQ(loaded->fixed_expiry()->reference_maturity, 2.0);
+    EXPECT_DOUBLE_EQ(loaded->tau_max(), 1.0);
+    ASSERT_EQ(loaded->fixed_expiry()->discrete_dividends.size(), 2u);
+    EXPECT_DOUBLE_EQ(loaded->fixed_expiry()->discrete_dividends[0].calendar_time, 1.5);
+    EXPECT_DOUBLE_EQ(loaded->fixed_expiry()->discrete_dividends[1].amount, 3.0);
+    EXPECT_DOUBLE_EQ(loaded->price(100, 100, .8, .2, .05),
+                     original.price(100, 100, .8, .2, .05));
+}
 
 // ===========================================================================
 // Helper: convert S/K moneyness to log-moneyness
@@ -130,6 +209,8 @@ TEST(PriceTableDataTest, BSpline4DRoundTrip) {
     auto loaded = from_data<BSplineLeaf>(data);
     ASSERT_TRUE(loaded.has_value()) << "from_data failed";
 
+    EXPECT_FALSE(loaded->strike_bounds());
+    EXPECT_FALSE(loaded->fixed_expiry());
     verify_prices_match_4d(*surface, *loaded, 100.0);
 }
 
@@ -278,8 +359,10 @@ TEST(PriceTableDataTest, BSplineSegmentedRoundTrip) {
         .rate_max = 0.05,
     };
 
+    bounds.strike_bounds = StrikeBounds{100.0, 100.0};
     BSplineMultiKRefSurface surface(
-        std::move(*multi), bounds, OptionType::PUT, 0.02);
+        std::move(*multi), bounds, OptionType::PUT, 0.02,
+        make_fixed_expiry_metadata(config.maturity, config.dividends.discrete_dividends));
 
     auto data = to_data(surface);
 
@@ -321,6 +404,7 @@ TEST(PriceTableDataTest, ChebyshevSegmentedRoundTrip) {
         .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
         .maturity = 1.0,
         .kref_config = {.K_refs = {100.0}},
+        .strike_bounds = StrikeBounds{100.0, 100.0},
     };
 
     IVGrid grid{
@@ -521,8 +605,10 @@ TEST(PriceTableDataTest, SegmentedSegmentMetadata) {
         .rate_max = 0.05,
     };
 
+    bounds.strike_bounds = StrikeBounds{100.0, 100.0};
     BSplineMultiKRefSurface surface(
-        std::move(*multi), bounds, OptionType::PUT, 0.02);
+        std::move(*multi), bounds, OptionType::PUT, 0.02,
+        make_fixed_expiry_metadata(config.maturity, config.dividends.discrete_dividends));
 
     auto data = to_data(surface);
     EXPECT_GE(data.segments.size(), 2u)

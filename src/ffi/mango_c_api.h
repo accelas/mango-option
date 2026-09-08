@@ -97,8 +97,8 @@ typedef struct {
 typedef struct {
   const double* K_refs;       // may be null when n_K_refs == 0 (auto mode)
   uint64_t n_K_refs;
-  int32_t K_ref_count;        // used iff K_refs empty; must be >= 1 (auto: 11)
-  double K_ref_span;
+  int32_t K_ref_count;        // legacy auto slot: only 0/default 11 accepted
+  double K_ref_span;          // legacy auto slot: only default 0.3 accepted
 } MangoMultiKRef;
 
 // DiscreteDividendConfig.

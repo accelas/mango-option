@@ -150,4 +150,30 @@ TEST(MangoCApiIvErrorMapping, ValidationAndSolverCategories) {
   EXPECT_EQ(mango::ffi::map_iv_error(e), MANGO_ERR_SOLVER);
 }
 
+TEST(MangoCApi, LegacyReferenceSlotsDoNotSilentlyChangeSelectionPolicy) {
+  const double m[] = {.9, .95, 1.0, 1.1};
+  const double sigma[] = {.1, .2, .3, .4};
+  const double rate[] = {.01, .03, .05, .07};
+  const double tau[] = {.25, .5, .75, 1.0};
+  MangoDiscreteDividendConfig dividends{};
+  dividends.maturity = 1.0;
+  dividends.kref_config.K_ref_span = .3;
+  MangoIvFactoryConfig config{};
+  config.option_type = MANGO_PUT;
+  config.spot = 100.0;
+  config.moneyness = m; config.n_moneyness = 4;
+  config.vol = sigma; config.n_vol = 4;
+  config.rate = rate; config.n_rate = 4;
+  config.maturity_grid = tau; config.n_maturity = 4;
+  config.discrete_dividends = &dividends;
+  MangoPriceTable* table = nullptr;
+  MangoError error{};
+  dividends.kref_config.K_ref_count = 5;  // retired nondefault auto control
+  EXPECT_EQ(mango_make_price_table(&config, &table, &error), MANGO_ERR_VALIDATION);
+  EXPECT_EQ(table, nullptr);
+  dividends.kref_config.K_ref_count = 11; // supported transitional default
+  ASSERT_EQ(mango_make_price_table(&config, &table, &error), MANGO_OK) << error.message;
+  mango_price_table_free(table);
+}
+
 }  // namespace

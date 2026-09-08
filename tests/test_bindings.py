@@ -380,6 +380,39 @@ def test_fdm_iv_solver_honors_discrete_dividends():
     assert abs(res2.implied_vol - 0.25) > 0.02
 
 
+def test_segmented_domain_and_reference_controls():
+    config = make_price_table_config()
+    divs = mo.DiscreteDividendConfig()
+    divs.maturity = 1.0
+    divs.strike_bounds = mo.StrikeBounds(90.0, 110.0)
+    refs = mo.MultiKRefConfig()
+    refs.K_refs = [85.0, 100.0, 115.0]
+    refs.max_references = 3
+    refs.max_selection_rounds = 2
+    divs.kref_config = refs
+    config.discrete_dividends = divs
+    table = mo.make_price_table(config)
+    assert table.strike_bounds.min == 90.0
+    assert table.strike_bounds.max == 110.0
+    assert table.fixed_expiry.reference_maturity == 1.0
+    assert table.fixed_expiry.discrete_dividends == []
+    p = make_pricing_params()
+    p.spot = p.strike = 120.0
+    try:
+        table.price(p)
+        raise AssertionError("extra support must not widen the published strike interval")
+    except mo.ValidationError:
+        pass
+    refs.max_references = 2
+    divs.kref_config = refs
+    config.discrete_dividends = divs
+    try:
+        mo.make_price_table(config)
+        raise AssertionError("an explicit set must not be truncated to meet its ceiling")
+    except mo.ValidationError:
+        pass
+
+
 def main():
     tests = [
         test_rate_spec_conversions,
@@ -387,6 +420,7 @@ def main():
         test_optional_and_backend_variant_conversions,
         test_grid_accuracy_coverage_roundtrip,
         test_dividend_conversions,
+        test_segmented_domain_and_reference_controls,
         test_fdm_iv_solver_honors_discrete_dividends,
         test_bspline_4d_price_table_workflow_and_persistence_paths,
         test_price_table_validation_and_iv_error_parity,
