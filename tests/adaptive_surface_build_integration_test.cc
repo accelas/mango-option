@@ -897,29 +897,10 @@ TEST(AdaptiveGridBuilderTest, TensorTailsMatchFdmAtExtremeMoneyness) {
     }
 }
 
-// Regression (#437, fallback branch): an explicit grid that covers the
-// fit axis but violates MAX_DX falls back to accuracy estimation, which
-// also solved gridless.  As above, make_batch() fixes maturity to the fit
-// tau axis's widened upper bound (measured 0.500001) for every entry, so
-// the fallback's required_n_sigma is derived from
-// max_sigma_sqrt_tau = 0.20*sqrt(0.500001) ~= 0.1414, not the chain's raw
-// max maturity of 0.1 -- an order-of-magnitude difference from a naive
-// reading of the formula.  The explicit bounds [-0.6, 0.6] are chosen so
-// that required_n_sigma = (0.6/0.1414)*1.1 ~= 4.67 sits BELOW the
-// n_sigma=5.0 floor: the fallback clamps to that floor, reproducing
-// exactly the default-profile branch's undershoot for the min-sigma
-// (0.10) group (half-width 5.0*0.10*sqrt(0.500001) ~= 0.3536 < the
-// ~0.3796 fit-axis reach at m_axis.front()) while max-sigma (0.20,
-// half-width ~0.7071) stays covered.  17 points over width 1.2 gives
-// max_dx ~= 0.094 > 0.05, forcing the fallback branch; width 1.2 still
-// exceeds min_required_width (6*0.1414 ~= 0.849) so only MAX_DX trips.
-// Pre-fix max abs error on this branch: 0.0569 (m=-0.379555, sigma=0.10).
-// Smaller than the GridAccuracyParams branch's 0.4263 despite the same
-// floored n_sigma=5.0 -- the multi-sinh point placement here differs from
-// the default-profile grid's, so the cubic-spline extrapolation just past
-// the domain edge is milder -- but it is still a genuine, real
-// out-of-domain extrapolation, not ordinary interpolation error.
-TEST(AdaptiveGridBuilderTest, FallbackExplicitGridCoversMoneynessTails) {
+// Regression (#437/#487): adaptive missing slices must retain the entire
+// requested moneyness range. This fixture previously supplied 17 points but
+// depended on silent replacement by 101; request its automatic grid explicitly.
+TEST(AdaptiveGridBuilderTest, AutomaticGridCoversMoneynessTailsWithFixedBudget) {
     OptionGrid chain;
     chain.spot = 100.0;
     chain.dividend_yield = 0.0;
@@ -933,11 +914,11 @@ TEST(AdaptiveGridBuilderTest, FallbackExplicitGridCoversMoneynessTails) {
     params.max_iter = 2;
     params.validation_samples = 8;
 
-    // Covers the fit axis (upfront check passes) but 17 points over
-    // width 1.2 makes max_dx > 0.05, forcing the fallback branch.
-    auto grid_spec = GridSpec<double>::sinh_spaced(-0.6, 0.6, 17, 2.0).value();
-    auto result = build_adaptive_bspline(params, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+    GridAccuracyParams accuracy;
+    accuracy.min_spatial_points = accuracy.max_spatial_points = 101;
+    accuracy.max_time_steps = 200;
+    accuracy.alpha = 2.0;
+    auto result = build_adaptive_bspline(params, chain, accuracy, OptionType::PUT);
     ASSERT_TRUE(result.has_value());
 
     auto wrapper = make_bspline_surface(
@@ -951,14 +932,8 @@ TEST(AdaptiveGridBuilderTest, FallbackExplicitGridCoversMoneynessTails) {
     const double tau = result->axes.grids[1].back();
     const double r = result->axes.grids[3].front();
 
-    // Tolerance in $ per K_ref=100 strike: post-fix max observed deviation
-    // is 1.19e-05 (m_axis.back(), sigma=vol_axis.back()).  TOL is
-    // deliberately loosened well above that -- this is the same
-    // coarse-fallback pipeline (multi-sinh explicit grid + accuracy
-    // re-estimation) already flagged as noisier across toolchains, so 1e-3
-    // stays robust to that noise while still ~57x below the recorded 0.0569
-    // pre-fix error, keeping full discriminating power between domain
-    // coverage and ordinary interpolation error.
+    // Preserve the existing quote-unit tolerance: the pre-coverage bug
+    // produced .0569 error, compared with this .001 acceptance limit.
     constexpr double TOL = 1e-3;
 
     for (double m : {m_axis.front(), m_axis.back()}) {

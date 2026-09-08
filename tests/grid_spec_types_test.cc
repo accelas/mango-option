@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -51,6 +52,59 @@ TEST(LogMoneynessRange, ReachIsMeasuredFromX0) {
     EXPECT_DOUBLE_EQ(r.reach_from(0.0), 0.5);
     EXPECT_DOUBLE_EQ(r.reach_from(0.2), 0.7);    // inside: to the far endpoint
     EXPECT_DOUBLE_EQ(r.reach_from(2.0), 2.5);    // outside: to the far endpoint
+}
+
+// Regression (#487): rounding a capped even grid up allocated 5001 points.
+TEST(EstimatePdeGrid, OddAdjustmentStaysInsideSpatialCeiling) {
+    GridAccuracyParams acc = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    acc.log_moneyness_coverage = LogMoneynessRange{-1.1, 1.1};
+    const auto [grid, time] = estimate_pde_grid(put(0.01, 1.0), acc);
+    EXPECT_LE(grid.n_points(), 5000u);
+    EXPECT_EQ(grid.n_points() % 2, 1u);
+    EXPECT_GE(grid.n_points(), acc.min_spatial_points);
+    EXPECT_LT(grid.x_min(), -1.1);
+    EXPECT_GT(grid.x_max(), 1.1);
+}
+
+// An odd grid must exist inside the caller's closed point-count interval.
+TEST(EstimatePdeGrid, RejectsInconsistentSpatialBounds) {
+    for (auto bounds : {std::pair{101u, 100u}, std::pair{100u, 100u},
+                        std::pair{0u, 2u}}) {
+        GridAccuracyParams acc;
+        acc.min_spatial_points = bounds.first;
+        acc.max_spatial_points = bounds.second;
+        EXPECT_THROW(estimate_pde_grid(put(0.2, 1.0), acc), std::invalid_argument);
+    }
+}
+
+TEST(EstimateBatchPdeGrid, SpatialCeilingIncludesEmptyAndSharedEstimates) {
+    GridAccuracyParams acc;
+    acc.min_spatial_points = 3;
+    acc.max_spatial_points = 100;
+    acc.tol = 1e-8;
+    for (const auto& batch : {std::vector<PricingParams>{},
+                              std::vector{put(0.01, 1.0), put(0.4, 1.0)}}) {
+        const auto grid = estimate_batch_pde_grid_config(batch, acc).grid_spec;
+        EXPECT_LE(grid.n_points(), 100u);
+        EXPECT_EQ(grid.n_points() % 2, 1u);
+    }
+}
+
+TEST(EstimatePdeGrid, CoveragePreservesExplicitClusteringStrength) {
+    GridAccuracyParams acc;
+    acc.alpha = 2.5;
+    acc.log_moneyness_coverage = LogMoneynessRange{-1.0, 1.0};
+    const auto [grid, time] = estimate_pde_grid(put(0.05, 0.5), acc);
+    ASSERT_FALSE(grid.clusters().empty());
+    for (const auto& cluster : grid.clusters()) EXPECT_DOUBLE_EQ(cluster.alpha, 2.5);
+}
+
+TEST(EstimatePdeGrid, LowerBoundMayBeBelowTheMinimumUsableGrid) {
+    GridAccuracyParams acc;
+    acc.min_spatial_points = 0;
+    acc.max_spatial_points = 3;
+    const auto [grid, time] = estimate_pde_grid(put(0.2, 1.0), acc);
+    EXPECT_EQ(grid.n_points(), 3u);
 }
 
 // D11 rule on a single normalized contract: edge = max(1.1*reach, reach + 3s).
@@ -175,9 +229,9 @@ TEST(EstimateBatchPdeGridConfig, WrapsTheSharedGrid) {
 }
 
 // Exact goldens recorded from the retired covering-grid helper on the
-// parent revision (its identity test proved the fold reproduces them bit
-// for bit), so the fold cannot drift now that the helper is deleted.
-TEST(EstimateBatchPdeGrid, GoldensMatchTheRetiredHelper) {
+// parent revision. Bounds stay fixed; spatial counts obey the ceiling.
+// The dividend time count reflects the corrected asymmetric grid map.
+TEST(EstimateBatchPdeGrid, CoverageGoldensWithCorrectedSpacing) {
     // (a) clamp-binding Ultra chain batch (T2-like): sigma nodes over
     //     [0.01, 0.225] at T = 0.694375, coverage [-1.0881, 1.0881].
     {
@@ -188,7 +242,7 @@ TEST(EstimateBatchPdeGrid, GoldensMatchTheRetiredHelper) {
         auto [grid, td] = estimate_batch_pde_grid(batch, acc);
         EXPECT_DOUBLE_EQ(grid.x_min(), -1.6505718742968398);
         EXPECT_DOUBLE_EQ(grid.x_max(), 1.6505718742968398);
-        EXPECT_EQ(grid.n_points(), 5001u);
+        EXPECT_EQ(grid.n_points(), 4999u);
         EXPECT_EQ(td.n_steps(), 20000u);
     }
     // (b) dividend batch: sigma {0.05, 0.15}, T = 0.2525, one dividend
@@ -203,8 +257,10 @@ TEST(EstimateBatchPdeGrid, GoldensMatchTheRetiredHelper) {
         auto [grid, td] = estimate_batch_pde_grid(batch, acc);
         EXPECT_DOUBLE_EQ(grid.x_min(), -1.1009491447542108);
         EXPECT_DOUBLE_EQ(grid.x_max(), 1.0713222014752199);
-        EXPECT_EQ(grid.n_points(), 5001u);
-        EXPECT_EQ(td.n_steps(), 20001u);
+        EXPECT_EQ(grid.n_points(), 4999u);
+        // Boundary crowding previously forced this otherwise modest grid to
+        // the 20000-step cap. Preserve the new measured scheduling result.
+        EXPECT_EQ(td.n_steps(), 4136u);
     }
 }
 

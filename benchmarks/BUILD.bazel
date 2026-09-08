@@ -625,3 +625,14 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
+
+cc_binary(
+    name = "grid_policy_characterization",
+    srcs = ["grid_policy_characterization.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/option:grid_spec_types",
+    ],
+    tags = ["manual"],
+)

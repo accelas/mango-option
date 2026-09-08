@@ -849,8 +849,17 @@ This optimization is automatic — `solve_batch()` routes eligible batches to th
 - `use_shared_grid = true`
 - No discrete dividends (these break scale invariance)
 - Positive spot and strike values
-- Grid spacing and domain width within stability constraints
+- Consistent option type within the batch
 - No `SetupCallback` (per-option callbacks are incompatible with shared PDE solves)
+
+The solver assesses each parameter group's actual grid, after automatic
+coverage estimation or an explicit override. Reuse follows model eligibility:
+on the same grid, homogeneous contracts solve the same normalized PDE.
+Historical width, spacing and margin cutoffs have been retired because
+repeating an identical solve cannot improve its numerical quality. The
+actual grid configuration and PDE validation remain authoritative; failures
+propagate to the group's contracts. Automatic coverage and explicit constraints
+are preserved.
 
 **Disabling chain solving:**
 
@@ -1219,6 +1228,26 @@ mango::GridAccuracyParams accuracy{
 
 auto [grid_spec, time_domain] = mango::estimate_pde_grid(params, accuracy);
 ```
+
+Spatial point limits are strict: the estimator chooses an odd count inside
+`[min_spatial_points, max_spatial_points]`; a maximum of 5000 permits at most
+4999 points. Inconsistent intervals (including an even fixed count such as
+`min=max=100`) are configuration errors. Direct pricing and IV return their
+existing typed errors. The low-level pair-returning `estimate_pde_grid` and
+batch estimation helpers throw `std::invalid_argument` for these requests;
+`validate_grid_accuracy` provides a typed preflight check.
+
+An explicit `PDEGridConfig` is used exactly. B-spline construction also preserves
+its coordinates, point count, clustering, and requested mandatory times; it
+no longer silently replaces a coarse or wide manual grid with an automatic
+one. Domain checks and solver failures still apply. Automatic accuracy requests
+are the normal way to delegate grid selection.
+
+`alpha` is an explicit numeric clustering strength, including its fixed default.
+Coverage widening does not reinterpret or retune it. The default three-diffusion-
+length clearance and grid density are heuristics, not measured price-error
+certificates. See the [grid-policy characterization](superpowers/specs/2026-09-06-grid-policy-characterization.md)
+for accuracy and cost measurements, including failures of a one-cent target.
 
 **Tolerance guidelines:**
 - `tol = 1e-2`: Fast mode (~100-150 points, ~5ms)

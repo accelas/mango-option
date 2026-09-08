@@ -182,6 +182,22 @@ public:
     std::span<const MultiSinhCluster<T>> clusters() const { return clusters_; }
 
 private:
+    /// A monotone sinh map with its density peak at the requested center
+    /// and both domain endpoints represented before any rounding correction.
+    struct SinhMap {
+        T center, scale, u_left, u_right;
+
+        SinhMap(T lo, T hi, const MultiSinhCluster<T>& cluster)
+            : center(cluster.center_x)
+            , scale((hi - lo) / (T(2) * std::sinh(cluster.alpha / T(2))))
+            , u_left(std::asinh((lo - center) / scale))
+            , u_right(std::asinh((hi - center) / scale)) {}
+
+        T eval(T eta) const {
+            return center + scale * std::sinh(std::lerp(u_left, u_right, eta));
+        }
+    };
+
     GridSpec(Type type, T x_min, T x_max, size_t n_points, T concentration = T(1.0),
              std::vector<MultiSinhCluster<T>> clusters = {})
         : type_(type), x_min_(x_min), x_max_(x_max),
@@ -234,35 +250,6 @@ private:
                         break;
                     }
                 }
-            }
-        }
-    }
-
-    /// Enforce strict monotonicity in grid points
-    ///
-    /// Ensures x[i+1] > x[i] for all i, while preserving endpoints.
-    /// Uses iterative smoothing to fix non-monotonic regions.
-    static void enforce_monotonicity(std::vector<T>& points, T x_min, T x_max) {
-        const size_t n = points.size();
-        if (n < 2) return;
-
-        const T min_spacing = (x_max - x_min) / static_cast<T>(n * 100);
-
-        // Clamp endpoints
-        points[0] = x_min;
-        points[n-1] = x_max;
-
-        // Forward pass: ensure strictly increasing with minimum spacing
-        for (size_t i = 1; i < n - 1; ++i) {
-            if (points[i] <= points[i-1] + min_spacing) {
-                points[i] = points[i-1] + min_spacing;
-            }
-        }
-
-        // Backward pass: ensure last interior point doesn't exceed x_max - min_spacing
-        for (size_t i = n - 2; i > 0; --i) {
-            if (points[i] >= points[i+1] - min_spacing) {
-                points[i] = points[i+1] - min_spacing;
             }
         }
     }
@@ -431,23 +418,18 @@ GridBuffer<T> GridSpec<T>::generate() const {
                         points.push_back(x_min_ + range * normalized);
                     }
                 } else {
-                    // Off-center cluster: use generalized formula + monotonicity enforcement
-                    const T offset = center - (x_min_ + x_max_) / T(2.0);
-                    std::vector<T> raw_points(n_points_);
+                    // Parameterize both endpoints in sinh coordinates about
+                    // the requested center. Merely shifting the centered map
+                    // overshoots an endpoint; repairing it creates tiny edge
+                    // cells unrelated to the requested cluster.
+                    const SinhMap map(x_min_, x_max_, cluster);
                     for (size_t i = 0; i < n_points_; ++i) {
                         const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-                        const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
-                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
-                        raw_points[i] = x_min_ + range * normalized + offset;
+                        points.push_back(map.eval(eta));
                     }
-
-                    // Enforce monotonicity and bounds
-                    enforce_monotonicity(raw_points, x_min_, x_max_);
-
-                    // Transfer to output
-                    for (const auto& x : raw_points) {
-                        points.push_back(x);
-                    }
+                    // Preserve the supplied endpoint labels exactly.
+                    points.front() = x_min_;
+                    points.back() = x_max_;
                 }
             } else {
                 // Multi-cluster: combine weighted sinh transforms
@@ -459,39 +441,18 @@ GridBuffer<T> GridSpec<T>::generate() const {
                     total_weight += cluster.weight;
                 }
 
-                const T range = x_max_ - x_min_;
-
-                for (size_t i = 0; i < n_points_; ++i) {
-                    // Map i to eta ∈ [0, 1]
-                    const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-
-                    // Weighted combination of sinh transforms
-                    T weighted_x = T(0);
-                    for (const auto& cluster : clusters_) {
-                        const T c = cluster.alpha;
-                        const T center = cluster.center_x;
-                        const T w = cluster.weight / total_weight;
-                        const T sinh_half_c = std::sinh(c / T(2.0));
-
-                        // Compute normalized center position for this cluster
-                        const T eta_center = (center - x_min_) / range;
-
-                        // Apply sinh transform centered at eta_center
-                        const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
-                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
-
-                        // Transform to [x_min, x_max] with offset to place peak at center_x
-                        const T offset = center - (x_min_ + x_max_) / T(2.0);
-                        const T x_i = x_min_ + range * normalized + offset;
-
-                        weighted_x += w * x_i;
+                // Positive combinations of maps sharing the endpoints remain
+                // monotone and in bounds; no artificial edge cells are needed.
+                for (const auto& cluster : clusters_) {
+                    const SinhMap map(x_min_, x_max_, cluster);
+                    const T weight = cluster.weight / total_weight;
+                    for (size_t i = 1; i + 1 < n_points_; ++i) {
+                        const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+                        raw_points[i] += weight * map.eval(eta);
                     }
-
-                    raw_points[i] = weighted_x;
                 }
-
-                // Enforce monotonicity with smoothing pass
-                enforce_monotonicity(raw_points, x_min_, x_max_);
+                raw_points.front() = x_min_;
+                raw_points.back() = x_max_;
 
                 // Transfer to output
                 points = std::move(raw_points);

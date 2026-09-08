@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace mango {
 
@@ -90,6 +91,17 @@ GridAccuracyParams fold_coverage(GridAccuracyParams accuracy,
 
 }  // namespace
 
+std::expected<void, ValidationError> validate_grid_accuracy(const GridAccuracyParams& accuracy) {
+    const size_t minimum = std::max(size_t{3}, accuracy.min_spatial_points);
+    if (accuracy.max_spatial_points < minimum ||
+        (accuracy.max_spatial_points % 2 == 0 &&
+         accuracy.max_spatial_points == minimum)) {
+        return std::unexpected(ValidationError{ValidationErrorCode::InvalidGridSize,
+            static_cast<double>(accuracy.max_spatial_points)});
+    }
+    return {};
+}
+
 GridAccuracyParams make_grid_accuracy(GridAccuracyProfile profile) {
     GridAccuracyParams params;
     switch (profile) {
@@ -125,6 +137,9 @@ std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
     const PricingParams& params,
     const GridAccuracyParams& accuracy)
 {
+    if (!validate_grid_accuracy(accuracy)) {
+        throw std::invalid_argument("spatial point bounds must contain an odd count >= 3");
+    }
     // Fold any log-moneyness coverage requirement into n_sigma using this
     // contract's own diffusion length, then estimate as before.
     const GridAccuracyParams acc = fold_coverage(
@@ -141,10 +156,12 @@ std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
     // Spatial resolution (target truncation error)
     double dx_target = params.volatility * std::sqrt(acc.tol);
     size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
-    Nx = std::clamp(Nx, acc.min_spatial_points, acc.max_spatial_points);
+    Nx = std::clamp(Nx, std::max(size_t{3}, acc.min_spatial_points), acc.max_spatial_points);
 
     // Ensure odd number of points (for centered stencils)
-    if (Nx % 2 == 0) Nx++;
+    if (Nx % 2 == 0) {
+        Nx = Nx < acc.max_spatial_points ? Nx + 1 : Nx - 1;
+    }
 
     // Widen grid for dividend shift: spline evaluates at x'=ln(exp(x)-D/K)
     // Only consider dividends strictly within (0, T) — same filter as mandatory tau
@@ -214,9 +231,16 @@ std::pair<GridSpec<double>, TimeDomain> estimate_batch_pde_grid(
     std::span<const PricingParams> params,
     const GridAccuracyParams& accuracy)
 {
+    if (!validate_grid_accuracy(accuracy)) {
+        throw std::invalid_argument("spatial point bounds must contain an odd count >= 3");
+    }
     if (params.empty()) {
+        // Return a valid grid within the caller's spatial budget.
+        size_t n = std::clamp(size_t{101}, std::max(size_t{3}, accuracy.min_spatial_points),
+                              accuracy.max_spatial_points);
+        if (n % 2 == 0) n = n < accuracy.max_spatial_points ? n + 1 : n - 1;
         // Return minimal valid sinh grid for empty batch
-        auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, accuracy.alpha);
+        auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, n, accuracy.alpha);
         TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 100);
         return {grid_spec.value(), time_domain};
     }
