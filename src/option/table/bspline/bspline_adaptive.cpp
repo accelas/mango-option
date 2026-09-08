@@ -517,13 +517,8 @@ BSplineSegmentedBuilder::create(const SegmentedAdaptiveConfig& config,
         config.discrete_dividends, K_refs->front());
     if (!support) return std::unexpected(support.error());
 
-    // Sample (measurement) domain: the same construction *without* the
-    // dividend widening (spec D2 -- accuracy is never measured in the
-    // unqueryable support band).  With a 20%-of-spot dividend schedule the
-    // two differ by more than a factor of two in strike, and measuring the
-    // wider one condemns surfaces on strikes the user never asked for.
-    auto sample = expand_segmented_domain(
-        domain, config.maturity, config.dividend_yield, {}, K_refs->front());
+    // Numerical support expansion never changes the requested query domain.
+    auto sample = requested_segmented_domain(domain, config.maturity, config.ratio_bounds);
     if (!sample) return std::unexpected(sample.error());
 
     sample->strike_bounds = *strikes;
@@ -587,26 +582,16 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     auto probes = select_probes(K_refs_, config_.spot);
 
     // The strike range the user can actually query (m = ln(spot/K)).
-    const double user_k_lo = config_.spot * std::exp(-sample_domain_.m_max);
-    const double user_k_hi = config_.spot * std::exp(-sample_domain_.m_min);
-
-    // The strike band a probe dominates in the assembled surface.  The
-    // assembly blends the two K_refs bracketing a query's strike linearly
-    // (MultiKRefSplit::bracket), so a probe's weight is largest between the
-    // midpoints to its neighbours; we take geometric midpoints since K_refs
-    // are log-spaced.  This scopes a sizing measurement, not a safety gate —
-    // the assembled surface's own final validation queries the true blend.
-    // The outermost bands run out to the user's strike range, and a single
-    // K_ref serves all of it.
-    const auto strike_band = [this, user_k_lo, user_k_hi](double k) {
-        const size_t n = K_refs_.size();
+    const auto requested_strikes = *sample_domain_.strike_bounds;
+    // Each reference contributes wherever its positive linear weight is
+    // supported, independently of spot. Retain the full requested x range.
+    const auto strike_band = [this, requested_strikes](double k) {
         const size_t idx = static_cast<size_t>(
             std::ranges::lower_bound(K_refs_, k) - K_refs_.begin());
-        double lo = (idx == 0)
-            ? user_k_lo : std::sqrt(K_refs_[idx - 1] * K_refs_[idx]);
-        double hi = (idx + 1 >= n)
-            ? user_k_hi : std::sqrt(K_refs_[idx] * K_refs_[idx + 1]);
-        return std::pair{std::max(lo, user_k_lo), std::min(hi, user_k_hi)};
+        const double lo = idx == 0 ? K_refs_.front() : K_refs_[idx - 1];
+        const double hi = idx + 1 == K_refs_.size() ? K_refs_.back() : K_refs_[idx + 1];
+        return std::pair{std::max(lo, requested_strikes.min),
+                         std::min(hi, requested_strikes.max)};
     };
 
     InitialGrids initial_grids;
@@ -617,26 +602,18 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     // 2. Run adaptive refinement per probe, measured over its own band
     std::vector<RefinementResult> probe_results;
     for (double probe_ref : probes) {
-        // Measurement domain for this probe: the user's tau/vol/rate ranges,
-        // moneyness restricted to the band this probe serves.
         SurfaceBounds probe_sample = sample_domain_;
         bool band_usable = false;
-        if (auto [k_lo, k_hi] = strike_band(probe_ref);
-            k_lo > 0.0 && k_hi > k_lo) {
-            probe_sample.m_min = std::log(config_.spot / k_hi);
-            probe_sample.m_max = std::log(config_.spot / k_lo);
-            // A band too thin for the loop's non-degeneracy check is widened
-            // about its midpoint, never past the user's own range.
-            constexpr double kMinBandWidth = 1e-3;
-            if (probe_sample.m_max - probe_sample.m_min < kMinBandWidth) {
-                const double mid =
-                    0.5 * (probe_sample.m_min + probe_sample.m_max);
-                probe_sample.m_min = std::max(sample_domain_.m_min,
-                                              mid - 0.5 * kMinBandWidth);
-                probe_sample.m_max = std::min(sample_domain_.m_max,
-                                              mid + 0.5 * kMinBandWidth);
+        if (auto [k_lo, k_hi] = strike_band(probe_ref); k_hi >= k_lo) {
+            band_usable = k_hi > k_lo;
+            if (k_hi == k_lo) {
+                const auto bracket = MultiKRefSplit(K_refs_).bracket(0.0, k_lo, 0.0, 0.0, 0.0);
+                for (size_t i = 0; i < bracket.count; ++i) {
+                    band_usable |= bracket.entries[i].weight > 0.0 &&
+                        K_refs_[bracket.entries[i].index] == probe_ref;
+                }
             }
-            band_usable = probe_sample.m_max > probe_sample.m_min;
+            probe_sample.strike_bounds = StrikeBounds{k_lo, k_hi};
         }
 
         if (!band_usable) {

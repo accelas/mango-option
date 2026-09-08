@@ -582,5 +582,51 @@ TEST(AnyPriceTableTest, PhysicalMoneynessEndpointsDoNotNeedToleranceWidening) {
     }
 }
 
+TEST(AnyPriceTableTest, FactoryPreservesOriginalRatioEndpoint) {
+    auto config = bspline_4d_config();
+    config.dividend_yield = 0.0;
+    config.grid.moneyness = {0.1, 0.3, 0.6, 1.0};
+    auto table = make_price_table(config);
+    ASSERT_TRUE(table.has_value());
+    PricingParams p(OptionSpec{.spot = 10.0, .strike = 100.0,
+        .maturity = 0.37, .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
+    EXPECT_TRUE(table->validate_pricing_params(p).has_value());
+    p.spot = std::nextafter(10.0, 0.0);
+    EXPECT_FALSE(table->validate_pricing_params(p).has_value());
+}
+
+TEST(AnyPriceTableTest, ManualSegmentedBackendsPublishTheSameRequestedDomain) {
+    for (bool chebyshev : {false, true}) {
+        auto config = bspline_4d_config();
+        config.dividend_yield = 0.0;
+        config.grid.moneyness = {.98, .99, 1.0, 1.02};
+        config.grid.vol = {.2, .205, .21, .215};
+        config.grid.rate = {.03, .032, .034, .035};
+        config.discrete_dividends = DiscreteDividendConfig{
+            .maturity = 1.0, .discrete_dividends = {},
+            .kref_config = {.K_refs = {90.0, 100.0, 110.0}},
+            .strike_bounds = StrikeBounds{90.0, 110.0},
+        };
+        if (chebyshev) config.backend = ChebyshevBackend{};
+        auto table = make_price_table(config);
+        ASSERT_TRUE(table.has_value()) << "backend=" << chebyshev;
+        PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+            .maturity = .005, .rate = .032, .option_type = OptionType::PUT}, .21);
+        EXPECT_TRUE(table->validate_pricing_params(p).has_value());
+        p.maturity = .37;
+        p.spot = 103.0;  // outside requested1.02, inside widened numerical support
+        EXPECT_FALSE(table->validate_pricing_params(p).has_value());
+        p.spot = 100.0;
+        p.volatility = .22;
+        EXPECT_FALSE(table->validate_pricing_params(p).has_value());
+        p.volatility = .21;
+        p.rate = .04;
+        EXPECT_FALSE(table->validate_pricing_params(p).has_value());
+        p.rate = .032;
+        p.maturity = 0.0;
+        EXPECT_FALSE(table->validate_pricing_params(p).has_value());
+    }
+}
+
 }  // namespace
 }  // namespace mango

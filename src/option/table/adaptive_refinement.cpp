@@ -58,10 +58,19 @@ double sample_tau(double tau, const RefinementContext& ctx) {
     return ctx.maturity_intervals->back().second;
 }
 
-std::vector<HoldoutPoint> physical_samples(
+std::expected<std::vector<HoldoutPoint>, PriceTableError> physical_samples(
     const std::vector<std::array<double, 4>>& input,
     const RefinementContext& ctx, uint64_t seed)
 {
+    const auto& requested = ctx.sample_bounds;
+    const auto ratios = requested.ratio_bounds.value_or(MoneynessBounds{
+        std::exp(requested.m_min), std::exp(requested.m_max)});
+    const MoneynessDomain quote_domain(ratios);
+    const auto ratio_at = [&](double x) {
+        if (x == requested.m_min) return ratios.min;
+        if (x == requested.m_max) return ratios.max;
+        return std::exp(x);
+    };
     std::vector<HoldoutPoint> samples;
     samples.reserve(input.size());
     std::vector<size_t> rank(input.size());
@@ -76,7 +85,7 @@ std::vector<HoldoutPoint> physical_samples(
             const auto& k = *ctx.sample_bounds.strike_bounds;
             const double u = (static_cast<double>(rank[i]) + .5) / static_cast<double>(input.size());
             strike = std::lerp(k.min, k.max, u);
-            spot = strike * std::exp(coords[0]);
+            spot = strike * ratio_at(coords[0]);
         }
         coords[1] = sample_tau(coords[1], ctx);
         samples.push_back({.coords = coords, .strike = strike, .spot = spot, .refs = {}});
@@ -99,7 +108,7 @@ std::vector<HoldoutPoint> physical_samples(
                 return p.coords == coords && p.strike == strike;
             })) return;
         mandatory.push_back({.coords = coords, .strike = strike,
-            .spot = strike * std::exp(m), .refs = {}});
+            .spot = strike * ratio_at(m), .refs = {}});
     };
     for (double m : {b.m_min, b.m_max}) {
         for (double strike : {k.min, k.max}) add(m, strike, mid_t, mid_v, mid_r);
@@ -107,6 +116,12 @@ std::vector<HoldoutPoint> physical_samples(
     add(mid_m, k.min, b.tau_min, b.sigma_min, b.rate_min);
     add(mid_m, k.max, b.tau_max, b.sigma_max, b.rate_max);
     for (size_t i = 0; i < std::min(mandatory.size(), samples.size()); ++i) samples[i] = mandatory[i];
+    for (size_t i = 0; i < samples.size(); ++i) {
+        if (!quote_domain.contains_quote(samples[i].spot, samples[i].strike)) {
+            // A refused physical query is not a filtered IV observation.
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig, 0, i});
+        }
+    }
     return samples;
 }
 
@@ -633,7 +648,9 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
 
     FinalValidationSet set;
     set.points.reserve(scaled.size());
-    for (auto pt : physical_samples(scaled, ctx, seed)) {
+    auto physical = physical_samples(scaled, ctx, seed);
+    if (!physical) return std::unexpected(physical.error());
+    for (auto pt : *physical) {
         ++set.ref_attempts;
         auto refs = prepare_refs(pt.spot, pt.strike, pt.coords[1], pt.coords[2], pt.coords[3]);
         if (!refs.has_value() || !std::isfinite(refs->ref_price) || !std::isfinite(refs->vega)) {
@@ -839,7 +856,9 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     std::vector<HoldoutPoint> holdout;
     holdout.reserve(holdout_scaled.size());
     size_t holdout_invalid = 0;
-    for (auto pt : physical_samples(holdout_scaled, ctx, params.lhs_seed ^ kHoldoutSeedMix)) {
+    auto physical_holdout = physical_samples(holdout_scaled, ctx, params.lhs_seed ^ kHoldoutSeedMix);
+    if (!physical_holdout) return std::unexpected(physical_holdout.error());
+    for (auto pt : *physical_holdout) {
         auto refs = prepare_refs(pt.spot, pt.strike, pt.coords[1], pt.coords[2], pt.coords[3]);
         if (!refs.has_value() || !std::isfinite(refs->ref_price) || !std::isfinite(refs->vega)) {
             ++holdout_invalid;
@@ -946,9 +965,10 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             auto samples = generate_validation_samples(
                 params, iteration, sample_axis_bounds, focus_bins,
                 focus_active);
+            auto physical = physical_samples(samples, ctx, params.lhs_seed + iteration);
+            if (!physical) return std::unexpected(physical.error());
             auto fresh = evaluate_fresh_samples(
-                physical_samples(samples, ctx, params.lhs_seed + iteration),
-                handle, prepare_refs, score, ctx, params.target_iv_error);
+                *physical, handle, prepare_refs, score, ctx, params.target_iv_error);
             stats.pde_solves_validation = fresh.pde_solves_validation;
             stats.max_error = fresh.max_error;
             stats.avg_error = fresh.avg_error;
@@ -1189,6 +1209,30 @@ resolve_k_refs(const MultiKRefConfig& config, const StrikeBounds& bounds) {
 }
 
 std::expected<SurfaceBounds, PriceTableError>
+requested_segmented_domain(const IVGrid& domain, double maturity,
+                           std::optional<MoneynessBounds> ratios) {
+    const auto valid_axis = [](const std::vector<double>& axis) {
+        return !axis.empty() && std::ranges::all_of(axis, [](double value) {
+            return std::isfinite(value);
+        }) && std::ranges::is_sorted(axis);
+    };
+    if (!std::isfinite(maturity) || maturity <= 0.0 ||
+        !valid_axis(domain.moneyness) || !valid_axis(domain.vol) ||
+        !valid_axis(domain.rate) || domain.vol.front() <= 0.0 ||
+        (ratios && (!ratios->valid() || std::log(ratios->min) != domain.moneyness.front() ||
+                    std::log(ratios->max) != domain.moneyness.back()))) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+    return SurfaceBounds{
+        .m_min = domain.moneyness.front(), .m_max = domain.moneyness.back(),
+        .tau_min = 0.0, .tau_max = maturity,
+        .sigma_min = domain.vol.front(), .sigma_max = domain.vol.back(),
+        .rate_min = domain.rate.front(), .rate_max = domain.rate.back(),
+        .ratio_bounds = ratios,
+    };
+}
+
+std::expected<SurfaceBounds, PriceTableError>
 expand_segmented_domain(const IVGrid& domain,
                         double maturity,
                         double /*dividend_yield*/,
@@ -1221,10 +1265,9 @@ expand_segmented_domain(const IVGrid& domain,
     expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
     expand_domain_bounds(min_rate, max_rate, 0.04);
 
-    double min_tau = std::min(0.01, maturity * 0.5);
-    double max_tau = maturity;
-    expand_domain_bounds(min_tau, max_tau, 0.1, kMinPositive);
-    max_tau = std::min(max_tau, maturity);
+    // The first segment includes an exact analytical payoff construction row.
+    const double min_tau = 0.0;
+    const double max_tau = maturity;
 
     return SurfaceBounds{
         .m_min = min_m, .m_max = max_m,

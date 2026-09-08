@@ -1337,6 +1337,39 @@ TEST(RunRefinementTest, SegmentedSamplesRespectIndependentStrikeAndMoneynessDoma
     }
 }
 
+TEST(RunRefinementTest, MandatoryCornersKeepOriginalRatioInputs) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.ctx.sample_bounds.m_min = std::log(0.1);
+    h.ctx.sample_bounds.m_max = std::log(0.3);
+    h.ctx.sample_bounds.ratio_bounds = mango::MoneynessBounds{0.1, 0.3};
+    h.ctx.sample_bounds.strike_bounds = mango::StrikeBounds{100.0, 110.0};
+    std::vector<std::pair<double, double>> queries;
+    h.price_override = [&](double s, double k, double t, double, double r) {
+        queries.emplace_back(s, k);
+        return analytic_ref(s, k, t, r);
+    };
+    auto result = h.run();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(std::ranges::any_of(queries, [](const auto& q) {
+        return q.first == 10.0 && q.second == 100.0;
+    }));
+}
+
+TEST(RunRefinementTest, RefusesUnrepresentableMandatoryQuoteCorner) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.ctx.sample_bounds.m_min = std::log(0.6);
+    h.ctx.sample_bounds.m_max = std::log(0.9);
+    h.ctx.sample_bounds.ratio_bounds = mango::MoneynessBounds{0.6, 0.9};
+    const double strike = 2.0 * std::numeric_limits<double>::denorm_min();
+    h.ctx.sample_bounds.strike_bounds = mango::StrikeBounds{strike, strike};
+    auto result = h.run();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::InvalidConfig);
+    EXPECT_EQ(h.build_calls, 0u);
+}
+
 TEST(RunRefinementTest, MeasurementSamplesUseOnlyAdmittedMaturityIntervals) {
     Harness h;
     h.params.max_iter = 1;

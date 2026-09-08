@@ -337,6 +337,30 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedEmptyProbeBandSkipped) {
     EXPECT_EQ(skipped, 1u) << "the K_ref = 50 probe should be recorded skipped";
 }
 
+// Moving-spot queries can reach a reference whose support lies outside the
+// fixed-build-spot strike interval. Probe reachability follows explicit K.
+TEST(AdaptiveGridBuilderTest, ProbeReachabilityUsesRequestedAbsoluteStrikeDomain) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    params.min_moneyness_points = 10;
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0, .option_type = OptionType::PUT,
+        .dividend_yield = 0.0, .discrete_dividends = {}, .maturity = 0.25,
+        .kref_config = {.K_refs = {50.0, 90.0, 100.0, 110.0}},
+        .strike_bounds = StrikeBounds{85.0, 110.0},
+    };
+    IVGrid domain{.moneyness = to_log_m({0.92, 0.95, 1.0, 1.05, 1.09}),
+        .vol = {0.15, 0.20, 0.30, 0.40}, .rate = {0.02, 0.03, 0.05, 0.07}};
+    auto result = build_adaptive_bspline_segmented(params, config, domain);
+    ASSERT_TRUE(result.has_value());
+    for (const auto& iteration : result->iterations) {
+        EXPECT_NE(iteration.refined_dim, -3)
+            << "Kref50 contributes positive blend weight for K85..90";
+    }
+}
+
 // A broad requested interval needs at least its two endpoints. A budget
 // of one reference must refuse before solving, not publish a clamped span.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsOneReferenceBudgetForBroadDomain) {

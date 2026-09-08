@@ -498,6 +498,12 @@ validate_k_ref_values(std::span<const double> values, size_t maximum_count);
 [[nodiscard]] std::expected<std::vector<double>, PriceTableError>
 resolve_k_refs(const MultiKRefConfig& config, const StrikeBounds& bounds);
 
+/// Preserve the requested log-moneyness, volatility and rate endpoints.
+/// Remaining life spans (0, maturity]; zero is an analytical construction row.
+[[nodiscard]] std::expected<SurfaceBounds, PriceTableError>
+requested_segmented_domain(const IVGrid& domain, double maturity,
+                           std::optional<MoneynessBounds> ratios = std::nullopt);
+
 /// Expand domain bounds for segmented (discrete-dividend) surface building.
 ///
 /// Converts IVGrid moneyness (already log-moneyness) to domain bounds,
