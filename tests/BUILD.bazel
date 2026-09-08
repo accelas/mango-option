@@ -1,5 +1,15 @@
 # SPDX-License-Identifier: MIT
 cc_test(
+    name = "accuracy_collector_test",
+    size = "small",
+    srcs = ["accuracy_collector_test.cc"],
+    deps = [
+        "//src/option/table/accuracy:collector",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "accuracy_acceptance_test",
     size = "small",
     srcs = ["accuracy_acceptance_test.cc"],
