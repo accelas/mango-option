@@ -250,3 +250,28 @@ cc_library(
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
 )
+
+cc_library(
+    name = "reference_strike_evaluator",
+    hdrs = ["reference_strike_evaluator.hpp"],
+    srcs = ["reference_strike_evaluator.cpp"],
+    deps = [
+        ":adaptive_refinement",
+        ":reference_selection",
+        "//src/option:american_option",
+        "//src/option:dividend_utils",
+        ":multi_kref_split",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
+    name = "reference_selection_builder",
+    hdrs = ["reference_selection_builder.hpp"],
+    deps = [":reference_strike_evaluator"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
