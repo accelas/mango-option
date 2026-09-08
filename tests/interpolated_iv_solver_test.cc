@@ -21,6 +21,39 @@
 namespace mango {
 namespace {
 
+// Exact affine-volatility prices isolate model provenance from fitting.
+struct LinearVolatilityPrice {
+    double price(double, double strike, double, double sigma, double) const { return strike * sigma; }
+    double vega(double, double strike, double, double, double) const { return strike; }
+};
+
+TEST(InterpolatedIVModelMetadata, UsesModelAnchorAndRejectsContradictoryOverrides) {
+    using Surface = PriceTable<LinearVolatilityPrice>;
+    auto make_surface = [] {
+        SurfaceBounds bounds{-.2, .2, .1, 1.0, .1, .4, .01, .1};
+        bounds.strike_bounds = StrikeBounds{90.0, 110.0};
+        return Surface({}, bounds, OptionType::PUT, 0.0,
+            FixedExpiryMetadata{2.0, {{1.5, 1.5}}});
+    };
+    auto solver = InterpolatedIVSolver<Surface>::create(
+        make_surface(), {}, std::vector<Dividend>{{1.5, 1.5}});
+    ASSERT_TRUE(solver.has_value());
+    IVQuery query(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = .75,
+        .rate = .05, .option_type = OptionType::PUT}, 20.0);
+    // T0=2, elapsed=1.25: the anchored offset1.5 is .25 from this query.
+    query.discrete_dividends = {{.25, 1.5}};
+    auto result = solver->solve(query);
+    EXPECT_TRUE(result.has_value());
+    if (result) { EXPECT_NEAR(result->implied_vol, .2, 1e-10); }
+
+    auto contradiction = InterpolatedIVSolver<Surface>::create(
+        make_surface(), {}, std::vector<Dividend>{{1.25, 1.5}});
+    EXPECT_FALSE(contradiction.has_value());
+    if (!contradiction) {
+        EXPECT_EQ(contradiction.error().code, ValidationErrorCode::DiscreteDividendMismatch);
+    }
+}
+
 /// Test fixture that creates a proper EEP price surface for IV solving
 class InterpolatedIVSolverTest : public ::testing::Test {
 protected:

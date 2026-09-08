@@ -2,7 +2,12 @@
 #pragma once
 
 #include "mango/option/option_spec.hpp"
+#include "mango/option/table/fixed_expiry.hpp"
+#include "mango/option/table/strike_bounds.hpp"
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,10 +20,11 @@ struct PriceTableData {
 
     OptionType option_type = OptionType::PUT;
     double dividend_yield = 0.0;
-    /// Used internally during reconstruction. Note: only dividend_yield is
-    /// serialized to Parquet; discrete_dividends are not persisted (they are
-    /// baked into the segmented surface structure at build time).
-    DividendSpec dividends;
+    /// Physical query domain and numerical model identity, never inferred
+    /// from support reference strikes or the largest published maturity.
+    std::optional<StrikeBounds> strike_bounds;
+    std::optional<FixedExpiryMetadata> fixed_expiry;
+    /// Largest published query maturity; not the numerical expiry anchor.
     double maturity = 0.0;
 
     /// Original SurfaceBounds (serialized directly, no heuristic inversion).
@@ -57,5 +63,26 @@ inline constexpr const char* kBSpline3D = "bspline_3d";
 inline constexpr const char* kChebyshev3D = "chebyshev_3d";
 inline constexpr const char* kChebyshev3DRaw = "chebyshev_3d_raw";
 }  // namespace surface_types
+
+/// Validate model/domain provenance at both in-memory and file boundaries.
+/// Reference support is allowed to exceed the declared strike interval.
+[[nodiscard]] inline bool valid_price_table_metadata(const PriceTableData& data) {
+    if ((data.strike_bounds && !data.strike_bounds->valid()) ||
+        (data.fixed_expiry && !data.fixed_expiry->valid(data.bounds_tau_max))) {
+        return false;
+    }
+    const bool segmented = data.surface_type == surface_types::kBSpline4DSegmented ||
+                           data.surface_type == surface_types::kChebyshev4DSegmented;
+    if (!segmented) return true;
+    if (!data.strike_bounds || !data.fixed_expiry || data.segments.empty()) return false;
+    double min_ref = data.segments.front().K_ref;
+    double max_ref = min_ref;
+    for (const auto& segment : data.segments) {
+        if (!std::isfinite(segment.K_ref) || segment.K_ref <= 0.0) return false;
+        min_ref = std::min(min_ref, segment.K_ref);
+        max_ref = std::max(max_ref, segment.K_ref);
+    }
+    return min_ref <= data.strike_bounds->min && max_ref >= data.strike_bounds->max;
+}
 
 }  // namespace mango

@@ -82,15 +82,21 @@ TEST(MultiSinhGridTest, TripleClusters) {
 
     // Spacing statistics
     double min_dx = std::numeric_limits<double>::max();
-    double max_dx = 0.0;
     for (size_t i = 1; i < grid.size(); ++i) {
         double dx = grid[i] - grid[i-1];
         min_dx = std::min(min_dx, dx);
-        max_dx = std::max(max_dx, dx);
     }
 
     EXPECT_GT(min_dx, 0.0);
-    EXPECT_GT(max_dx / min_dx, 2.0);  // Non-trivial concentration
+    // Symmetric requested clusters produce a symmetric map with finer
+    // central spacing. A global ratio >2 previously came from endpoint
+    // distortion, not from the specified cluster strengths.
+    const double central_dx = grid[16] - grid[15];
+    EXPECT_GT(grid[1] - grid[0], central_dx);
+    EXPECT_GT(grid[30] - grid[29], central_dx);
+    for (size_t i = 0; i < grid.size(); ++i) {
+        EXPECT_NEAR(grid[i], -grid[grid.size() - 1 - i], 1e-14);
+    }
 }
 
 TEST(MultiSinhGridTest, SingleClusterSufficesForNearbyStrikes) {

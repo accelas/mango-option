@@ -934,6 +934,18 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("max_failure_rate", &mango::AdaptiveGridParams::max_failure_rate);
 
     // MultiKRefConfig
+    py::class_<mango::FixedExpiryMetadata>(m, "FixedExpiryMetadata")
+        .def_readonly("reference_maturity", &mango::FixedExpiryMetadata::reference_maturity)
+        .def_property_readonly("discrete_dividends", [](const mango::FixedExpiryMetadata& model) {
+            return dividends_to_python(model.discrete_dividends);
+        });
+
+    py::class_<mango::StrikeBounds>(m, "StrikeBounds")
+        .def(py::init<>())
+        .def(py::init<double, double>(), py::arg("min"), py::arg("max"))
+        .def_readwrite("min", &mango::StrikeBounds::min)
+        .def_readwrite("max", &mango::StrikeBounds::max);
+
     py::class_<mango::MultiKRefConfig>(m, "MultiKRefConfig")
         .def(py::init<>())
         .def_readwrite("K_refs", &mango::MultiKRefConfig::K_refs)
@@ -990,7 +1002,8 @@ PYBIND11_MODULE(mango_option, m) {
             [](mango::DiscreteDividendConfig& self, const py::object& obj) {
                 self.discrete_dividends = python_to_dividends(obj);
             })
-        .def_readwrite("kref_config", &mango::DiscreteDividendConfig::kref_config);
+        .def_readwrite("kref_config", &mango::DiscreteDividendConfig::kref_config)
+        .def_readwrite("strike_bounds", &mango::DiscreteDividendConfig::strike_bounds);
 
     // IVSolverFactoryConfig
     py::class_<mango::IVSolverFactoryConfig>(m, "IVSolverFactoryConfig")
@@ -1052,6 +1065,8 @@ PYBIND11_MODULE(mango_option, m) {
     // AnyPriceTable (exposed as PriceTable for Python)
     py::class_<mango::AnyPriceTable>(m, "PriceTable")
         .def_property_readonly("surface_type", &mango::AnyPriceTable::surface_type)
+        .def_property_readonly("strike_bounds", &mango::AnyPriceTable::strike_bounds)
+        .def_property_readonly("fixed_expiry", &mango::AnyPriceTable::fixed_expiry)
         .def_property_readonly("option_type", &mango::AnyPriceTable::option_type)
         .def_property_readonly("dividend_yield", &mango::AnyPriceTable::dividend_yield)
         .def_property_readonly("build_diagnostics",

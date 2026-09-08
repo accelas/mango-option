@@ -583,6 +583,13 @@ Chebyshev construction uses one end-to-end PDE solve per parameter pair,
 with the contractual horizon and exact mandatory snapshot times. Each leaf
 uses the same local-time origin as its `TauSegmentSplit` router.
 
+Manual segmented Chebyshev defaults use CC levels `{8,3,2,2}` (257
+moneyness, 9 time nodes per segment, 5 volatility, and 5 rate nodes).
+Explicit levels supplied to `ChebyshevSegmentedBuilder::build` or
+`build_chebyshev_segmented_manual` are honored. See the
+[measured default accuracy and cost](MATHEMATICAL_FOUNDATIONS.md#manual-chebyshev-defaults)
+for the tested domain and the distinction between price accuracy and IV/Greek guarantees.
+
 Chebyshev's current event topology omits `5e-4` years (4.38 hours) on each
 side of each dividend. Queries in these gaps, including the exact event,
 are unsupported: `validate_pricing_params` reports `OutOfRange`, Greeks
@@ -660,11 +667,16 @@ In particular, a non-empty query schedule against a continuous
 schedule to match — this guarantee holds for solvers built via
 `make_interpolated_iv_solver` / `AnyPriceTable::make_iv_solver`, which record
 "no build-time dividends" explicitly; a solver created directly via
-`InterpolatedIVSolver::create` without a `build_dividends` argument instead
-defaults to "unknown provenance" and skips this check. One exception:
-segmented tables loaded from Parquet have no persisted build schedule, so
-their non-empty query schedules are accepted unverified — the caller is
-responsible for consistency in that case. Both the build-time and
+`InterpolatedIVSolver::create` reads known model metadata from its table.
+Segmented tables retain the canonical schedule and numerical anchor through
+`to_data`/`from_data` and `AnyPriceTable::save`/`load_price_table`, so loaded
+solvers validate schedules in the same way as freshly built solvers. Parquet
+format 3.0 preserves the explicit absolute-strike interval independently of
+support references, and the fixed-expiry anchor independently of `tau_max`.
+All these fields are covered by the payload checksum. Older formats and
+segmented payloads lacking valid metadata are refused; rebuild those tables.
+Homogeneous continuous tables may omit the strike interval and fixed-expiry
+metadata. Both the build-time and
 query-time schedules are canonicalized with the same rules the table
 builders use (`filter_and_merge_dividends`): same-date entries are merged,
 and non-positive-time/non-positive-amount entries are ignored — and, on the
@@ -742,12 +754,17 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 The B-spline segmented path now uses raw fixed-expiry PDE snapshots instead
 of passing fitted surfaces into later segment solves. On the exact configuration
-above, B-spline construction succeeds with **0.00435 maximum measured decimal
-IV error (43.5 absolute-IV bps)**. This exceeds the requested 0.001 (10 bps), so
+above, B-spline construction succeeds with **0.00452 maximum measured decimal
+IV error (45.2 absolute-IV bps)** after the cubic fitting repair. This exceeds the requested 0.001 (10 bps), so
 `build_diagnostics()->target_met` is false. A successful build is not a claim
-that the requested target was met. Other configurations still refuse while
-clustered fitting and reference-strike semantics are corrected; final backend
+that the requested target was met. Reference-strike semantics still need correction; final backend
 selection follows the remaining #483 accuracy and certification work.
+
+The corrected fixed-expiry Chebyshev oracle measured 0.00744049 maximum
+absolute IV error (74.4 bps) over 64 measured points on 2026-09-06, with zero
+invalid points. This passes the current 0.20 viability bound but exceeds the
+requested 0.001 target; strict target admission is a later #483 gate.
+
 Both facts are pinned:
 `IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig` for the
 Chebyshev config, and

@@ -16,7 +16,7 @@ bazel_dep(name = "fuzztest", version = "20241028.0")
 bazel_dep(name = "pybind11_bazel", version = "2.13.6")
 bazel_dep(name = "rules_python", version = "1.0.0")
 bazel_dep(name = "rules_pkg", version = "1.1.0")
-bazel_dep(name = "platforms", version = "0.0.11")
+bazel_dep(name = "platforms", version = "1.0.0")
 
 # Rust support (for the mango-option Rust binding)
 bazel_dep(name = "rules_rust", version = "0.70.0")
@@ -72,3 +72,32 @@ use_repo(non_bcr_deps, "mdspan")
 #     "libbacktrace",
 #     "zlib",
 # )
+
+# Directed proof arithmetic; private certification preparation only.
+bazel_dep(name = "mpfr", version = "4.2.2.bcr.1")
+
+# These BCR source overlays use package_info(MODULE.bazel) but do not ship
+# that file on Bazel 7. Supply the exact registry declarations to the source
+# repositories without changing their already-resolved dependency graph.
+# GMP also needs whole-archive linking for its root/MPN archive cycle; see
+# third_party/MPFR.md for the scope and validation of all three patches.
+single_version_override(
+    module_name = "gmp",
+    version = "6.3.0",
+    patches = ["//third_party:gmp_bazel7_module.patch"],
+    patch_strip = 1,
+)
+single_version_override(
+    module_name = "mpfr",
+    version = "4.2.2.bcr.1",
+    patches = ["//third_party:mpfr_bazel7_module.patch"],
+    patch_strip = 1,
+)
+# The GMP/M4 configure probes must see the same system extensions as their
+# config.h-enabled C sources even under this project's strict C11 toolchain.
+single_version_override(
+    module_name = "rules_cc_autoconf",
+    version = "0.10.1",
+    patches = ["//third_party:autoconf_system_extensions.patch"],
+    patch_strip = 1,
+)

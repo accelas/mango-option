@@ -19,13 +19,16 @@ struct ParquetWriteOptions {
     ParquetCompression compression = ParquetCompression::ZSTD;
 };
 
-/// Write PriceTableData to a Parquet file.
+/// Write PriceTableData in format 3.0. Segmented tables require explicit
+/// strike bounds and fixed-expiry provenance; invalid metadata is refused.
+/// All numerical model/domain metadata is bound to the payload checksum.
 [[nodiscard]] std::expected<void, PriceTableError>
 write_parquet(const PriceTableData& data,
               const std::filesystem::path& path,
               const ParquetWriteOptions& opts = {});
 
-/// Read PriceTableData from a Parquet file.
+/// Read format 3.0 PriceTableData. Older formats are refused because they
+/// cannot preserve the supported strike domain and fixed-expiry model.
 [[nodiscard]] std::expected<PriceTableData, PriceTableError>
 read_parquet(const std::filesystem::path& path);
 
