@@ -97,8 +97,13 @@ point must additionally resolve <=2e-6 decimal volatility (0.02 absolute-IV bp)
 using the lower numerically supported vega endpoint. A .001 price check alone
 cannot establish the IV budget.
 
-TV/K<1e-4 and |reference vega|<1e-4 retain the established filtering policy.
-Uncertainty that straddles either threshold is unresolved. The exclusive states
+TV/K<1e-4 **or** |reference vega|<1e-4 excludes a point from IV measurement.
+Either independently established exclusion suffices, even if the other
+quantity is unresolved or straddles its threshold. When neither exclusion is
+established, a straddled threshold remains unresolved. Price qualification is
+still required. Policy v3 records this OR rule explicitly; its new fingerprint
+archives earlier classifications while retaining reusable physical solves.
+The exclusive states
 are reference-measurable, TV-filtered, vega-filtered, both-filtered, unresolved,
 and pending. Filtered rows carry no measured-zero IV error. These are numerical
 oracle-resolution records, not a market-price uncertainty or confidence API.

@@ -42,24 +42,29 @@ def iv_eligibility(price, intrinsic, strike, price_error, vega, vega_error,
     if (price_error is None or not math.isfinite(price_error)
             or price_error > price_budget or not math.isfinite(price)):
         return dict(result, reason="price-budget")
-    if vega_error is None or not all(math.isfinite(x) for x in (vega, vega_error)):
-        return dict(result, reason="vega-unresolved")
     tv_lo, tv_hi = price - intrinsic - price_error, price - intrinsic + price_error
     cutoff = strike * TV_RATIO_FLOOR
     if tv_hi < 0:
         return dict(result, reason="intrinsic-bound")
-    if tv_lo < cutoff <= tv_hi:
-        return dict(result, reason="time-value-floor-straddle")
-    v_lo, v_hi = vega - vega_error, vega + vega_error
-    abs_lo = 0.0 if v_lo <= 0 <= v_hi else min(abs(v_lo), abs(v_hi))
-    abs_hi = max(abs(v_lo), abs(v_hi))
-    if abs_lo < vega_floor <= abs_hi:
-        return dict(result, reason="vega-floor-straddle")
-    tv_filtered, v_filtered = tv_hi < cutoff, abs_hi < vega_floor
+    vega_known = vega_error is not None and all(math.isfinite(x) for x in (vega, vega_error))
+    tv_filtered, v_filtered = tv_hi < cutoff, False
+    if vega_known:
+        v_lo, v_hi = vega - vega_error, vega + vega_error
+        abs_lo = 0.0 if v_lo <= 0 <= v_hi else min(abs(v_lo), abs(v_hi))
+        abs_hi = max(abs(v_lo), abs(v_hi))
+        v_filtered = abs_hi < vega_floor
+    # Either independently established exclusion is sufficient. Requiring
+    # the other predicate to resolve would turn this OR policy into AND.
     if tv_filtered or v_filtered:
         label = "both-filtered" if tv_filtered and v_filtered else (
             "tv-filtered" if tv_filtered else "vega-filtered")
         return dict(result, status=label, reason="reference-floor")
+    if not vega_known:
+        return dict(result, reason="vega-unresolved")
+    if tv_lo < cutoff <= tv_hi:
+        return dict(result, reason="time-value-floor-straddle")
+    if abs_lo < vega_floor <= abs_hi:
+        return dict(result, reason="vega-floor-straddle")
     if v_lo <= 0:
         return dict(result, reason="negative-or-unresolved-vega")
     resolution = price_error / v_lo
@@ -477,7 +482,7 @@ def main(argv=None):
     libraries = runtime_libraries(worker_path)
     effective_worker_hash = digest(encoded({"binary": binary_hash, "libraries": libraries}).encode())
     version = json.loads(subprocess.check_output([worker_path, "--version"], text=True))
-    policy = {"version": "reference-qualification-v2",
+    policy = {"version": "reference-qualification-v3", "iv_filter_logic": "tv-or-vega",
               "analytic_put_provenance": "Healy 2021 Proposition 2, https://arxiv.org/pdf/2109.15157", "price_budget": PRICE_BUDGET, "iv_budget": IV_BUDGET,
               "vega_floor": VEGA_FLOOR, "tv_ratio_floor": TV_RATIO_FLOOR,
               "vega_bump_fraction": args.vega_bump_fraction,
