@@ -186,4 +186,41 @@ Interval cos(const Interval &value) {
         result = hull(result, Interval(first % 2 == 0 ? 1 : -1));
     return result;
 }
+bool Interval::nonpositive() const { return finite() && mpfr_sgn(upper_) <= 0; }
+Interval Interval::pi() {
+    Interval result;
+    mpfr_const_pi(result.lower_, MPFR_RNDD);
+    mpfr_const_pi(result.upper_, MPFR_RNDU);
+    return result;
+}
+Interval positive_part(const Interval &value) {
+    if (!value.finite())
+        return Interval::invalid();
+    Interval result;
+    mpfr_max(result.lower_, result.lower_, value.lower_, MPFR_RNDD);
+    mpfr_max(result.upper_, result.upper_, value.upper_, MPFR_RNDU);
+    return result;
+}
+Interval square(const Interval &value) {
+    if (!value.finite())
+        return Interval::invalid();
+    Interval result, other;
+    mpfr_sqr(result.lower_, value.lower_, MPFR_RNDD);
+    mpfr_sqr(result.upper_, value.lower_, MPFR_RNDU);
+    mpfr_sqr(other.lower_, value.upper_, MPFR_RNDD);
+    mpfr_sqr(other.upper_, value.upper_, MPFR_RNDU);
+    mpfr_min(result.lower_, result.lower_, other.lower_, MPFR_RNDD);
+    mpfr_max(result.upper_, result.upper_, other.upper_, MPFR_RNDU);
+    if (value.contains(0))
+        mpfr_set_zero(result.lower_, 1);
+    return result;
+}
+Interval erfc(const Interval &value) {
+    if (!value.finite())
+        return Interval::invalid();
+    Interval result;
+    mpfr_erfc(result.lower_, value.upper_, MPFR_RNDD);
+    mpfr_erfc(result.upper_, value.lower_, MPFR_RNDU);
+    return result;
+}
 } // namespace mango::detail::proof

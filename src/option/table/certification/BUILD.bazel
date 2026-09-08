@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "certificate_status",
+    hdrs = ["certificate_status.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/certification",
+    include_prefix = "mango/option/table/certification",
+)
+
+cc_library(
+    name = "physical_bounds",
+    srcs = ["physical_bounds.cpp"],
+    hdrs = ["physical_bounds.hpp"],
+    deps = ["//src/math/proof:interval", "//src/option:option_spec"],
+    copts = ["-O3", "-fno-fast-math", "-ffp-contract=off"],
+    visibility = ["//src:__subpackages__", "//tests:__subpackages__"],
+    strip_include_prefix = "/src/option/table/certification",
+    include_prefix = "mango/option/table/certification",
+)

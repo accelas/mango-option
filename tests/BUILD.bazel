@@ -2021,3 +2021,9 @@ cc_test(
     srcs = ["moneyness_bounds_test.cc"],
     deps = ["//src/option/table:moneyness_bounds", "@googletest//:gtest_main"],
 )
+
+cc_test(
+    name = "physical_price_bounds_test",
+    srcs = ["physical_price_bounds_test.cc"],
+    deps = ["//src/option/table/certification:physical_bounds", "@googletest//:gtest_main"],
+)
