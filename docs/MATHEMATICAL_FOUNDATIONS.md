@@ -388,26 +388,40 @@ Simple and useful for testing, but wasteful for option pricing: most of the inte
 
 ### Sinh-Spaced Grids
 
-The workhorse grid for option pricing. A hyperbolic sine transformation concentrates points near a center while maintaining smooth spacing:
+A hyperbolic sine map concentrates points near a center while preserving
+both requested endpoints. For domain $[l,h]$, center $c$, concentration
+$\alpha>0$, and $\eta_i=i/(n-1)$, define
 
-$$\xi_i = -1 + \frac{2i}{n-1} \qquad \text{(uniform in } [-1, 1]\text{)}$$
+$$a=\frac{h-l}{2\sinh(\alpha/2)},\qquad
+u_l=\operatorname{asinh}\frac{l-c}{a},\qquad
+u_h=\operatorname{asinh}\frac{h-c}{a}.$$
 
-$$x_i = x_c + \frac{\Delta x}{\alpha}\sinh(\alpha\xi_i) \qquad \text{(sinh-spaced in } x\text{)}$$
+Then
 
-where $x_c$ is the center (typically $0$ = ATM), $\Delta x$ is the half-width, and $\alpha$ controls the concentration. With $\alpha = 2$:
+$$x_i=c+a\sinh\bigl((1-\eta_i)u_l+\eta_i u_h\bigr).$$
 
-- Spacing near center: $\Delta x_\min \sim (\Delta x / n)e^{-\alpha}$ — about 7× finer than uniform
-- Spacing at boundaries: $\Delta x_\max \sim (\Delta x / n)e^{\alpha}$ — about 7× coarser than uniform
+For a centered grid, $c=(l+h)/2$ and $u_l=-\alpha/2$, $u_h=\alpha/2$.
+This reduces to the centered `GridSpec::sinh_spaced` formula. The asymmetric
+map also preserves $l$ and $h$ without creating small boundary cells by
+clamping an overshooting map. Stored endpoint labels are pinned exactly.
 
-This puts resolution where it matters (near the strike) and saves points where it doesn't (far tails). The spacing varies smoothly and monotonically, so the non-uniform finite difference weights remain well-conditioned.
+Since $dx/d\eta=a(u_h-u_l)\cosh(u)$ is positive, the map is monotone.
+Its smallest local spacing occurs near $c$ when that center lies in the domain.
+Increasing concentration changes the spacing and therefore the time-step
+estimate; it does not change the requested spatial bounds.
 
 ### Multi-Sinh Grids
 
-When pricing across multiple strikes (e.g., for price tables), a single concentration center is insufficient. Multi-sinh grids superpose several sinh transformations:
+`GridSpec::multi_sinh` combines endpoint-preserving maps $f_k$ with positive
+normalized weights:
 
-$$x_i = \sum_k w_k\text{sinh}_k(\xi_i) \qquad \text{(normalized weights)}$$
+$$x_i=\sum_k \frac{w_k}{\sum_j w_j} f_k(\eta_i).$$
 
-Each cluster specifies a center, $\alpha$, and weight. Clusters closer than $0.3/\bar{\alpha}$ are automatically merged to avoid wasted resolution. Use this when strikes differ by more than ~20%.
+Each map has its own center and concentration. Their positive combination
+remains monotone with the same endpoints. Nearby clusters, separated by less
+than $0.3/\bar\alpha$, are merged while preserving their weighted center.
+A combined map does not guarantee a separate density peak at every input
+center; assess the actual generated spacing for the intended workload.
 
 ### Automatic PDE Grid Estimation
 
@@ -687,7 +701,24 @@ or European add-back is applied to segmented leaves.
 
 ### Multiple Reference Strikes
 
-Cash dividends break the scale invariance that American options normally have in strike (the EEP decomposition assumes $P \propto K$, which fails when $D/K$ varies with $K$). The builder constructs surfaces at several reference strikes and interpolates across them with Catmull-Rom splines in $\ln(K_\text{ref})$, producing a `SegmentedMultiKRefSurface`.
+Cash dividends break strike homogeneity because $D/K$ changes with strike.
+For adjacent references $K_i\leq K\leq K_{i+1}$, preserve query moneyness
+by evaluating at $S_j=S K_j/K$ and local strike $K_j$. Define
+
+$$w_i=\frac{K_{i+1}-K}{K_{i+1}-K_i},\qquad
+w_{i+1}=\frac{K-K_i}{K_{i+1}-K_i},\qquad
+P(S,K)=K\sum_{j=i}^{i+1}w_j\frac{V_j(S_j,K_j)}{K_j}.$$
+
+The weights are nonnegative, independent of sigma, and linear in absolute
+strike. An exact reference query evaluates its active reference only.
+Differentiating with respect to spot requires the factors $K_j/K$ for delta
+and $(K_j/K)^2$ for gamma before normalized blending and restoration of quote
+units. The resulting cash-dividend blend is an approximation, not an exact
+homogeneity identity.
+
+The published domain declares both an S/K interval and an absolute K interval;
+spot may vary independently within their joint constraints. Numerical support
+for dividend jumps does not enlarge this query domain.
 
 ### Adaptive Grid Refinement for Segmented Surfaces
 
@@ -723,9 +754,9 @@ The 4D grid density directly controls IV accuracy. Too coarse and the B-spline i
 The library offers two grid specification modes:
 
 - **Manual grid.** The user supplies explicit grid vectors for moneyness, volatility, and rate (each requiring $\geq 4$ points for the cubic B-spline). Predefined accuracy profiles translate a qualitative accuracy level into concrete grid sizes derived from the curvature-based formula below.
-- **Adaptive grid.** The user specifies a target IV error $\varepsilon_\text{target}$ and domain bounds. The builder automatically determines grid density via iterative refinement, validated against fresh PDE solves. This works for both the standard path (continuous dividends) and the segmented path (discrete dividends; see section 9 for the probe-and-max strategy). This removes the need for manual tuning at the cost of additional PDE solves during construction.
+- **Adaptive grid.** The user specifies a target IV error $\varepsilon_\text{target}$ and domain bounds. The builder automatically determines grid density via iterative refinement, validated against fresh PDE solves. This works for both the standard path (continuous dividends) and the segmented path (discrete dividends; see section 9 for coordinate retention and bounded aggregation). This removes the need for manual tuning at the cost of additional PDE solves during construction.
 
-Both modes share the same maturity grid (supplied via the path configuration) and produce the same `BSplineND<double, 4>` — the difference is only in how the per-axis point counts are chosen.
+Both modes use cubic B-spline interpolation. Manual builders consume their supplied axes; adaptive builders can add coordinates on all four axes within their ceilings. Segmented construction retains actual physical tau positions and applies the tau ceiling separately to each temporal leaf. A vector's length alone does not determine its interpolation behavior.
 
 ### Curvature-Based Budget Allocation
 
@@ -748,11 +779,11 @@ The per-dimension point count is:
 
 $$n_\text{base} = \left(\frac{s}{\varepsilon_\text{target}}\right)^{1/4}, \qquad n_d = \text{clamp}\!\left(\lceil n_\text{base} \cdot w_d \rceil,\; 4,\; n_\text{max}\right)$$
 
-where $s = 2.0$ is a scale factor calibrated from benchmark data. The calibration reference: a grid of $13 \times 18 \times 8$ (moneyness $\times$ volatility $\times$ rate) achieves approximately 4.3 bps average IV error. With weights $[1.0, 1.0, 2.5, 0.6]$ and $n_\text{base} = 12$, the formula reproduces $n_\sigma = \lceil 12 \times 2.5 \rceil = 30$ for the volatility axis. The fourth-root relationship means accuracy improves slowly with grid size (halving the error requires $16\times$ the points), so the weights matter more than raw point count.
+where $s = 2.0$ is a scale factor calibrated from benchmark data. The calibration reference: a grid of $13 \times 18 \times 8$ (moneyness $\times$ volatility $\times$ rate) achieves approximately 4.3 bps average IV error. With weights $[1.0, 1.0, 2.5, 0.6]$ and $n_\text{base} = 12$, the formula reproduces $n_\sigma = \lceil 12 \times 2.5 \rceil = 30$ for the volatility axis. Under this smooth-function model, halving a single-axis error requires about $2^{1/4}$ times as many points on that axis; halving the spacing reduces its leading error by a factor of 16. Tensor storage multiplies the axis sizes. These estimates do not guarantee accuracy near an exercise boundary.
 
 **Grid spacing strategies.** The distribution of points within each axis exploits the coordinate transform used internally:
 
-- **Moneyness**: log-uniform spacing. Points are uniform in $\log(m)$, matching the log-moneyness coordinate used by the B-spline. This concentrates points near ATM where gamma peaks.
+- **Moneyness**: log-uniform spacing. Points are uniform in $\log(m)$, matching the log-moneyness coordinate used by the B-spline. Uniform log spacing alone does not create a concentration peak at ATM.
 - **Maturity**: $\sqrt{\tau}$-uniform spacing. Points are uniform in $\sqrt{\tau}$, concentrating near short expiries where theta is steepest and the early exercise boundary moves fastest.
 - **Volatility**: uniform spacing. The price surface's dependence on $\sigma$ has the highest fourth derivative; regular spacing is the safest choice for the B-spline error bound.
 - **Rate**: uniform spacing. Nearly linear dependence means uniform spacing wastes the fewest points.
@@ -763,10 +794,10 @@ For manual grid construction, four profiles translate a qualitative accuracy lev
 
 | Profile | $\varepsilon_\text{target}$ | $n_\text{max}$ | Typical grid $(m \times \tau \times \sigma \times r)$ | Estimated PDE solves |
 |---------|:---:|:---:|:---:|:---:|
-| Low | $5 \times 10^{-4}$ (50 bps) | 80 | $8 \times 8 \times 20 \times 5$ | ~100 |
-| Medium | $1 \times 10^{-4}$ (10 bps) | 120 | $12 \times 12 \times 30 \times 8$ | ~240 |
-| High | $2 \times 10^{-5}$ (2 bps) | 160 | $18 \times 18 \times 45 \times 11$ | ~495 |
-| Ultra | $7 \times 10^{-6}$ (0.7 bps) | 200 | $24 \times 24 \times 58 \times 14$ | ~812 |
+| Low | $5 \times 10^{-4}$ (5 bps) | 80 | $8 \times 8 \times 20 \times 5$ | ~100 |
+| Medium | $1 \times 10^{-4}$ (1 bp) | 120 | $12 \times 12 \times 30 \times 8$ | ~240 |
+| High | $2 \times 10^{-5}$ (0.2 bp) | 160 | $18 \times 18 \times 45 \times 11$ | ~495 |
+| Ultra | $7 \times 10^{-6}$ (0.07 bp) | 200 | $24 \times 24 \times 58 \times 14$ | ~812 |
 
 All profiles use the same curvature weights $[1.0,\, 1.0,\, 2.5,\, 0.6]$ and minimum of 4 points per axis (the cubic B-spline minimum). The "typical grid" column shows approximate sizes from the formula; actual sizes depend on domain bounds.
 

@@ -16,12 +16,16 @@ No data sites move, interpolation remains cubic, and explicitly supplied or
 persisted knot vectors retain their exact values.
 
 Issue #458's corrected dividend-sample reproduction is pinned in
-`tests/data/bspline_458_dividend_axis.txt`: 281 expanded moneyness sites from
-120 requested sites, axis 0 / slice 0 after successful rate, volatility and
+`tests/data/bspline_458_dividend_axis.txt`: 281 moneyness sites, historically
+expanded from 120 requested sites, axis 0 / slice 0 after successful rate, volatility and
 time fits. The old matrix's estimated condition was about 1e21 and its
 absolute residual 0.942 at tolerance 1e-6 despite successful LAPACK
 factorization and solve. On the same sites/RHS, the selected construction's
 dense control has condition about 43.5 and residual below 1e-17.
+
+The captured fixture retains that history. The current raw sampler consumes
+supplied interpolation axes exactly; its end-to-end regressions explicitly
+provide 118, 160, 188, and 281 sites and check the actual sample counts.
 
 Regressions also cover cubic polynomial reproduction between nodes, actual
 raw dividend builds through the former fitting cliff, and public prices and
