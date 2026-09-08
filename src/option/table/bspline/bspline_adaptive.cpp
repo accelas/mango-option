@@ -563,6 +563,13 @@ BSplineSegmentedBuilder::assemble(std::vector<BSplineSegmentedSurface> surfaces)
 std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
 BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
 {
+    const auto regime = compute_segment_boundaries(config_.discrete_dividends,
+        config_.maturity, 0.0, config_.maturity);
+    const auto tau_split = make_tau_split_from_segments(
+        regime.bounds, regime.is_gap, K_refs_.front());
+    const auto admitted_times = admitted_maturity_intervals(
+        tau_split, sample_domain_.tau_min, sample_domain_.tau_max);
+
     // 0. Derive the fit domain from the sample domain (spec D3): headroom
     //    scale is the expected seeded moneyness density, not the user's
     //    knot count.
@@ -734,6 +741,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             .option_type = config_.option_type,
             .bounds = fit_domain,
             .sample_bounds = probe_sample,
+            .maturity_intervals = admitted_times,
         };
 
         auto refine_fn = make_bspline_refine_fn(params);
@@ -786,6 +794,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         // Final validation measures the user-facing domain (spec D2), not
         // the interpolation support band.
         .sample_bounds = sample_domain_,
+        .maturity_intervals = admitted_times,
     };
 
     auto final_validate_fn = make_validate_fn(

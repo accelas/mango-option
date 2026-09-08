@@ -1018,6 +1018,9 @@ ChebyshevSegmentedBuilder::build_adaptive(
     // CC-extended node span, the sample domain is the user's own range
     // (sample_domain_ -- domain_ still carries the discrete-dividend
     // widening, which is support, not a queryable range).
+    const auto tau_split = make_tau_split_from_segments(seg_bounds_, seg_is_gap_, K_refs_.front());
+    const auto admitted_times = admitted_maturity_intervals(
+        tau_split, sample_domain_.tau_min, sample_domain_.tau_max);
     RefinementContext ctx{
         .spot = config_.spot,
         .dividend_yield = config_.dividend_yield,
@@ -1029,6 +1032,7 @@ ChebyshevSegmentedBuilder::build_adaptive(
             .rate_min = state.rate_lo, .rate_max = state.rate_hi,
         },
         .sample_bounds = sample_domain_,
+        .maturity_intervals = admitted_times,
     };
 
     // Level counters roll back with the grids on every backtracking reset

@@ -23,6 +23,93 @@ constexpr size_t kMonotonicityPoints = 7;
 /// Shared with the segmented builders' final validation (spec D9).
 using HoldoutPoint = detail::ValidationPoint;
 
+// Query construction is separate from the four fit axes. Segmented domains
+// carry independent absolute K; continuous domains retain fixed-spot sampling.
+bool valid_measurement_domain(const RefinementContext& ctx) {
+    if (ctx.sample_bounds.strike_bounds && !ctx.sample_bounds.strike_bounds->valid()) return false;
+    if (ctx.maturity_intervals) {
+        if (ctx.maturity_intervals->empty()) return false;
+        double previous = ctx.sample_bounds.tau_min;
+        for (const auto& [lo, hi] : *ctx.maturity_intervals) {
+            if (!std::isfinite(lo) || !std::isfinite(hi) || lo < previous || !(hi > lo) ||
+                hi > ctx.sample_bounds.tau_max) return false;
+            previous = hi;
+        }
+    }
+    return true;
+}
+
+double sample_tau(double tau, const RefinementContext& ctx) {
+    if (!ctx.maturity_intervals) {
+        return tau > 0.0 ? tau : std::lerp(ctx.sample_bounds.tau_min, ctx.sample_bounds.tau_max, 1e-4);
+    }
+    double width = 0.0;
+    for (const auto& [lo, hi] : *ctx.maturity_intervals) width += hi - lo;
+    const double unit = std::clamp((tau - ctx.sample_bounds.tau_min) /
+        (ctx.sample_bounds.tau_max - ctx.sample_bounds.tau_min), 0.0, 1.0);
+    double offset = unit * width;
+    for (const auto& [lo, hi] : *ctx.maturity_intervals) {
+        if (offset <= hi - lo) {
+            const double result = std::clamp(lo + offset, lo, hi);
+            return result > 0.0 ? result : std::lerp(lo, hi, 1e-4);
+        }
+        offset -= hi - lo;
+    }
+    return ctx.maturity_intervals->back().second;
+}
+
+std::vector<HoldoutPoint> physical_samples(
+    const std::vector<std::array<double, 4>>& input,
+    const RefinementContext& ctx, uint64_t seed)
+{
+    std::vector<HoldoutPoint> samples;
+    samples.reserve(input.size());
+    std::vector<size_t> rank(input.size());
+    std::iota(rank.begin(), rank.end(), size_t{0});
+    std::mt19937_64 rng(seed ^ 0x4b524546ULL);
+    std::shuffle(rank.begin(), rank.end(), rng);
+    for (size_t i = 0; i < input.size(); ++i) {
+        auto coords = input[i];
+        double strike = ctx.spot * std::exp(-coords[0]);
+        double spot = ctx.spot;
+        if (ctx.sample_bounds.strike_bounds) {
+            const auto& k = *ctx.sample_bounds.strike_bounds;
+            const double u = (static_cast<double>(rank[i]) + .5) / static_cast<double>(input.size());
+            strike = std::lerp(k.min, k.max, u);
+            spot = strike * std::exp(coords[0]);
+        }
+        coords[1] = sample_tau(coords[1], ctx);
+        samples.push_back({.coords = coords, .strike = strike, .spot = spot, .refs = {}});
+    }
+    if (!ctx.sample_bounds.strike_bounds) return samples;
+
+    // Fixed endpoint strata supplement the independent-K Latin hypercube
+    // within the same declared sample count. Include interior moneyness so
+    // a small budget does not consist solely of flat exercise/OTM tails.
+    const auto& b = ctx.sample_bounds;
+    const auto& k = *b.strike_bounds;
+    const double mid_m = std::midpoint(b.m_min, b.m_max);
+    const double mid_t = std::midpoint(b.tau_min, b.tau_max);
+    const double mid_v = std::midpoint(b.sigma_min, b.sigma_max);
+    const double mid_r = std::midpoint(b.rate_min, b.rate_max);
+    std::vector<HoldoutPoint> mandatory;
+    auto add = [&](double m, double strike, double tau, double sigma, double rate) {
+        std::array<double, 4> coords{m, sample_tau(tau, ctx), sigma, rate};
+        if (std::any_of(mandatory.begin(), mandatory.end(), [&](const auto& p) {
+                return p.coords == coords && p.strike == strike;
+            })) return;
+        mandatory.push_back({.coords = coords, .strike = strike,
+            .spot = strike * std::exp(m), .refs = {}});
+    };
+    for (double m : {b.m_min, b.m_max}) {
+        for (double strike : {k.min, k.max}) add(m, strike, mid_t, mid_v, mid_r);
+    }
+    add(mid_m, k.min, b.tau_min, b.sigma_min, b.rate_min);
+    add(mid_m, k.max, b.tau_max, b.sigma_max, b.rate_max);
+    for (size_t i = 0; i < std::min(mandatory.size(), samples.size()); ++i) samples[i] = mandatory[i];
+    return samples;
+}
+
 /// Outcome of scoring one candidate surface over a set of samples.
 struct SampleEval {
     double max_error = 0.0;
@@ -188,6 +275,31 @@ TauSegmentSplit make_tau_split_from_segments(
         std::move(tau_min), std::move(tau_max), K_ref);
 }
 
+std::vector<std::pair<double, double>> admitted_maturity_intervals(
+    const TauSegmentSplit& split, double tau_min, double tau_max)
+{
+    std::vector<std::pair<double, double>> intervals;
+    for (size_t i = 0; i < split.tau_start().size(); ++i) {
+        double lo = std::max(tau_min, split.tau_start()[i] + split.tau_min()[i]);
+        double hi = std::min(tau_max, split.tau_start()[i] + split.tau_max()[i]);
+        // Addition/subtraction round trips at a physical endpoint can need
+        // one representable step inward to satisfy the split's own predicate.
+        for (int j = 0; j < 4 && lo < hi && !split.contains_maturity(lo); ++j) {
+            lo = std::nextafter(lo, hi);
+        }
+        for (int j = 0; j < 4 && lo < hi && !split.contains_maturity(hi); ++j) {
+            hi = std::nextafter(hi, lo);
+        }
+        if (!(hi > lo) || !split.contains_maturity(lo) || !split.contains_maturity(hi)) continue;
+        if (!intervals.empty() && lo <= intervals.back().second) {
+            intervals.back().second = std::max(intervals.back().second, hi);
+        } else {
+            intervals.emplace_back(lo, hi);
+        }
+    }
+    return intervals;
+}
+
 MaxGridSizes aggregate_max_sizes(const std::vector<RefinementResult>& probe_results) {
     MaxGridSizes s;
     for (const auto& pr : probe_results) {
@@ -312,7 +424,7 @@ static std::vector<std::array<double, 4>> generate_validation_samples(
 /// Non-finite prices or scores do not contribute to the error statistics but
 /// do clear `all_finite`, which disqualifies the candidate.
 static SampleEval evaluate_fresh_samples(
-    const std::vector<std::array<double, 4>>& samples,
+    const std::vector<HoldoutPoint>& samples,
     const SurfaceHandle& handle,
     const PrepareRefsFn& prepare_refs,
     const ScoreErrorFn& score,
@@ -322,21 +434,21 @@ static SampleEval evaluate_fresh_samples(
     double sum_error = 0.0;
 
     for (const auto& sample : samples) {
-        double m = sample[0];
-        double tau = sample[1];
-        double sigma = sample[2];
-        double rate = sample[3];
+        double m = sample.coords[0];
+        double tau = sample.coords[1];
+        double sigma = sample.coords[2];
+        double rate = sample.coords[3];
 
         // Interpolated price from surface via callback
-        double strike = ctx.spot * std::exp(-m);
-        double interp_price = handle.price(ctx.spot, strike, tau, sigma, rate);
+        double strike = sample.strike;
+        double interp_price = handle.price(sample.spot, strike, tau, sigma, rate);
 
         // Fresh FD refs (price + vega) for reference via callback.
         // Note: prepare_refs performs 3 PDE solves internally (base + two
         // sigma-bump solves), but we count 1 per successful sample here to
         // preserve pre-existing pde_solves_validation accounting -- callers
         // (e.g. bspline_adaptive.cpp) multiply this count by 3 downstream.
-        auto refs_result = prepare_refs(ctx.spot, strike, tau, sigma, rate);
+        auto refs_result = prepare_refs(sample.spot, strike, tau, sigma, rate);
 
         if (!refs_result.has_value()) {
             continue;  // Skip failed solves
@@ -346,7 +458,7 @@ static SampleEval evaluate_fresh_samples(
 
         auto scored = score(
             interp_price, refs_result.value(),
-            ctx.spot, strike, tau, sigma, rate);
+            sample.spot, strike, tau, sigma, rate);
 
         // A NaN price on an in-domain fresh sample disqualifies the candidate
         // even if the fixed holdout missed that location (spec D5) -- and
@@ -474,13 +586,12 @@ void detail::scan_monotonicity(const std::vector<HoldoutPoint>& holdout,
         return;  // degenerate sigma range: scan skipped
     }
     const auto sigmas = linspace(sigma_lo, sigma_hi, kMonotonicityPoints);
-    const double tol = std::max(1e-8 * ctx.spot, target_iv_error * vega_floor);
-
     for (const auto& pt : holdout) {
+        const double tol = std::max(1e-8 * pt.spot, target_iv_error * vega_floor);
         double prev_price = std::numeric_limits<double>::quiet_NaN();
         double prev_sigma = std::numeric_limits<double>::quiet_NaN();
         for (double sigma : sigmas) {
-            double price = handle.price(ctx.spot, pt.strike, pt.coords[1],
+            double price = handle.price(pt.spot, pt.strike, pt.coords[1],
                                         sigma, pt.coords[3]);
             if (!std::isfinite(price)) {
                 diag.monotonicity_points_invalid++;
@@ -508,6 +619,8 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
                                  const RefinementContext& ctx,
                                  const PrepareRefsFn& prepare_refs,
                                  uint64_t seed) {
+    if (!valid_measurement_domain(ctx)) return std::unexpected(
+        PriceTableError{PriceTableErrorCode::InvalidConfig});
     const std::array<std::pair<double, double>, 4> axis_bounds = {{
         {ctx.sample_bounds.m_min, ctx.sample_bounds.m_max},
         {ctx.sample_bounds.tau_min, ctx.sample_bounds.tau_max},
@@ -520,17 +633,15 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
 
     FinalValidationSet set;
     set.points.reserve(scaled.size());
-    for (const auto& pt : scaled) {
-        const double strike = ctx.spot * std::exp(-pt[0]);
+    for (auto pt : physical_samples(scaled, ctx, seed)) {
         ++set.ref_attempts;
-        auto refs = prepare_refs(ctx.spot, strike, pt[1], pt[2], pt[3]);
-        if (!refs.has_value() || !std::isfinite(refs->ref_price) ||
-            !std::isfinite(refs->vega)) {
+        auto refs = prepare_refs(pt.spot, pt.strike, pt.coords[1], pt.coords[2], pt.coords[3]);
+        if (!refs.has_value() || !std::isfinite(refs->ref_price) || !std::isfinite(refs->vega)) {
             ++set.invalid;
             continue;
         }
-        set.points.push_back(ValidationPoint{
-            .coords = pt, .strike = strike, .refs = refs.value()});
+        pt.refs = *refs;
+        set.points.push_back(std::move(pt));
     }
 
     const size_t min_valid =
@@ -555,8 +666,8 @@ detail::FinalScore detail::score_final_surface(
         const double sigma = pt.coords[2];
         const double rate = pt.coords[3];
         const double interp =
-            handle.price(ctx.spot, pt.strike, tau, sigma, rate);
-        const auto err = score(interp, pt.refs, ctx.spot, pt.strike,
+            handle.price(pt.spot, pt.strike, tau, sigma, rate);
+        const auto err = score(interp, pt.refs, pt.spot, pt.strike,
                                tau, sigma, rate);
         // A NaN price is garbage whether or not the metric is defined here.
         if (!std::isfinite(interp)) {
@@ -673,6 +784,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             PriceTableErrorCode::InvalidConfig});
     };
 
+    if (!valid_measurement_domain(ctx)) return invalid_config();
     if (!std::isfinite(params.target_iv_error) || params.target_iv_error <= 0.0) {
         return invalid_config();
     }
@@ -727,16 +839,14 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     std::vector<HoldoutPoint> holdout;
     holdout.reserve(holdout_scaled.size());
     size_t holdout_invalid = 0;
-    for (const auto& pt : holdout_scaled) {
-        double strike = ctx.spot * std::exp(-pt[0]);
-        auto refs = prepare_refs(ctx.spot, strike, pt[1], pt[2], pt[3]);
-        if (!refs.has_value() || !std::isfinite(refs->ref_price) ||
-            !std::isfinite(refs->vega)) {
+    for (auto pt : physical_samples(holdout_scaled, ctx, params.lhs_seed ^ kHoldoutSeedMix)) {
+        auto refs = prepare_refs(pt.spot, pt.strike, pt.coords[1], pt.coords[2], pt.coords[3]);
+        if (!refs.has_value() || !std::isfinite(refs->ref_price) || !std::isfinite(refs->vega)) {
             ++holdout_invalid;
             continue;
         }
-        holdout.push_back(HoldoutPoint{
-            .coords = pt, .strike = strike, .refs = refs.value()});
+        pt.refs = *refs;
+        holdout.push_back(std::move(pt));
     }
 
     // A holdout that cannot measure cannot certify retention.
@@ -837,8 +947,8 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
                 params, iteration, sample_axis_bounds, focus_bins,
                 focus_active);
             auto fresh = evaluate_fresh_samples(
-                samples, handle, prepare_refs, score, ctx,
-                params.target_iv_error);
+                physical_samples(samples, ctx, params.lhs_seed + iteration),
+                handle, prepare_refs, score, ctx, params.target_iv_error);
             stats.pde_solves_validation = fresh.pde_solves_validation;
             stats.max_error = fresh.max_error;
             stats.avg_error = fresh.avg_error;

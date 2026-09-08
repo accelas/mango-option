@@ -272,19 +272,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
 // strike range.  These two tests pin the band's degenerate cases.
 // ===========================================================================
 
-// A band thinner than the loop's non-degeneracy tolerance is widened about
-// its midpoint rather than being handed to run_refinement as m_max == m_min
-// (which would fail the build with InvalidConfig).  K_refs one basis point
-// apart give the middle probe a band ~1e-4 wide in log-moneyness.
-//
-// Such a config cannot produce a usable surface: three K_refs within one
-// basis point of 100 cannot resolve strikes spanning [90.9, 111.1], and the
-// assembled surface measures 0.278 (2,776 bps) on the final validation
-// against the 0.20 viability bound, so the build refuses (spec D9).  What
-// this test pins is *which* refusal: `NoViableSurface` from the final gate
-// means the degenerate band was widened and every probe loop ran;
-// `InvalidConfig` would mean the band was handed over degenerate.
-TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
+// Explicit references a basis point apart do not cover the requested
+// absolute interval. Refuse before fitting rather than widening probe bands.
+TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInsufficientReferenceCoverage) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
@@ -307,17 +297,14 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_FALSE(result.has_value())
         << "three K_refs a basis point apart cannot serve [90.9, 111.1]";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface)
-        << "a degenerate band must be widened and measured, not rejected up "
-           "front (InvalidConfig would mean it reached run_refinement "
-           "degenerate)";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
 // A probe whose served band lies entirely outside the user's strike range is
 // skipped: no refinement loop, its seed sizes still feed the aggregate, and
 // the skip is recorded with the refined_dim = -3 sentinel.  K_ref = 50 with
-// user strikes in [91.7, 108.7] serves nothing: its band ends at the
-// geometric midpoint to its neighbour, sqrt(50 * 90) = 67.1.
+// user strikes in [91.7, 108.7] serves nothing: its linear-blend support
+// ends at its absolute-strike neighbor90, below the requested interval.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedEmptyProbeBandSkipped) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;

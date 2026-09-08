@@ -53,6 +53,9 @@ struct RefinementContext {
     OptionType option_type;
     SurfaceBounds bounds;         ///< fit domain (support incl. headroom)
     SurfaceBounds sample_bounds;  ///< user-facing measurement domain
+    /// Admitted physical tau intervals for measurement, excluding gaps.
+    /// nullopt means the full sample tau interval; an engaged empty set is invalid.
+    std::optional<std::vector<std::pair<double, double>>> maturity_intervals = std::nullopt;
 };
 
 /// Absolute holdout-error ceiling above which a candidate surface is treated
@@ -296,6 +299,11 @@ SegmentBoundaries compute_segment_boundaries(
     const std::vector<Dividend>& dividends, double maturity,
     double tau_min, double tau_max);
 
+/// Exact admitted physical tau intervals from a split, clipped to the
+/// requested measurement range. These are sampling domains, not query snaps.
+std::vector<std::pair<double, double>> admitted_maturity_intervals(
+    const TauSegmentSplit& split, double tau_min, double tau_max);
+
 /// Collapse gap segments into adjacent real segments for TauSegmentSplit.
 /// Each real segment's range extends to the midpoint of its adjacent gap.
 /// Only real segments are kept; gaps are absorbed.
@@ -378,6 +386,7 @@ namespace detail {
 struct ValidationPoint {
     std::array<double, 4> coords{};  ///< m, tau, sigma, rate
     double strike = 0.0;
+    double spot = 0.0;  ///< physical S, independent of the numerical build anchor
     ErrorRefs refs;
 };
 

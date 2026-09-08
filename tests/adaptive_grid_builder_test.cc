@@ -881,7 +881,7 @@ std::vector<detail::ValidationPoint> make_points(size_t n) {
     for (size_t i = 0; i < n; ++i) {
         pts.push_back(detail::ValidationPoint{
             .coords = {0.0, 0.5, 0.20 + 0.01 * static_cast<double>(i), 0.05},
-            .strike = 100.0,
+            .strike = 100.0, .spot = 100.0,
             .refs = {.ref_price = 10.0, .vega = 1.0}});
     }
     return pts;
