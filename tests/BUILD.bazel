@@ -2015,3 +2015,9 @@ cc_test(
     srcs = ["proof_chebyshev_test.cc"],
     deps = ["//src/math/proof:chebyshev", "@googletest//:gtest_main"],
 )
+
+cc_test(
+    name = "moneyness_bounds_test",
+    srcs = ["moneyness_bounds_test.cc"],
+    deps = ["//src/option/table:moneyness_bounds", "@googletest//:gtest_main"],
+)

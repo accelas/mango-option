@@ -4,6 +4,7 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/greek_types.hpp"
 #include "mango/option/table/strike_bounds.hpp"
+#include "mango/option/table/moneyness_bounds.hpp"
 #include "mango/option/table/fixed_expiry.hpp"
 #include <expected>
 #include <cmath>
@@ -18,6 +19,9 @@ struct SurfaceBounds {
     double rate_min, rate_max;
     /// Required for segmented publication; omitted for homogeneous tables.
     std::optional<StrikeBounds> strike_bounds = std::nullopt;
+    /// Original ratio-input endpoints when known. Absent means a direct
+    /// log-domain request, resolved once with exp(m_min/max).
+    std::optional<MoneynessBounds> ratio_bounds = std::nullopt;
 };
 
 /// Top-level queryable price surface with runtime metadata.
@@ -38,8 +42,8 @@ public:
         , bounds_(bounds)
         , option_type_(option_type)
         , dividend_yield_(dividend_yield)
-        , ratio_min_(std::exp(bounds.m_min))
-        , ratio_max_(std::exp(bounds.m_max))
+        , moneyness_domain_(bounds.ratio_bounds ? *bounds.ratio_bounds
+            : MoneynessBounds{std::exp(bounds.m_min), std::exp(bounds.m_max)})
         , fixed_expiry_(std::move(fixed_expiry))
         , fixed_expiry_valid_(fixed_expiry_ ? fixed_expiry_->valid(bounds.tau_max)
                                            : !requires_fixed_expiry)
@@ -97,7 +101,7 @@ public:
     [[nodiscard]] double tau_min() const noexcept { return bounds_.tau_min; }
     [[nodiscard]] double tau_max() const noexcept { return bounds_.tau_max; }
     [[nodiscard]] bool contains_maturity(double tau) const noexcept {
-        if (!fixed_expiry_valid_ || !std::isfinite(tau) || tau < tau_min() || tau > tau_max()) return false;
+        if (!fixed_expiry_valid_ || !std::isfinite(tau) || tau <= 0.0 || tau < tau_min() || tau > tau_max()) return false;
         if constexpr (requires { inner_.contains_maturity(tau); }) {
             return inner_.contains_maturity(tau);
         }
@@ -117,13 +121,16 @@ public:
     [[nodiscard]] const std::optional<StrikeBounds>& strike_bounds() const noexcept {
         return bounds_.strike_bounds;
     }
-    /// Compare in quote space, using the same rounded S=K*exp(x) endpoint
-    /// construction as callers. This avoids log(S/K) round-trip ULP errors
-    /// without admitting the next representable spot outside either bound.
+    /// Requested ratio endpoints and conservative real S/K enclosure are
+    /// carried separately from interpolation coordinates and support headroom.
+    [[nodiscard]] const MoneynessBounds& ratio_bounds() const noexcept {
+        return moneyness_domain_.requested();
+    }
+    [[nodiscard]] const MoneynessBounds& ratio_enclosure() const noexcept {
+        return moneyness_domain_.enclosure();
+    }
     [[nodiscard]] bool contains_moneyness(double spot, double strike) const noexcept {
-        return std::isfinite(spot) && std::isfinite(strike) && spot > 0.0 && strike > 0.0
-            && spot >= strike * ratio_min_
-            && spot <= strike * ratio_max_;
+        return moneyness_domain_.contains_quote(spot, strike);
     }
 
     [[nodiscard]] bool contains_strike(double strike) const noexcept {
@@ -148,7 +155,7 @@ private:
     SurfaceBounds bounds_;
     OptionType option_type_;
     double dividend_yield_;
-    double ratio_min_, ratio_max_;
+    MoneynessDomain moneyness_domain_;
     std::optional<FixedExpiryMetadata> fixed_expiry_;
     bool fixed_expiry_valid_;
 };

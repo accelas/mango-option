@@ -203,3 +203,13 @@ TEST(SplitSurfaceTest, SegmentedCheckedQueriesRequireStrikeMetadata) {
     PriceTable<SmoothHomogeneousPrice> continuous({}, bounds, OptionType::CALL, 0.0);
     EXPECT_TRUE(continuous.contains_strike(1000.0));
 }
+
+TEST(SplitSurfaceTest, RequestedRatiosAndPositiveMaturityDefineAdmission) {
+    SurfaceBounds bounds{std::log(.1), std::log(.13), 0, 1, .1, .4, .01, .1};
+    bounds.ratio_bounds = MoneynessBounds{.1, .13};
+    PriceTable<SmoothHomogeneousPrice> table({}, bounds, OptionType::CALL, 0.0);
+    EXPECT_TRUE(table.contains_moneyness(10, 100));
+    EXPECT_EQ(table.ratio_bounds().min, .1);
+    EXPECT_FALSE(table.contains_maturity(0));
+    EXPECT_TRUE(table.contains_maturity(std::nextafter(0., 1.)));
+}
