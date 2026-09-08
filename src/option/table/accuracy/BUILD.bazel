@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "acceptance",
+    srcs = ["acceptance.cpp"],
+    hdrs = ["acceptance.hpp"],
+    deps = ["//src/option/table:reference_selection"],
+    visibility = ["//src/option/table:__subpackages__", "//tests:__pkg__"],
+    strip_include_prefix = "/src/option/table/accuracy",
+    include_prefix = "mango/option/table/accuracy",
+)
