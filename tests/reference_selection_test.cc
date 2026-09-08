@@ -457,5 +457,48 @@ TEST(ReferenceSelectionTest, ComposedPriceCanRescueReferencesWithoutAnIvClaim) {
     }
 }
 
+TEST(ReferenceSelectionTest, IdealStructuralCountsCannotQualifyComposedRescue) {
+    for (bool price_channel : {false, true}) for (size_t structural : {1u, 6u}) {
+        auto result=select_k_refs({}, {90,110}, [=](std::span<const double>)
+            -> std::expected<ReferenceCandidateMetrics, PriceTableError> {
+            ReferenceCandidateMetrics metrics;
+            metrics.decision=ReferenceCandidateDecision::Adequate;
+            metrics.total_target_met=true;
+            metrics.ideal_blend.price=ReferenceErrorSummary{.requested=6, .unresolved=6};
+            metrics.total.price=ReferenceErrorSummary{.requested=6, .measured=6, .max_error=0.001};
+            metrics.total.iv=ReferenceErrorSummary{.requested=6, .measured=6, .max_error=1e-6};
+            auto& channel=price_channel ? metrics.total.price : metrics.total.iv;
+            channel=ReferenceErrorSummary{
+                .requested=6, .measured=6-structural, .structurally_exact=structural};
+            if (channel->measured) channel->max_error=0.0;
+            return metrics;
+        });
+        EXPECT_FALSE(result.has_value()) << "price=" << price_channel << " structural=" << structural;
+        if (result) continue;
+        EXPECT_EQ(result.error().stop_reason, ReferenceSelectionStopReason::InvalidMetrics);
+        EXPECT_EQ(result.error().candidates.size(), 1u);
+    }
+}
+
+TEST(ReferenceSelectionTest, ComposedRescuePreservesCallbackTargetPolicy) {
+    for (bool filtered_iv : {false, true}) {
+        auto result=select_k_refs({}, {90,110}, [=](std::span<const double>)
+            -> std::expected<ReferenceCandidateMetrics, PriceTableError> {
+            ReferenceCandidateMetrics metrics;
+            metrics.decision=ReferenceCandidateDecision::Adequate;
+            // The callback may assess a price-only requested target. The
+            // engine must not invent a requirement for measurable IV rows.
+            metrics.total_target_met=true;
+            metrics.ideal_blend.price=ReferenceErrorSummary{.requested=6, .unresolved=6};
+            metrics.total.price=ReferenceErrorSummary{.requested=6, .measured=6, .max_error=0.001};
+            if (filtered_iv) metrics.total.iv=ReferenceErrorSummary{.requested=6, .filtered=6};
+            return metrics;
+        });
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(result->stop_reason, ReferenceSelectionStopReason::Adequate);
+        EXPECT_EQ(result->candidates.size(), 1u);
+    }
+}
+
 }  // namespace
 }  // namespace mango
