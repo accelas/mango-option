@@ -30,6 +30,20 @@ cc_library(
 )
 
 cc_library(
+    name = "reference_selection",
+    srcs = ["reference_selection.cpp"],
+    hdrs = ["reference_selection.hpp"],
+    deps = [
+        ":adaptive_grid_types",
+        ":adaptive_refinement",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "pde_cache",
     hdrs = ["pde_cache.hpp"],
     visibility = ["//visibility:public"],

@@ -8,8 +8,11 @@
 #include <vector>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 namespace mango {
+
+struct ReferenceSelectionResult;
 
 /// Configuration for multi-K_ref surface construction.
 /// Used by both manual and adaptive grid builders.
@@ -134,6 +137,9 @@ struct BuildDiagnostics {
     /// Per-iteration forensics; see IterationStats for the refined_dim
     /// sentinels (-2 final rebuild, -3 skipped probe).
     std::vector<IterationStats> iterations;
+    /// Reference-selection history, shared by manual and adaptive builds.
+    /// Independent of table ownership; null when no reference selection ran.
+    std::shared_ptr<const ReferenceSelectionResult> reference_selection;
 };
 
 }  // namespace mango
