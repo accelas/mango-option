@@ -26,6 +26,7 @@ enum class ReferenceCandidateDecision {
 /// Disjoint per-channel accounting. requested equals the sum of the six
 /// outcome counts. Error statistics cover qualified measured rows only;
 /// measured==0 means all three optional error fields are absent, never zero.
+/// Filtering applies to IV; a filtered price row cannot support acceptance.
 struct ReferenceErrorSummary {
     size_t requested = 0;
     size_t measured = 0;
@@ -103,11 +104,23 @@ struct ReferenceSelectionFailure {
 
 /// Validate using resolve_k_refs, then measure bounded covering candidates.
 /// Automatic selection starts with resolve_k_refs' cheap covering seed and
-/// inserts interval midpoints (normally3->5->9->17->33->65). Explicit sets are measured exactly once,
+/// inserts interval midpoints (normally 3->5->9->17->33->65). Explicit sets
+/// are measured exactly once,
 /// preserving all validated values. The seed is the first selection round.
 ///
 /// The callback owns error budgets and evidence. Actual composed target
 /// success can establish adequacy even when private component guidance misses.
+/// It uses a fixed declared population and criteria. An Adequate assessment
+/// remains valid for that candidate while later vectors are evaluated.
+/// The reference span is valid only during the synchronous callback.
+///
+/// Accepting decisions require complete ideal evidence (at least one measured
+/// or structurally exact row, no unresolved/refused/untested rows). Adequate
+/// may instead use complete total evidence with total_target_met=true.
+/// RefineReferences/ThresholdAmbiguous require a measured ideal witness;
+/// remaining probes may be explicitly untested. Malformed count/statistic
+/// reports stop with InvalidMetrics and remain in the diagnostic history.
+///
 /// IvUnmeasured selects price-adequate refs while retaining absent/filtered IV
 /// statistics. It makes no whole-IV-target claim; Gate 7 owns publication.
 /// FitLimited selects adequate refs with unmet-total diagnostics; it neither
