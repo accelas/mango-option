@@ -767,8 +767,7 @@ TEST(GridSpecTest, MultiSinhSingleOffCenterPreserved) {
     if (idx_far > 0 && idx_far < 50) {
         double spacing_far = grid[idx_far + 1] - grid[idx_far];
         double spacing_near = grid[idx_center + 1] - grid[idx_center];
-        // Off-center grids with monotonicity enforcement have reduced contrast,
-        // but spacing far should still be coarser than spacing near the center
+        // Spacing far from the requested center should be coarser.
         EXPECT_GT(spacing_far, spacing_near * 0.9)
             << "Spacing should be coarser far from requested center";
     }

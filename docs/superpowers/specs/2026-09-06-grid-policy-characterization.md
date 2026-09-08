@@ -144,3 +144,43 @@ maximum errors (all below .006 against High-profile direct references).
 Timings were measured on a shared host; small timing differences do not support
 claims about a performance regression or improvement. PDE reuse counts and
 price equivalence are the decisive evidence for retiring numerical cutoffs.
+
+## September 8 follow-up: asymmetric spatial maps
+
+The corrected fixed-expiry sampler exposed a separate grid-generator defect.
+A single ATM put at sigma 0.2, maturity 1, K 100 resolves 101 spatial points and
+120 time steps. Adding a zero-amount dividend at 0.5 leaves 120 steps. Giving
+that dividend amount 3 widens only the lower spatial endpoint; the previous
+sinh formula then overshoots that endpoint, and monotonicity repair creates
+artificially tiny boundary cells. The time estimator consequently hits 5000
+steps. This isolates grid shape from snapshot insertion or a longer horizon.
+
+The repaired map uses a positive spatial scale
+`a=(x_max-x_min)/(2*sinh(alpha/2))`, transforms each endpoint through
+`asinh((x_endpoint-center)/a)`, interpolates between those transformed
+endpoints, then maps back with `center+a*sinh(u)`. Its derivative with
+respect to the uniform coordinate is positive, is smallest at the requested
+center, and it represents both endpoints before floating-point rounding.
+Positive weighted combinations of these maps also preserve the endpoints
+and monotonicity. The existing centered single-cluster path is retained.
+Only exact endpoint labels are pinned; no interior boundary-crowding repair
+is used. Explicit point counts, cluster centers, weights and alpha are kept.
+
+Public grid regressions cover boundary density on both asymmetric sides and
+equivalence of a single cluster to identical unmerged weighted clusters.
+The old example's global spacing-ratio threshold was an artifact of endpoint
+distortion; it now checks the intended symmetry and finer central spacing.
+A recorded dividend time-step golden changes from 20001 to 4136 on the same
+4999-point Ultra domain. Price and Greek criteria are not loosened.
+
+Matched sampling measurements and independent price-reference qualification
+are retained in the session's 488-matched artifacts; full numerical checks
+are required before this follow-up is considered complete.
+
+The three grid/estimator test targets and seven direct pricing/IV/dividend/
+QuantLib test targets pass without changing price or Greek tolerances. The
+matched single-cluster correction reduces the raw-sampling workload from
+80,128 to 3,872 scheduled steps (16 jobs either way), and measured build time
+by about 94% on the shared host. The coarse low-volatility price error remains
+about 0.01106 against requalified references; this does not pass the final
+one-cent criterion. Query latency is unchanged within measurement noise.
