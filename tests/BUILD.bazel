@@ -1962,3 +1962,21 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "proof_interval_test",
+    srcs = ["proof_interval_test.cc"],
+    deps = ["//src/math/proof:interval", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "proof_bernstein_test",
+    srcs = ["proof_bernstein_test.cc"],
+    deps = ["//src/math/proof:bernstein", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "proof_bspline_cell_test",
+    srcs = ["proof_bspline_cell_test.cc"],
+    deps = ["//src/math/proof:bspline_cell", "@googletest//:gtest_main"],
+)
