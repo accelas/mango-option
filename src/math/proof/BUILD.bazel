@@ -31,3 +31,14 @@ cc_library(
     strip_include_prefix = "/src/math/proof",
     include_prefix = "mango/math/proof",
 )
+
+cc_library(
+    name = "chebyshev",
+    srcs = ["chebyshev.cpp"],
+    hdrs = ["chebyshev.hpp"],
+    deps = [":bernstein", ":interval", "//src/math/chebyshev:chebyshev_polynomial"],
+    copts = ["-fno-fast-math", "-ffp-contract=off"],
+    visibility = ["//src:__subpackages__", "//tests:__subpackages__", "//benchmarks:__subpackages__"],
+    strip_include_prefix = "/src/math/proof",
+    include_prefix = "mango/math/proof",
+)

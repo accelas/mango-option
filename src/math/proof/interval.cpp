@@ -142,4 +142,48 @@ Interval sqrt(const Interval &value) {
     mpfr_sqrt(result.upper_, value.upper_, MPFR_RNDU);
     return result;
 }
+Interval intersection(const Interval &a, const Interval &b) {
+    if (!a.finite() || !b.finite())
+        return Interval::invalid();
+    Interval result;
+    mpfr_max(result.lower_, a.lower_, b.lower_, MPFR_RNDD);
+    mpfr_min(result.upper_, a.upper_, b.upper_, MPFR_RNDU);
+    if (mpfr_cmp(result.lower_, result.upper_) > 0)
+        return Interval::invalid();
+    return result;
+}
+Interval acos(const Interval &value) {
+    if (!value.finite() || mpfr_cmp_si(value.lower_, -1) < 0 || mpfr_cmp_ui(value.upper_, 1) > 0)
+        return Interval::invalid();
+    Interval result;
+    mpfr_acos(result.lower_, value.upper_, MPFR_RNDD);
+    mpfr_acos(result.upper_, value.lower_, MPFR_RNDU);
+    return result;
+}
+Interval cos(const Interval &value) {
+    if (!value.finite())
+        return Interval::invalid();
+    Interval pi, result, endpoint;
+    mpfr_const_pi(pi.lower_, MPFR_RNDD);
+    mpfr_const_pi(pi.upper_, MPFR_RNDU);
+    const auto multiples = value / pi;
+    // An uncertain or enormous argument range is safely enclosed by [-1,1].
+    if (!multiples.finite() || !mpfr_fits_slong_p(multiples.lower_, MPFR_RNDU) ||
+        !mpfr_fits_slong_p(multiples.upper_, MPFR_RNDD))
+        return Interval::hull(-1, 1);
+    const long first = mpfr_get_si(multiples.lower_, MPFR_RNDU);
+    const long last = mpfr_get_si(multiples.upper_, MPFR_RNDD);
+    if (first < last)
+        return Interval::hull(-1, 1);
+    mpfr_cos(result.lower_, value.lower_, MPFR_RNDD);
+    mpfr_cos(result.upper_, value.lower_, MPFR_RNDU);
+    mpfr_cos(endpoint.lower_, value.upper_, MPFR_RNDD);
+    mpfr_cos(endpoint.upper_, value.upper_, MPFR_RNDU);
+    result = hull(result, endpoint);
+    // Every interior cosine extremum is k*pi. The enclosing quotient may
+    // include an extra k, which only widens the result conservatively.
+    if (first == last)
+        result = hull(result, Interval(first % 2 == 0 ? 1 : -1));
+    return result;
+}
 } // namespace mango::detail::proof

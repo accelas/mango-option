@@ -2003,3 +2003,15 @@ cc_test(
     srcs = ["proof_bspline_cell_test.cc"],
     deps = ["//src/math/proof:bspline_cell", "@googletest//:gtest_main"],
 )
+
+cc_test(
+    name = "chebyshev_polynomial_test",
+    srcs = ["chebyshev_polynomial_test.cc"],
+    deps = ["//src/math/chebyshev:chebyshev_polynomial", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "proof_chebyshev_test",
+    srcs = ["proof_chebyshev_test.cc"],
+    deps = ["//src/math/proof:chebyshev", "@googletest//:gtest_main"],
+)
