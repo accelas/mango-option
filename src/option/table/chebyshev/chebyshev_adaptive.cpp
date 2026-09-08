@@ -835,7 +835,7 @@ ChebyshevSegmentedBuilder::create(
         config.strike_bounds, config.spot, domain.moneyness);
     if (!strikes) return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
 
-    auto K_refs = resolve_k_refs(config.kref_config, config.spot);
+    auto K_refs = resolve_k_refs(config.kref_config, *strikes);
     if (!K_refs) return std::unexpected(K_refs.error());
 
     // Support domain: the user's ranges widened for the cumulative discrete

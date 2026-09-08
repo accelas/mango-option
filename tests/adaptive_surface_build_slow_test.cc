@@ -736,7 +736,7 @@ TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
     // Re-score the surface we were handed on an independently reproduced
     // reference set: the reported numbers must be its own, not the
     // single-K_ref sizing loop's.
-    auto K_refs = resolve_k_refs(seg_config.kref_config, seg_config.spot);
+    auto K_refs = resolve_k_refs(seg_config.kref_config, *result->sample_bounds.strike_bounds);
     ASSERT_TRUE(K_refs.has_value());
     auto sample = expand_segmented_domain(domain, seg_config.maturity,
                                           seg_config.dividend_yield, {},
