@@ -28,6 +28,36 @@ class ConvergenceTest(unittest.TestCase):
 
 
 class EligibilityTest(unittest.TestCase):
+    def test_captured_small_time_value_filters_with_unresolved_vega(self):
+        # Frozen C0-CALL-205d3c754422d4ae94ff: qualified price establishes
+        # TV/K < 1e-4, regardless of the failed independent vega ladder.
+        result = rq.iv_eligibility(2.9883944208108915e-9, 0.0, 100.0,
+                                   4.910663138226097e-9, math.nan, None)
+        self.assertEqual(result["status"], "tv-filtered")
+        self.assertIsNone(result["oracle_iv_resolution"])
+
+    def test_small_time_value_filters_when_vega_straddles_floor(self):
+        result = rq.iv_eligibility(0.005, 0.0, 100.0, 1e-8, 1e-4, 1e-5)
+        self.assertEqual(result["status"], "tv-filtered")
+        self.assertIsNone(result["oracle_iv_resolution"])
+
+    def test_small_vega_filters_when_time_value_straddles_floor(self):
+        result = rq.iv_eligibility(0.01, 0.0, 100.0, 1e-5, 1e-6, 1e-7)
+        self.assertEqual(result["status"], "vega-filtered")
+        self.assertIsNone(result["oracle_iv_resolution"])
+
+    def test_both_uncertain_floors_cannot_fabricate_filtering(self):
+        result = rq.iv_eligibility(0.01, 0.0, 100.0, 1e-5, 1e-4, 1e-5)
+        self.assertEqual(result["status"], "oracle-unresolved")
+
+    def test_filtering_requires_a_qualified_physical_price(self):
+        for price, intrinsic, uncertainty in [(0.005, 0.0, None),
+                                               (0.005, 0.0, 0.002),
+                                               (0.005, 1.0, 1e-8)]:
+            result = rq.iv_eligibility(price, intrinsic, 100.0, uncertainty,
+                                       1e-6, 1e-7)
+            self.assertEqual(result["status"], "oracle-unresolved")
+
     def test_price_budget_does_not_qualify_iv_budget(self):
         result = rq.iv_eligibility(7.0, 0.0, 100.0, 0.0009, 10.0, 0.001)
         self.assertEqual(result["status"], "oracle-unresolved")
