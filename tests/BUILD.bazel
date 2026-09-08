@@ -1,4 +1,14 @@
 # SPDX-License-Identifier: MIT
+cc_test(
+    name = "reference_selection_test",
+    size = "small",
+    srcs = ["reference_selection_test.cc"],
+    deps = [
+        "//src/option/table:reference_selection",
+        "@googletest//:gtest_main",
+    ],
+)
+
 
 # Shared LCP enumeration/reference-solve test helpers (Task 1 + Task 9,
 # issues #439/#455): used by thomas_solver_lcp_test here and by
