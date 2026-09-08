@@ -223,6 +223,23 @@ TEST(GridSpecTest, MultiSinhOffCenterDoesNotClusterAtBoundary) {
     }
 }
 
+TEST(GridSpecTest, MultiSinhDuplicateClustersKeepTheSameMap) {
+    auto single = mango::GridSpec<>::multi_sinh_spaced(-1.1, 1.0, 101,
+        {{.center_x = 0.0, .alpha = 4.0, .weight = 1.0}});
+    auto duplicate = mango::GridSpec<>::multi_sinh_spaced(-1.1, 1.0, 101,
+        {{.center_x = 0.0, .alpha = 4.0, .weight = 0.25},
+         {.center_x = 0.0, .alpha = 4.0, .weight = 0.75}}, false);
+    ASSERT_TRUE(single.has_value());
+    ASSERT_TRUE(duplicate.has_value());
+    auto expected = single->generate();
+    auto actual = duplicate->generate();
+    double max_difference = 0.0;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        max_difference = std::max(max_difference, std::abs(actual[i] - expected[i]));
+    }
+    EXPECT_LT(max_difference, 1e-14);
+}
+
 TEST(GridSpecTest, MultiSinhMergedClusterPreservesLocation) {
     // Test that merged clusters preserve their weighted-average location
     // Auto-merge only deduplicates overlapping centers, it doesn't recenter them
