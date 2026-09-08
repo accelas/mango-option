@@ -36,3 +36,13 @@ interpolation error between nodes or a monotonicity certificate. Strongly
 nonuniform sites can remain ill-conditioned; the condition estimate remains
 part of the diagnostics. Shape constraints and final physical-price
 certification belong to #459.
+
+Nonfinite data sites fail before constructing a matrix. Nonfinite solved
+values cannot pass the residual gate. Numerical failures retain the existing
+`FittingFailed` category, with `message` identifying factorization, solve,
+or residual rejection; residual errors also preserve `max_residual`.
+The separable fitter stops at the first failed axis in its existing reverse
+axis order, retaining that error and the lowest failing slice index
+deterministically across threads. It does not fit later axes from a partially
+failed tensor. `grid_size` identifies the failed axis length and `index`
+identifies the axis; the message carries the slice index.

@@ -1491,7 +1491,8 @@ cc_test(
 
 cc_test(
     name = "segmented_price_table_builder_test",
-    size = "medium",
+    # Includes corrected raw-dividend fitting/Greek regressions (~158s).
+    size = "large",
     srcs = ["segmented_price_table_builder_test.cc"],
     deps = [
         "//src/option/table/bspline:bspline_segmented_builder",

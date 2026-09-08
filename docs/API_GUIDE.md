@@ -749,11 +749,10 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 The B-spline segmented path now uses raw fixed-expiry PDE snapshots instead
 of passing fitted surfaces into later segment solves. On the exact configuration
-above, B-spline construction succeeds with **0.00435 maximum measured decimal
-IV error (43.5 absolute-IV bps)**. This exceeds the requested 0.001 (10 bps), so
+above, B-spline construction succeeds with **0.00452 maximum measured decimal
+IV error (45.2 absolute-IV bps)** after the cubic fitting repair. This exceeds the requested 0.001 (10 bps), so
 `build_diagnostics()->target_met` is false. A successful build is not a claim
-that the requested target was met. Other configurations still refuse while
-clustered fitting and reference-strike semantics are corrected; final backend
+that the requested target was met. Reference-strike semantics still need correction; final backend
 selection follows the remaining #483 accuracy and certification work.
 
 The corrected fixed-expiry Chebyshev oracle measured 0.00744049 maximum

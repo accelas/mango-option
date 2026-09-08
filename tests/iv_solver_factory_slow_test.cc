@@ -165,8 +165,9 @@ TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
 }
 
 // After #488 removes fitted-IC chaining, the exact documented B-spline
-// configuration is viable. Its returned retry measures .00434953 decimal IV
-// (43.5 absolute-IV bps), still above the requested .001 (10 bps) target.
+// configuration is viable. After #458 stabilizes generated cubic knots, its
+// returned retry measures .00451589 decimal IV (45.2 absolute-IV bps), versus
+// .00434953 after #488 alone, still above the requested .001 (10 bps) target.
 // Keep accuracy evidence separate from successful construction; final backend
 // selection and strict target enforcement belong to #462 after #458/#460/#459.
 TEST(IVSolverFactorySegmented, DocumentedBSplineConfigBuildsButMissesTarget) {
@@ -180,7 +181,7 @@ TEST(IVSolverFactorySegmented, DocumentedBSplineConfigBuildsButMissesTarget) {
     EXPECT_FALSE(diagnostics->target_met);
     EXPECT_EQ(diagnostics->holdout_points_measured, 64u);
     EXPECT_EQ(diagnostics->holdout_points_invalid, 0u);
-    EXPECT_NEAR(diagnostics->achieved_max_error, 0.00434953, 1e-5);
+    EXPECT_NEAR(diagnostics->achieved_max_error, 0.00451589, 1e-5);
 }
 
 // ---------------------------------------------------------------------------
