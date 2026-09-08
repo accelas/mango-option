@@ -150,7 +150,7 @@ void cubic_basis_nonuniform(
     const int n = static_cast<int>(t.size());
 
     // Exact interpolation at right boundary (avoids numerical errors)
-    if (std::abs(x - t.back()) < T{64} * std::numeric_limits<T>::epsilon() * std::max(std::abs(t.back()), T{1})) {
+    if (x == t.back()) {
         N[0] = T{1};
         N[1] = T{0};
         N[2] = T{0};
@@ -163,7 +163,8 @@ void cubic_basis_nonuniform(
     for (int k = 0; k < 4; ++k) {
         const int idx = i - k;
         if (idx >= 0 && idx + 1 < n) {
-            N0[k] = (t[idx] <= x && x < t[idx + 1]) ? T{1} : T{0};
+            const bool endpoint_limit = x == t.back() && idx == n - 5;
+            N0[k] = ((t[idx] <= x && x < t[idx + 1]) || endpoint_limit) ? T{1} : T{0};
         }
     }
 
@@ -251,7 +252,8 @@ void cubic_basis_derivative_nonuniform(
     for (int k = 0; k < 4; ++k) {
         const int idx = i - k;
         if (idx >= 0 && idx + 1 < n) {
-            N0[k] = (t[idx] <= x && x < t[idx + 1]) ? T{1} : T{0};
+            const bool endpoint_limit = x == t.back() && idx == n - 5;
+            N0[k] = ((t[idx] <= x && x < t[idx + 1]) || endpoint_limit) ? T{1} : T{0};
         }
     }
 
@@ -333,7 +335,8 @@ void cubic_basis_second_derivative_nonuniform(
     for (int k = 0; k < 4; ++k) {
         const int idx = i - k;
         if (idx >= 0 && idx + 1 < n) {
-            N0[k] = (t[idx] <= x && x < t[idx + 1]) ? T{1} : T{0};
+            const bool endpoint_limit = x == t.back() && idx == n - 5;
+            N0[k] = ((t[idx] <= x && x < t[idx + 1]) || endpoint_limit) ? T{1} : T{0};
         }
     }
 
