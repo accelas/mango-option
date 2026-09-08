@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: MIT
+cc_library(
+    name = "interval",
+    srcs = ["interval.cpp"],
+    hdrs = ["interval.hpp"],
+    deps = ["@mpfr//:mpfr"],
+    copts = ["-fno-fast-math", "-ffp-contract=off"],
+    visibility = ["//src:__subpackages__", "//tests:__subpackages__"],
+    strip_include_prefix = "/src/math/proof",
+    include_prefix = "mango/math/proof",
+)
+
+cc_library(
+    name = "bernstein",
+    srcs = ["bernstein.cpp"],
+    hdrs = ["bernstein.hpp"],
+    deps = [":interval"],
+    copts = ["-fno-fast-math", "-ffp-contract=off"],
+    visibility = ["//src:__subpackages__", "//tests:__subpackages__"],
+    strip_include_prefix = "/src/math/proof",
+    include_prefix = "mango/math/proof",
+)
+
+cc_library(
+    name = "bspline_cell",
+    srcs = ["bspline_cell.cpp"],
+    hdrs = ["bspline_cell.hpp"],
+    deps = [":bernstein", ":interval"],
+    copts = ["-fno-fast-math", "-ffp-contract=off"],
+    visibility = ["//src:__subpackages__", "//tests:__subpackages__"],
+    strip_include_prefix = "/src/math/proof",
+    include_prefix = "mango/math/proof",
+)
+
+cc_library(
+    name = "chebyshev",
+    srcs = ["chebyshev.cpp"],
+    hdrs = ["chebyshev.hpp"],
+    deps = [":bernstein", ":interval", "//src/math/chebyshev:chebyshev_polynomial"],
+    copts = ["-fno-fast-math", "-ffp-contract=off"],
+    visibility = ["//src:__subpackages__", "//tests:__subpackages__", "//benchmarks:__subpackages__"],
+    strip_include_prefix = "/src/math/proof",
+    include_prefix = "mango/math/proof",
+)

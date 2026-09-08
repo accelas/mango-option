@@ -1,0 +1,6 @@
+diff --git a/autoconf/private/autoconf_config.bzl b/autoconf/private/autoconf_config.bzl
+--- a/autoconf/private/autoconf_config.bzl
++++ b/autoconf/private/autoconf_config.bzl
+@@ -333 +333 @@
+-        user_compile_flags = ctx.fragments.cpp.copts,
++        user_compile_flags = ctx.fragments.cpp.copts + ["-D_GNU_SOURCE"],

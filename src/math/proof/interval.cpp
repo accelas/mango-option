@@ -1,0 +1,226 @@
+// SPDX-License-Identifier: MIT
+#include "mango/math/proof/interval.hpp"
+#include <cmath>
+#include <initializer_list>
+#include <limits>
+
+namespace mango::detail::proof {
+Interval::Interval(double value) {
+    mpfr_init2(lower_, precision);
+    mpfr_init2(upper_, precision);
+    // An application can change MPFR's exponent range. A rounded import
+    // would certify a different stored constant, so fail closed instead.
+    const int lower_inexact = mpfr_set_d(lower_, value, MPFR_RNDN);
+    const int upper_inexact = mpfr_set_d(upper_, value, MPFR_RNDN);
+    if (lower_inexact || upper_inexact) {
+        mpfr_set_nan(lower_);
+        mpfr_set_nan(upper_);
+    }
+}
+Interval::Interval(const Interval &other) : Interval() {
+    mpfr_set(lower_, other.lower_, MPFR_RNDD);
+    mpfr_set(upper_, other.upper_, MPFR_RNDU);
+}
+Interval::Interval(Interval &&other) noexcept : Interval() {
+    mpfr_swap(lower_, other.lower_);
+    mpfr_swap(upper_, other.upper_);
+}
+Interval &Interval::operator=(const Interval &other) {
+    if (this != &other) {
+        mpfr_set(lower_, other.lower_, MPFR_RNDD);
+        mpfr_set(upper_, other.upper_, MPFR_RNDU);
+    }
+    return *this;
+}
+Interval &Interval::operator=(Interval &&other) noexcept {
+    mpfr_swap(lower_, other.lower_);
+    mpfr_swap(upper_, other.upper_);
+    return *this;
+}
+Interval::~Interval() {
+    mpfr_clear(lower_);
+    mpfr_clear(upper_);
+}
+bool Interval::finite() const { return mpfr_number_p(lower_) && mpfr_number_p(upper_); }
+bool Interval::strictly_positive() const { return finite() && mpfr_sgn(lower_) > 0; }
+bool Interval::contains(double value) const {
+    return finite() && std::isfinite(value) && mpfr_cmp_d(lower_, value) <= 0 &&
+           mpfr_cmp_d(upper_, value) >= 0;
+}
+Interval operator+(const Interval &a, const Interval &b) {
+    if (!a.finite() || !b.finite())
+        return Interval::invalid();
+    Interval result;
+    mpfr_add(result.lower_, a.lower_, b.lower_, MPFR_RNDD);
+    mpfr_add(result.upper_, a.upper_, b.upper_, MPFR_RNDU);
+    return result;
+}
+Interval operator-(const Interval &a, const Interval &b) {
+    if (!a.finite() || !b.finite())
+        return Interval::invalid();
+    Interval result;
+    mpfr_sub(result.lower_, a.lower_, b.upper_, MPFR_RNDD);
+    mpfr_sub(result.upper_, a.upper_, b.lower_, MPFR_RNDU);
+    return result;
+}
+
+Interval Interval::invalid() { return Interval(std::numeric_limits<double>::quiet_NaN()); }
+Interval Interval::hull(double lower, double upper) {
+    if (!std::isfinite(lower) || !std::isfinite(upper) || lower > upper)
+        return invalid();
+    Interval result(lower);
+    if (mpfr_set_d(result.upper_, upper, MPFR_RNDN))
+        return invalid();
+    return result;
+}
+bool Interval::exact_zero() const { return finite() && mpfr_zero_p(lower_) && mpfr_zero_p(upper_); }
+bool Interval::nonnegative() const { return finite() && mpfr_sgn(lower_) >= 0; }
+bool Interval::strictly_negative() const { return finite() && mpfr_sgn(upper_) < 0; }
+double Interval::lower_bound() const { return mpfr_get_d(lower_, MPFR_RNDD); }
+double Interval::upper_bound() const { return mpfr_get_d(upper_, MPFR_RNDU); }
+Interval hull(const Interval &a, const Interval &b) {
+    if (!a.finite() || !b.finite())
+        return Interval::invalid();
+    Interval result;
+    mpfr_min(result.lower_, a.lower_, b.lower_, MPFR_RNDD);
+    mpfr_max(result.upper_, a.upper_, b.upper_, MPFR_RNDU);
+    return result;
+}
+Interval operator*(const Interval &a, const Interval &b) {
+    if (!a.finite() || !b.finite())
+        return Interval::invalid();
+    Interval result, term;
+    mpfr_set_inf(result.lower_, 1);
+    mpfr_set_inf(result.upper_, -1);
+    for (auto x : {a.lower_, a.upper_}) {
+        for (auto y : {b.lower_, b.upper_}) {
+            mpfr_mul(term.lower_, x, y, MPFR_RNDD);
+            mpfr_mul(term.upper_, x, y, MPFR_RNDU);
+            mpfr_min(result.lower_, result.lower_, term.lower_, MPFR_RNDD);
+            mpfr_max(result.upper_, result.upper_, term.upper_, MPFR_RNDU);
+        }
+    }
+    return result;
+}
+Interval operator/(const Interval &a, const Interval &b) {
+    if (!a.finite() || !b.finite() || b.contains(0))
+        return Interval::invalid();
+    Interval result, term;
+    mpfr_set_inf(result.lower_, 1);
+    mpfr_set_inf(result.upper_, -1);
+    for (auto x : {a.lower_, a.upper_}) {
+        for (auto y : {b.lower_, b.upper_}) {
+            mpfr_div(term.lower_, x, y, MPFR_RNDD);
+            mpfr_div(term.upper_, x, y, MPFR_RNDU);
+            mpfr_min(result.lower_, result.lower_, term.lower_, MPFR_RNDD);
+            mpfr_max(result.upper_, result.upper_, term.upper_, MPFR_RNDU);
+        }
+    }
+    return result;
+}
+Interval exp(const Interval &value) {
+    if (!value.finite())
+        return Interval::invalid();
+    Interval result;
+    mpfr_exp(result.lower_, value.lower_, MPFR_RNDD);
+    mpfr_exp(result.upper_, value.upper_, MPFR_RNDU);
+    return result;
+}
+Interval log(const Interval &value) {
+    if (!value.strictly_positive())
+        return Interval::invalid();
+    Interval result;
+    mpfr_log(result.lower_, value.lower_, MPFR_RNDD);
+    mpfr_log(result.upper_, value.upper_, MPFR_RNDU);
+    return result;
+}
+Interval sqrt(const Interval &value) {
+    if (!value.nonnegative())
+        return Interval::invalid();
+    Interval result;
+    mpfr_sqrt(result.lower_, value.lower_, MPFR_RNDD);
+    mpfr_sqrt(result.upper_, value.upper_, MPFR_RNDU);
+    return result;
+}
+Interval intersection(const Interval &a, const Interval &b) {
+    if (!a.finite() || !b.finite())
+        return Interval::invalid();
+    Interval result;
+    mpfr_max(result.lower_, a.lower_, b.lower_, MPFR_RNDD);
+    mpfr_min(result.upper_, a.upper_, b.upper_, MPFR_RNDU);
+    if (mpfr_cmp(result.lower_, result.upper_) > 0)
+        return Interval::invalid();
+    return result;
+}
+Interval acos(const Interval &value) {
+    if (!value.finite() || mpfr_cmp_si(value.lower_, -1) < 0 || mpfr_cmp_ui(value.upper_, 1) > 0)
+        return Interval::invalid();
+    Interval result;
+    mpfr_acos(result.lower_, value.upper_, MPFR_RNDD);
+    mpfr_acos(result.upper_, value.lower_, MPFR_RNDU);
+    return result;
+}
+Interval cos(const Interval &value) {
+    if (!value.finite())
+        return Interval::invalid();
+    Interval pi, result, endpoint;
+    mpfr_const_pi(pi.lower_, MPFR_RNDD);
+    mpfr_const_pi(pi.upper_, MPFR_RNDU);
+    const auto multiples = value / pi;
+    // An uncertain or enormous argument range is safely enclosed by [-1,1].
+    if (!multiples.finite() || !mpfr_fits_slong_p(multiples.lower_, MPFR_RNDU) ||
+        !mpfr_fits_slong_p(multiples.upper_, MPFR_RNDD))
+        return Interval::hull(-1, 1);
+    const long first = mpfr_get_si(multiples.lower_, MPFR_RNDU);
+    const long last = mpfr_get_si(multiples.upper_, MPFR_RNDD);
+    if (first < last)
+        return Interval::hull(-1, 1);
+    mpfr_cos(result.lower_, value.lower_, MPFR_RNDD);
+    mpfr_cos(result.upper_, value.lower_, MPFR_RNDU);
+    mpfr_cos(endpoint.lower_, value.upper_, MPFR_RNDD);
+    mpfr_cos(endpoint.upper_, value.upper_, MPFR_RNDU);
+    result = hull(result, endpoint);
+    // Every interior cosine extremum is k*pi. The enclosing quotient may
+    // include an extra k, which only widens the result conservatively.
+    if (first == last)
+        result = hull(result, Interval(first % 2 == 0 ? 1 : -1));
+    return result;
+}
+bool Interval::nonpositive() const { return finite() && mpfr_sgn(upper_) <= 0; }
+Interval Interval::pi() {
+    Interval result;
+    mpfr_const_pi(result.lower_, MPFR_RNDD);
+    mpfr_const_pi(result.upper_, MPFR_RNDU);
+    return result;
+}
+Interval positive_part(const Interval &value) {
+    if (!value.finite())
+        return Interval::invalid();
+    Interval result;
+    mpfr_max(result.lower_, result.lower_, value.lower_, MPFR_RNDD);
+    mpfr_max(result.upper_, result.upper_, value.upper_, MPFR_RNDU);
+    return result;
+}
+Interval square(const Interval &value) {
+    if (!value.finite())
+        return Interval::invalid();
+    Interval result, other;
+    mpfr_sqr(result.lower_, value.lower_, MPFR_RNDD);
+    mpfr_sqr(result.upper_, value.lower_, MPFR_RNDU);
+    mpfr_sqr(other.lower_, value.upper_, MPFR_RNDD);
+    mpfr_sqr(other.upper_, value.upper_, MPFR_RNDU);
+    mpfr_min(result.lower_, result.lower_, other.lower_, MPFR_RNDD);
+    mpfr_max(result.upper_, result.upper_, other.upper_, MPFR_RNDU);
+    if (value.contains(0))
+        mpfr_set_zero(result.lower_, 1);
+    return result;
+}
+Interval erfc(const Interval &value) {
+    if (!value.finite())
+        return Interval::invalid();
+    Interval result;
+    mpfr_erfc(result.lower_, value.upper_, MPFR_RNDD);
+    mpfr_erfc(result.upper_, value.lower_, MPFR_RNDU);
+    return result;
+}
+} // namespace mango::detail::proof

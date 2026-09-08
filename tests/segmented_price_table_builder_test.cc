@@ -2,12 +2,58 @@
 #include <gtest/gtest.h>
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/american_option.hpp"
+#include "mango/option/european_option.hpp"
 #include <cmath>
+#include <fstream>
 #include <vector>
 
 using namespace mango;
 
 namespace {
+
+// #458: use #488's raw end-to-end snapshots while increasing the real
+// moneyness data sites through the former collocation failure region.
+TEST(SegmentedPriceTableBuilderTest, RawDividendSamplesCrossFormerFittingCliff) {
+    // Use the captured actual axis explicitly. Raw sampling no longer adds
+    // interpolation knots, so this remains an above-cliff regression.
+    std::ifstream input("tests/data/bspline_458_dividend_axis.txt");
+    size_t full_size = 0;
+    ASSERT_TRUE(static_cast<bool>(input >> full_size));
+    ASSERT_EQ(full_size, 281u);
+    std::vector<double> full_axis(full_size);
+    for (double& x : full_axis) ASSERT_TRUE(static_cast<bool>(input >> x));
+    for (size_t n : {118u, 160u, 188u, 281u}) {
+        SCOPED_TRACE(n);
+        std::vector<double> log_m(n);
+        for (size_t i = 0; i < n; ++i) {
+            log_m[i] = full_axis[i * (full_size - 1) / (n - 1)];
+        }
+        SegmentedPriceTableBuilder::Config config{
+            .K_ref = 100.0, .option_type = OptionType::PUT,
+            .dividends = {.dividend_yield = 0.01,
+                          .discrete_dividends = {{0.25, 1.5}, {0.5, 1.5}}},
+            .grid = {.moneyness = log_m, .vol = {0.1, 0.15, 0.2, 0.3},
+                     .rate = {0.02, 0.03, 0.05, 0.07}},
+            .maturity = 1.0,
+            .tau_points_per_segment = 8,
+            .pde_accuracy = make_grid_accuracy(GridAccuracyProfile::High),
+        };
+        auto built = SegmentedPriceTableBuilder::build_with_diagnostics(config);
+        ASSERT_TRUE(built.has_value()) << built.error();
+        EXPECT_EQ(built->sample_points, n * built->sample_rows);
+        PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+            .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.01,
+            .option_type = OptionType::PUT}, 0.1);
+        p.discrete_dividends = config.dividends.discrete_dividends;
+        auto solver = AmericanOptionSolver::create(
+            p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::Ultra)});
+        ASSERT_TRUE(solver.has_value());
+        auto reference = solver->solve();
+        ASSERT_TRUE(reference.has_value());
+        EXPECT_NEAR(built->surface.price(100.0, 100.0, 1.0, 0.1, 0.05),
+                    reference->value(), 0.003);
+    }
+}
 
 std::vector<double> log_m_grid(std::initializer_list<double> moneyness) {
     std::vector<double> out;
@@ -19,6 +65,64 @@ std::vector<double> log_m_grid(std::initializer_list<double> moneyness) {
 }
 
 }  // namespace
+
+TEST(SegmentedKnotPositions, ExplicitTemporalResolutionPreservesShortDatedCallPrice) {
+    std::vector<double> m;
+    for (int i = -10; i <= 10; ++i) m.push_back(0.05 * i);
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::CALL,
+        .grid = {.moneyness = m, .vol = {0.1, 0.15, 0.2, 0.3},
+                 .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 0.25,
+        .tau_points_per_segment = 7,
+        .pde_accuracy = make_grid_accuracy(GridAccuracyProfile::High),
+        .tau_grid = {0.0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.25},
+    };
+    const double reference = bs_price(100, 100, 0.01, 0.2, 0.05, 0.0, OptionType::CALL);
+    auto selected = SegmentedPriceTableBuilder::build(config);
+    ASSERT_TRUE(selected.has_value()) << selected.error();
+    const double retained = selected->price(100, 100, 0.01, 0.2, 0.05);
+    EXPECT_NEAR(retained, reference, 0.003);
+    // Same number of nodes, discarding their chosen positions.
+    config.tau_grid.clear();
+    auto uniform = SegmentedPriceTableBuilder::build(config);
+    ASSERT_TRUE(uniform.has_value()) << uniform.error();
+    const double lost = uniform->price(100, 100, 0.01, 0.2, 0.05);
+    EXPECT_GT(std::abs(lost - reference), 0.01);
+    std::cout << "TAU_RETENTION selected=" << retained << " uniform=" << lost
+              << " analytic=" << reference << '\n';
+}
+
+TEST(SegmentedKnotPositions, TemporalSeedsAndExplicitNodesKeepEventOwnership) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::PUT,
+        .dividends = {.discrete_dividends = {{0.5, 2.0}}}, .maturity = 1.0,
+    };
+    auto generated = SegmentedPriceTableBuilder::make_tau_grid(config);
+    ASSERT_TRUE(generated.has_value());
+    EXPECT_EQ(*generated, (std::vector<double>{0.0, 0.125, 0.25, 0.375, 0.4995,
+                                              0.5005, 0.625, 0.75, 0.875, 1.0}));
+    config.tau_grid = {0.0, 0.1, 0.4, 0.4995, 0.5005, 0.55, 0.9, 1.0};
+    auto explicit_nodes = SegmentedPriceTableBuilder::make_tau_grid(config);
+    ASSERT_TRUE(explicit_nodes.has_value());
+    EXPECT_EQ(*explicit_nodes, config.tau_grid);
+    config.tau_grid.insert(config.tau_grid.begin() + 4, 0.5);
+    auto in_gap = SegmentedPriceTableBuilder::make_tau_grid(config);
+    ASSERT_FALSE(in_gap.has_value());
+    EXPECT_EQ(in_gap.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(SegmentedKnotPositions, ResolvedFitAxesAreNotExpandedAgain) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::CALL,
+        .grid = {.moneyness = {-0.2, -0.1, 0.0, 0.1, 0.2},
+                 .vol = {0.1, 0.15, 0.2, 0.3}, .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 0.25,
+    };
+    auto result = SegmentedPriceTableBuilder::build_with_diagnostics(config);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_EQ(result->sample_points, result->sample_rows * config.grid.moneyness.size());
+}
 
 // Regression #488: a post-dividend backward-time segment must contain raw
 // end-to-end PDE samples, rather than evolution of a fitted initial state.
@@ -79,6 +183,23 @@ TEST(SegmentedPriceTableBuilderTest, DiagnosticsCountRawRowsAndSingleExpirySolve
     EXPECT_FALSE(result->surface.contains_maturity(0.5));
     EXPECT_FALSE(result->surface.contains_maturity(0.75));
     EXPECT_TRUE(result->surface.contains_maturity(0.8));
+}
+
+// Regression #487/#488: invalid automatic grid bounds must return the
+// builder's typed configuration error rather than escape as an exception.
+TEST(SegmentedPriceTableBuilderTest, RejectsInvalidGridAccuracyWithTypedError) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::PUT,
+        .dividends = {.discrete_dividends = {{0.5, 1.0}}},
+        .grid = {.moneyness = {-0.2, -0.1, 0.0, 0.1, 0.2},
+                 .vol = {0.1, 0.15, 0.2, 0.3},
+                 .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 1.0,
+        .pde_accuracy = {.min_spatial_points = 201, .max_spatial_points = 200},
+    };
+    auto result = SegmentedPriceTableBuilder::build_with_diagnostics(config);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
 TEST(SegmentedPriceTableBuilderTest, RejectsUnsortedSampleAxesBeforeSolving) {
@@ -166,7 +287,17 @@ TEST(SegmentedPriceTableBuilderTest, RawCallAndPutPricesAndGreeksShareTheSameSur
             const double up = price(100 + hs, tau, 0.2, 0.05);
             const double down = price(100 - hs, tau, 0.2, 0.05);
             EXPECT_NEAR(*delta, (up - down) / (2 * hs), 1e-7);
-            EXPECT_NEAR(*gamma, (up - 2 * mid + down) / (hs * hs), 1e-7);
+            // At a cubic knot the third derivative can jump, giving this
+            // central second difference an O(h) term. Cancel that term at
+            // two successive scales; preserve the existing Greek tolerance.
+            const auto gamma_fd = [&](double step) {
+                return (price(100 + step, tau, 0.2, 0.05) - 2 * mid
+                      + price(100 - step, tau, 0.2, 0.05)) / (step * step);
+            };
+            const double gamma_ref = 2 * gamma_fd(hs / 2) - gamma_fd(hs);
+            const double gamma_finer = 2 * gamma_fd(hs / 4) - gamma_fd(hs / 2);
+            ASSERT_NEAR(gamma_ref, gamma_finer, 1e-7);
+            EXPECT_NEAR(*gamma, gamma_finer, 1e-7);
             EXPECT_NEAR(surface->vega(100, 100, tau, 0.2, 0.05),
                 (price(100, tau, 0.2 + h, 0.05) - price(100, tau, 0.2 - h, 0.05)) / (2 * h), 1e-6);
             EXPECT_NEAR(*theta,

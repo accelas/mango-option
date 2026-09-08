@@ -112,9 +112,8 @@ struct ChebyshevAdaptiveResult {
     size_t total_pde_solves = 0;
 
     /// Build diagnostics (spec D7) and the user-facing measurement domain
-    /// (spec D2).  Not consumed by the factory today (the continuous
-    /// Chebyshev factory path always uses the fixed builder), exposed for
-    /// direct callers of `build_adaptive_chebyshev`.
+    /// (spec D2). The surface publishes these sample bounds; the factory
+    /// propagates its diagnostics to both price-table and IV-solver handles.
     BuildDiagnostics diagnostics;
     SurfaceBounds sample_bounds{};
 };

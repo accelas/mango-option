@@ -651,8 +651,10 @@ cc_test(
 cc_test(
     name = "bspline_collocation_1d_test",
     srcs = ["bspline_collocation_1d_test.cc"],
+    data = ["data/bspline_458_dividend_axis.txt"],
     deps = [
         "//src/math/bspline:bspline_collocation",
+        "//src/math/bspline:bspline_nd",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -1207,7 +1209,10 @@ cc_test(
     size = "small",
     srcs = ["adaptive_refinement_unit_test.cc"],
     deps = [
+        "//src/math/bspline:bspline_collocation",
+        "//src/math/bspline:bspline_nd",
         "//src/option:american_option",
+        "//src/option:european_option",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:adaptive_metrics",
         "//src/option/table:adaptive_refinement",
@@ -1274,6 +1279,7 @@ cc_test(
         "//src/option/table/chebyshev:chebyshev_surface",
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:american_option",
+        "//src/option:european_option",
         "//src/option:american_option_batch",
         "//src/option:interpolated_iv_solver",
         "//src/option:option_grid",
@@ -1509,9 +1515,12 @@ cc_test(
 
 cc_test(
     name = "segmented_price_table_builder_test",
-    size = "medium",
+    # Includes corrected raw-dividend fitting/Greek regressions (~158s).
+    size = "large",
     srcs = ["segmented_price_table_builder_test.cc"],
+    data = ["data/bspline_458_dividend_axis.txt"],
     deps = [
+        "//src/option:european_option",
         "//src/option/table/bspline:bspline_segmented_builder",
         "@googletest//:gtest_main",
     ],
@@ -2004,7 +2013,43 @@ cc_test(
 )
 
 cc_test(
+    name = "proof_interval_test",
+    srcs = ["proof_interval_test.cc"],
+    deps = ["//src/math/proof:interval", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "proof_bernstein_test",
+    srcs = ["proof_bernstein_test.cc"],
+    deps = ["//src/math/proof:bernstein", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "proof_bspline_cell_test",
+    srcs = ["proof_bspline_cell_test.cc"],
+    deps = ["//src/math/proof:bspline_cell", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "chebyshev_polynomial_test",
+    srcs = ["chebyshev_polynomial_test.cc"],
+    deps = ["//src/math/chebyshev:chebyshev_polynomial", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "proof_chebyshev_test",
+    srcs = ["proof_chebyshev_test.cc"],
+    deps = ["//src/math/proof:chebyshev", "@googletest//:gtest_main"],
+)
+
+cc_test(
     name = "moneyness_bounds_test",
     srcs = ["moneyness_bounds_test.cc"],
     deps = ["//src/option/table:moneyness_bounds", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "physical_price_bounds_test",
+    srcs = ["physical_price_bounds_test.cc"],
+    deps = ["//src/option/table/certification:physical_bounds", "@googletest//:gtest_main"],
 )

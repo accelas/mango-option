@@ -20,6 +20,22 @@
 
 using namespace mango;
 
+TEST(BSplineNDSeparableTest, PreservesFirstAxisResidualFailure) {
+    const std::vector<double> grid{0, 1, 2, 3, 4, 5};
+    auto fitter = BSplineNDSeparable<double, 2>::create({grid, grid});
+    ASSERT_TRUE(fitter.has_value());
+    std::vector<double> values(36);
+    for (size_t i = 0; i < values.size(); ++i) values[i] = std::sin(i + 0.2);
+    auto result = fitter->fit(values, {.tolerance = 1e-30});
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, InterpolationErrorCode::FittingFailed);
+    EXPECT_EQ(result.error().index, 1u);  // first axis visited is the fast axis
+    EXPECT_EQ(result.error().grid_size, grid.size());
+    EXPECT_GT(result.error().max_residual, 1e-30);
+    EXPECT_NE(result.error().message.find("residual"), std::string::npos);
+    EXPECT_NE(result.error().message.find("slice"), std::string::npos);
+}
+
 namespace {
 
 /// Helper: Create linearly spaced grid

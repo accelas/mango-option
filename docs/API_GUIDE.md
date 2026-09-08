@@ -460,7 +460,7 @@ if (auto diag = solver.build_diagnostics(); diag.has_value()) {
 }
 ```
 
-`build_diagnostics()` returns `std::nullopt` for a manually-built (non-adaptive) table, a table loaded from Parquet, or a build on a factory path that does not honor `.adaptive` — the continuous (non-segmented) Chebyshev path and `DimensionlessBackend`. Diagnostics are never persisted to `PriceTableData`/Parquet. Python exposes the same data via the `build_diagnostics` property (a dict) on `PriceTable` and `InterpolatedIVSolver`.
+`build_diagnostics()` returns `std::nullopt` for a manually-built (non-adaptive) table, a table loaded from Parquet, or a `DimensionlessBackend` build, which does not honor `.adaptive`. Continuous and segmented adaptive Chebyshev builds expose diagnostics, as do both adaptive B-spline paths. Diagnostics are never persisted to `PriceTableData`/Parquet. Python exposes the same data via the `build_diagnostics` property (a dict) on `PriceTable` and `InterpolatedIVSolver`.
 
 If every candidate built during refinement fails the internal viability gate (holdout error above an absolute, target-independent garbage-detection bound — or no holdout point could be measured at all, e.g. a domain where implied vol is everywhere undefined), the build itself fails with `ValidationErrorCode::NoViableSurface` rather than silently returning a broken surface — check for it alongside the usual validation errors.
 
@@ -666,7 +666,9 @@ The factory dispatches on two orthogonal variants:
 - **`backend`**: `BSplineBackend`, `ChebyshevBackend`, or `DimensionlessBackend`
 - **`discrete_dividends`**: When set, uses the segmented surface path (tau splits + K_ref blending)
 
-With optional `adaptive` for automatic grid density tuning to a target IV accuracy. It is honored on three of the factory's paths — continuous `BSplineBackend`, and both segmented (discrete-dividend) paths, B-spline and Chebyshev. The continuous `ChebyshevBackend` and `DimensionlessBackend` paths ignore it and build their fixed grids, reporting no build diagnostics.
+With optional `adaptive` for automatic grid density tuning to a target IV accuracy. It is honored on the continuous and segmented (discrete-dividend) paths for both B-spline and Chebyshev. `DimensionlessBackend` ignores it and builds its fixed grid, reporting no build diagnostics.
+
+For continuous `ChebyshevBackend`, `maturity` supplies the upper requested tau bound and the lower bound is `min(0.01, maturity / 2)`. The adaptive builder applies its existing minimum-spread policy to narrow input ranges and measures the resulting sample domain. Published query bounds cover that measured domain, excluding numerical support headroom. `num_pts` applies only to manual continuous builds; adaptive CC levels are selected by the existing adaptive builder, with all supplied `AdaptiveGridParams` passed through.
 
 **Query-time dividend schedule validation.** `IVQuery::discrete_dividends` is
 optional at query time: leaving it empty against a segmented surface is
@@ -737,7 +739,13 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 ### Discrete Dividends with Adaptive Grid
 
-Adaptive grid also works with discrete dividends. The builder probes 2–3 representative K_ref values using segmented PDE surfaces, takes per-axis maximum grid sizes across probes, then builds all segments with a uniform grid:
+Adaptive grid also works with discrete dividends. The builder retains the
+actual refined coordinates from representative reference-strike probes.
+It uses their union within the point ceilings, or evaluates a bounded set of
+seed-preserving alternatives when that union is too large. Retries insert
+points into retained grids. Tau positions stay in their own dividend regimes;
+`max_points_per_dim` applies to each leaf axis, while total snapshot rows are
+reported separately. No uniform reconstruction from grid sizes occurs:
 
 ```cpp
 mango::IVSolverFactoryConfig config{
@@ -766,14 +774,17 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 The B-spline segmented path now uses raw fixed-expiry PDE snapshots instead
 of passing fitted surfaces into later segment solves. On the exact configuration
-above, B-spline construction succeeds with **0.00435 maximum measured decimal
-IV error (43.5 absolute-IV bps)**. This exceeds the requested 0.001 (10 bps), so
+above, B-spline construction succeeds with **0.00452 maximum measured decimal
+IV error (45.2 absolute-IV bps)** after the cubic fitting repair. This exceeds the requested 0.001 (10 bps), so
 `build_diagnostics()->target_met` is false. A successful build is not a claim
-that the requested target was met. Other configurations still refuse while
-clustered fitting and reference-strike semantics are corrected; final backend
+that the requested target was met. Reference-strike semantics still need correction; final backend
 selection follows the remaining #483 accuracy and certification work.
-The corrected Chebyshev path measures 0.00744 (74.4 absolute-IV bps) over
-64 measured points with zero invalid points; its requested target is also unmet.
+
+The corrected fixed-expiry Chebyshev oracle measured 0.00744049 maximum
+absolute IV error (74.4 bps) over 64 measured points on 2026-09-06, with zero
+invalid points. This passes the current 0.20 viability bound but exceeds the
+requested 0.001 target; strict target admission is a later #483 gate.
+
 Both facts are pinned:
 `IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig` for the
 Chebyshev config, and

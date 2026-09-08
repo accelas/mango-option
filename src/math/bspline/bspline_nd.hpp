@@ -41,15 +41,13 @@
 
 namespace mango {
 
-/// Clamp query point to valid domain with half-open interval
-///
-/// For right boundary, uses nextafter to ensure x < xmax (not x <= xmax)
-/// to avoid issues with half-open interval [xmin, xmax)
+/// Clamp to the closed domain. Basis evaluation supplies exact endpoint
+/// values and interior one-sided derivatives.
 template<std::floating_point T>
 inline T clamp_bspline_query(T x, T xmin, T xmax) {
     if (x <= xmin) return xmin;
     if (x >= xmax) {
-        return std::nextafter(xmax, -std::numeric_limits<T>::infinity());
+        return xmax;
     }
     return x;
 }
@@ -167,6 +165,13 @@ public:
     /// @return Partial derivative ∂f/∂x_axis
     T eval_partial(size_t axis, const QueryPoint& query) const {
         assert(axis < N && "Axis index out of bounds");
+        // Differentiate the function actually returned by eval: it is
+        // constant beyond the differentiated coordinate's clamping bound.
+        // Validate every coordinate first so a NaN cannot be masked as zero.
+        for (T value : query)
+            if (std::isnan(value)) return std::numeric_limits<T>::quiet_NaN();
+        if (query[axis] < grids_[axis].front() || query[axis] > grids_[axis].back())
+            return T{0};
 
         // Process all dimensions in single loop for better cache locality
         QueryPoint clamped;
@@ -212,6 +217,13 @@ public:
     /// @return Second partial derivative ∂²f/∂x²_axis
     T eval_second_partial(size_t axis, const QueryPoint& query) const {
         assert(axis < N && "Axis index out of bounds");
+        // Differentiate the function actually returned by eval: it is
+        // constant beyond the differentiated coordinate's clamping bound.
+        // Validate every coordinate first so a NaN cannot be masked as zero.
+        for (T value : query)
+            if (std::isnan(value)) return std::numeric_limits<T>::quiet_NaN();
+        if (query[axis] < grids_[axis].front() || query[axis] > grids_[axis].back())
+            return T{0};
 
         QueryPoint clamped;
         std::array<int, N> spans;

@@ -432,9 +432,35 @@ build_chebyshev_segmented_table(const IVSolverFactoryConfig& config,
     };
 }
 
-std::expected<ChebyshevSurface, ValidationError>
+std::expected<BuiltTable<ChebyshevSurface>, ValidationError>
 build_chebyshev_continuous_table(const IVSolverFactoryConfig& config,
                                  const ChebyshevBackend& backend) {
+    if (config.adaptive.has_value()) {
+        OptionGrid chain;
+        chain.spot = config.spot;
+        chain.dividend_yield = config.dividend_yield;
+        chain.strikes.reserve(config.grid.moneyness.size());
+        for (double m : config.grid.moneyness) {
+            chain.strikes.push_back(config.spot / m);
+        }
+        chain.maturities = {std::min(0.01, backend.maturity * 0.5),
+                            backend.maturity};
+        chain.implied_vols = config.grid.vol;
+        chain.rates = config.grid.rate;
+
+        auto result = build_adaptive_chebyshev(
+            *config.adaptive, chain, config.option_type);
+        if (!result.has_value()) {
+            return std::unexpected(detail::to_validation_error(result.error()));
+        }
+        // The adaptive builder publishes its measured sample bounds on the
+        // returned surface, excluding the numerical support headroom.
+        return BuiltTable<ChebyshevSurface>{
+            .table = std::move(*result->surface),
+            .diagnostics = std::move(result->diagnostics),
+        };
+    }
+
     const auto b = extract_bounds(config.grid);
 
     ChebyshevTableConfig cheb_config{
@@ -454,7 +480,10 @@ build_chebyshev_continuous_table(const IVSolverFactoryConfig& config,
     if (!result.has_value()) {
         return std::unexpected(detail::to_validation_error(result.error()));
     }
-    return std::move(result->surface);
+    return BuiltTable<ChebyshevSurface>{
+        .table = std::move(result->surface),
+        .diagnostics = std::nullopt,
+    };
 }
 
 std::expected<AnyPriceTable, ValidationError>
@@ -471,11 +500,13 @@ build_chebyshev_table(const IVSolverFactoryConfig& config,
             std::move(built->diagnostics));
     }
 
-    auto table = build_chebyshev_continuous_table(config, backend);
-    if (!table.has_value()) {
-        return std::unexpected(table.error());
+    auto built = build_chebyshev_continuous_table(config, backend);
+    if (!built.has_value()) {
+        return std::unexpected(built.error());
     }
-    return make_any_price_table(std::move(*table));
+    return make_any_price_table(
+        std::move(built->table),
+        std::move(built->diagnostics));
 }
 
 struct DimlessDomain {

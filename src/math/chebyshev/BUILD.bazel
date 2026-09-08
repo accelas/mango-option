@@ -38,3 +38,14 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+
+# Explicit opt-in polynomial preparation; no financial factory dispatch yet.
+cc_library(
+    name = "chebyshev_polynomial",
+    srcs = ["chebyshev_polynomial.cpp"],
+    hdrs = ["chebyshev_polynomial.hpp"],
+    copts = ["-O3", "-fno-fast-math", "-ffp-contract=off"],
+    visibility = ["//src:__subpackages__", "//tests:__subpackages__", "//benchmarks:__subpackages__"],
+    strip_include_prefix = "/src/math/chebyshev",
+    include_prefix = "mango/math/chebyshev",
+)

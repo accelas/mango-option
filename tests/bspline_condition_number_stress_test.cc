@@ -127,15 +127,11 @@ TEST_F(BSplineConditionNumberStressTest, ClusteredGrid) {
 
     auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
 
-    // May or may not succeed depending on conditioning
-    if (fit_result.has_value()) {
-        // If it succeeds, condition number should be elevated
-        EXPECT_GT(fit_result->condition_estimate, 1e3)
-            << "Clustered grid should have higher condition number";
-        std::cout << "Clustered grid (succeeded): cond = " << fit_result->condition_estimate << "\n";
-    } else {
-        std::cout << "Clustered grid (failed): " << fit_result.error() << "\n";
-    }
+    ASSERT_TRUE(fit_result.has_value()) << fit_result.error();
+    // Smooth geometric grading is not inherently ill-conditioned. The
+    // legacy proportional knots made this grid's condition exceed 1e3.
+    EXPECT_GE(fit_result->condition_estimate, 1.0);
+    EXPECT_LT(fit_result->condition_estimate, 100.0);
 }
 
 TEST_F(BSplineConditionNumberStressTest, NearSingularMatrix) {
@@ -180,7 +176,7 @@ TEST_F(BSplineConditionNumberStressTest, PerturbedGrid) {
 
 TEST_F(BSplineConditionNumberStressTest, LargeSystem) {
     // Test 5: Large system (stress memory/performance)
-    // Note: B-spline collocation matrices become ill-conditioned at large sizes
+    // Increasing a uniform grid's size must not destabilize cubic fitting.
     auto grid = create_uniform_grid(200);  // 200 points
     auto values = generate_smooth_values(grid);
 
@@ -210,9 +206,9 @@ TEST_F(BSplineConditionNumberStressTest, LargeSystem) {
 }
 
 TEST_F(BSplineConditionNumberStressTest, MultipleResolutions) {
-    // Test 6: Condition number growth with resolution
-    // Note: For B-spline collocation, condition number grows rapidly with n
-    std::vector<size_t> sizes = {10, 20, 40};  // Reduced to avoid extreme conditioning
+    // #458: stable generated knots prevent the legacy exponential condition
+    // growth on an otherwise ordinary uniform grid.
+    std::vector<size_t> sizes = {10, 20, 40, 160, 240};
     std::vector<double> condition_numbers;
 
     for (size_t n : sizes) {
@@ -229,17 +225,12 @@ TEST_F(BSplineConditionNumberStressTest, MultipleResolutions) {
         std::cout << "Resolution n=" << n << ": cond = " << fit_result->condition_estimate << "\n";
     }
 
-    // Verify condition numbers are increasing
-    for (size_t i = 1; i < condition_numbers.size(); ++i) {
-        EXPECT_GT(condition_numbers[i], condition_numbers[i-1])
-            << "Condition number should increase with resolution";
-    }
-
-    // Verify all are valid
+    // Verify uniformly bounded conditioning rather than pinning the defect.
     for (double cond : condition_numbers) {
         EXPECT_FALSE(std::isnan(cond));
         EXPECT_FALSE(std::isinf(cond));
         EXPECT_GE(cond, 1.0);
+        EXPECT_LT(cond, 100.0);
     }
 }
 

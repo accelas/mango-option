@@ -29,7 +29,7 @@ namespace {
 // Constants
 // ============================================================================
 
-constexpr const char* FORMAT_VERSION = "3.0";
+constexpr const char* FORMAT_VERSION = "4.0";
 
 // ============================================================================
 // Helpers
@@ -196,6 +196,11 @@ uint64_t metadata_checksum(
     h.feed_f64(data.bounds_sigma_max);
     h.feed_f64(data.bounds_rate_min);
     h.feed_f64(data.bounds_rate_max);
+    h.feed_u64(data.ratio_bounds.has_value());
+    if (data.ratio_bounds) {
+        h.feed_f64(data.ratio_bounds->min);
+        h.feed_f64(data.ratio_bounds->max);
+    }
     h.feed_u64(data.strike_bounds.has_value());
     if (data.strike_bounds) {
         h.feed_f64(data.strike_bounds->min);
@@ -458,6 +463,8 @@ write_parquet(const PriceTableData& data,
     metadata->Append("mango.bounds_sigma_max", double_to_string(data.bounds_sigma_max));
     metadata->Append("mango.bounds_rate_min", double_to_string(data.bounds_rate_min));
     metadata->Append("mango.bounds_rate_max", double_to_string(data.bounds_rate_max));
+    metadata->Append("mango.ratio_min", double_to_string(data.ratio_bounds->min));
+    metadata->Append("mango.ratio_max", double_to_string(data.ratio_bounds->max));
     metadata->Append("mango.has_strike_bounds", data.strike_bounds ? "1" : "0");
     if (data.strike_bounds) {
         metadata->Append("mango.strike_min", double_to_string(data.strike_bounds->min));
@@ -809,6 +816,10 @@ read_parquet(const std::filesystem::path& path) {
         if (!value) return std::unexpected(value.error());
         return parse_double(*value);
     };
+    auto ratio_min = get_double("mango.ratio_min");
+    auto ratio_max = get_double("mango.ratio_max");
+    if (!ratio_min || !ratio_max) return std::unexpected(serialization_error());
+    data.ratio_bounds = MoneynessBounds{*ratio_min, *ratio_max};
     auto has_strikes = get_flag("mango.has_strike_bounds");
     if (!has_strikes) return std::unexpected(has_strikes.error());
     if (*has_strikes) {

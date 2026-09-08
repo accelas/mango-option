@@ -4,6 +4,46 @@ Mango Option is a pricing and implied-volatility library whose public surface sp
 
 ## Language
 
+**Remaining maturity (τ)**:
+Time until expiry measured from the query's valuation point.
+_Avoid_: Unqualified calendar time, expiry date
+
+**Time-homogeneous price table**:
+A price table whose contract family depends on remaining maturity and stationary model parameters, without a separate calendar position.
+_Avoid_: Fixed-expiry lifecycle table
+
+**Fixed-expiry price table**:
+A price table representing one expiry across its remaining life under an anchored dated-dividend model.
+_Avoid_: Cross-expiry chain surface, expiry bank member
+
+**Reference-strike split**:
+A representation of cash-dividend option prices across reference strikes, accounting for the change in normalized dividend amount D/K with strike.
+_Avoid_: Expiry split
+
+**Dividend-time segment**:
+A temporal region of a fixed-expiry price table between dated-dividend events, with event-side meaning at its boundaries.
+_Avoid_: Expiry bucket
+
+**Measured accuracy**:
+Observed price or IV error over a declared validation population; it is distinct from a mathematical property proved over an entire domain.
+_Avoid_: Accuracy certificate, root residual
+
+**Sigma-monotonicity certificate**:
+A proof that the represented physical price is nondecreasing in volatility over its published domain, allowing flat exercise regions.
+_Avoid_: Unique-IV guarantee, Greek accuracy certificate
+
+**IV measurability**:
+The ability to assess IV accuracy under the declared time-value and volatility-sensitivity policy, separately from whether pricing is valid.
+_Avoid_: Pricing validity, successful root finding
+
+**Price-only build**:
+A table request with a price-accuracy requirement and no IV-accuracy claim.
+_Avoid_: Unchecked build
+
+**Best-effort build**:
+An explicitly requested table build that may miss requested accuracy targets while retaining hard viability and certification requirements.
+_Avoid_: Target met
+
 **Python API parity**:
 Every supported C++ capability is reachable from Python through an idiomatic Python surface, even when the Python shape does not mirror C++ templates or helper types one-to-one.
 _Avoid_: Binding parity, wrapper parity, pybind coverage
