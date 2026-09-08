@@ -98,3 +98,22 @@ TEST(ProofBernsteinTest, TensorSubdivisionProvesSumOfSquaresWithinBudget) {
     EXPECT_EQ(proof.status, ProofStatus::Certified);
     EXPECT_LE(proof.nodes, 31);
 }
+
+TEST(ProofBernsteinTest, PartialCellRestrictionAndClampedFacesPreserveThePolynomial) {
+    using namespace mango::detail::proof;
+    // f(u)=(u-.5)^2 has a negative coarse Bernstein coefficient. On [.75,1]
+    // its exact restricted controls are {1/16,1/8,1/4}.
+    auto source = BernsteinTensor::create({2}, {Interval(.25), Interval(-.25), Interval(.25)});
+    ASSERT_TRUE(source);
+    auto restricted = source->restrict_axis(0, Interval(.75), Interval(1));
+    ASSERT_TRUE(restricted);
+    const std::array<double, 3> expected{.0625, .125, .25};
+    for (std::size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(restricted->coefficients()[i].lower_bound(), expected[i]);
+        EXPECT_EQ(restricted->coefficients()[i].upper_bound(), expected[i]);
+    }
+    EXPECT_EQ(prove_nonnegative(*restricted, {1, 0}).status, ProofStatus::Certified);
+    auto face = source->restrict_axis(0, Interval(.5), Interval(.5));
+    ASSERT_TRUE(face);
+    EXPECT_TRUE(face->bounds().exact_zero());
+}

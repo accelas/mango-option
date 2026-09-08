@@ -21,6 +21,10 @@ class BernsteinTensor {
     [[nodiscard]] Interval bounds() const;
     [[nodiscard]] std::expected<std::pair<BernsteinTensor, BernsteinTensor>, InputError>
     split(std::size_t axis) const;
+    /// Compose one unit coordinate with lower+(upper-lower)*u. Enclosing
+    /// endpoint intervals retain rounding in restrictions and clamped faces.
+    [[nodiscard]] std::expected<BernsteinTensor, InputError>
+    restrict_axis(std::size_t axis, const Interval &lower, const Interval &upper) const;
     const std::vector<std::size_t> &degrees() const { return degrees_; }
     const std::vector<Interval> &coefficients() const { return coefficients_; }
 

@@ -22,6 +22,9 @@ class Interval {
     [[nodiscard]] bool exact_zero() const;
     [[nodiscard]] bool nonnegative() const;
     [[nodiscard]] bool nonpositive() const;
+    /// Retained MPFR endpoint values for partitioning enclosing domains.
+    [[nodiscard]] Interval lower_endpoint() const;
+    [[nodiscard]] Interval upper_endpoint() const;
     [[nodiscard]] static Interval pi();
     [[nodiscard]] bool strictly_negative() const;
     /// Directed binary64 conversion for diagnostics only, never sign decisions.

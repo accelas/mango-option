@@ -14,6 +14,12 @@ struct PhysicalCellProof {
     std::optional<PricingParams> witness;
     proof::Interval witness_vega_per_strike{0};
 };
+/// Internal whole-domain continuous EEP proof, including grid-clamped
+/// coordinate branches. Still diagnostic evidence; cannot publish a table.
+PhysicalCellProof prove_continuous_bspline(const BSplineND<double, 4> &spline,
+                                           double reference_strike, OptionType type,
+                                           double dividend_yield, const SurfaceBounds &requested,
+                                           proof::ProofBudget budget = {});
 /// Bounds one explicit stored-knot cell of the continuous EEP expression.
 /// A certified cell is not a whole-table certificate. The caller must cover
 /// every admitted cell, clamped coordinate branch and composition.

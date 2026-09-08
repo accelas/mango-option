@@ -91,3 +91,79 @@ TEST(PhysicalCellProofTest, ExhaustedBudgetsAndUnreachableNegativityAreIndetermi
         prove_continuous_bspline_cell(spline, {3, 3, 3, 3}, 100, OptionType::PUT, 0, b);
     EXPECT_EQ(reachable.status, PriceProofStatus::NegativeWitness);
 }
+
+TEST(PhysicalCellProofTest, InvalidClampMetadataCannotReceiveCellEvidence) {
+    const SurfaceBounds b{-.001, .001, .99, 1.01, .19, .21, -.001, .001};
+    auto source = bezier({0, 0, 0, 0}, b);
+    std::array<std::vector<double>, 4> grids, knots;
+    for (std::size_t d = 0; d < 4; ++d) {
+        grids[d] = source.grid(d);
+        knots[d] = source.knots(d);
+    }
+    grids[0][0] = std::numeric_limits<double>::quiet_NaN();
+    auto invalid =
+        BSplineND<double, 4>::create(std::move(grids), std::move(knots), source.coefficients());
+    ASSERT_TRUE(invalid); // Raw math construction does not validate this metadata.
+    auto result = prove_continuous_bspline_cell(*invalid, {3, 3, 3, 3}, 100, OptionType::PUT, 0, b);
+    EXPECT_EQ(result.status, PriceProofStatus::Indeterminate);
+}
+
+TEST(PhysicalCellProofTest, WholeDomainUsesZeroSlopeOnSigmaClampedExtension) {
+    const SurfaceBounds support{-.001, .001, .99, 1.01, .19, .21, -.001, .001};
+    auto spline = bezier({20, 20 - 2. / 3, 20 - 4. / 3, 18}, support);
+    auto requested = support;
+    requested.sigma_min = .3;
+    requested.sigma_max = .4;
+    auto result = prove_continuous_bspline(spline, 100, OptionType::PUT, 0, requested);
+    EXPECT_EQ(result.status, PriceProofStatus::Certified);
+    EXPECT_FALSE(result.witness);
+}
+
+TEST(PhysicalCellProofTest, RestrictedDomainExcludesPocketButSingletonRateCanStillWitnessIt) {
+    const SurfaceBounds support{-.001, .001, .1, .11, .2, .20001, .04, .06};
+    const double a = 17. / 32, c = a * a - 1. / (128 * 128);
+    auto spline = bezier({.1, .1 + c, .1 + 2 * c - a, 1.1 + 3 * c - 3 * a}, support);
+    auto requested = support;
+    requested.sigma_max = .200001;
+    auto restricted = prove_continuous_bspline(spline, 100, OptionType::PUT, 0, requested);
+    EXPECT_EQ(restricted.status, PriceProofStatus::Certified);
+    requested = support;
+    requested.rate_min = .05;
+    requested.rate_max = .05;
+    requested.tau_min = .105;
+    requested.tau_max = .105;
+    auto negative = prove_continuous_bspline(spline, 100, OptionType::PUT, 0, requested);
+    ASSERT_EQ(negative.status, PriceProofStatus::NegativeWitness) << "nodes=" << negative.nodes;
+    ASSERT_TRUE(negative.witness);
+    EXPECT_EQ(negative.witness->maturity, .105);
+    EXPECT_EQ(std::get<double>(negative.witness->rate), .05);
+}
+
+TEST(PhysicalCellProofTest, WholeProofCoversEveryStoredCellWithinOneSharedBudget) {
+    const SurfaceBounds b{-.001, .001, .1, .11, .2, .20004, .04, .06};
+    auto base = bezier({1, 2, 3, 4}, b);
+    std::array<std::vector<double>, 4> grids, knots;
+    for (std::size_t d = 0; d < 4; ++d) {
+        grids[d] = base.grid(d);
+        knots[d] = base.knots(d);
+    }
+    grids[2] = {.2, .20001, .20002, .20003, .20004};
+    knots[2] = {.2, .2, .2, .2, .20002, .20004, .20004, .20004, .20004};
+    std::vector<double> controls(320);
+    const std::array<double, 5> sigma{1, 2, 3, 4, 0};
+    for (std::size_t i = 0; i < controls.size(); ++i)
+        controls[i] = sigma[(i / 4) % 5];
+    auto spline =
+        BSplineND<double, 4>::create(std::move(grids), std::move(knots), std::move(controls))
+            .value();
+    auto first = prove_continuous_bspline_cell(spline, {3, 3, 3, 3}, 100, OptionType::PUT, 0, b);
+    ASSERT_EQ(first.status, PriceProofStatus::Certified);
+    auto limited = prove_continuous_bspline(spline, 100, OptionType::PUT, 0, b, {1, 24});
+    EXPECT_EQ(limited.status, PriceProofStatus::Indeterminate);
+    EXPECT_EQ(limited.reason, mango::detail::proof::StopReason::NodeBudget);
+    EXPECT_EQ(limited.nodes, 1u);
+    auto whole = prove_continuous_bspline(spline, 100, OptionType::PUT, 0, b);
+    ASSERT_EQ(whole.status, PriceProofStatus::NegativeWitness);
+    ASSERT_TRUE(whole.witness);
+    EXPECT_GT(whole.witness->volatility, .20002);
+}
