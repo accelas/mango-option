@@ -213,3 +213,36 @@ TEST(SplitSurfaceTest, RequestedRatiosAndPositiveMaturityDefineAdmission) {
     EXPECT_FALSE(table.contains_maturity(0));
     EXPECT_TRUE(table.contains_maturity(std::nextafter(0., 1.)));
 }
+
+TEST(SplitSurfaceTest, TypedGreeksRejectUnsupportedSigmaRateAndModel) {
+    const SurfaceBounds bounds{-.3, .3, .1, 1.0, .1, .4, .01, .1};
+    PriceTable<SmoothHomogeneousPrice> table({}, bounds, OptionType::CALL, 0.0);
+    const PricingParams valid(OptionSpec{.spot = 100, .strike = 100,
+        .maturity = .5, .rate = .05, .option_type = OptionType::CALL}, .2);
+    ASSERT_TRUE(table.delta(valid));
+    ASSERT_TRUE(table.gamma(valid));
+    ASSERT_TRUE(table.theta(valid));
+    ASSERT_TRUE(table.rho(valid));
+    auto rejected = [&](const PricingParams& params) {
+        EXPECT_EQ(table.delta(params), std::unexpected(GreekError::OutOfDomain));
+        EXPECT_EQ(table.gamma(params), std::unexpected(GreekError::OutOfDomain));
+        EXPECT_EQ(table.theta(params), std::unexpected(GreekError::OutOfDomain));
+        EXPECT_EQ(table.rho(params), std::unexpected(GreekError::OutOfDomain));
+    };
+    for (double sigma : {.09, .41, std::numeric_limits<double>::quiet_NaN()}) {
+        auto params = valid;
+        params.volatility = sigma;
+        rejected(params);
+    }
+    for (double rate : {0., .11, std::numeric_limits<double>::quiet_NaN()}) {
+        auto params = valid;
+        params.rate = rate;
+        rejected(params);
+    }
+    auto params = valid;
+    params.option_type = OptionType::PUT;
+    rejected(params);
+    params = valid;
+    params.dividend_yield = .01;
+    rejected(params);
+}

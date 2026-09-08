@@ -62,8 +62,7 @@ public:
 
     [[nodiscard]] std::expected<double, GreekError>
     delta(const PricingParams& params) const {
-        if (!contains_strike(params.strike) || !contains_moneyness(params.spot, params.strike)
-            || !contains_maturity(params.maturity)) {
+        if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
         return inner_.greek(Greek::Delta, params);
@@ -71,8 +70,7 @@ public:
 
     [[nodiscard]] std::expected<double, GreekError>
     gamma(const PricingParams& params) const {
-        if (!contains_strike(params.strike) || !contains_moneyness(params.spot, params.strike)
-            || !contains_maturity(params.maturity)) {
+        if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
         return inner_.gamma(params);
@@ -80,8 +78,7 @@ public:
 
     [[nodiscard]] std::expected<double, GreekError>
     theta(const PricingParams& params) const {
-        if (!contains_strike(params.strike) || !contains_moneyness(params.spot, params.strike)
-            || !contains_maturity(params.maturity)) {
+        if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
         return inner_.greek(Greek::Theta, params);
@@ -89,8 +86,7 @@ public:
 
     [[nodiscard]] std::expected<double, GreekError>
     rho(const PricingParams& params) const {
-        if (!contains_strike(params.strike) || !contains_moneyness(params.spot, params.strike)
-            || !contains_maturity(params.maturity)) {
+        if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
         return inner_.greek(Greek::Rho, params);
@@ -151,6 +147,16 @@ public:
     [[nodiscard]] const Inner& inner() const noexcept { return inner_; }
 
 private:
+    [[nodiscard]] bool contains_pricing_params(const PricingParams& params) const {
+        if (!mango::validate_pricing_params(params) || params.option_type != option_type_ ||
+            std::abs(params.dividend_yield - dividend_yield_) > 1e-10 ||
+            !contains_strike(params.strike) || !contains_moneyness(params.spot, params.strike) ||
+            !contains_maturity(params.maturity)) return false;
+        const double rate = get_zero_rate(params.rate, params.maturity);
+        return std::isfinite(rate) && params.volatility >= sigma_min() &&
+            params.volatility <= sigma_max() && rate >= rate_min() && rate <= rate_max();
+    }
+
     Inner inner_;
     SurfaceBounds bounds_;
     OptionType option_type_;
