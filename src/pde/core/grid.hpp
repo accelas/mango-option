@@ -431,23 +431,21 @@ GridBuffer<T> GridSpec<T>::generate() const {
                         points.push_back(x_min_ + range * normalized);
                     }
                 } else {
-                    // Off-center cluster: use generalized formula + monotonicity enforcement
-                    const T offset = center - (x_min_ + x_max_) / T(2.0);
-                    std::vector<T> raw_points(n_points_);
+                    // Parameterize both endpoints in sinh coordinates about
+                    // the requested center. Merely shifting the centered map
+                    // overshoots an endpoint; repairing it creates tiny edge
+                    // cells unrelated to the requested cluster.
+                    const T scale = range / (T(2.0) * sinh_half_c);
+                    const T u_left = std::asinh((x_min_ - center) / scale);
+                    const T u_right = std::asinh((x_max_ - center) / scale);
                     for (size_t i = 0; i < n_points_; ++i) {
                         const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-                        const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
-                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
-                        raw_points[i] = x_min_ + range * normalized + offset;
+                        points.push_back(center + scale * std::sinh(
+                            std::lerp(u_left, u_right, eta)));
                     }
-
-                    // Enforce monotonicity and bounds
-                    enforce_monotonicity(raw_points, x_min_, x_max_);
-
-                    // Transfer to output
-                    for (const auto& x : raw_points) {
-                        points.push_back(x);
-                    }
+                    // Preserve the supplied endpoint labels exactly.
+                    points.front() = x_min_;
+                    points.back() = x_max_;
                 }
             } else {
                 // Multi-cluster: combine weighted sinh transforms
