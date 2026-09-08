@@ -6,6 +6,7 @@
 #include "mango/option/table/strike_bounds.hpp"
 #include "mango/option/table/fixed_expiry.hpp"
 #include <expected>
+#include <cmath>
 
 namespace mango {
 

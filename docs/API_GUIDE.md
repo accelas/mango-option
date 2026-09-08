@@ -746,6 +746,8 @@ IV error (43.5 absolute-IV bps)**. This exceeds the requested 0.001 (10 bps), so
 that the requested target was met. Other configurations still refuse while
 clustered fitting and reference-strike semantics are corrected; final backend
 selection follows the remaining #483 accuracy and certification work.
+The corrected Chebyshev path measures 0.00744 (74.4 absolute-IV bps) over
+64 measured points with zero invalid points; its requested target is also unmet.
 Both facts are pinned:
 `IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig` for the
 Chebyshev config, and
