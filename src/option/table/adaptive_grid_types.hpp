@@ -3,6 +3,7 @@
 
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/strike_bounds.hpp"
+#include "mango/option/table/moneyness_bounds.hpp"
 #include <array>
 #include <vector>
 #include <cstddef>
@@ -79,6 +80,8 @@ struct SegmentedAdaptiveConfig {
     double maturity;
     MultiKRefConfig kref_config;
     std::optional<StrikeBounds> strike_bounds = std::nullopt;
+    /// Original ratio endpoints retained by factory adapters; log APIs may omit.
+    std::optional<MoneynessBounds> ratio_bounds = std::nullopt;
 };
 
 /// Per-iteration diagnostics

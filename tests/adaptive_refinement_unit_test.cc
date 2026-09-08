@@ -1483,3 +1483,85 @@ TEST(MakeValidateFnTest, FixedExpiryRollsCalendarInsteadOfChangingExpiry) {
     ASSERT_TRUE(before.has_value());
     EXPECT_GT(*before - *fixed, 1.0);
 }
+
+TEST(RunRefinementTest, SegmentedSamplesRespectIndependentStrikeAndMoneynessDomain) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.ctx.sample_bounds.strike_bounds = mango::StrikeBounds{90.0, 110.0};
+    std::vector<std::pair<double, double>> physical_queries;
+    h.price_override = [&](double spot, double strike, double tau, double, double rate) {
+        physical_queries.emplace_back(spot, strike);
+        return analytic_ref(spot, strike, tau, rate);
+    };
+    auto result = h.run();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->achieved_max_error, 0.0, 1e-12);
+    ASSERT_FALSE(physical_queries.empty());
+    bool moving_spot = false;
+    for (const auto& [spot, strike] : physical_queries) {
+        EXPECT_GE(strike, 90.0);
+        EXPECT_LE(strike, 110.0);
+        EXPECT_GE(spot, strike * std::exp(h.ctx.sample_bounds.m_min));
+        EXPECT_LE(spot, strike * std::exp(h.ctx.sample_bounds.m_max));
+        moving_spot |= spot != h.ctx.spot;
+    }
+    EXPECT_TRUE(moving_spot);
+    for (double x : {h.ctx.sample_bounds.m_min, h.ctx.sample_bounds.m_max}) {
+        for (double k : {90.0, 110.0}) {
+            EXPECT_TRUE(std::any_of(physical_queries.begin(), physical_queries.end(),
+                [&](const auto& q) { return q.second == k && q.first == k * std::exp(x); }));
+        }
+    }
+}
+
+TEST(RunRefinementTest, MandatoryCornersKeepOriginalRatioInputs) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.ctx.sample_bounds.m_min = std::log(0.1);
+    h.ctx.sample_bounds.m_max = std::log(0.3);
+    h.ctx.sample_bounds.ratio_bounds = mango::MoneynessBounds{0.1, 0.3};
+    h.ctx.sample_bounds.strike_bounds = mango::StrikeBounds{100.0, 110.0};
+    std::vector<std::pair<double, double>> queries;
+    h.price_override = [&](double s, double k, double t, double, double r) {
+        queries.emplace_back(s, k);
+        return analytic_ref(s, k, t, r);
+    };
+    auto result = h.run();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(std::ranges::any_of(queries, [](const auto& q) {
+        return q.first == 10.0 && q.second == 100.0;
+    }));
+}
+
+TEST(RunRefinementTest, RefusesUnrepresentableMandatoryQuoteCorner) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.ctx.sample_bounds.m_min = std::log(0.6);
+    h.ctx.sample_bounds.m_max = std::log(0.9);
+    h.ctx.sample_bounds.ratio_bounds = mango::MoneynessBounds{0.6, 0.9};
+    const double strike = 2.0 * std::numeric_limits<double>::denorm_min();
+    h.ctx.sample_bounds.strike_bounds = mango::StrikeBounds{strike, strike};
+    auto result = h.run();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::InvalidConfig);
+    EXPECT_EQ(h.build_calls, 0u);
+}
+
+TEST(RunRefinementTest, MeasurementSamplesUseOnlyAdmittedMaturityIntervals) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.ctx.sample_bounds.strike_bounds = mango::StrikeBounds{90.0, 110.0};
+    h.ctx.maturity_intervals = std::vector<std::pair<double, double>>{{.1, .4}, {.6, 1.0}};
+    std::vector<double> maturities;
+    h.price_override = [&](double spot, double strike, double tau, double, double rate) {
+        maturities.push_back(tau);
+        return analytic_ref(spot, strike, tau, rate);
+    };
+    auto result = h.run();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->achieved_max_error, 0.0, 1e-12);
+    ASSERT_FALSE(maturities.empty());
+    for (double tau : maturities) {
+        EXPECT_TRUE((tau >= .1 && tau <= .4) || (tau >= .6 && tau <= 1.0)) << tau;
+    }
+}

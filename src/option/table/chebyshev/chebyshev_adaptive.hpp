@@ -88,7 +88,8 @@ build_segment_leaves(ChebyshevPDECache& cache,
                      std::span<const double> m_nodes,
                      std::span<const double> tau_nodes,
                      std::span<const double> sigma_nodes,
-                     std::span<const double> rate_nodes);
+                     std::span<const double> rate_nodes,
+                     std::optional<OptionType> payoff_type = std::nullopt);
 
 }  // namespace detail
 
@@ -184,11 +185,11 @@ public:
     create(const SegmentedAdaptiveConfig& config, const IVGrid& domain);
 
     /// Build with fixed CC levels (no adaptive refinement).
-    /// Defaults use 257 moneyness, 9 tau, 5 sigma, and 5 rate nodes.
+    /// Defaults use 257 moneyness, 17 tau, 5 sigma, and 5 rate nodes.
     /// Explicit levels are used as supplied; unrepresentable node counts
     /// or tensor sizes return InvalidConfig.
     [[nodiscard]] std::expected<ChebyshevMultiKRefSurface, PriceTableError>
-    build(std::array<size_t, 4> cc_levels = {8, 3, 2, 2}) const;
+    build(std::array<size_t, 4> cc_levels = {8, 4, 2, 2}) const;
 
     /// Build with adaptive grid refinement.
     [[nodiscard]] std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
@@ -248,6 +249,6 @@ build_adaptive_chebyshev_segmented(const AdaptiveGridParams& params,
 build_chebyshev_segmented_manual(
     const SegmentedAdaptiveConfig& config,
     const IVGrid& domain,
-    std::array<size_t, 4> cc_levels = {8, 3, 2, 2});
+    std::array<size_t, 4> cc_levels = {8, 4, 2, 2});
 
 }  // namespace mango

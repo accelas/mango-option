@@ -116,6 +116,7 @@ struct GridBounds {
     double m_min = 0.0, m_max = 0.0;
     double sigma_min = 0.0, sigma_max = 0.0;
     double rate_min = 0.0, rate_max = 0.0;
+    MoneynessBounds ratios;
 };
 
 GridBounds extract_bounds(const IVGrid& grid) {
@@ -135,6 +136,7 @@ GridBounds extract_bounds(const IVGrid& grid) {
         .sigma_max = *minmax_v.second,
         .rate_min = *minmax_r.first,
         .rate_max = *minmax_r.second,
+        .ratios = {*minmax_m.first, *minmax_m.second},
     };
 }
 
@@ -185,9 +187,8 @@ BSplineMultiKRefSurface wrap_multi_kref_surface(
 }
 
 /// Bounds for the manually-gridded segmented surface: the user's own grid
-/// range, tau spanning [0, maturity].  Adaptive builds instead publish the
-/// builder's `sample_bounds` directly (spec D2) -- see the adaptive branch
-/// of `build_bspline_segmented_table`.
+/// range, with tau0 retained only as an analytical construction bound.
+/// Adaptive builders publish the same requested physical bounds.
 SurfaceBounds manual_segmented_bounds(const GridBounds& b, double maturity, StrikeBounds strikes) {
     return SurfaceBounds{
         .m_min = b.m_min, .m_max = b.m_max,
@@ -195,6 +196,7 @@ SurfaceBounds manual_segmented_bounds(const GridBounds& b, double maturity, Stri
         .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
         .rate_min = b.rate_min, .rate_max = b.rate_max,
         .strike_bounds = strikes,
+        .ratio_bounds = b.ratios,
     };
 }
 
@@ -227,6 +229,7 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
             .maturity = divs.maturity,
             .kref_config = divs.kref_config,
             .strike_bounds = *strikes,
+            .ratio_bounds = MoneynessBounds{*min_m, *max_m},
         };
 
         auto result = build_adaptive_bspline_segmented(
@@ -236,8 +239,7 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
             return std::unexpected(detail::to_validation_error(result.error()));
         }
 
-        // Published bounds = the sample domain the builder actually
-        // measured (spec D2), not the user's raw grid range.
+        // Publish the same requested physical domain used for validation.
         return BuiltTable<BSplineMultiKRefSurface>{
             .table = wrap_multi_kref_surface(
                 std::move(result->surface), result->sample_bounds,
@@ -289,8 +291,11 @@ build_bspline_continuous_table(const IVSolverFactoryConfig& config,
             return std::unexpected(detail::to_validation_error(result.error()));
         }
 
-        // Published bounds = the sample domain (spec D2), not the spline's
-        // own knot span, which includes B-spline support headroom.
+        // Preserve original ratio endpoints through the factory adapter.
+        const auto requested = extract_bounds(config.grid);
+        result->sample_bounds.m_min = requested.m_min;
+        result->sample_bounds.m_max = requested.m_max;
+        result->sample_bounds.ratio_bounds = requested.ratios;
         auto table = make_bspline_surface(
             std::move(result->spline), chain.spot, chain.dividend_yield,
             config.option_type, result->sample_bounds);
@@ -329,9 +334,19 @@ build_bspline_continuous_table(const IVSolverFactoryConfig& config,
         return std::unexpected(detail::to_validation_error(table_result.error()));
     }
 
+    const auto requested = extract_bounds(config.grid);
+    const auto [tau_min, tau_max] = std::minmax_element(
+        backend.maturity_grid.begin(), backend.maturity_grid.end());
+    const SurfaceBounds bounds{
+        .m_min = requested.m_min, .m_max = requested.m_max,
+        .tau_min = *tau_min, .tau_max = *tau_max,
+        .sigma_min = requested.sigma_min, .sigma_max = requested.sigma_max,
+        .rate_min = requested.rate_min, .rate_max = requested.rate_max,
+        .ratio_bounds = requested.ratios,
+    };
     auto table = make_bspline_surface(
         table_result->spline, config.spot, config.dividend_yield,
-        config.option_type);
+        config.option_type, bounds);
     if (!table.has_value()) {
         return std::unexpected(detail::to_validation_error(
             PriceTableError{PriceTableErrorCode::SurfaceBuildFailed, 0, 0}));
@@ -387,6 +402,7 @@ build_chebyshev_segmented_table(const IVSolverFactoryConfig& config,
         .maturity = divs.maturity,
         .kref_config = divs.kref_config,
         .strike_bounds = *strikes,
+        .ratio_bounds = MoneynessBounds{*min_m, *max_m},
     };
 
     IVGrid log_grid{std::move(*log_m), config.grid.vol, config.grid.rate};
@@ -457,6 +473,7 @@ build_chebyshev_continuous_table(const IVSolverFactoryConfig& config,
         .K_ref = config.spot,
         .option_type = config.option_type,
         .dividend_yield = config.dividend_yield,
+        .ratio_bounds = b.ratios,
     };
 
     auto result = build_chebyshev_table(cheb_config);
@@ -518,12 +535,13 @@ DimlessDomain compute_dimless_domain(const GridBounds& b, double maturity) {
     return d;
 }
 
-SurfaceBounds dimless_bounds(const DimlessDomain& d, double maturity) {
+SurfaceBounds dimless_bounds(const DimlessDomain& d, double maturity, MoneynessBounds ratios) {
     return {
         .m_min = d.m_min, .m_max = d.m_max,
         .tau_min = d.tau_min, .tau_max = maturity,
         .sigma_min = d.sigma_min, .sigma_max = d.sigma_max,
         .rate_min = d.rate_min, .rate_max = d.rate_max,
+        .ratio_bounds = ratios,
     };
 }
 
@@ -620,7 +638,7 @@ build_dimensionless_bspline_table(const IVSolverFactoryConfig& config,
     BSpline3DLeaf eep_leaf(std::move(leaf), std::move(eep));
 
     return BSpline3DPriceTable(
-        std::move(eep_leaf), dimless_bounds(d, backend.maturity),
+        std::move(eep_leaf), dimless_bounds(d, backend.maturity, extract_bounds(config.grid).ratios),
         config.option_type, 0.0);
 }
 
@@ -675,7 +693,7 @@ build_dimensionless_chebyshev_table(const IVSolverFactoryConfig& config,
     Chebyshev3DLeaf eep_leaf(std::move(leaf), std::move(eep_fn));
 
     return Chebyshev3DPriceTable(
-        std::move(eep_leaf), dimless_bounds(d, backend.maturity),
+        std::move(eep_leaf), dimless_bounds(d, backend.maturity, extract_bounds(config.grid).ratios),
         config.option_type, 0.0);
 }
 

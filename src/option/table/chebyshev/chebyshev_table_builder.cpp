@@ -177,6 +177,7 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
         .tau_min = config.domain.lo[1], .tau_max = config.domain.hi[1],
         .sigma_min = config.domain.lo[2], .sigma_max = config.domain.hi[2],
         .rate_min = config.domain.lo[3], .rate_max = config.domain.hi[3],
+        .ratio_bounds = config.ratio_bounds,
     };
 
     auto eep_span = std::span<const double>(eep_values);

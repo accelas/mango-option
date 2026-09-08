@@ -92,3 +92,20 @@ slots retain their layout: automatic mode accepts only the legacy defaults
 (count0 or11, span0.3), and rejects nondefault controls explicitly. Explicit
 arrays do not use those old automatic-only fields. No slot is reinterpreted
 as a new resource limit.
+
+## Physical validation samples
+
+Segmented validation points store both physical spot and absolute strike.
+Strike is sampled independently of the four fitting coordinates; spot is
+constructed as K*exp(x). Fixed endpoint strata exercise equal moneyness at
+both strike endpoints. Fresh samples, cached holdouts, final scoring and
+monotonicity diagnostics all use the stored physical spot. Continuous contexts
+without a strike interval retain their existing fixed-spot population.
+
+`RefinementContext::maturity_intervals` optionally describes the admitted union
+of physical remaining-time intervals. An engaged empty set is invalid; nullopt
+means the full sample interval. Samples are drawn from that union before
+references are calculated, so a labelled point always receives its own price.
+This is not query retiming. Intervals are derived from the same TauSegmentSplit
+admission predicate and clipped to the measurement bounds. Four-dimensional
+fit/refinement attribution remains unchanged.

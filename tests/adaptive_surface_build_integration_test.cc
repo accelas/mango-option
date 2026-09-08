@@ -308,19 +308,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
 // strike range.  These two tests pin the band's degenerate cases.
 // ===========================================================================
 
-// A band thinner than the loop's non-degeneracy tolerance is widened about
-// its midpoint rather than being handed to run_refinement as m_max == m_min
-// (which would fail the build with InvalidConfig).  K_refs one basis point
-// apart give the middle probe a band ~1e-4 wide in log-moneyness.
-//
-// Such a config cannot produce a usable surface: three K_refs within one
-// basis point of 100 cannot resolve strikes spanning [90.9, 111.1], and the
-// assembled surface measures 0.278 (2,776 bps) on the final validation
-// against the 0.20 viability bound, so the build refuses (spec D9).  What
-// this test pins is *which* refusal: `NoViableSurface` from the final gate
-// means the degenerate band was widened and every probe loop ran;
-// `InvalidConfig` would mean the band was handed over degenerate.
-TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
+// Explicit references a basis point apart do not cover the requested
+// absolute interval. Refuse before fitting rather than widening probe bands.
+TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInsufficientReferenceCoverage) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
@@ -343,17 +333,14 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_FALSE(result.has_value())
         << "three K_refs a basis point apart cannot serve [90.9, 111.1]";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface)
-        << "a degenerate band must be widened and measured, not rejected up "
-           "front (InvalidConfig would mean it reached run_refinement "
-           "degenerate)";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
 // A probe whose served band lies entirely outside the user's strike range is
 // skipped: no refinement loop, its seed sizes still feed the aggregate, and
 // the skip is recorded with the refined_dim = -3 sentinel.  K_ref = 50 with
-// user strikes in [91.7, 108.7] serves nothing: its band ends at the
-// geometric midpoint to its neighbour, sqrt(50 * 90) = 67.1.
+// user strikes in [91.7, 108.7] serves nothing: its linear-blend support
+// ends at its absolute-strike neighbor90, below the requested interval.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedEmptyProbeBandSkipped) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
@@ -384,6 +371,30 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedEmptyProbeBandSkipped) {
         if (it.refined_dim == -3) ++skipped;
     }
     EXPECT_EQ(skipped, 1u) << "the K_ref = 50 probe should be recorded skipped";
+}
+
+// Moving-spot queries can reach a reference whose support lies outside the
+// fixed-build-spot strike interval. Probe reachability follows explicit K.
+TEST(AdaptiveGridBuilderTest, ProbeReachabilityUsesRequestedAbsoluteStrikeDomain) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    params.min_moneyness_points = 10;
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0, .option_type = OptionType::PUT,
+        .dividend_yield = 0.0, .discrete_dividends = {}, .maturity = 0.25,
+        .kref_config = {.K_refs = {50.0, 90.0, 100.0, 110.0}},
+        .strike_bounds = StrikeBounds{85.0, 110.0},
+    };
+    IVGrid domain{.moneyness = to_log_m({0.92, 0.95, 1.0, 1.05, 1.09}),
+        .vol = {0.15, 0.20, 0.30, 0.40}, .rate = {0.02, 0.03, 0.05, 0.07}};
+    auto result = build_adaptive_bspline_segmented(params, config, domain);
+    ASSERT_TRUE(result.has_value());
+    for (const auto& iteration : result->iterations) {
+        EXPECT_NE(iteration.refined_dim, -3)
+            << "Kref50 contributes positive blend weight for K85..90";
+    }
 }
 
 // A broad requested interval needs at least its two endpoints. A budget
@@ -687,11 +698,8 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
     AdaptiveGridParams params;
     params.target_iv_error = 1e-6;  // unreachable => the retry path is taken
     params.max_iter = 1;
-    // 16, not 8: `solve_american_option` refuses a schedule whose dividend
-    // date is at or beyond the requested maturity, so every sample with
-    // tau <= 0.25 loses its reference -- half the tau range here.  Eight
-    // samples would leave the validation set sitting exactly on the
-    // `max(4, n/4)` floor.
+    // Keep the fixed reference population across candidate and retry builds.
+    // Each remaining-life query receives its independently rolled schedule.
     params.validation_samples = 16;
     params.min_moneyness_points = 8;
 
@@ -734,6 +742,8 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
         .option_type = seg_config.option_type,
         .bounds = sample,
         .sample_bounds = sample,
+        .maturity_intervals = admitted_maturity_intervals(
+            result->surface.pieces().front().split(), sample.tau_min, sample.tau_max),
     };
     auto validate_fn = make_validate_fn(seg_config.dividend_yield,
                                         seg_config.option_type,
@@ -742,6 +752,10 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
     auto points = detail::prepare_final_validation(params, ctx, refs_fn,
                                                    params.lhs_seed + 999);
     ASSERT_TRUE(points.has_value());
+    for (const auto& point : points->points) {
+        EXPECT_GT(point.coords[1], 0.0);
+        EXPECT_TRUE(result->surface.pieces().front().contains_maturity(point.coords[1]));
+    }
 
     const SurfaceHandle returned{
         .price = [&](double spot, double strike, double tau, double sigma,
