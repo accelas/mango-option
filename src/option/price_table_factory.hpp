@@ -28,24 +28,25 @@ public:
     [[nodiscard]] std::string surface_type() const;
     [[nodiscard]] OptionType option_type() const noexcept;
     [[nodiscard]] double dividend_yield() const noexcept;
+    /// Required for segmented tables; absent for homogeneous tables.
+    [[nodiscard]] std::optional<StrikeBounds> strike_bounds() const noexcept;
+    [[nodiscard]] std::optional<FixedExpiryMetadata> fixed_expiry() const;
 
     [[nodiscard]] std::expected<void, ValidationError>
     validate_pricing_params(const PricingParams& params) const;
 
+    /// Unchecked hot primitive: requires successful validate_pricing_params.
     [[nodiscard]] double price(const PricingParams& params) const;
+    /// Unchecked hot primitive: requires successful validate_pricing_params.
     [[nodiscard]] double vega(const PricingParams& params) const;
     [[nodiscard]] std::expected<double, GreekError> delta(const PricingParams& params) const;
     [[nodiscard]] std::expected<double, GreekError> gamma(const PricingParams& params) const;
     [[nodiscard]] std::expected<double, GreekError> theta(const PricingParams& params) const;
     [[nodiscard]] std::expected<double, GreekError> rho(const PricingParams& params) const;
 
-    /// @param build_dividends Discrete schedule for validate_query.
-    ///        nullopt = use the table's stored build-time schedule when
-    ///        known (set by make_price_table for freshly built tables),
-    ///        otherwise infer from table type: segmented (MultiKRef)
-    ///        tables get "unknown" (checks skipped — schedules are not
-    ///        persisted to Parquet, so tables loaded via load_price_table
-    ///        lack this provenance), all others get known-empty.
+    /// @param build_dividends Optional known schedule for a custom surface.
+    ///        A fixed-expiry table owns its schedule and numerical anchor;
+    ///        supplied overrides must match that canonical model exactly.
     [[nodiscard]] std::expected<AnyInterpIVSolver, ValidationError>
     make_iv_solver(const InterpolatedIVSolverConfig& config = {},
                    std::optional<std::vector<Dividend>> build_dividends =

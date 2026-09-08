@@ -573,6 +573,13 @@ std::expected<BSplineSegmentedBuilder, PriceTableError>
 BSplineSegmentedBuilder::create(const SegmentedAdaptiveConfig& config,
                                  const IVGrid& domain)
 {
+    if (!make_fixed_expiry_metadata(config.maturity, config.discrete_dividends).valid(config.maturity)) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+    auto strikes = resolve_strike_bounds_from_log_nodes(
+        config.strike_bounds, config.spot, domain.moneyness);
+    if (!strikes) return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+
     auto K_refs = resolve_k_refs(config.kref_config, config.spot);
     if (!K_refs) return std::unexpected(K_refs.error());
 
@@ -593,6 +600,9 @@ BSplineSegmentedBuilder::create(const SegmentedAdaptiveConfig& config,
     auto sample = expand_segmented_domain(
         domain, config.maturity, config.dividend_yield, {}, K_refs->front());
     if (!sample) return std::unexpected(sample.error());
+
+    sample->strike_bounds = *strikes;
+    support->strike_bounds = *strikes;
 
     // Support headroom is deliberately NOT applied here: its scale depends
     // on AdaptiveGridParams::min_moneyness_points (spec D3), which is only
@@ -976,6 +986,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         .used_retry = use_retry,
         .diagnostics = std::move(diagnostics),
         .sample_bounds = sample_domain_,
+        .fixed_expiry = make_fixed_expiry_metadata(config_.maturity, config_.discrete_dividends),
     };
 }
 

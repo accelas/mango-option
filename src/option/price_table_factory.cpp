@@ -48,21 +48,14 @@ using PriceTableVariant = std::variant<
 
 struct AnyPriceTable::Impl {
     PriceTableVariant table;
-    // Discrete dividend schedule the table was built with, when known.
-    // nullopt = unknown provenance (e.g. deserialized from Parquet, which
-    // does not persist the schedule); known (possibly empty) otherwise.
-    std::optional<std::vector<Dividend>> build_dividends;
-
     /// Adaptive-build diagnostics (spec D7).  `nullopt` for manual builds
     /// and Parquet loads; never visited by `to_data()`/serialization.
     std::optional<BuildDiagnostics> diagnostics;
 
     template <typename T>
     explicit Impl(T t,
-                  std::optional<std::vector<Dividend>> divs = std::nullopt,
                   std::optional<BuildDiagnostics> diag = std::nullopt)
         : table(std::make_shared<const T>(std::move(t)))
-        , build_dividends(std::move(divs))
         , diagnostics(std::move(diag)) {}
 };
 
@@ -71,10 +64,9 @@ namespace {
 template <typename Table>
 AnyPriceTable make_any_price_table(
     Table table,
-    std::optional<std::vector<Dividend>> build_dividends = std::nullopt,
     std::optional<BuildDiagnostics> diagnostics = std::nullopt) {
     return AnyPriceTable(std::make_unique<AnyPriceTable::Impl>(
-        std::move(table), std::move(build_dividends), std::move(diagnostics)));
+        std::move(table), std::move(diagnostics)));
 }
 
 /// A built table plus its adaptive-build diagnostics, when any (spec D7).
@@ -203,22 +195,23 @@ BSplineMultiKRefSurface wrap_multi_kref_surface(
     BSplineMultiKRefInner surface,
     const SurfaceBounds& bounds,
     OptionType option_type,
-    double dividend_yield)
+    double dividend_yield, FixedExpiryMetadata fixed_expiry)
 {
     return BSplineMultiKRefSurface(
-        std::move(surface), bounds, option_type, dividend_yield);
+        std::move(surface), bounds, option_type, dividend_yield, std::move(fixed_expiry));
 }
 
 /// Bounds for the manually-gridded segmented surface: the user's own grid
 /// range, tau spanning [0, maturity].  Adaptive builds instead publish the
 /// builder's `sample_bounds` directly (spec D2) -- see the adaptive branch
 /// of `build_bspline_segmented_table`.
-SurfaceBounds manual_segmented_bounds(const GridBounds& b, double maturity) {
+SurfaceBounds manual_segmented_bounds(const GridBounds& b, double maturity, StrikeBounds strikes) {
     return SurfaceBounds{
         .m_min = b.m_min, .m_max = b.m_max,
         .tau_min = 0.0, .tau_max = maturity,
         .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
         .rate_min = b.rate_min, .rate_max = b.rate_max,
+        .strike_bounds = strikes,
     };
 }
 
@@ -233,6 +226,14 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
     IVGrid log_grid = config.grid;
     log_grid.moneyness = std::move(*log_m);
     const auto b = extract_bounds(config.grid);
+    if (config.grid.moneyness.empty()) return std::unexpected(
+        ValidationError{ValidationErrorCode::InvalidBounds});
+    auto model = make_fixed_expiry_metadata(divs.maturity, divs.discrete_dividends);
+    if (!model.valid(divs.maturity)) return std::unexpected(
+        ValidationError{ValidationErrorCode::InvalidBounds});
+    const auto [min_m, max_m] = std::minmax_element(config.grid.moneyness.begin(), config.grid.moneyness.end());
+    auto strikes = resolve_strike_bounds(divs.strike_bounds, config.spot, *min_m, *max_m);
+    if (!strikes) return std::unexpected(strikes.error());
 
     if (config.adaptive.has_value()) {
         SegmentedAdaptiveConfig seg_config{
@@ -242,6 +243,7 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
             .discrete_dividends = divs.discrete_dividends,
             .maturity = divs.maturity,
             .kref_config = divs.kref_config,
+            .strike_bounds = *strikes,
         };
 
         auto result = build_adaptive_bspline_segmented(
@@ -256,7 +258,7 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
         return BuiltTable<BSplineMultiKRefSurface>{
             .table = wrap_multi_kref_surface(
                 std::move(result->surface), result->sample_bounds,
-                config.option_type, config.dividend_yield),
+                config.option_type, config.dividend_yield, model),
             .diagnostics = std::move(result->diagnostics),
         };
     }
@@ -275,8 +277,8 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
 
     return BuiltTable<BSplineMultiKRefSurface>{
         .table = wrap_multi_kref_surface(
-            std::move(*surface), manual_segmented_bounds(b, divs.maturity),
-            config.option_type, config.dividend_yield),
+            std::move(*surface), manual_segmented_bounds(b, divs.maturity, *strikes),
+            config.option_type, config.dividend_yield, model),
         .diagnostics = std::nullopt,
     };
 }
@@ -368,9 +370,6 @@ build_bspline_table(const IVSolverFactoryConfig& config,
         }
         return make_any_price_table(
             std::move(built->table),
-            filter_and_merge_dividends(
-                config.discrete_dividends->discrete_dividends,
-                config.discrete_dividends->maturity),
             std::move(built->diagnostics));
     }
 
@@ -379,7 +378,7 @@ build_bspline_table(const IVSolverFactoryConfig& config,
         return std::unexpected(built.error());
     }
     return make_any_price_table(
-        std::move(built->table), std::vector<Dividend>{},
+        std::move(built->table),
         std::move(built->diagnostics));
 }
 
@@ -391,6 +390,12 @@ build_chebyshev_segmented_table(const IVSolverFactoryConfig& config,
         return std::unexpected(log_m.error());
     }
 
+    if (config.grid.moneyness.empty()) return std::unexpected(
+        ValidationError{ValidationErrorCode::InvalidBounds});
+    const auto [min_m, max_m] = std::minmax_element(config.grid.moneyness.begin(), config.grid.moneyness.end());
+    auto strikes = resolve_strike_bounds(divs.strike_bounds, config.spot, *min_m, *max_m);
+    if (!strikes) return std::unexpected(strikes.error());
+
     SegmentedAdaptiveConfig seg_config{
         .spot = config.spot,
         .option_type = config.option_type,
@@ -398,6 +403,7 @@ build_chebyshev_segmented_table(const IVSolverFactoryConfig& config,
         .discrete_dividends = divs.discrete_dividends,
         .maturity = divs.maturity,
         .kref_config = divs.kref_config,
+        .strike_bounds = *strikes,
     };
 
     IVGrid log_grid{std::move(*log_m), config.grid.vol, config.grid.rate};
@@ -462,9 +468,6 @@ build_chebyshev_table(const IVSolverFactoryConfig& config,
         }
         return make_any_price_table(
             std::move(built->table),
-            filter_and_merge_dividends(
-                config.discrete_dividends->discrete_dividends,
-                config.discrete_dividends->maturity),
             std::move(built->diagnostics));
     }
 
@@ -472,7 +475,7 @@ build_chebyshev_table(const IVSolverFactoryConfig& config,
     if (!table.has_value()) {
         return std::unexpected(table.error());
     }
-    return make_any_price_table(std::move(*table), std::vector<Dividend>{});
+    return make_any_price_table(std::move(*table));
 }
 
 struct DimlessDomain {
@@ -692,14 +695,14 @@ build_dimensionless_table(const IVSolverFactoryConfig& config,
         if (!table.has_value()) {
             return std::unexpected(table.error());
         }
-        return make_any_price_table(std::move(*table), std::vector<Dividend>{});
+        return make_any_price_table(std::move(*table));
     }
 
     auto table = build_dimensionless_bspline_table(config, backend);
     if (!table.has_value()) {
         return std::unexpected(table.error());
     }
-    return make_any_price_table(std::move(*table), std::vector<Dividend>{});
+    return make_any_price_table(std::move(*table));
 }
 
 ParquetCompression to_parquet_compression(PriceTableCompression compression) {
@@ -753,6 +756,14 @@ double AnyPriceTable::dividend_yield() const noexcept {
     }, impl_->table);
 }
 
+std::optional<FixedExpiryMetadata> AnyPriceTable::fixed_expiry() const {
+    return std::visit([](const auto& table) { return table->fixed_expiry(); }, impl_->table);
+}
+
+std::optional<StrikeBounds> AnyPriceTable::strike_bounds() const noexcept {
+    return std::visit([](const auto& table) { return table->strike_bounds(); }, impl_->table);
+}
+
 std::expected<void, ValidationError>
 AnyPriceTable::validate_pricing_params(const PricingParams& params) const {
     auto base_validation = mango::validate_pricing_params(params);
@@ -776,10 +787,13 @@ AnyPriceTable::validate_pricing_params(const PricingParams& params) const {
     const double rate = get_zero_rate(params.rate, params.maturity);
     return std::visit([&](const auto& table_ptr)
         -> std::expected<void, ValidationError> {
-        if (log_moneyness < table_ptr->m_min() ||
-            log_moneyness > table_ptr->m_max()) {
+        if (!table_ptr->contains_moneyness(params.spot, params.strike)) {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::OutOfRange, log_moneyness, 0});
+        }
+        if (!table_ptr->contains_strike(params.strike)) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::OutOfRange, params.strike, 4});
         }
         if (!table_ptr->contains_maturity(params.maturity)) {
             return std::unexpected(ValidationError{
@@ -851,19 +865,11 @@ AnyPriceTable::make_iv_solver(
         using Table = std::remove_cv_t<
             typename std::decay_t<decltype(table_ptr)>::element_type>;
         using SharedSurface = detail::SharedPriceTableSurface<Table>;
-        // Precedence: explicit caller param > stored build-time schedule
-        // (set by make_price_table for freshly built tables) > type
-        // inference fallback (continuous -> known-empty, segmented ->
-        // unknown; used for Parquet-loaded segmented tables, which do not
-        // persist their schedule).
+        // PriceTable owns fixed-expiry provenance. The IV constructor
+        // checks an explicit override against that authoritative model.
         std::optional<std::vector<Dividend>> divs = std::move(build_dividends);
-        if (!divs.has_value() && impl_->build_dividends.has_value()) {
-            divs = impl_->build_dividends;
-        }
-        if (!divs.has_value() &&
-            !std::is_same_v<Table, BSplineMultiKRefSurface> &&
-            !std::is_same_v<Table, ChebyshevMultiKRefSurface>) {
-            divs = std::vector<Dividend>{};  // continuous: known-empty
+        if (!divs && !table_ptr->fixed_expiry()) {
+            divs = std::vector<Dividend>{};
         }
         auto solver = InterpolatedIVSolver<SharedSurface>::create(
             SharedSurface(table_ptr), config, std::move(divs));
