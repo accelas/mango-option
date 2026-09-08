@@ -56,10 +56,14 @@ Assessment assess(const ReferenceAccuracySummary& evidence, Prerequisites prereq
     auto decision=price_met==true && (!targets.iv || iv_met==true)
         ? Decision::Accepted : policy==Policy::BestEffort
             ? Decision::AcceptedBestEffort : Decision::TargetsMissed;
-    if (prerequisites.viability==Viability::Unassessed) decision=Decision::ViabilityUnassessed;
-    else if (prerequisites.viability==Viability::Failed) decision=Decision::ViabilityFailed;
-    else if (prerequisites.certificate==Certificate::Unproven) decision=Decision::CertificateUnproven;
-    else if (prerequisites.certificate==Certificate::Violated) decision=Decision::CertificateViolated;
+    if (prerequisites.viability!=Viability::Passed) {
+        decision=prerequisites.viability==Viability::Failed
+            ? Decision::ViabilityFailed : Decision::ViabilityUnassessed;
+    } else if (prerequisites.certificate!=PriceProofStatus::Certified) {
+        decision=prerequisites.certificate==PriceProofStatus::NegativeWitness
+            ? Decision::CertificateViolated : prerequisites.certificate==PriceProofStatus::NotRun
+                ? Decision::CertificateNotRun : Decision::CertificateIndeterminate;
+    }
     else if (incomplete(evidence.price)) decision=Decision::IncompletePriceEvidence;
     else if (!evidence.price || evidence.price->measured==0) decision=Decision::PriceUnmeasured;
     else if (targets.iv && incomplete(evidence.iv)) decision=Decision::IncompleteIvEvidence;

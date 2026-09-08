@@ -2,6 +2,7 @@
 #pragma once
 
 #include "mango/option/table/reference_selection.hpp"
+#include "mango/option/table/certification/certificate_status.hpp"
 #include <cstdint>
 #include <utility>
 
@@ -16,28 +17,30 @@ struct Targets {
 enum class Policy : uint8_t { Strict, BestEffort };
 enum class IvMetricKind : uint8_t { Unknown, AbsoluteIvError, PriceVegaProxy };
 enum class Viability : uint8_t { Unassessed, Passed, Failed };
-enum class Certificate : uint8_t { Unproven, Certified, Violated };
 
 /// Supplied by independent hard-viability checks and the final physical-price
 /// proof. An unfinished proof is not a witnessed monotonicity violation.
 struct Prerequisites {
     Viability viability=Viability::Unassessed;
-    Certificate certificate=Certificate::Unproven;
+    PriceProofStatus certificate=PriceProofStatus::NotRun;
 };
 
 enum class Decision : uint8_t {
     Accepted, AcceptedBestEffort, TargetsMissed,
     InvalidTargets, InvalidEvidence,
-    ViabilityUnassessed, ViabilityFailed, CertificateUnproven, CertificateViolated,
+    ViabilityUnassessed, ViabilityFailed, CertificateNotRun, CertificateIndeterminate,
+    CertificateViolated,
     PriceUnmeasured, IvUnmeasured, IncompletePriceEvidence, IncompleteIvEvidence,
     IvMetricNotActual,
 };
 
 class Assessment;
-/// Input statistics must measure the final composed price and actual IV error
-/// against independently qualified references on a fixed declared population.
-/// A root residual, ideal-blend identity, or price/vega proxy does not establish
-/// this evidence. Oracle uncertainty/identifiability classification belongs to
+/// Input statistics describe the final composed surface against independently
+/// qualified references on a fixed declared population. An IV claim requires
+/// the explicit AbsoluteIvError tag; a price/vega proxy may be preserved as
+/// diagnostics on a price-only assessment, but cannot satisfy an IV target.
+/// A root residual or ideal-blend identity does not establish this evidence.
+/// Oracle uncertainty/identifiability classification belongs to
 /// the evaluator; unresolved rows remain counted. Maximum measured absolute
 /// error gates acceptance; RMS and reference uncertainty are separate reports.
 /// Price checks remain required where IV is filtered. BestEffort permits only

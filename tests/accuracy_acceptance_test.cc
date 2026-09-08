@@ -22,7 +22,7 @@ Assessment assess_actual_iv(const ReferenceAccuracySummary& evidence,
 }
 
 const Prerequisites viable_certified{
-    .viability=Viability::Passed, .certificate=Certificate::Certified};
+    .viability=Viability::Passed, .certificate=PriceProofStatus::Certified};
 
 TEST(AccuracyAcceptanceTest, DefaultsGateMaximumQuoteAndDecimalIvErrors) {
     auto passing=assess_actual_iv(measured(0.01, 2e-5), viable_certified);
@@ -53,16 +53,17 @@ TEST(AccuracyAcceptanceTest, BestEffortNeverBypassesViabilityOrCertification) {
 
     for (auto policy : {Policy::Strict, Policy::BestEffort}) {
         for (auto viability : {Viability::Unassessed, Viability::Failed}) {
-            auto assessment=assess_actual_iv(evidence, {viability, Certificate::Certified}, {}, policy);
+            auto assessment=assess_actual_iv(evidence, {viability, PriceProofStatus::Certified}, {}, policy);
             EXPECT_EQ(assessment.decision(), viability==Viability::Failed
                 ? Decision::ViabilityFailed : Decision::ViabilityUnassessed);
             EXPECT_EQ(assessment.prerequisites().viability, viability);
             EXPECT_EQ(assessment.price_target_met(), false);
         }
-        for (auto certificate : {Certificate::Unproven, Certificate::Violated}) {
+        for (auto certificate : {PriceProofStatus::NotRun, PriceProofStatus::Indeterminate, PriceProofStatus::NegativeWitness}) {
             auto assessment=assess_actual_iv(evidence, {Viability::Passed, certificate}, {}, policy);
-            EXPECT_EQ(assessment.decision(), certificate==Certificate::Violated
-                ? Decision::CertificateViolated : Decision::CertificateUnproven);
+            EXPECT_EQ(assessment.decision(), certificate==PriceProofStatus::NegativeWitness
+                ? Decision::CertificateViolated : certificate==PriceProofStatus::NotRun
+                    ? Decision::CertificateNotRun : Decision::CertificateIndeterminate);
             EXPECT_EQ(assessment.prerequisites().certificate, certificate);
             EXPECT_EQ(assessment.evidence().price->measured, 10u);
         }
@@ -199,6 +200,15 @@ TEST(AccuracyAcceptanceTest, AssessmentOwnsImmutableEvidenceEvenOnRefusal) {
     ASSERT_TRUE(result.evidence().iv.has_value());
     EXPECT_EQ(result.evidence().iv->requested, 10u);
     EXPECT_EQ(result.evidence().iv->max_error, 3e-5);
+}
+
+TEST(AccuracyAcceptanceTest, OnlyAffirmativePrerequisiteStatusesPermitAdmission) {
+    auto unknown_viability=assess_actual_iv(measured(0.001, 1e-6),
+        {static_cast<Viability>(255), PriceProofStatus::Certified});
+    EXPECT_EQ(unknown_viability.decision(), Decision::ViabilityUnassessed);
+    auto unknown_proof=assess_actual_iv(measured(0.001, 1e-6),
+        {Viability::Passed, static_cast<PriceProofStatus>(255)});
+    EXPECT_EQ(unknown_proof.decision(), Decision::CertificateIndeterminate);
 }
 
 } // namespace
