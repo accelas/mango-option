@@ -51,6 +51,8 @@ PriceTableData to_data(const PriceTable<Inner>& table) {
     data.option_type = table.option_type();
     data.dividend_yield = table.dividend_yield();
     data.maturity = table.tau_max();
+    data.strike_bounds = table.strike_bounds();
+    data.fixed_expiry = table.fixed_expiry();
 
     data.bounds_m_min = table.m_min();
     data.bounds_m_max = table.m_max();

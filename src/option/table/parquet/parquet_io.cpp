@@ -29,7 +29,7 @@ namespace {
 // Constants
 // ============================================================================
 
-constexpr const char* FORMAT_VERSION = "2.0";
+constexpr const char* FORMAT_VERSION = "3.0";
 
 // ============================================================================
 // Helpers
@@ -175,7 +175,7 @@ uint64_t segment_checksum(const PriceTableData::Segment& seg) {
 }
 
 /// Compute CRC64 over file-level metadata + per-segment checksums.
-/// Covers option_type, dividend_yield, maturity, bounds, surface_type,
+/// Covers model identity, published bounds, fixed-expiry provenance,
 /// and all per-segment checksums (chaining integrity).
 ///
 /// Segment checksums are fed as (segment_id, checksum) pairs sorted by
@@ -196,6 +196,20 @@ uint64_t metadata_checksum(
     h.feed_f64(data.bounds_sigma_max);
     h.feed_f64(data.bounds_rate_min);
     h.feed_f64(data.bounds_rate_max);
+    h.feed_u64(data.strike_bounds.has_value());
+    if (data.strike_bounds) {
+        h.feed_f64(data.strike_bounds->min);
+        h.feed_f64(data.strike_bounds->max);
+    }
+    h.feed_u64(data.fixed_expiry.has_value());
+    if (data.fixed_expiry) {
+        h.feed_f64(data.fixed_expiry->reference_maturity);
+        h.feed_u64(data.fixed_expiry->discrete_dividends.size());
+        for (const auto& dividend : data.fixed_expiry->discrete_dividends) {
+            h.feed_f64(dividend.calendar_time);
+            h.feed_f64(dividend.amount);
+        }
+    }
     h.feed_u64(static_cast<uint64_t>(data.n_pde_solves));
     h.feed_f64(data.precompute_time_seconds);
 
@@ -368,6 +382,9 @@ write_parquet(const PriceTableData& data,
               const std::filesystem::path& path,
               const ParquetWriteOptions& opts) {
 
+    if (!valid_price_table_metadata(data)) {
+        return std::unexpected(serialization_error());
+    }
     // ---- Validate file-level metadata ----
     // Reject non-finite scalars and inverted bounds so the writer never
     // emits files that the reader would reject.
@@ -441,6 +458,23 @@ write_parquet(const PriceTableData& data,
     metadata->Append("mango.bounds_sigma_max", double_to_string(data.bounds_sigma_max));
     metadata->Append("mango.bounds_rate_min", double_to_string(data.bounds_rate_min));
     metadata->Append("mango.bounds_rate_max", double_to_string(data.bounds_rate_max));
+    metadata->Append("mango.has_strike_bounds", data.strike_bounds ? "1" : "0");
+    if (data.strike_bounds) {
+        metadata->Append("mango.strike_min", double_to_string(data.strike_bounds->min));
+        metadata->Append("mango.strike_max", double_to_string(data.strike_bounds->max));
+    }
+    metadata->Append("mango.has_fixed_expiry", data.fixed_expiry ? "1" : "0");
+    if (data.fixed_expiry) {
+        metadata->Append("mango.reference_maturity",
+                         double_to_string(data.fixed_expiry->reference_maturity));
+        const auto& dividends = data.fixed_expiry->discrete_dividends;
+        metadata->Append("mango.dividend_count", size_to_string(dividends.size()));
+        for (size_t i = 0; i < dividends.size(); ++i) {
+            const auto prefix = "mango.dividend." + std::to_string(i);
+            metadata->Append(prefix + ".time", double_to_string(dividends[i].calendar_time));
+            metadata->Append(prefix + ".amount", double_to_string(dividends[i].amount));
+        }
+    }
     metadata->Append("mango.n_pde_solves", size_to_string(data.n_pde_solves));
     metadata->Append("mango.precompute_time_seconds",
                      double_to_string(data.precompute_time_seconds));
@@ -761,8 +795,51 @@ read_parquet(const std::filesystem::path& path) {
         data.precompute_time_seconds = *parsed;
     }
 
-    // Also set dividend_yield in the DividendSpec
-    data.dividends.dividend_yield = data.dividend_yield;
+    // Presence is explicit: missing metadata cannot masquerade as an
+    // unrestricted homogeneous domain or an inferred fixed-expiry anchor.
+    auto get_flag = [&](const std::string& key) -> std::expected<bool, PriceTableError> {
+        auto value = get_meta(key);
+        if (!value) return std::unexpected(value.error());
+        if (*value == "0") return false;
+        if (*value == "1") return true;
+        return std::unexpected(serialization_error());
+    };
+    auto get_double = [&](const std::string& key) -> std::expected<double, PriceTableError> {
+        auto value = get_meta(key);
+        if (!value) return std::unexpected(value.error());
+        return parse_double(*value);
+    };
+    auto has_strikes = get_flag("mango.has_strike_bounds");
+    if (!has_strikes) return std::unexpected(has_strikes.error());
+    if (*has_strikes) {
+        auto lo = get_double("mango.strike_min");
+        auto hi = get_double("mango.strike_max");
+        if (!lo || !hi) return std::unexpected(serialization_error());
+        data.strike_bounds = StrikeBounds{*lo, *hi};
+    }
+    auto has_fixed = get_flag("mango.has_fixed_expiry");
+    if (!has_fixed) return std::unexpected(has_fixed.error());
+    if (*has_fixed) {
+        auto anchor = get_double("mango.reference_maturity");
+        auto count_string = get_meta("mango.dividend_count");
+        if (!anchor || !count_string) return std::unexpected(serialization_error());
+        auto count = parse_size_t(*count_string);
+        // Every dividend requires two keys. Bound allocation by the metadata
+        // already read instead of trusting a potentially corrupt count.
+        if (!count || *count > static_cast<size_t>(kv->size()) / 2) {
+            return std::unexpected(serialization_error());
+        }
+        FixedExpiryMetadata fixed{*anchor, {}};
+        fixed.discrete_dividends.reserve(*count);
+        for (size_t i = 0; i < *count; ++i) {
+            const auto prefix = "mango.dividend." + std::to_string(i);
+            auto time = get_double(prefix + ".time");
+            auto amount = get_double(prefix + ".amount");
+            if (!time || !amount) return std::unexpected(serialization_error());
+            fixed.discrete_dividends.push_back({*time, *amount});
+        }
+        data.fixed_expiry = std::move(fixed);
+    }
 
     // ---- Column accessors ----
     // Get column by name, checking existence
@@ -943,6 +1020,9 @@ read_parquet(const std::filesystem::path& path) {
         }
     }
 
+    if (!valid_price_table_metadata(data)) {
+        return std::unexpected(serialization_error());
+    }
     return data;
 }
 
