@@ -23,7 +23,7 @@ enum class ReferenceCandidateDecision {
     FitLimited,
 };
 
-/// Disjoint per-channel accounting. requested equals the sum of the four
+/// Disjoint per-channel accounting. requested equals the sum of the six
 /// outcome counts. Error statistics cover qualified measured rows only;
 /// measured==0 means all three optional error fields are absent, never zero.
 struct ReferenceErrorSummary {
@@ -35,6 +35,11 @@ struct ReferenceErrorSummary {
     std::optional<double> max_error;
     std::optional<double> rms_error;
     std::optional<double> max_uncertainty;
+    /// Exact zero quote-price perturbation by model identity, not a numeric
+    /// price/IV observation. These rows do not contribute error statistics.
+    size_t structurally_exact = 0;
+    /// Remaining declared probes after a qualified early rejection witness.
+    size_t untested = 0;
 };
 
 struct ReferenceAccuracySummary {
@@ -97,14 +102,14 @@ struct ReferenceSelectionFailure {
 };
 
 /// Validate using resolve_k_refs, then measure bounded covering candidates.
-/// Automatic selection starts at up to 17 refs and inserts interval midpoints
-/// (17->33->65 with default ceilings). Explicit sets are measured exactly once,
+/// Automatic selection starts with resolve_k_refs' cheap covering seed and
+/// inserts interval midpoints (normally3->5->9->17->33->65). Explicit sets are measured exactly once,
 /// preserving all validated values. The seed is the first selection round.
 ///
 /// The callback owns error budgets and evidence. Actual composed target
 /// success can establish adequacy even when private component guidance misses.
-/// IvUnmeasured denotes missing requested IV evidence; a price-only evaluator
-/// can instead return Adequate while retaining absent/filtered IV statistics.
+/// IvUnmeasured selects price-adequate refs while retaining absent/filtered IV
+/// statistics. It makes no whole-IV-target claim; Gate 7 owns publication.
 /// FitLimited selects adequate refs with unmet-total diagnostics; it neither
 /// grows references nor introduces Gate 7's strict whole-table rejection.
 [[nodiscard]] std::expected<ReferenceSelectionResult, ReferenceSelectionFailure>
