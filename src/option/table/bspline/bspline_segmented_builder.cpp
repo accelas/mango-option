@@ -479,6 +479,12 @@ build_multi_kref_surface(std::vector<BSplineMultiKRefEntry> entries) {
             PriceTableErrorCode::InvalidConfig, 0, 0});
     }
 
+    std::vector<double> requested_refs;
+    requested_refs.reserve(entries.size());
+    for (const auto& entry : entries) requested_refs.push_back(entry.K_ref);
+    auto valid_refs = validate_k_ref_values(requested_refs, entries.size());
+    if (!valid_refs) return std::unexpected(valid_refs.error());
+
     std::sort(entries.begin(), entries.end(),
               [](const BSplineMultiKRefEntry& a, const BSplineMultiKRefEntry& b) {
                   return a.K_ref < b.K_ref;

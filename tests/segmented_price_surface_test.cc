@@ -260,3 +260,17 @@ TEST(SegmentedSurfaceTest, DividendAtTimeZeroIsIgnored) {
     auto result = SegmentedPriceTableBuilder::build(config);
     ASSERT_TRUE(result.has_value());
 }
+
+TEST(SegmentedSurfaceTest, RawMultiReferenceAssemblyRejectsDuplicateStrikes) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::PUT, .dividends = {},
+        .grid = {{-.2, -.05, .05, .2}, {.1, .2, .3, .4}, {.01, .03, .05, .07}},
+        .maturity = 1.0,
+    };
+    auto piece = SegmentedPriceTableBuilder::build(config);
+    ASSERT_TRUE(piece.has_value());
+    auto one = build_multi_kref_surface({{100.0, *piece}});
+    ASSERT_TRUE(one.has_value());
+    auto duplicate = build_multi_kref_surface({{100.0, *piece}, {100.0, *piece}});
+    EXPECT_FALSE(duplicate.has_value());
+}

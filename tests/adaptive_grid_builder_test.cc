@@ -25,6 +25,24 @@ std::vector<double> to_log_m(std::initializer_list<double> sk) {
     return v;
 }
 
+TEST(ReferenceStrikeValidation, BothBuildersRejectInvalidExplicitSetsBeforeSolving) {
+    const IVGrid domain{to_log_m({0.7, 0.9, 1.0, 1.3}),
+        {0.1, 0.2, 0.3, 0.4}, {0.01, 0.03, 0.05, 0.07}};
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    for (const auto& refs : {std::vector{70.0, nan, 150.0}, std::vector{70.0, inf, 150.0},
+             std::vector{0.0, 100.0, 150.0}, std::vector{-10.0, 100.0, 150.0},
+             std::vector{70.0, 100.0, 100.0, 150.0}, std::vector{90.0, 100.0, 110.0}}) {
+        SegmentedAdaptiveConfig config{.spot = 100.0, .option_type = OptionType::PUT,
+            .dividend_yield = 0.0, .discrete_dividends = {}, .maturity = 1.0,
+            .kref_config = {.K_refs = refs}};
+        auto bspline = BSplineSegmentedBuilder::create(config, domain);
+        auto chebyshev = ChebyshevSegmentedBuilder::create(config, domain);
+        EXPECT_FALSE(bspline.has_value());
+        EXPECT_FALSE(chebyshev.has_value());
+    }
+}
+
 // Helper to create a dummy AmericanOptionResult for cache testing
 std::shared_ptr<AmericanOptionResult> make_dummy_result() {
     PricingParams params;
@@ -243,8 +261,8 @@ TEST(ErrorBinsTest, ProblematicBins) {
 // Coverage gap tests — Priority 1 (Critical)
 // ===========================================================================
 
-// Coverage: Invalid auto-K_ref config with count < 1
-TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvalidKRefCount) {
+// Coverage: an automatic reference ceiling must be positive
+TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsZeroReferenceCeiling) {
     AdaptiveGridParams params;
     params.max_iter = 1;
     params.validation_samples = 8;  // spec D3 minimum
@@ -255,7 +273,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvalidKRefCount) {
         .dividend_yield = 0.0,
         .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
         .maturity = 1.0,
-        .kref_config = {.K_refs = {}, .K_ref_count = 0, .K_ref_span = 0.3},
+        .kref_config = {.K_refs = {}, .max_references = 0},
     };
 
     auto m = to_log_m({0.7, 0.9, 1.0, 1.1, 1.3});
@@ -267,8 +285,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvalidKRefCount) {
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
-// Coverage: Invalid auto-K_ref config with span <= 0
-TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsZeroSpan) {
+// Coverage: at least one selection round is required
+TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsZeroSelectionRounds) {
     AdaptiveGridParams params;
     params.max_iter = 1;
     params.validation_samples = 8;  // spec D3 minimum
@@ -279,7 +297,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsZeroSpan) {
         .dividend_yield = 0.0,
         .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
         .maturity = 1.0,
-        .kref_config = {.K_refs = {}, .K_ref_count = 5, .K_ref_span = 0.0},
+        .kref_config = {.K_refs = {}, .max_selection_rounds = 0},
     };
 
     auto m = to_log_m({0.7, 0.9, 1.0, 1.1, 1.3});
@@ -326,8 +344,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedProbeFailurePropagation) {
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
-// Coverage: Negative span with auto K_refs
-TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsNegativeSpan) {
+// Coverage: the requested absolute-strike interval must be ordered
+TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvertedStrikeInterval) {
     AdaptiveGridParams params;
     params.max_iter = 1;
     params.validation_samples = 8;  // spec D3 minimum
@@ -338,7 +356,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsNegativeSpan) {
         .dividend_yield = 0.0,
         .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
         .maturity = 1.0,
-        .kref_config = {.K_refs = {}, .K_ref_count = 3, .K_ref_span = -0.2},
+        .kref_config = {}, .strike_bounds = StrikeBounds{110.0, 90.0},
     };
 
     auto m = to_log_m({0.7, 0.9, 1.0, 1.1, 1.3});
@@ -500,85 +518,51 @@ TEST(ComputeSegmentBoundariesTest, SplitNearRangeEdgeIsDropped) {
 // Tests for resolve_k_refs
 // ===========================================================================
 
-TEST(ResolveKRefsTest, ExplicitKRefs) {
+TEST(ResolveKRefsTest, ExplicitValuesArePreservedAndSorted) {
     MultiKRefConfig config{.K_refs = {120.0, 80.0, 100.0}};
-    auto result = resolve_k_refs(config, 100.0);
+    auto result = resolve_k_refs(config, StrikeBounds{85.0, 115.0});
     ASSERT_TRUE(result.has_value());
-    // Should be sorted
-    EXPECT_EQ(result->size(), 3);
-    EXPECT_DOUBLE_EQ(result->at(0), 80.0);
-    EXPECT_DOUBLE_EQ(result->at(1), 100.0);
-    EXPECT_DOUBLE_EQ(result->at(2), 120.0);
+    EXPECT_EQ(*result, (std::vector{80.0, 100.0, 120.0}));
 }
 
-TEST(ResolveKRefsTest, ExplicitKRefsSingleValue) {
-    MultiKRefConfig config{.K_refs = {100.0}};
-    auto result = resolve_k_refs(config, 100.0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->size(), 1);
-    EXPECT_DOUBLE_EQ(result->at(0), 100.0);
-}
-
-TEST(ResolveKRefsTest, GeneratedKRefsCount1) {
-    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 1, .K_ref_span = 0.3};
-    auto result = resolve_k_refs(config, 100.0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->size(), 1);
-    EXPECT_DOUBLE_EQ(result->at(0), 100.0);  // Single K_ref = spot
-}
-
-TEST(ResolveKRefsTest, GeneratedKRefsMultiple) {
-    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 5, .K_ref_span = 0.3};
-    auto result = resolve_k_refs(config, 100.0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->size(), 5);
-    // First should be spot*(1-span) = 70.0
-    EXPECT_NEAR(result->at(0), 100.0 * (1.0 - 0.3), 1e-10);
-    // Last should be spot*(1+span) = 130.0
-    EXPECT_NEAR(result->at(4), 100.0 * (1.0 + 0.3), 1e-10);
-    // Should be sorted
-    for (size_t i = 1; i < result->size(); ++i) {
-        EXPECT_GT(result->at(i), result->at(i - 1));
+TEST(ResolveKRefsTest, SingletonDomainUsesExactlyOneReference) {
+    for (auto config : {MultiKRefConfig{}, MultiKRefConfig{.K_refs = {100.0}}}) {
+        auto result = resolve_k_refs(config, StrikeBounds{100.0, 100.0});
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(*result, (std::vector{100.0}));
     }
 }
 
-TEST(ResolveKRefsTest, GeneratedKRefsLogSpaced) {
-    // Verify the spacing is log-uniform (ratios between consecutive K_refs equal)
-    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 3, .K_ref_span = 0.3};
-    auto result = resolve_k_refs(config, 100.0);
-    ASSERT_TRUE(result.has_value());
-    ASSERT_EQ(result->size(), 3);
-    double ratio01 = std::log(result->at(1) / result->at(0));
-    double ratio12 = std::log(result->at(2) / result->at(1));
-    EXPECT_NEAR(ratio01, ratio12, 1e-10);
+TEST(ResolveKRefsTest, AutomaticSeedCoversTheRequestedDomainWithinCeiling) {
+    MultiKRefConfig config;
+    const StrikeBounds bounds{100.0 / 1.3, 100.0 / 0.7};
+    for (size_t cap : {2u, 3u, 65u}) {
+        config.max_references = cap;
+        auto result = resolve_k_refs(config, bounds);
+        ASSERT_TRUE(result.has_value());
+        EXPECT_DOUBLE_EQ(result->front(), bounds.min);
+        EXPECT_DOUBLE_EQ(result->back(), bounds.max);
+        EXPECT_LE(result->size(), cap);
+        for (size_t i = 1; i < result->size(); ++i) EXPECT_LT((*result)[i - 1], (*result)[i]);
+    }
 }
 
-TEST(ResolveKRefsTest, ErrorInvalidCount) {
-    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 0, .K_ref_span = 0.3};
-    auto result = resolve_k_refs(config, 100.0);
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+TEST(ResolveKRefsTest, RejectsImpossibleLimitsAndInvalidDomains) {
+    for (auto config : {MultiKRefConfig{.max_references = 0},
+                        MultiKRefConfig{.max_references = 1},
+                        MultiKRefConfig{.max_selection_rounds = 0}}) {
+        EXPECT_FALSE(resolve_k_refs(config, StrikeBounds{80.0, 120.0}).has_value());
+    }
+    for (auto domain : {StrikeBounds{120.0, 80.0}, StrikeBounds{0.0, 120.0},
+                        StrikeBounds{80.0, std::numeric_limits<double>::infinity()}}) {
+        EXPECT_FALSE(resolve_k_refs({}, domain).has_value());
+    }
 }
 
-TEST(ResolveKRefsTest, ErrorZeroSpan) {
-    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 5, .K_ref_span = 0.0};
-    auto result = resolve_k_refs(config, 100.0);
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
-}
-
-TEST(ResolveKRefsTest, ErrorNegativeSpan) {
-    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 3, .K_ref_span = -0.2};
-    auto result = resolve_k_refs(config, 100.0);
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
-}
-
-TEST(ResolveKRefsTest, ErrorSpanTooLarge) {
-    MultiKRefConfig config{.K_refs = {}, .K_ref_count = 3, .K_ref_span = 1.0};
-    auto result = resolve_k_refs(config, 100.0);
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+TEST(ResolveKRefsTest, ExplicitCeilingNeverTruncatesTheRequestedSet) {
+    MultiKRefConfig config{.K_refs = {80.0, 90.0, 100.0, 120.0}, .max_references = 3};
+    EXPECT_FALSE(resolve_k_refs(config, StrikeBounds{85.0, 115.0}).has_value());
+    EXPECT_EQ(config.K_refs, (std::vector{80.0, 90.0, 100.0, 120.0}));
 }
 
 // ===========================================================================

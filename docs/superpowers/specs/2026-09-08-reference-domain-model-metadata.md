@@ -74,3 +74,21 @@ anchor of2 with published tau_max1. The latter admits the correctly rolled
 schedule and rejects a contradictory construction override. Python and Rust
 binding builds pass at this checkpoint; final integrated checks follow the
 remaining reference-selection and persistence slices.
+
+## Shared reference request controls
+
+`MultiKRefConfig` now carries exact optional `K_refs`, `max_references` and
+`max_selection_rounds`. Limits include explicit sets and the seed candidate.
+The shared resolver refuses nonfinite, nonpositive, duplicate, over-budget or
+insufficient-coverage arrays before any PDE solve. It sorts a copy without
+changing values. Automatic requests receive a covering seed derived from the
+requested absolute interval, with no fixed count/span domain promise. A singleton
+interval needs one reference; a nondegenerate interval needs at least two.
+Build-time density measurement is a separate step from this cheap validation.
+
+The retired count/span fields are removed from core C++/Python and the safe
+Rust configuration. Until the coordinated C ABI revision, the existing ABI
+slots retain their layout: automatic mode accepts only the legacy defaults
+(count0 or11, span0.3), and rejects nondefault controls explicitly. Explicit
+arrays do not use those old automatic-only fields. No slot is reinterpreted
+as a new resource limit.

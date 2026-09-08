@@ -1041,39 +1041,41 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 }
 
 std::expected<std::vector<double>, PriceTableError>
-resolve_k_refs(const MultiKRefConfig& config, double spot) {
-    // If K_refs explicitly provided, sort and return
+validate_k_ref_values(std::span<const double> values, size_t maximum_count) {
+    if (values.empty() || values.size() > maximum_count ||
+        !std::all_of(values.begin(), values.end(),
+            [](double k) { return std::isfinite(k) && k > 0.0; })) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig, 4, values.size()});
+    }
+    std::vector<double> sorted(values.begin(), values.end());
+    std::sort(sorted.begin(), sorted.end());
+    if (std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig, 4, sorted.size()});
+    }
+    return sorted;
+}
+
+std::expected<std::vector<double>, PriceTableError>
+resolve_k_refs(const MultiKRefConfig& config, const StrikeBounds& bounds) {
+    if (!bounds.valid() || config.max_references == 0 || config.max_selection_rounds == 0) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig, 4});
+    }
     if (!config.K_refs.empty()) {
-        std::vector<double> sorted = config.K_refs;
-        std::sort(sorted.begin(), sorted.end());
-        return sorted;
-    }
-
-    // Generate from count/span
-    if (config.K_ref_count < 1 || config.K_ref_span <= 0.0
-        || config.K_ref_span >= 1.0) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-    }
-
-    const int count = config.K_ref_count;
-    const double span = config.K_ref_span;
-    std::vector<double> K_refs;
-    K_refs.reserve(static_cast<size_t>(count));
-
-    if (count == 1) {
-        K_refs.push_back(spot);
-    } else {
-        const double log_lo = std::log(1.0 - span);
-        const double log_hi = std::log(1.0 + span);
-        for (int i = 0; i < count; ++i) {
-            double t = static_cast<double>(i)
-                     / static_cast<double>(count - 1);
-            K_refs.push_back(spot * std::exp(log_lo + t * (log_hi - log_lo)));
+        auto refs = validate_k_ref_values(config.K_refs, config.max_references);
+        if (!refs) return std::unexpected(refs.error());
+        if (refs->front() > bounds.min || refs->back() < bounds.max) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig, 4, refs->size()});
         }
+        return refs;
     }
-
-    std::sort(K_refs.begin(), K_refs.end());
-    return K_refs;
+    if (bounds.min == bounds.max) return std::vector{bounds.min};
+    if (config.max_references < 2) return std::unexpected(
+        PriceTableError{PriceTableErrorCode::InvalidConfig, 4, config.max_references});
+    const double middle = std::midpoint(bounds.min, bounds.max);
+    if (config.max_references >= 3 && middle > bounds.min && middle < bounds.max) {
+        return std::vector{bounds.min, middle, bounds.max};
+    }
+    return std::vector{bounds.min, bounds.max};
 }
 
 std::expected<SurfaceBounds, PriceTableError>

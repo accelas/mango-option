@@ -102,12 +102,10 @@ impl AdaptiveGridParams {
 #[derive(Debug, Clone)]
 pub struct MultiKRef {
     pub k_refs: Vec<f64>,
-    pub k_ref_count: i32,
-    pub k_ref_span: f64,
 }
 impl Default for MultiKRef {
     fn default() -> Self {
-        MultiKRef { k_refs: Vec::new(), k_ref_count: 11, k_ref_span: 0.3 }
+        MultiKRef { k_refs: Vec::new() }
     }
 }
 
@@ -328,8 +326,8 @@ pub(crate) fn with_c_config<T>(
             kref_config: sys::MangoMultiKRef {
                 K_refs: if krefs.is_empty() { core::ptr::null() } else { krefs.as_ptr() },
                 n_K_refs: krefs.len() as u64,
-                K_ref_count: d.kref_config.k_ref_count,
-                K_ref_span: d.kref_config.k_ref_span,
+                K_ref_count: 11, // legacy ABI default until the coordinated ABI revision
+                K_ref_span: 0.3,
             },
         };
         (c, divs, krefs)

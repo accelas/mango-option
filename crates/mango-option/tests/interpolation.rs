@@ -80,7 +80,7 @@ fn discrete_dividend_build_solves() {
     cfg.discrete_dividends = Some(DiscreteDividendConfig {
         maturity: 1.0,
         dividends: vec![Dividend { calendar_time: 0.5, amount: 2.0 }],
-        kref_config: MultiKRef { k_refs: vec![90.0, 100.0, 110.0], ..MultiKRef::default() },
+        kref_config: MultiKRef::default(),
     });
     let solver = InterpIvSolver::new(&cfg).expect("discrete build");
     let spec = OptionSpec {
