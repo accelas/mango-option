@@ -21,6 +21,8 @@ class Interval {
     [[nodiscard]] bool finite() const;
     [[nodiscard]] bool exact_zero() const;
     [[nodiscard]] bool nonnegative() const;
+    [[nodiscard]] bool nonpositive() const;
+    [[nodiscard]] static Interval pi();
     [[nodiscard]] bool strictly_negative() const;
     /// Directed binary64 conversion for diagnostics only, never sign decisions.
     [[nodiscard]] double lower_bound() const;
@@ -30,6 +32,9 @@ class Interval {
     friend Interval hull(const Interval &a, const Interval &b);
     friend Interval operator*(const Interval &a, const Interval &b);
     friend Interval operator/(const Interval &a, const Interval &b);
+    friend Interval positive_part(const Interval &value);
+    friend Interval square(const Interval &value);
+    friend Interval erfc(const Interval &value);
     friend Interval intersection(const Interval &a, const Interval &b);
     friend Interval acos(const Interval &value);
     friend Interval cos(const Interval &value);
