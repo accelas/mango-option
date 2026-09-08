@@ -199,6 +199,183 @@ MaxGridSizes aggregate_max_sizes(const std::vector<RefinementResult>& probe_resu
     return s;
 }
 
+namespace {
+
+template <typename Grids>
+auto& grid_axis(Grids& grids, size_t axis) {
+    const std::array axes{&grids.moneyness, &grids.tau, &grids.vol, &grids.rate};
+    return *axes[axis];
+}
+
+bool ordered_finite_nodes(const std::vector<double>& nodes) {
+    return nodes.size() >= 4 &&
+        std::ranges::all_of(nodes, [](double x) { return std::isfinite(x); }) &&
+        std::adjacent_find(nodes.begin(), nodes.end(), std::greater_equal<double>{}) == nodes.end();
+}
+
+template <typename Grids>
+auto grid_coordinates(const Grids& grids) {
+    return std::tie(grids.moneyness, grids.tau, grids.vol, grids.rate);
+}
+
+std::vector<double> nodes_in_interval(const std::vector<double>& nodes, double lo, double hi) {
+    return {std::lower_bound(nodes.begin(), nodes.end(), lo),
+            std::upper_bound(nodes.begin(), nodes.end(), hi)};
+}
+
+// Add only existing candidate positions. Maximum distance from the retained
+// set provides deterministic coverage; the sorted input breaks ties low-first.
+void fill_from_positions(std::vector<double>& selected,
+                         const std::vector<double>& available, size_t cap) {
+    while (selected.size() < cap) {
+        std::optional<double> next;
+        double greatest = -1.0;
+        for (double x : available) {
+            auto right = std::lower_bound(selected.begin(), selected.end(), x);
+            if (right != selected.end() && *right == x) continue;
+            double distance = std::numeric_limits<double>::infinity();
+            if (right != selected.end()) distance = *right - x;
+            if (right != selected.begin()) distance = std::min(distance, x - *(right - 1));
+            if (distance > greatest) { greatest = distance; next = x; }
+        }
+        if (!next) break;
+        selected.insert(std::lower_bound(selected.begin(), selected.end(), *next), *next);
+    }
+}
+
+}  // namespace
+
+std::expected<std::vector<SeededGrids>, PriceTableError>
+aggregate_refinement_grids(
+    std::span<const RefinementResult> probes, const SeededGrids& required,
+    size_t max_points_per_dim,
+    std::span<const std::pair<double, double>> tau_intervals) {
+    if (probes.empty() || max_points_per_dim < 4) return std::unexpected(
+        PriceTableError{PriceTableErrorCode::InvalidConfig});
+    SeededGrids united;
+    std::array<std::vector<std::pair<double, double>>, 4> axis_intervals;
+    bool overflow = false;
+    for (size_t axis = 0; axis < 4; ++axis) {
+        const auto& seeds = grid_axis(required, axis);
+        if (!ordered_finite_nodes(seeds)) return std::unexpected(
+            PriceTableError{PriceTableErrorCode::InvalidConfig, axis});
+        auto& intervals = axis_intervals[axis];
+        if (axis == 1 && !tau_intervals.empty()) {
+            intervals.assign(tau_intervals.begin(), tau_intervals.end());
+        } else {
+            intervals.emplace_back(seeds.front(), seeds.back());
+        }
+        for (size_t i = 0; i < intervals.size(); ++i) {
+            auto [lo, hi] = intervals[i];
+            if (!std::isfinite(lo) || !std::isfinite(hi) || !std::isfinite(hi - lo) || !(lo < hi) ||
+                (i > 0 && !(intervals[i - 1].second < lo))) return std::unexpected(
+                    PriceTableError{PriceTableErrorCode::InvalidConfig, axis});
+        }
+        const auto covered = [&intervals](double x) {
+            return std::ranges::any_of(intervals, [x](auto interval) {
+                return x >= interval.first && x <= interval.second;
+            });
+        };
+        auto& nodes = grid_axis(united, axis);
+        nodes = seeds;
+        for (const auto& probe : probes) {
+            const auto& selected = grid_axis(probe, axis);
+            if (!ordered_finite_nodes(selected)) return std::unexpected(
+                PriceTableError{PriceTableErrorCode::InvalidConfig, axis});
+            nodes.insert(nodes.end(), selected.begin(), selected.end());
+        }
+        if (!std::ranges::all_of(nodes, covered)) return std::unexpected(
+            PriceTableError{PriceTableErrorCode::InvalidConfig, axis});
+        std::sort(nodes.begin(), nodes.end());
+        nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+        for (auto [lo, hi] : intervals) {
+            const auto first = std::lower_bound(seeds.begin(), seeds.end(), lo);
+            const auto last = std::upper_bound(seeds.begin(), seeds.end(), hi);
+            const size_t count = last - first;
+            if (count < 4 || count > max_points_per_dim ||
+                *first != lo || *(last - 1) != hi) return std::unexpected(
+                    PriceTableError{PriceTableErrorCode::InvalidConfig, axis, count});
+            const size_t total = std::upper_bound(nodes.begin(), nodes.end(), hi) -
+                std::lower_bound(nodes.begin(), nodes.end(), lo);
+            overflow |= total > max_points_per_dim;
+        }
+    }
+    if (!overflow) return std::vector<SeededGrids>{std::move(united)};
+
+    // One coverage candidate and at most three probe-priority candidates.
+    // The financial caller evaluates all of them on identical references.
+    std::vector<const RefinementResult*> ordered;
+    for (const auto& probe : probes) ordered.push_back(&probe);
+    std::sort(ordered.begin(), ordered.end(), [](auto* a, auto* b) {
+        return grid_coordinates(*a) < grid_coordinates(*b);
+    });
+    const size_t priorities = std::min(size_t{3}, ordered.size());
+    std::vector<SeededGrids> candidates;
+    for (size_t priority = 0; priority <= priorities; ++priority) {
+        SeededGrids candidate;
+        for (size_t axis = 0; axis < 4; ++axis) {
+            for (auto [lo, hi] : axis_intervals[axis]) {
+                auto available = nodes_in_interval(grid_axis(united, axis), lo, hi);
+                std::vector<double> selected;
+                if (available.size() <= max_points_per_dim) {
+                    selected = std::move(available);
+                } else {
+                    selected = nodes_in_interval(grid_axis(required, axis), lo, hi);
+                    if (priority > 0) fill_from_positions(selected,
+                        nodes_in_interval(grid_axis(*ordered[priority - 1], axis), lo, hi),
+                        max_points_per_dim);
+                    fill_from_positions(selected, available, max_points_per_dim);
+                }
+                auto& result = grid_axis(candidate, axis);
+                result.insert(result.end(), selected.begin(), selected.end());
+            }
+        }
+        candidates.push_back(std::move(candidate));
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
+        return grid_coordinates(a) < grid_coordinates(b);
+    });
+    candidates.erase(std::unique(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
+        return grid_coordinates(a) == grid_coordinates(b);
+    }), candidates.end());
+    return candidates;
+}
+
+std::expected<SeededGrids, PriceTableError>
+refine_aggregate_grids(
+    const SeededGrids& retained, size_t max_points_per_dim,
+    std::span<const std::pair<double, double>> tau_intervals) {
+    const RefinementResult probe{.moneyness = retained.moneyness, .tau = retained.tau,
+        .vol = retained.vol, .rate = retained.rate};
+    auto valid = aggregate_refinement_grids(std::span{&probe, 1}, retained,
+                                           max_points_per_dim, tau_intervals);
+    if (!valid) return std::unexpected(valid.error());
+    SeededGrids result;
+    constexpr std::array<size_t, 4> additions{2, 2, 1, 1};
+    for (size_t axis = 0; axis < 4; ++axis) {
+        const auto& nodes = grid_axis(retained, axis);
+        std::vector<std::pair<double, double>> intervals;
+        if (axis == 1 && !tau_intervals.empty()) intervals.assign(tau_intervals.begin(), tau_intervals.end());
+        else intervals.emplace_back(nodes.front(), nodes.back());
+        for (auto [lo, hi] : intervals) {
+            auto part = nodes_in_interval(nodes, lo, hi);
+            const size_t target = part.size() + std::min(additions[axis], max_points_per_dim - part.size());
+            while (part.size() < target) {
+                size_t gap = 0;
+                for (size_t j = 1; j + 1 < part.size(); ++j) {
+                    if (part[j + 1] - part[j] > part[gap + 1] - part[gap]) gap = j;
+                }
+                const double midpoint = std::midpoint(part[gap], part[gap + 1]);
+                if (!(midpoint > part[gap] && midpoint < part[gap + 1])) break;
+                part.insert(part.begin() + gap + 1, midpoint);
+            }
+            auto& out = grid_axis(result, axis);
+            out.insert(out.end(), part.begin(), part.end());
+        }
+    }
+    return result;
+}
+
 std::vector<double> linspace(double lo, double hi, size_t n) {
     if (n < 2) {
         return {lo, hi};  // Minimum valid grid

@@ -37,7 +37,8 @@ struct BSplineAdaptiveResult {
 struct BSplineSegmentedAdaptiveResult {
     BSplineMultiKRefInner surface;
     IVGrid grid;
-    int tau_points_per_segment;
+    std::vector<double> tau_grid{};  ///< Exact global times of the returned leaf grids
+    int tau_points_per_segment;  ///< Maximum actual leaf count; tau_grid owns positions
 
     // Convergence stats.  The achieved errors and `target_met` describe the
     // **returned** assembled surface as measured by the final validation
@@ -49,6 +50,8 @@ struct BSplineSegmentedAdaptiveResult {
     bool target_met = false;
     size_t total_pde_solves = 0;
     bool used_retry = false;                 ///< True if bumped-grid retry was returned
+    size_t aggregate_candidates = 0;         ///< Final grids attempted, including retry
+    size_t sample_rows = 0;                  ///< Returned physical tau × sigma × rate × K_ref rows
 
     /// Diagnostics for the returned final surface (spec D7/D9), with the
     /// per-probe iterations appended for forensics.
@@ -72,6 +75,12 @@ struct BSplineSegmentedAdaptiveResult {
 /// at max_points_per_dim or no midpoint could be inserted; never redirects
 /// to a different axis.
 [[nodiscard]] RefineFn make_bspline_refine_fn(const AdaptiveGridParams& params);
+
+/// Same refinement policy, with tau insertions confined to each actual leaf.
+/// max_points_per_dim applies separately to every temporal interval.
+[[nodiscard]] RefineFn make_segmented_bspline_refine_fn(
+    const AdaptiveGridParams& params,
+    std::vector<std::pair<double, double>> tau_intervals);
 
 /// Build B-spline price table with adaptive grid refinement.
 ///

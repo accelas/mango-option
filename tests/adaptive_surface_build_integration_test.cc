@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/american_option.hpp"
+#include "mango/option/european_option.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
 #include "mango/option/table/bspline/bspline_pde_cache.hpp"
@@ -21,6 +22,41 @@
 
 namespace mango {
 namespace {
+
+// #461: the returned adaptive surface retains selected coordinates and
+// independently satisfies the analytic short-dated call price criterion.
+TEST(SegmentedKnotRetention, ReturnedPriceKeepsSelectedMoneynessResolution) {
+    const std::vector<double> m = {-0.2, -0.15, -0.1, -0.02, -0.01, 0.0,
+                                  0.01, 0.02, 0.1, 0.15, 0.2};
+    const std::vector<double> vol = {0.1, 0.11, 0.12, 0.13};
+    const std::vector<double> rate = {0.02, 0.03, 0.05, 0.07};
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0, .option_type = OptionType::CALL, .dividend_yield = 0.0,
+        .maturity = 0.25, .kref_config = {.K_refs = {100.0}},
+        .strike_bounds = StrikeBounds{100.0, 100.0},
+    };
+    AdaptiveGridParams accuracy{
+        .target_iv_error = 0.1, .max_iter = 4, .max_points_per_dim = 64,
+        .min_moneyness_points = 60, .validation_samples = 16,
+    };
+    auto result = build_adaptive_bspline_segmented(accuracy, config, {m, vol, rate});
+    ASSERT_TRUE(result.has_value()) << result.error();
+    for (double selected : m) {
+        EXPECT_TRUE(std::binary_search(result->grid.moneyness.begin(),
+                                       result->grid.moneyness.end(), selected));
+    }
+    EXPECT_TRUE(std::binary_search(result->tau_grid.begin(), result->tau_grid.end(), 0.0625));
+    EXPECT_LE(result->grid.moneyness.size(), accuracy.max_points_per_dim);
+    EXPECT_LE(result->aggregate_candidates, 5u);
+    const double spot = 100.0 * std::exp(0.01);
+    const double reference = bs_price(spot, 100.0, 0.0625, 0.1, 0.05, 0.0, OptionType::CALL);
+    const double actual = result->surface.price(spot, 100.0, 0.0625, 0.1, 0.05);
+    std::cout << "RETAINED_SITE actual=" << actual << " analytical=" << reference
+              << " difference=" << actual - reference << '\n';
+    // No-dividend calls at positive rates equal their analytic European
+    // values: this oracle does not change with the PDE implementation.
+    EXPECT_NEAR(actual, reference, 0.01);
+}
 
 /// Convert S/K moneyness to log-moneyness for internal builder APIs.
 std::vector<double> to_log_m(std::initializer_list<double> sk) {
@@ -705,19 +741,13 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
     // Reproduce the builder's final validation set exactly (same sample
     // domain, same seed, same references) and re-score the surface we were
     // handed.  A retry returned with the original's numbers fails here.
-    auto K_refs = resolve_k_refs(seg_config.kref_config, seg_config.spot);
-    ASSERT_TRUE(K_refs.has_value());
-    auto sample = expand_segmented_domain(domain, seg_config.maturity,
-                                          seg_config.dividend_yield, {},
-                                          K_refs->front());
-    ASSERT_TRUE(sample.has_value());
-
+    const auto sample = result->sample_bounds;
     RefinementContext ctx{
         .spot = seg_config.spot,
         .dividend_yield = seg_config.dividend_yield,
         .option_type = seg_config.option_type,
-        .bounds = *sample,
-        .sample_bounds = *sample,
+        .bounds = sample,
+        .sample_bounds = sample,
     };
     auto validate_fn = make_validate_fn(seg_config.dividend_yield,
                                         seg_config.option_type,
@@ -743,67 +773,35 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
         << " (used_retry = " << result->used_retry << ")";
     EXPECT_NEAR(measured.avg_error, result->achieved_avg_error, 1e-12);
 
-    // Which of the two surfaces wins is deliberately NOT pinned.
-    //
-    // This config sits at its own accuracy floor, so the bumped grids buy
-    // nothing and the two scores land on top of each other: measured here,
-    // original 0.020230 vs retry 0.020352 -- 0.6 % apart, with the original
-    // winning by 1.2e-4.  Sweeping `min_moneyness_points` over 5..12 shows
-    // the retry winning at 6 and losing at 5, 7, 8, 9, 10 and 12, with every
-    // score in 0.0196-0.0278 and no trend in the grid size: the outcome is
-    // numerical noise, not a property of the design.  An earlier revision
-    // asserted `used_retry` here and duly broke when an unrelated fix to the
-    // reference solves shifted the validation set.
-    //
-    // The contract this test exists for is the identity above -- the
-    // *reported* numbers describe the surface actually returned -- and it is
-    // checked unconditionally.  The grid check below extends that identity to
-    // the reported grid sizes, for whichever surface won.
-    //
-    // With max_iter = 1 no probe refines, so every probe returns its seed and
-    // the aggregate is exactly the seed sizes; the retry adds (+2, +2, +1, +1)
-    // on (moneyness, tau, vol, rate).
-    auto support = expand_segmented_domain(
-        domain, seg_config.maturity, seg_config.dividend_yield,
-        seg_config.discrete_dividends, K_refs->front());
-    ASSERT_TRUE(support.has_value());
-    SurfaceBounds fit = *support;
-    const double headroom = spline_support_headroom(
-        sample->m_max - sample->m_min,
-        std::max(domain.moneyness.size(), params.min_moneyness_points));
-    fit.m_min -= headroom;
-    fit.m_max += headroom;
+    // Whichever bounded candidate won, the exposed axes must describe its
+    // actual leaf interpolants. No reconstruction from sizes is permitted.
+    size_t max_tau_points = 0;
+    size_t stored_rows = 0;
+    for (const auto& reference_surface : result->surface.pieces()) {
+        const auto& split = reference_surface.split();
+        for (size_t i = 0; i < reference_surface.num_pieces(); ++i) {
+            const auto& spline = reference_surface.pieces()[i].interpolant().get();
+            EXPECT_EQ(spline.grid(0), result->grid.moneyness);
+            EXPECT_EQ(spline.grid(2), result->grid.vol);
+            EXPECT_EQ(spline.grid(3), result->grid.rate);
+            EXPECT_LE(spline.grid(1).size(), params.max_points_per_dim);
+            stored_rows += spline.grid(1).size() * spline.grid(2).size() * spline.grid(3).size();
+            max_tau_points = std::max(max_tau_points, spline.grid(1).size());
+            size_t matched = 0;
+            for (double time : result->tau_grid) {
+                const double local = time - split.tau_start()[i];
+                if (local >= split.tau_min()[i] && local <= split.tau_max()[i]) {
+                    EXPECT_TRUE(std::binary_search(spline.grid(1).begin(), spline.grid(1).end(), local));
+                    ++matched;
+                }
+            }
+            EXPECT_EQ(matched, spline.grid(1).size());
+        }
+    }
+    EXPECT_EQ(result->tau_points_per_segment, static_cast<int>(max_tau_points));
+    EXPECT_EQ(result->sample_rows, stored_rows);
+    EXPECT_LE(result->aggregate_candidates, 5u);
 
-    RefinementContext seed_ctx{
-        .spot = seg_config.spot,
-        .dividend_yield = seg_config.dividend_yield,
-        .option_type = seg_config.option_type,
-        .bounds = fit,
-        .sample_bounds = *sample,
-    };
-    auto seeded = seed_refinement_grids(
-        params, seed_ctx,
-        InitialGrids{.moneyness = domain.moneyness,
-                     .vol = domain.vol,
-                     .rate = domain.rate});
-
-    const size_t m_bump = result->used_retry ? 2 : 0;
-    const size_t v_bump = result->used_retry ? 1 : 0;
-    const size_t r_bump = result->used_retry ? 1 : 0;
-    const int tau_bump = result->used_retry ? 2 : 0;
-
-    EXPECT_EQ(result->grid.moneyness.size(),
-              std::min(seeded.moneyness.size() + m_bump,
-                       params.max_points_per_dim))
-        << "reported moneyness grid does not describe the returned surface"
-        << " (used_retry = " << result->used_retry << ")";
-    EXPECT_EQ(result->grid.vol.size(),
-              std::min(seeded.vol.size() + v_bump, params.max_points_per_dim));
-    EXPECT_EQ(result->grid.rate.size(),
-              std::min(seeded.rate.size() + r_bump, params.max_points_per_dim));
-    EXPECT_EQ(result->tau_points_per_segment,
-              std::min(static_cast<int>(seeded.tau.size()) + tau_bump,
-                       static_cast<int>(params.max_points_per_dim)));
 }
 
 // Reference FDM price with a PINNED explicit configuration (spec: the

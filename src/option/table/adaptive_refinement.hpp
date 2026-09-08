@@ -330,6 +330,23 @@ struct SeededGrids {
     std::vector<double> rate;
 };
 
+/// Retain actual probe coordinates, preserving required seeds and endpoints.
+/// Tau intervals identify separate leaf domains; the point ceiling applies
+/// to each interval independently. Returned candidates must be measured on
+/// one fixed reference set before selecting a final financial surface.
+[[nodiscard]] std::expected<std::vector<SeededGrids>, PriceTableError>
+aggregate_refinement_grids(
+    std::span<const RefinementResult> probes, const SeededGrids& required,
+    size_t max_points_per_dim,
+    std::span<const std::pair<double, double>> tau_intervals = {});
+
+/// Bounded final retry: insert into retained grids without moving existing
+/// sites. Tau insertion occurs within each supplied temporal leaf interval.
+[[nodiscard]] std::expected<SeededGrids, PriceTableError>
+refine_aggregate_grids(
+    const SeededGrids& retained, size_t max_points_per_dim,
+    std::span<const std::pair<double, double>> tau_intervals = {});
+
 /// Seed the working grids over the fit domain exactly as `run_refinement`
 /// does (user knots where given, linspace otherwise, moneyness padded to
 /// `params.min_moneyness_points`; `InitialGrids::exact` passes through).

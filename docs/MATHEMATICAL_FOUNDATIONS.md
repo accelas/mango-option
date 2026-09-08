@@ -697,21 +697,28 @@ Cash dividends break the scale invariance that American options normally have in
 
 ### Adaptive Grid Refinement for Segmented Surfaces
 
-The adaptive grid builder (section 10) extends to segmented surfaces via a probe-and-max strategy. Rather than building the full multi-K_ref surface at each refinement iteration, the builder:
+Segmented adaptation refines single-reference probe surfaces and retains their
+actual four-dimensional coordinates. The final assembly uses a sorted union of
+those coordinates when it fits the point ceilings. If a union is too large,
+the builder forms a bounded deterministic set of candidates from the selected
+positions, preserving required seeds and support endpoints. It measures each
+candidate against the same cached independent references before choosing one.
 
-1. **Selects 2–3 probe K_ref values** from the full list: the lowest, highest, and the one closest to ATM (deduplicated if ATM coincides with an endpoint).
+Tau coordinates are physical remaining maturities, grouped by their actual
+temporal regimes. Refinement and retry insertion never cross an excluded
+dividend gap. The point ceiling applies separately to each interpolant leaf's
+tau axis; the total physical snapshot vector can therefore exceed that ceiling.
+The returned `tau_grid` records exact positions, and `tau_points_per_segment`
+reports the maximum actual count among leaves.
 
-2. **Runs independent refinement loops** on each probe, building single-K_ref `BSplineSegmentedSurface` instances. Each probe validates at strike = K_ref (the only strike that single-K_ref raw segments can price exactly).
+A final retry inserts coordinates into the selected grids without replacing
+existing positions. If no bounded candidate is viable, construction refuses.
+No general monotonic-accuracy claim is made as the number of nodes grows.
 
-3. **Takes the per-axis maximum** grid sizes across probes — the worst-case K_ref determines each axis.
-
-4. **Builds the full `SegmentedMultiKRefSurface`** once, using uniform grids at the maximum sizes with `skip_moneyness_expansion = true` (the domain was pre-expanded in step 1).
-
-5. **Final validation** at arbitrary strikes against fresh PDE reference prices. If the error exceeds the target, all grids are bumped by one refinement step and the surface is rebuilt (one retry).
-
-The moneyness domain is pre-expanded before probing using the worst-case (smallest) K_ref: $m_\text{min}' = \max(m_\text{min} - \sum D_k / K_\text{ref,min},\; 0.01)$. This ensures all K_refs share the same expanded domain.
-
-The tau axis is refined via the `tau_points_per_segment` scalar (minimum 4 for B-spline), which the refinement loop increments when tau is the worst dimension.
+The raw segmented sampler consumes its supplied interpolation axes exactly.
+It adds no interpolation knots for dividend jumps: the PDE grid estimator
+owns numerical spatial coverage and jump support. Adaptive builders own any
+additional fit support and must include it in their interpolation point budgets.
 
 ---
 
