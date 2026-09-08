@@ -67,11 +67,11 @@ public:
     }
 
     [[nodiscard]] const std::vector<double>& tau_start() const noexcept { return tau_start_; }
-    /// Whether this time has a sample-supported representation. The enclosing
-    /// price table owns outer bounds; this check detects internal omitted gaps.
+    /// Whether this time has a sample-supported representation. Requested
+    /// table bounds may exceed retained leaves, so reject edge gaps too.
     [[nodiscard]] bool contains_maturity(double tau) const noexcept {
         if (tau_start_.empty() || !std::isfinite(tau)) return false;
-        if (tau < tau_start_.front() || tau > tau_end_.back()) return true;
+        if (tau < tau_start_.front() || tau > tau_end_.back()) return false;
         const auto br = bracket(0.0, 0.0, tau, 0.0, 0.0);
         const size_t i = br.entries[0].index;
         const double local = tau - tau_start_[i];
