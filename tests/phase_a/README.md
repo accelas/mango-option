@@ -41,6 +41,13 @@ mixed-build results remain separately under `459-rate-seeds`. Do not compare
 an optimized candidate with the earlier baseline as a matched performance or
 accuracy selection experiment.
 
+The optimized finite panel completed with returned tables at 4 and 7 input
+rate sites. They retain all seeds and the original domains but still miss
+accuracy criteria; proof returns NegativeWitness and Indeterminate,
+respectively. The 13- and 25-site builds remain unfinished at the declared
+600-second research cap, with no invented proof/accuracy outcome. The panel
+stopped without extending densities, work caps, or shape candidates.
+
 Both workers are manual targets under `//tests/phase_a`. Their private proof
 dependency stays within its existing test visibility. Compile with `--jobs=4`,
 run with `OMP_NUM_THREADS=2`, and use the four recorded compression link options
