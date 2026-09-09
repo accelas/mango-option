@@ -245,6 +245,18 @@ enclose_chebyshev_physical(const ChebyshevPolynomial &polynomial,
         }
     }
     auto result = bound(*prepared, std::span<const Interval>(units));
+    // A low-degree Bernstein restriction preserves correlations between
+    // modes near a narrow extremum. Keep the direct Chebyshev enclosure too;
+    // their intersection can only tighten two bounds of the same polynomial.
+    if (result) {
+        if (auto bernstein = as_bernstein(*prepared)) {
+            for (std::size_t d = 0; d < units.size() && bernstein; ++d)
+                bernstein = bernstein->restrict_axis(d, units[d].lower_endpoint(),
+                                                     units[d].upper_endpoint());
+            if (bernstein)
+                *result = intersection(*result, bernstein->bounds());
+        }
+    }
     if (result && partial_crosses_clamp)
         *result = hull(*result, Interval(0));
     return result;

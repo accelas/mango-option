@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "mango/math/bspline/bspline_nd.hpp"
+#include "mango/math/chebyshev/chebyshev_modal_interpolant.hpp"
 #include "mango/math/proof/bernstein.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/certification/certificate_status.hpp"
@@ -15,6 +16,20 @@ struct PhysicalCellProof {
     std::optional<PricingParams> witness;
     proof::Interval witness_vega_per_strike{0};
 };
+using ModalSegmentedLeaf = TransformLeaf<ChebyshevModalInterpolant<4>, StandardTransform4D>;
+using ModalTauInner = SplitSurface<ModalSegmentedLeaf, TauSegmentSplit>;
+using ModalMultiKRefInner = SplitSurface<ModalTauInner, MultiKRefSplit>;
+PhysicalCellProof prove_segmented_chebyshev(const ModalMultiKRefInner &inner, OptionType type,
+                                            double dividend_yield, const SurfaceBounds &requested,
+                                            proof::ProofBudget budget = {});
+PhysicalCellProof prove_continuous_chebyshev(const ChebyshevPolynomial &polynomial,
+                                             double reference_strike, OptionType type,
+                                             double dividend_yield, const SurfaceBounds &requested,
+                                             proof::ProofBudget budget = {});
+PhysicalCellProof prove_dimensionless_chebyshev(const ChebyshevPolynomial &polynomial,
+                                                double reference_strike, OptionType type,
+                                                const SurfaceBounds &requested,
+                                                proof::ProofBudget budget = {});
 /// Segmented normalized total-price proof. Positive reference weights are
 /// proved at requested strike/bracket endpoints; no independent K axis.
 /// This proves the current per-leaf zero floors BEFORE reference blending.

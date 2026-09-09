@@ -336,3 +336,168 @@ TEST(PhysicalCellProofTest, SegmentedNullPayloadAndInconsistentReferencesAreInde
     EXPECT_EQ(prove_segmented_bspline(mismatched, OptionType::CALL, 0, b).status,
               PriceProofStatus::Indeterminate);
 }
+
+TEST(PhysicalCellProofTest, ModalContinuousProofAndEvaluatorUseIdenticalStoredCoefficients) {
+    Domain<4> domain{{-.001, .99, .19, -.001}, {.001, 1.01, .21, .001}};
+    const std::array<std::size_t, 4> shape{2, 2, 4, 2};
+    const SurfaceBounds b{-.001, .001, .99, 1.01, .19, .21, -.001, .001};
+    std::vector<double> coefficients(32);
+    coefficients[0] = 2;
+    coefficients[2] = -.1; // f_sigma=-10; European dominates.
+    auto interpolant =
+        ChebyshevModalInterpolant<4>::build_from_coefficients(coefficients, domain, shape);
+    ASSERT_TRUE(interpolant);
+    auto positive =
+        prove_continuous_chebyshev(interpolant->polynomial(), 100, OptionType::PUT, 0, b);
+    EXPECT_EQ(positive.status, PriceProofStatus::Certified);
+    coefficients[2] = -1; // f_sigma=-100; full physical price decreases.
+    auto negative =
+        ChebyshevModalInterpolant<4>::build_from_coefficients(coefficients, domain, shape);
+    ASSERT_TRUE(negative);
+    auto violation = prove_continuous_chebyshev(negative->polynomial(), 100, OptionType::PUT, 0, b);
+    ASSERT_EQ(violation.status, PriceProofStatus::NegativeWitness);
+    ASSERT_TRUE(violation.witness);
+    using Leaf =
+        EEPLayer<TransformLeaf<ChebyshevModalInterpolant<4>, StandardTransform4D>, AnalyticalEEP>;
+    Leaf leaf(TransformLeaf<ChebyshevModalInterpolant<4>, StandardTransform4D>(*negative, {}, 100),
+              AnalyticalEEP(OptionType::PUT, 0));
+    const auto &p = *violation.witness;
+    EXPECT_LT(
+        leaf.vega(p.spot, p.strike, p.maturity, p.volatility, get_zero_rate(p.rate, p.maturity)),
+        0);
+}
+
+TEST(PhysicalCellProofTest, ModalPhysicalProofFindsTheNarrowOffScanPocket) {
+    Domain<4> domain{{-.001, .1, .2, .04}, {.001, .11, .20001, .06}};
+    const SurfaceBounds b{-.001, .001, .1, .11, .2, .20001, .04, .06};
+    const double a = 17. / 32, c = a * a - 1. / (128 * 128);
+    const double p0 = .1 + 1.5 * c - .75 * a + .125, p1 = 1.5 * c - 1.5 * a + .375,
+                 p2 = -.75 * a + .375, p3 = .125;
+    std::vector<double> coefficients(32);
+    coefficients[0] = p0 + .5 * p2;
+    coefficients[2] = p1 + .75 * p3;
+    coefficients[4] = .5 * p2;
+    coefficients[6] = .25 * p3;
+    auto interp =
+        ChebyshevModalInterpolant<4>::build_from_coefficients(coefficients, domain, {2, 2, 4, 2});
+    ASSERT_TRUE(interp);
+    auto result = prove_continuous_chebyshev(interp->polynomial(), 100, OptionType::PUT, 0, b);
+    EXPECT_EQ(result.status, PriceProofStatus::NegativeWitness) << "nodes=" << result.nodes;
+    EXPECT_TRUE(result.witness);
+}
+
+TEST(PhysicalCellProofTest, ModalDimensionlessProofUsesTheQueryPolynomialAndCoupledDerivative) {
+    Domain<3> domain{{-.01, .4, -.1}, {.01, .6, .1}};
+    const SurfaceBounds b{-.001, .001, .99, 1.01, .99, 1.01, .49, .51};
+    std::vector<double> coefficients(8);
+    coefficients[0] = 1;
+    coefficients[2] = .1;
+    coefficients[1] = -.1;
+    auto positive =
+        ChebyshevModalInterpolant<3>::build_from_coefficients(coefficients, domain, {2, 2, 2});
+    ASSERT_TRUE(positive);
+    EXPECT_EQ(prove_dimensionless_chebyshev(positive->polynomial(), 100, OptionType::PUT, b).status,
+              PriceProofStatus::Certified);
+    coefficients[0] = 10.5;
+    coefficients[1] = 2;
+    auto negative =
+        ChebyshevModalInterpolant<3>::build_from_coefficients(coefficients, domain, {2, 2, 2});
+    ASSERT_TRUE(negative);
+    auto proof = prove_dimensionless_chebyshev(negative->polynomial(), 100, OptionType::PUT, b);
+    ASSERT_EQ(proof.status, PriceProofStatus::NegativeWitness);
+    ASSERT_TRUE(proof.witness);
+    using Transform = TransformLeaf<ChebyshevModalInterpolant<3>, DimensionlessTransform3D>;
+    EEPLayer<Transform, AnalyticalEEP> leaf(Transform(*negative, {}, 100),
+                                            AnalyticalEEP(OptionType::PUT, 0));
+    const auto &p = *proof.witness;
+    EXPECT_LT(
+        leaf.vega(p.spot, p.strike, p.maturity, p.volatility, get_zero_rate(p.rate, p.maturity)),
+        0);
+}
+
+TEST(PhysicalCellProofTest, SingletonSigmaIsPriceableShapeNotANegativeExtensionWitness) {
+    const SurfaceBounds support{-.001, .001, .99, 1.01, .19, .21, -.001, .001};
+    auto spline = bezier({20, 20 - 2. / 3, 20 - 4. / 3, 18}, support);
+    auto requested = support;
+    requested.sigma_min = .2;
+    requested.sigma_max = .2;
+    auto point = prove_continuous_bspline(spline, 100, OptionType::PUT, 0, requested);
+    EXPECT_EQ(point.status, PriceProofStatus::Certified);
+    EXPECT_FALSE(point.witness);
+    auto full_cell =
+        prove_continuous_bspline_cell(spline, {3, 3, 3, 3}, 100, OptionType::PUT, 0, requested);
+    EXPECT_EQ(full_cell.status, PriceProofStatus::Indeterminate);
+    EXPECT_FALSE(full_cell.witness);
+    const SurfaceBounds d3domain{-.001, .001, .99, 1.01, 1, 1, .49, .51};
+    auto d3 = dimensionless_linear(1, 20, 10);
+    EXPECT_EQ(prove_dimensionless_bspline(d3, 100, OptionType::PUT, d3domain).status,
+              PriceProofStatus::Certified);
+    auto segmented = two_references(-.1, -.1);
+    SurfaceBounds split_domain{-.01, .01, .1, .9, .2, .2, .04, .06, StrikeBounds{95, 105}};
+    auto split = prove_segmented_bspline(segmented, OptionType::CALL, 0, split_domain);
+    EXPECT_EQ(split.status, PriceProofStatus::Certified);
+    EXPECT_FALSE(split.witness);
+    Domain<4> modal_domain{{-.001, .99, .19, -.001}, {.001, 1.01, .21, .001}};
+    std::vector<double> coefficients(16);
+    coefficients[0] = 2;
+    coefficients[2] = -1;
+    auto modal = ChebyshevModalInterpolant<4>::build_from_coefficients(coefficients, modal_domain,
+                                                                       {2, 2, 2, 2});
+    ASSERT_TRUE(modal);
+    EXPECT_EQ(
+        prove_continuous_chebyshev(modal->polynomial(), 100, OptionType::PUT, 0, requested).status,
+        PriceProofStatus::Certified);
+}
+
+TEST(PhysicalCellProofTest, ModalSegmentedProofCertifiesTheFinalPositiveReferenceBlend) {
+    Domain<4> domain{{-.1, 0, .1, .01}, {.1, 1, .4, .1}};
+    const std::array<double, 2> refs{80, 120}, slopes{-.1, .4};
+    std::vector<ModalTauInner> members;
+    for (std::size_t i = 0; i < 2; ++i) {
+        std::vector<double> coefficients(16);
+        coefficients[0] = .5 + .05 * slopes[i];
+        coefficients[2] = .15 * slopes[i];
+        auto interpolant = ChebyshevModalInterpolant<4>::build_from_coefficients(
+            coefficients, domain, {2, 2, 2, 2});
+        ASSERT_TRUE(interpolant);
+        members.emplace_back(
+            std::vector<ModalSegmentedLeaf>{ModalSegmentedLeaf(*interpolant, {}, refs[i])},
+            TauSegmentSplit({0}, {1}, {0}, {1}, refs[i]));
+    }
+    ModalMultiKRefInner inner(std::move(members), MultiKRefSplit({80, 120}));
+    SurfaceBounds b{-.01, .01, .1, .9, .15, .35, .04, .06, StrikeBounds{95, 105}};
+    EXPECT_EQ(prove_segmented_chebyshev(inner, OptionType::CALL, 0, b).status,
+              PriceProofStatus::Certified);
+    b.strike_bounds = StrikeBounds{80, 105};
+    auto negative = prove_segmented_chebyshev(inner, OptionType::CALL, 0, b);
+    ASSERT_EQ(negative.status, PriceProofStatus::NegativeWitness);
+    ASSERT_TRUE(negative.witness);
+    const auto &p = *negative.witness;
+    EXPECT_LT(
+        inner.vega(p.spot, p.strike, p.maturity, p.volatility, get_zero_rate(p.rate, p.maturity)),
+        0);
+    b.sigma_min = .2;
+    b.sigma_max = .2;
+    EXPECT_EQ(prove_segmented_chebyshev(inner, OptionType::CALL, 0, b).status,
+              PriceProofStatus::Certified);
+}
+
+TEST(PhysicalCellProofTest, ModalProofHandlesTheActual257By9By9By5ShapeWithinDeclaredWork) {
+    const std::array<std::size_t, 4> shape{257, 9, 9, 5};
+    Domain<4> domain{{-.1, .1, .1, -.05}, {.1, 1, .5, .1}};
+    std::vector<double> coefficients(257 * 9 * 9 * 5);
+    coefficients[0] = 2;
+    coefficients[5] = .1;
+    coefficients[((256 * 9) * 9 + 1) * 5] = .01;
+    // f_sigma=(.1+.01*T256(x))*2/.4 >= .45 everywhere.
+    auto polynomial =
+        ChebyshevModalInterpolant<4>::build_from_coefficients(coefficients, domain, shape);
+    ASSERT_TRUE(polynomial);
+    const SurfaceBounds b{-.01, .01, .1, 1, .1, .5, -.05, .1};
+    auto result =
+        prove_continuous_chebyshev(polynomial->polynomial(), 100, OptionType::PUT, 0, b, {3, 24});
+    EXPECT_EQ(result.status, PriceProofStatus::Certified);
+    EXPECT_LE(result.nodes, 3u);
+    EXPECT_EQ(polynomial->num_pts(), shape);
+    EXPECT_EQ(polynomial->polynomial().coefficients().size(), coefficients.size());
+}
