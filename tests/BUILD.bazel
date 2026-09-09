@@ -2188,3 +2188,14 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "accuracy_report_test",
+    size = "small",
+    srcs = ["accuracy_report_test.cc"],
+    deps = [
+        "//src/option/table/accuracy:acceptance",
+        "//src/option:price_table_error_mapping",
+        "@googletest//:gtest_main",
+    ],
+)

@@ -16,8 +16,8 @@ TEST(AccuracyRequestTest, OneRequestPreservesTargetsAndPolicyWithoutInventingAdm
     const AccuracyRequest request{.max_price_error = .03,
         .max_iv_error = std::nullopt, .policy = AccuracyPolicy::BestEffort};
     const auto assessment = detail::accuracy::assess_request({}, {}, request);
-    EXPECT_DOUBLE_EQ(assessment.targets().price, .03);
-    EXPECT_FALSE(assessment.targets().iv);
+    EXPECT_DOUBLE_EQ(assessment.request().max_price_error, .03);
+    EXPECT_FALSE(assessment.request().max_iv_error);
     EXPECT_EQ(assessment.policy(), AccuracyPolicy::BestEffort);
     EXPECT_EQ(assessment.decision(), detail::accuracy::Decision::ViabilityUnassessed);
     EXPECT_EQ(assessment.prerequisites().certificate, PriceProofStatus::NotRun);

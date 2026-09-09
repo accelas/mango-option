@@ -42,11 +42,11 @@ std::optional<bool> target_met(const std::optional<ReferenceErrorSummary>& chann
 Assessment assess(const ReferenceAccuracySummary& evidence, Prerequisites prerequisites,
                   Targets targets, Policy policy, IvMetricKind iv_metric_kind) {
     if (!AccuracyRequest{targets.price, targets.iv, policy}.valid()) {
-        return {evidence, prerequisites, targets, policy, Decision::InvalidTargets,
+        return {evidence, prerequisites, AccuracyRequest{targets.price, targets.iv, policy}, Decision::InvalidTargets,
                 std::nullopt, std::nullopt, iv_metric_kind};
     }
     if (!valid_channel(evidence.price, true) || !valid_channel(evidence.iv, false)) {
-        return {evidence, prerequisites, targets, policy, Decision::InvalidEvidence,
+        return {evidence, prerequisites, AccuracyRequest{targets.price, targets.iv, policy}, Decision::InvalidEvidence,
                 std::nullopt, std::nullopt, iv_metric_kind};
     }
     const auto price_met=target_met(evidence.price, targets.price);
@@ -69,7 +69,7 @@ Assessment assess(const ReferenceAccuracySummary& evidence, Prerequisites prereq
     else if (targets.iv && incomplete(evidence.iv)) decision=Decision::IncompleteIvEvidence;
     else if (targets.iv && (!evidence.iv || evidence.iv->measured==0)) decision=Decision::IvUnmeasured;
     else if (targets.iv && iv_metric_kind!=IvMetricKind::AbsoluteIvError) decision=Decision::IvMetricNotActual;
-    return {evidence, prerequisites, targets, policy, decision, price_met, iv_met, iv_metric_kind};
+    return {evidence, prerequisites, AccuracyRequest{targets.price, targets.iv, policy}, decision, price_met, iv_met, iv_metric_kind};
 }
 
 Assessment assess_request(const ReferenceAccuracySummary& evidence,

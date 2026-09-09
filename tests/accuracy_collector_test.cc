@@ -43,7 +43,7 @@ TEST(AccuracyCollectorTest, MeasuresActualNonlinearInversionInsteadOfPriceVegaPr
     EXPECT_NEAR(*evidence.price->max_error, 0.05, 1e-15);
     EXPECT_NEAR(*evidence.iv->max_error, 0.1, 1e-15);
     EXPECT_NEAR(*evidence.iv->rms_error, 0.1, 1e-15);
-    EXPECT_GT(0.05/0.4, *result.assessment.targets().iv);
+    EXPECT_GT(0.05/0.4, *result.assessment.request().max_iv_error);
     ASSERT_EQ(result.rows.size(), 1u);
     EXPECT_EQ(result.rows[0].iv, ObservationOutcome::Measured);
     ASSERT_TRUE(result.rows[0].iv_error.has_value());
@@ -62,7 +62,7 @@ TEST(AccuracyCollectorTest, ProxyUnderestimationCannotFalselyPassAnActualIvTarge
         [](const IVQuery& query) -> std::optional<double> {
             return std::sqrt(query.market_price-0.03);
         }, viable_certified, {.price=0.04, .iv=0.09});
-    EXPECT_LT(0.03/0.4, *result.assessment.targets().iv);
+    EXPECT_LT(0.03/0.4, *result.assessment.request().max_iv_error);
     EXPECT_EQ(result.assessment.decision(), Decision::TargetsMissed);
     EXPECT_EQ(result.assessment.price_target_met(), true);
     EXPECT_EQ(result.assessment.iv_target_met(), false);
