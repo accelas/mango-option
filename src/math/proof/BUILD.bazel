@@ -42,3 +42,14 @@ cc_library(
     strip_include_prefix = "/src/math/proof",
     include_prefix = "mango/math/proof",
 )
+
+cc_library(
+    name = "bspline_box",
+    srcs = ["bspline_box.cpp"],
+    hdrs = ["bspline_box.hpp"],
+    deps = [":bspline_cell"],
+    copts = ["-O3", "-fno-fast-math", "-ffp-contract=off"],
+    visibility = ["//src:__subpackages__", "//tests:__subpackages__"],
+    strip_include_prefix = "/src/math/proof",
+    include_prefix = "mango/math/proof",
+)

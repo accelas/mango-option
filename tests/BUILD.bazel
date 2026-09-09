@@ -2104,5 +2104,11 @@ cc_test(
 cc_test(
     name = "physical_cell_proof_test",
     srcs = ["physical_cell_proof_test.cc"],
-    deps = ["//src/option/table/certification:continuous_cell", "//src/option/table/bspline:bspline_surface", "@googletest//:gtest_main"],
+    deps = ["//src/option/table/certification:continuous_cell", "//src/option/table/bspline:bspline_surface", "//src/option/table/bspline:bspline_3d_surface", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "proof_bspline_box_test",
+    srcs = ["proof_bspline_box_test.cc"],
+    deps = ["//src/math/proof:bspline_box", "@googletest//:gtest_main"],
 )

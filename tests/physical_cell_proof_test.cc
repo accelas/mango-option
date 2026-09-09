@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include "mango/option/table/bspline/bspline_3d_surface.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/certification/continuous_cell.hpp"
 #include <gtest/gtest.h>
@@ -166,4 +167,81 @@ TEST(PhysicalCellProofTest, WholeProofCoversEveryStoredCellWithinOneSharedBudget
     ASSERT_EQ(whole.status, PriceProofStatus::NegativeWitness);
     ASSERT_TRUE(whole.witness);
     EXPECT_GT(whole.witness->volatility, .20002);
+}
+
+namespace {
+BSplineND<double, 3> dimensionless_linear(double u_partial, double z_partial, double offset) {
+    std::array<std::vector<double>, 3> grids{
+        {{-.01, -.003, .003, .01}, {.4, .45, .55, .6}, {-.1, -.03, .03, .1}}};
+    std::array<std::vector<double>, 3> knots;
+    for (std::size_t d = 0; d < 3; ++d) {
+        const double a = grids[d].front(), b = grids[d].back();
+        knots[d] = {a, a, a, a, b, b, b, b};
+    }
+    std::vector<double> coefficients(64);
+    for (std::size_t i = 0; i < 64; ++i)
+        coefficients[i] = offset + u_partial * (.4 + .2 * ((i / 4) % 4) / 3) +
+                          z_partial * (-.1 + .2 * (i % 4) / 3);
+    return BSplineND<double, 3>::create(std::move(grids), std::move(knots), std::move(coefficients))
+        .value();
+}
+} // namespace
+TEST(PhysicalCellProofTest, DimensionlessProofUsesBothActualCoordinateDerivatives) {
+    const SurfaceBounds b{-.001, .001, .99, 1.01, .99, 1.01, .49, .51};
+    auto positive = dimensionless_linear(1, -1, .5);
+    auto result = prove_dimensionless_bspline(positive, 100, OptionType::PUT, b);
+    EXPECT_EQ(result.status, PriceProofStatus::Certified);
+    EXPECT_FALSE(result.witness);
+    auto negative = dimensionless_linear(1, 20, 10);
+    auto violation = prove_dimensionless_bspline(negative, 100, OptionType::PUT, b);
+    EXPECT_EQ(violation.status, PriceProofStatus::NegativeWitness);
+    ASSERT_TRUE(violation.witness);
+    EXPECT_TRUE(violation.witness_vega_per_strike.strictly_negative());
+    BSpline3DLeaf leaf(
+        BSpline3DTransformLeaf(
+            SharedBSplineInterp<3>(std::make_shared<const BSplineND<double, 3>>(negative)), {},
+            100),
+        AnalyticalEEP(OptionType::PUT, 0));
+    const auto &query = *violation.witness;
+    EXPECT_LT(leaf.vega(query.spot, query.strike, query.maturity, query.volatility,
+                        get_zero_rate(query.rate, query.maturity)),
+              0);
+}
+
+TEST(PhysicalCellProofTest, DimensionlessSubdivisionCertifiesPositiveQuadraticSensitivity) {
+    auto base = dimensionless_linear(1, 0, 100);
+    std::array<std::vector<double>, 3> grids, knots;
+    for (std::size_t d = 0; d < 3; ++d) {
+        grids[d] = base.grid(d);
+        knots[d] = base.knots(d);
+    }
+    // f_u=10000*((u-.5)^2+.0001)>0, whose coarse Bernstein middle
+    // derivative coefficient is -99. f stays positive everywhere.
+    const std::array<double, 4> u{100, 100 + 101 * .2 / 3, 100 + 2 * .2 / 3, 100 + 103 * .2 / 3};
+    std::vector<double> coefficients(64);
+    for (std::size_t i = 0; i < 64; ++i)
+        coefficients[i] = u[(i / 4) % 4];
+    auto spline =
+        BSplineND<double, 3>::create(std::move(grids), std::move(knots), std::move(coefficients))
+            .value();
+    const SurfaceBounds b{-.001, .001, 1, 1, std::sqrt(.8), std::sqrt(1.2), .5, .5};
+    auto result = prove_dimensionless_bspline(spline, 100, OptionType::PUT, b, {4096, 24});
+    EXPECT_EQ(result.status, PriceProofStatus::Certified) << "nodes=" << result.nodes;
+    EXPECT_GT(result.nodes, 2u);
+}
+
+TEST(PhysicalCellProofTest, DimensionlessClampAndBudgetKeepTheirPhysicalMeaning) {
+    auto spline = dimensionless_linear(1, -1, .5);
+    SurfaceBounds b{-.001, .001, 3, 4, .99, 1.01, .49, .51};
+    // Transformed time is entirely above its grid; its partial is zero.
+    EXPECT_EQ(prove_dimensionless_bspline(spline, 100, OptionType::PUT, b).status,
+              PriceProofStatus::Certified);
+    auto limited = prove_dimensionless_bspline(spline, 100, OptionType::PUT, b, {1, 24});
+    EXPECT_EQ(limited.status, PriceProofStatus::Indeterminate);
+    EXPECT_EQ(limited.reason, mango::detail::proof::StopReason::NodeBudget);
+    EXPECT_EQ(limited.nodes, 1u);
+    b.rate_min = 0;
+    auto unsupported = prove_dimensionless_bspline(spline, 100, OptionType::PUT, b);
+    EXPECT_EQ(unsupported.status, PriceProofStatus::Indeterminate);
+    EXPECT_FALSE(unsupported.witness);
 }
