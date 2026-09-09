@@ -142,6 +142,28 @@ TEST(GridSpecTest, CenteredSinhRetainsEndpointsAndFiniteRatio) {
     }
 }
 
+// A finite scale can still lose information by underflowing before sinh
+// restores the final coordinate's magnitude. The ratio map avoids that loss.
+TEST(GridSpecTest, CenteredSinhRetainsCoordinatesWhenScaleUnderflows) {
+    constexpr double radius = 1.0e-300;
+    constexpr double alpha = 120.0;
+    constexpr size_t n = 9;
+    auto spec = mango::GridSpec<>::sinh_spaced(-radius, radius, n, alpha);
+    ASSERT_TRUE(spec.has_value());
+    auto grid = spec->generate();
+    for (size_t i = 0; i < n; ++i) {
+        const long double argument = static_cast<long double>(alpha)
+            * (static_cast<long double>(i) / (n - 1) - 0.5L);
+        const long double exact = static_cast<long double>(radius)
+            * std::sinh(argument) / std::sinh(static_cast<long double>(alpha) / 2);
+        const double expected = static_cast<double>(exact);
+        const double tolerance = 8 * std::max(std::numeric_limits<double>::denorm_min(),
+            std::numeric_limits<double>::epsilon() * std::abs(expected));
+        EXPECT_NEAR(grid[i], expected, tolerance) << "i=" << i;
+        if (i > 0) EXPECT_GT(grid[i], grid[i - 1]);
+    }
+}
+
 TEST(GridViewTest, ViewFromBuffer) {
     auto result = mango::GridSpec<>::uniform(0.0, 10.0, 6);
     ASSERT_TRUE(result.has_value());
