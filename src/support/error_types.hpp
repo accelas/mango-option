@@ -13,6 +13,7 @@ namespace mango {
 
 struct RefinementWork;
 class ReferenceSelectionHistory;
+class AccuracyReport;
 
 /// High-level solver error categories surfaced through expected results
 enum class SolverErrorCode {
@@ -73,6 +74,7 @@ struct ValidationError {
     size_t index;  // Optional index for array/grid errors (0 if not applicable)
     std::shared_ptr<const RefinementWork> work;  ///< Retained build work, when available
     std::shared_ptr<const ReferenceSelectionHistory> reference_selection;
+    std::shared_ptr<const AccuracyReport> accuracy_report;
 
     ValidationError(ValidationErrorCode code,
                    double value = 0.0,
@@ -235,6 +237,7 @@ struct PriceTableError {
     size_t count;              ///< Count for size-related errors
     std::shared_ptr<const RefinementWork> work;  ///< Present when a build spent tracked work
     std::shared_ptr<const ReferenceSelectionHistory> reference_selection;
+    std::shared_ptr<const AccuracyReport> accuracy_report;
 
     PriceTableError(PriceTableErrorCode code,
                    size_t axis_index = 0,
@@ -425,7 +428,7 @@ inline PriceTableError convert_to_price_table_error(const InterpolationError& er
 
 /// Convert ValidationError to PriceTableError
 inline PriceTableError convert_to_price_table_error(const ValidationError& err) {
-    PriceTableErrorCode code;
+    PriceTableErrorCode code = PriceTableErrorCode::SurfaceBuildFailed;
     switch (err.code) {
         case ValidationErrorCode::InvalidStrike:
         case ValidationErrorCode::InvalidSpotPrice:
@@ -481,6 +484,7 @@ inline PriceTableError convert_to_price_table_error(const ValidationError& err) 
     PriceTableError result{code, err.index, 0};
     result.work = err.work;
     result.reference_selection = err.reference_selection;
+    result.accuracy_report = err.accuracy_report;
     return result;
 }
 

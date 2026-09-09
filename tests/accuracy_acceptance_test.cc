@@ -29,8 +29,8 @@ TEST(AccuracyAcceptanceTest, DefaultsGateMaximumQuoteAndDecimalIvErrors) {
     EXPECT_EQ(passing.decision(), Decision::Accepted);
     EXPECT_EQ(passing.price_target_met(), true);
     EXPECT_EQ(passing.iv_target_met(), true);
-    EXPECT_DOUBLE_EQ(passing.targets().price, 0.01);
-    EXPECT_EQ(passing.targets().iv, 2e-5);  // 0.2 absolute-IV bp, not 2 bp.
+    EXPECT_DOUBLE_EQ(passing.request().max_price_error, 0.01);
+    EXPECT_EQ(passing.request().max_iv_error, 2e-5);  // 0.2 absolute-IV bp, not 2 bp.
 
     auto price_miss=assess_actual_iv(measured(0.0101, 1e-5), viable_certified);
     EXPECT_EQ(price_miss.decision(), Decision::TargetsMissed);
