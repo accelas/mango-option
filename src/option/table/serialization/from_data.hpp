@@ -11,7 +11,9 @@ namespace mango {
 
 /// Reconstruct a PriceTable<Inner> from its serialized PriceTableData.
 ///
-/// Validates that data.surface_type matches the expected type for Inner.
+/// Validates the representation/model/domain and recomputes the composed
+/// sigma-shape proof on the detached stored payload. Persisted diagnostic
+/// history is never accepted as current proof evidence.
 /// Explicit instantiations are provided for all surface Inner types.
 ///
 /// @tparam Inner  The inner surface type (e.g. BSplineLeaf, ChebyshevRawLeaf)

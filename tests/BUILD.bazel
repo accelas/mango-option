@@ -2135,7 +2135,7 @@ cc_test(
 cc_test(
     name = "financial_certification_red_test",
     srcs = ["financial_certification_red_test.cc"],
-    deps = ["//src/option/table/bspline:bspline_surface", "//src/option:price_table_factory", "@googletest//:gtest_main"],
+    deps = ["//src/option/table/bspline:bspline_surface", "//src/option:price_table_factory", "//src/option/table/serialization:from_data", "//src/option/table/serialization:to_data", "@googletest//:gtest_main"],
     tags = ["manual"],
 )
 
