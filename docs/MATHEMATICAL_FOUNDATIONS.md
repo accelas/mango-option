@@ -698,7 +698,46 @@ or European add-back is applied to segmented leaves.
 
 ### Multiple Reference Strikes
 
-Cash dividends break the scale invariance that American options normally have in strike (the EEP decomposition assumes $P \propto K$, which fails when $D/K$ varies with $K$). The builder constructs surfaces at several reference strikes and interpolates across them with Catmull-Rom splines in $\ln(K_\text{ref})$, producing a `SegmentedMultiKRefSurface`.
+Cash dividends break strike homogeneity because the normalized cash amount
+$D/K$ changes with strike. For a query $(S,K)$, the reference-$K_i$ surface
+is evaluated at $S_i=SK_i/K$, preserving the requested moneyness. Between
+adjacent references, use positive linear weights in absolute strike:
+
+$$w=\frac{K-K_0}{K_1-K_0},\qquad
+P(S,K)=K\left[(1-w)\frac{P_0(SK_0/K)}{K_0}
++w\frac{P_1(SK_1/K)}{K_1}\right].$$
+
+The same fixed-expiry anchor and absolute cash schedule apply to both
+reference models. Queries use the schedule rolled by $T_0-\tau$. Since the
+weights depend on strike rather than spot, the spot Jacobians give
+$\Delta=\sum_i w_i\Delta_i$ and
+$\Gamma=\sum_i w_i(K_i/K)\Gamma_i$, with reference Greeks evaluated at $S_i$.
+
+The published absolute-strike interval is separate from fit support and from
+moving spot. Explicit references retain their exact values and must cover
+that interval. Automatic references start with covering endpoints and an
+interior seed, then grow within strict reference-count and round ceilings.
+Both backends and both manual/adaptive routes use the same measured selection
+policy. Coverage alone does not establish density adequacy.
+
+A fixed 150-query PUT panel measured on numerical source `d050d576`
+(T0=1, cash1 at .5, q=.02, r=.05, K[90,110], S/K[.92,1.08], sigma[.2,.3])
+accepted nine references after qualified failures at three and five. Its
+72 numerical rows and 78 structural identities had no unresolved or filtered
+rows at nine references. Maximum price error was .0001401025; maximum
+price/vega IV proxy was 7.5593e-6 decimal volatility, with maximum proxy
+uncertainty 1.5218e-6. The full proxy target remained 2e-5. Every physical
+query and uncertainty criterion was retained after stabilizing centered-grid
+arithmetic; component-price uncertainty was used where direct differences
+could not qualify.
+
+The `reference_selection_probe ordinary-trace 3 5 9` run recorded 2492
+attempted reference requests and 533 seconds of shared-machine wall time.
+Those requests predate the actual-solver work ledger and are not relabeled
+completed solves. This measures ideal reference blending only; it establishes
+neither a universal nine-reference default nor fitted-table/actual-IV accuracy.
+The separate low-volatility cash panel retains its unresolved cases. Full
+composed accuracy and publication remain separate validation stages.
 
 ### Adaptive Grid Refinement for Segmented Surfaces
 

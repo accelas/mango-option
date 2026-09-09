@@ -611,7 +611,11 @@ jump callbacks, which is the pre-dividend calendar side.
 
 The result is a `BSplineSegmentedSurface` — an ordered list of segments that together cover [0, T]. At query time, the surface finds the segment covering the requested τ and evaluates it directly.
 
-**Why multiple K_ref values?** Cash dividends break the scale invariance that American options normally have in strike. A single reference-strike surface cannot accurately interpolate across strikes far from K_ref. The builder constructs surfaces at several reference strikes and interpolates across them with Catmull-Rom splines in log(K_ref). The result is a `SegmentedMultiKRefSurface`.
+**Why multiple K_ref values?** Absolute cash dividends break strike
+homogeneity. The builder evaluates each adjacent reference surface at
+`S*K_ref/K`, normalizes its price by `K_ref`, and blends with positive linear
+weights in absolute strike before multiplying by the requested `K`.
+Reference density is measured over the requested physical domain.
 
 ### Building a Segmented IV Solver
 
@@ -819,14 +823,14 @@ Chebyshev config, and
 `IVSolverFactorySegmented.DocumentedBSplineConfigBuildsButMissesTarget` for the
 B-spline achieved error.
 
-**The moneyness grid and the K_refs must agree.** The assembled surface routes
-a query to the K_refs bracketing its strike and blends their prices linearly
-in strike, so the K_refs must both *span* and *resolve* the strike range the
-moneyness grid implies. Here `S/K ∈ [0.92, 1.08]` means strikes in
-`[92.6, 108.7]`, served by K_refs at 2.5% spacing across `[90, 110]`. Pairing
-the same K_refs with the default ±30% moneyness grid puts most queried
-strikes outside the K_ref span, where the blend clamps to a single K_ref, and
-the build fails with `NoViableSurface` rather than returning it.
+**Reference coverage and density.** Unless supplied explicitly, the supported
+strike interval derives from the build spot and original requested ratios.
+For spot100 and `S/K ∈ [0.92,1.08]`, this is `[100/1.08,100/0.92]`.
+Explicit reference vectors must cover the whole interval; otherwise the
+builder returns `InvalidConfig` before PDE work. A covering vector must also
+satisfy measured reference criteria; fixed spacing alone is not an accuracy
+guarantee. Automatic selection grows within its configured ceilings and
+reports failure when it cannot establish an acceptable reference set.
 
 Note that `BSplineBackend::maturity_grid` is **ignored** whenever
 `discrete_dividends` is set, on both the manual and the adaptive segmented
