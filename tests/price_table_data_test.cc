@@ -40,7 +40,7 @@ namespace {
 ChebyshevMultiKRefSurface metadata_surface() {
     std::vector<ChebyshevTauSegmented> references;
     for (double k : {80.0, 120.0}) {
-        auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build_from_values(
+        auto interp = ChebyshevModalInterpolant<4>::build_from_values(
             std::vector<double>(16, 0.1),
             Domain<4>{{-0.3, 0.01, 0.1, 0.02}, {0.3, 1.0, 0.4, 0.08}},
             std::array<size_t, 4>{2, 2, 2, 2}).value();
@@ -55,6 +55,26 @@ ChebyshevMultiKRefSurface metadata_surface() {
         ChebyshevMultiKRefInner(std::move(references), MultiKRefSplit({80.0, 120.0})),
         bounds, OptionType::PUT, 0.02,
         FixedExpiryMetadata{2.0, {{1.5, 2.0}, {1.8, 3.0}}});
+}
+
+TEST(PriceTableDataTest, FinancialChebyshevStoresThePolynomialUsedForQueries) {
+    const auto table = metadata_surface();
+    const auto data = to_data(table);
+    ASSERT_EQ(data.segments.size(), 2u);
+    for (const auto& segment : data.segments) {
+        EXPECT_EQ(segment.interp_type, "chebyshev_modal");
+        ASSERT_EQ(segment.values.size(), 16u);
+        EXPECT_DOUBLE_EQ(segment.values.front(), 0.1);
+        for (std::size_t i = 1; i < segment.values.size(); ++i)
+            EXPECT_EQ(segment.values[i], 0.0);
+    }
+    auto restored = from_data<ChebyshevMultiKRefInner>(data);
+    ASSERT_TRUE(restored);
+    EXPECT_DOUBLE_EQ(restored->price(100, 100, .8, .2, .05), 10.0);
+    EXPECT_DOUBLE_EQ(restored->vega(100, 100, .8, .2, .05), 0.0);
+    auto wrong_representation = data;
+    wrong_representation.segments[0].interp_type = "chebyshev";
+    EXPECT_FALSE(from_data<ChebyshevMultiKRefInner>(wrong_representation));
 }
 
 TEST(PriceTableDataTest, SegmentedReconstructionRejectsIncompleteOrInvalidModelMetadata) {
@@ -240,7 +260,7 @@ TEST(PriceTableDataTest, ChebyshevRaw4DRoundTrip) {
 
     EXPECT_EQ(data.surface_type, "chebyshev_4d_raw");
     ASSERT_EQ(data.segments.size(), 1u);
-    EXPECT_EQ(data.segments[0].interp_type, "chebyshev");
+    EXPECT_EQ(data.segments[0].interp_type, "chebyshev_modal");
     EXPECT_EQ(data.segments[0].ndim, 4u);
 
     auto loaded = from_data<ChebyshevRawLeaf>(data);
@@ -428,7 +448,7 @@ TEST(PriceTableDataTest, ChebyshevSegmentedRoundTrip) {
     EXPECT_NEAR(data.dividend_yield, 0.02, 1e-15);
 
     for (const auto& seg : data.segments) {
-        EXPECT_EQ(seg.interp_type, "chebyshev");
+        EXPECT_EQ(seg.interp_type, "chebyshev_modal");
         EXPECT_EQ(seg.ndim, 4u);
     }
 

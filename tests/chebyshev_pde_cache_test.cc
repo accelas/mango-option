@@ -323,6 +323,14 @@ TEST(ChebyshevPDECacheTest, RejectsUnmatchedSampleInsteadOfChangingItsOwner) {
     EXPECT_EQ(leaves.error().code, PriceTableErrorCode::ExtractionFailed);
 }
 
+TEST(ChebyshevPDECacheTest, TinySegmentPreservesEveryRequestedCGLNode) {
+    const auto nodes = detail::generate_segmented_tau_nodes(4, {0.0, 1e-9}, {false});
+    const auto expected = cc_level_nodes(4, 0.0, 1e-9);
+    EXPECT_EQ(nodes, expected);
+    ASSERT_EQ(nodes.size(), 17u);
+    for (std::size_t i = 1; i < nodes.size(); ++i) EXPECT_LT(nodes[i - 1], nodes[i]);
+}
+
 TEST(ChebyshevPDECacheTest, GeneratedSegmentNodesKeepTheirCardinality) {
     ChebyshevPDECache cache;
     const std::vector<double> bounds = {0.01, 0.1495, 0.1505, 0.25};

@@ -99,11 +99,12 @@ PriceTableData model_payload() {
         segment.K_ref = k;
         segment.tau_end = segment.tau_max = 1.0;
         segment.tau_min = 0.01;
-        segment.interp_type = "chebyshev";
+        segment.interp_type = "chebyshev_modal";
         segment.domain_lo = {-0.3, 0.01, 0.1, 0.02};
         segment.domain_hi = {0.3, 1.0, 0.4, 0.08};
         segment.num_pts = {2, 2, 2, 2};
-        segment.values = std::vector<double>(16, .1);
+        segment.values = std::vector<double>(16, 0.0);
+        segment.values[0] = .1;
         data.segments.push_back(std::move(segment));
     }
     return data;
@@ -470,7 +471,7 @@ TEST_F(ParquetIOTest, Chebyshev3DRoundTrip) {
         .hi = {axes.log_moneyness.back(), axes.tau_prime.back(), axes.ln_kappa.back()},
     };
 
-    auto cheb = ChebyshevInterpolant<3, RawTensor<3>>::build_from_values(
+    auto cheb = ChebyshevModalInterpolant<3>::build_from_values(
         std::span<const double>(pde->values),
         domain, num_pts).value();
 
@@ -1191,7 +1192,7 @@ TEST_F(ParquetIOTest, ChebyshevSegmentedMultiKRefRoundTrip) {
     // Build a Chebyshev segmented surface with 2 K_ref groups × 2 tau
     // segments each, then round-trip through Parquet.
     //
-    // Construction: build ChebyshevInterpolant<4, RawTensor<4>> instances
+    // Construction: build ChebyshevModalInterpolant<4> instances
     // manually, compose into ChebyshevMultiKRefSurface.
 
     constexpr size_t N = 4;
@@ -1224,7 +1225,7 @@ TEST_F(ParquetIOTest, ChebyshevSegmentedMultiKRefRoundTrip) {
             values[i] = 0.01 + 0.001 * static_cast<double>(i)
                        + 0.0001 * spec.K_ref;
         }
-        auto interp = ChebyshevInterpolant<N, RawTensor<N>>::build_from_values(
+        auto interp = ChebyshevModalInterpolant<N>::build_from_values(
             std::span<const double>(values), domain, num_pts).value();
         StandardTransform4D xform;
         return ChebyshevSegmentedLeaf(std::move(interp), xform, spec.K_ref);

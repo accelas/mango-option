@@ -110,9 +110,10 @@ std::vector<double> generate_segmented_tau_nodes(
             tau_nodes.push_back(t);
     }
     std::sort(tau_nodes.begin(), tau_nodes.end());
-    tau_nodes.erase(std::unique(tau_nodes.begin(), tau_nodes.end(),
-        [](double a, double b) { return std::abs(a - b) < 1e-10; }),
-        tau_nodes.end());
+    // Distinct represented CGL nodes are data, even for tiny maturities.
+    // A tolerance-based merge changes the declared tensor degree and treats
+    // the remaining values as samples at different polynomial coordinates.
+    tau_nodes.erase(std::unique(tau_nodes.begin(), tau_nodes.end()), tau_nodes.end());
     return tau_nodes;
 }
 
@@ -353,7 +354,7 @@ build_segment_leaves(
             };
             std::array<size_t, 4> num_pts = {2, 2, 2, 2};
             std::vector<double> zeros(16, 0.0);
-            auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
+            auto interp = ChebyshevModalInterpolant<4>::
                 build_from_values(std::span<const double>(zeros),
                                   domain, num_pts);
             if (!interp.has_value()) {
@@ -406,7 +407,7 @@ build_segment_leaves(
                    sigma_nodes.back(), rate_nodes.back()},
         };
         std::array<size_t, 4> num_pts = {Nm, Nt_seg, Ns, Nr};
-        auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
+        auto interp = ChebyshevModalInterpolant<4>::
             build_from_values(std::span<const double>(values),
                               domain, num_pts);
         if (!interp.has_value()) {
@@ -543,7 +544,7 @@ static BuildFn make_chebyshev_build_fn(
         };
         std::array<size_t, 4> num_pts = {Nm, Nt, Ns, Nr};
 
-        auto interp = ChebyshevInterpolant<4, RawTensor<4>>::
+        auto interp = ChebyshevModalInterpolant<4>::
             build_from_values(std::span<const double>(eep_values),
                               domain, num_pts);
         if (!interp.has_value()) {

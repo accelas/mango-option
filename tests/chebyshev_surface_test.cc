@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
+#include "mango/math/chebyshev/chebyshev_interpolant.hpp"
+#include "mango/math/chebyshev/raw_tensor.hpp"
 
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
@@ -11,6 +13,19 @@
 
 using namespace mango;
 
+namespace {
+// Sample the analytic test function at the existing CGL nodes, then explicitly
+// convert those samples to the modal polynomial used by financial surfaces.
+template <std::size_t N, class Function>
+std::expected<ChebyshevModalInterpolant<N>, InterpolationError> sample_modal(
+    Function function, const Domain<N>& domain, const std::array<std::size_t, N>& shape) {
+    auto sampled = ChebyshevInterpolant<N, RawTensor<N>>::build(function, domain, shape);
+    if (!sampled) return std::unexpected(sampled.error());
+    return ChebyshevModalInterpolant<N>::build_from_values(
+        sampled->storage().values(), domain, shape);
+}
+} // namespace
+
 // Static assertions
 static_assert(SurfaceInterpolant<ChebyshevInterpolant<4, RawTensor<4>>, 4>);
 
@@ -20,7 +35,7 @@ TEST(ChebyshevSurfaceTest, MathReviewGammaAtAndNearMoneynessEdges) {
     const Domain<4> domain{
         .lo = {-1.0, 0.1, 0.1, 0.01},
         .hi = {1.0, 1.0, 0.5, 0.1}};
-    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build(
+    auto interp = sample_modal<4>(
         [](std::array<double, 4> c) { return 3.0 + c[0] + c[0] * c[0]; },
         domain, {4, 4, 4, 4});
     ASSERT_TRUE(interp.has_value());
@@ -51,7 +66,7 @@ TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
     };
     std::array<size_t, 4> num_pts = {5, 5, 5, 5};
 
-    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build(
+    auto interp = sample_modal<4>(
         [](std::array<double, 4>) { return 0.05; },
         domain, num_pts);
     ASSERT_TRUE(interp.has_value());
@@ -141,7 +156,7 @@ TEST(TransformLeafNaNTest, PricePropagatesNaNAndKeepsFloor) {
     auto f = [](std::array<double, 4>) { return -1.0; };  // always-negative raw
     Domain<4> dom{.lo = {-0.7, 0.05, 0.1, 0.0}, .hi = {0.7, 2.0, 0.5, 0.08}};
     std::array<size_t, 4> npts = {5, 5, 5, 5};
-    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build(f, dom, npts);
+    auto interp = sample_modal<4>(f, dom, npts);
     ASSERT_TRUE(interp.has_value());
     ChebyshevTransformLeaf leaf(std::move(*interp),
                                  StandardTransform4D{}, 100.0);
@@ -154,8 +169,8 @@ TEST(TransformLeafNaNTest, PricePropagatesNaNAndKeepsFloor) {
     // NaN spot propagates instead of masking to 0.0
     EXPECT_TRUE(std::isnan(leaf.price(std::nan(""), 100.0, 1.0, 0.2, 0.05)));
 
-    // Inf spot still clamps to the domain edge (finite output)
-    EXPECT_TRUE(std::isfinite(
+    // The modal polynomial rejects nonfinite coordinates, including infinity.
+    EXPECT_TRUE(std::isnan(
         leaf.price(std::numeric_limits<double>::infinity(), 100.0, 1.0, 0.2, 0.05)));
 }
 
@@ -214,7 +229,7 @@ TEST(ChebyshevTableBuilderTest, TailsMatchFdmAtExtremeMoneyness) {
 
 TEST(ChebyshevSurfaceTest, NonfiniteMaturityIsOutsideContinuousDomain) {
     const Domain<4> domain{{-0.2, 0.1, 0.1, 0.01}, {0.2, 1.0, 0.3, 0.1}};
-    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build(
+    auto interp = sample_modal<4>(
         [](std::array<double, 4>) { return 1.0; }, domain, {2, 2, 2, 2});
     ASSERT_TRUE(interp.has_value());
     ChebyshevTransformLeaf leaf(std::move(*interp), StandardTransform4D{}, 100.0);

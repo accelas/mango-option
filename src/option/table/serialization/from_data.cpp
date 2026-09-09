@@ -151,7 +151,7 @@ from_data<ChebyshevLeaf>(const PriceTableData& data) {
     }
 
     const auto& seg = data.segments[0];
-    auto leaf = reconstruct_chebyshev_leaf<4, StandardTransform4D>(seg);
+    auto leaf = reconstruct_chebyshev_modal_leaf<4, StandardTransform4D>(seg);
     if (!leaf) return std::unexpected(leaf.error());
 
     auto eep_leaf = reconstruct_eep(std::move(*leaf),
@@ -196,7 +196,7 @@ from_data<ChebyshevMultiKRefInner>(const PriceTableData& data) {
 
     for (const auto& [k_ref, group] : groups) {
         k_refs.push_back(k_ref);
-        auto tau_split = reconstruct_chebyshev_tau_split<4, StandardTransform4D>(
+        auto tau_split = reconstruct_chebyshev_modal_tau_split<4, StandardTransform4D>(
             group, k_ref);
         if (!tau_split) return std::unexpected(tau_split.error());
         kref_surfaces.push_back(std::move(*tau_split));
@@ -259,7 +259,7 @@ from_data<Chebyshev3DLeaf>(const PriceTableData& data) {
     }
 
     const auto& seg = data.segments[0];
-    auto leaf = reconstruct_chebyshev_leaf<3, DimensionlessTransform3D>(seg);
+    auto leaf = reconstruct_chebyshev_modal_leaf<3, DimensionlessTransform3D>(seg);
     if (!leaf) return std::unexpected(leaf.error());
 
     auto eep_leaf = reconstruct_eep(std::move(*leaf),
