@@ -12,6 +12,7 @@
 namespace mango {
 
 struct RefinementWork;
+class ReferenceSelectionHistory;
 
 /// High-level solver error categories surfaced through expected results
 enum class SolverErrorCode {
@@ -67,6 +68,8 @@ struct ValidationError {
     ValidationErrorCode code;
     double value;  // The invalid value that was provided
     size_t index;  // Optional index for array/grid errors (0 if not applicable)
+    std::shared_ptr<const RefinementWork> work;  ///< Retained build work, when available
+    std::shared_ptr<const ReferenceSelectionHistory> reference_selection;
 
     ValidationError(ValidationErrorCode code,
                    double value = 0.0,
@@ -225,6 +228,7 @@ struct PriceTableError {
     size_t axis_index;         ///< Axis index for grid errors (0-3 for 4D)
     size_t count;              ///< Count for size-related errors
     std::shared_ptr<const RefinementWork> work;  ///< Present when a build spent tracked work
+    std::shared_ptr<const ReferenceSelectionHistory> reference_selection;
 
     PriceTableError(PriceTableErrorCode code,
                    size_t axis_index = 0,
@@ -456,7 +460,10 @@ inline PriceTableError convert_to_price_table_error(const ValidationError& err) 
             code = PriceTableErrorCode::ValidationFailed;
             break;
     }
-    return PriceTableError{code, err.index, 0};
+    PriceTableError result{code, err.index, 0};
+    result.work = err.work;
+    result.reference_selection = err.reference_selection;
+    return result;
 }
 
 // ============================================================================

@@ -33,7 +33,7 @@ namespace mango {
 struct SurfaceHandle {
     std::function<double(double spot, double strike, double tau,
                          double sigma, double rate)> price;
-    size_t pde_solves = 0;
+    std::optional<size_t> pde_solves = std::nullopt;  ///< Explicit successful solve count, absent when unreported
 };
 
 /// Domain bounds for the refinement loop (spec D2).
@@ -55,6 +55,8 @@ struct RefinementContext {
     /// Admitted physical tau intervals for measurement, excluding gaps.
     /// nullopt means the full sample tau interval; an engaged empty set is invalid.
     std::optional<std::vector<std::pair<double, double>>> maturity_intervals = std::nullopt;
+    /// Internal exploration goal. Public acceptance is owned by Gate 7.
+    double price_target = 0.01;
 };
 
 /// Shared cheap checks before reference preparation or numerical builds.
@@ -71,9 +73,9 @@ inline constexpr double kMinRelImprovement = 0.02;
 
 /// Result of grid sizing from the refinement loop
 ///
-/// `achieved_max_error` / `achieved_avg_error` / `target_met` describe the
-/// *returned* candidate measured on the fixed holdout (spec D5), not the last
-/// iteration's fresh samples.
+/// Legacy max/average error fields describe the returned candidate's IV proxy
+/// on the fixed holdout. target_met covers both exploration goals; none of
+/// these fields establishes final measured accuracy or certification.
 struct RefinementResult {
     std::vector<double> moneyness;
     std::vector<double> tau;
@@ -201,8 +203,48 @@ struct ErrorBins {
 // Callback type aliases
 // ============================================================================
 
+/// A callback outcome keeps provider work even when its value is a failure.
+/// Conversion from a legacy expected carries unknown work unless the returned
+/// surface explicitly reports its solve count. Analytic providers pass PdeWork{}.
+template <typename T, typename E>
+class ProviderResult {
+public:
+    using value_type = T;
+    ProviderResult(std::expected<T, E> value, std::optional<PdeWork> reported = std::nullopt)
+        : value_(std::move(value)), work(reported) {
+        if (!work) {
+            if constexpr (requires { value_->pde_solves; }) {
+                if (value_ && value_->pde_solves) {
+                    work = PdeWork{*value_->pde_solves, *value_->pde_solves, 0};
+                }
+            }
+        }
+    }
+    ProviderResult(T value, std::optional<PdeWork> reported = std::nullopt)
+        : ProviderResult(std::expected<T, E>(std::move(value)), reported) {}
+    ProviderResult(std::unexpected<E> error, std::optional<PdeWork> reported = std::nullopt)
+        : ProviderResult(std::expected<T, E>(std::move(error)), reported) {}
+    [[nodiscard]] bool has_value() const { return value_.has_value(); }
+    explicit operator bool() const { return has_value(); }
+    T& operator*() & { return *value_; }
+    const T& operator*() const& { return *value_; }
+    T&& operator*() && { return std::move(*value_); }
+    T* operator->() { return &*value_; }
+    const T* operator->() const { return &*value_; }
+    T& value() & { return value_.value(); }
+    const T& value() const& { return value_.value(); }
+    T&& value() && { return std::move(value_).value(); }
+    E& error() & { return value_.error(); }
+    const E& error() const& { return value_.error(); }
+
+private:
+    std::expected<T, E> value_;
+public:
+    std::optional<PdeWork> work;
+};
+
 /// Builds a surface from current grids, returns handle for querying
-using BuildFn = std::function<std::expected<SurfaceHandle, PriceTableError>(
+using BuildFn = std::function<ProviderResult<SurfaceHandle, PriceTableError>(
     std::span<const double> moneyness,
     std::span<const double> tau_grid,
     std::span<const double> vol,
@@ -245,7 +287,7 @@ struct RefineStateHooks {
 };
 
 /// Produces a fresh FD reference price for one validation point
-using ValidateFn = std::function<std::expected<double, SolverError>(
+using ValidateFn = std::function<ProviderResult<double, SolverError>(
     double spot, double strike, double tau,
     double sigma, double rate)>;
 
@@ -257,10 +299,10 @@ struct ErrorRefs {
 
 /// Produce refs for one point (base solve + two sigma-bump solves).
 /// Any failed or non-finite solve => unexpected.
-using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
+using PrepareRefsFn = std::function<ProviderResult<ErrorRefs, SolverError>(
     double spot, double strike, double tau, double sigma, double rate)>;
 
-/// Score one point from interpolated price + cached refs. Pure arithmetic.
+/// Score the exploration-only IV price/vega proxy. It is not actual IV error.
 ///
 /// Contract (spec D4, final-review amendment 2026-08-29):
 ///  - `std::nullopt` means the point was **deliberately skipped** by a filter
@@ -270,10 +312,13 @@ using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
 ///    surface nor condemn it.
 ///  - An engaged value must be finite and nonnegative; anything else is a
 ///    non-viable evaluation and disqualifies the candidate (D5).
-using ScoreErrorFn = std::function<std::optional<double>(
+using IvProxyScoreFn = std::function<std::optional<double>(
     double interp, const ErrorRefs& refs,
     double spot, double strike, double tau,
     double sigma, double rate)>;
+
+/// Compatibility name for the exploration-only IV proxy callback.
+using ScoreErrorFn = IvProxyScoreFn;
 
 // ============================================================================
 // Shared helper function declarations
@@ -415,11 +460,8 @@ struct ValidationPoint {
 struct FinalValidationSet {
     std::vector<ValidationPoint> points;
     size_t invalid = 0;
-    /// `PrepareRefsFn` invocations made, valid and invalid alike.  Each costs
-    /// up to three FD solves (base plus two sigma bumps); an attempt that
-    /// fails on the base solve costs fewer, so `3 * ref_attempts` is an upper
-    /// bound on the build's validation cost.
-    size_t ref_attempts = 0;
+    OperationWork reference_work;
+
 };
 
 /// Draw `params.validation_samples` LHS points over the **sample** domain
@@ -455,6 +497,14 @@ struct FinalScore {
     size_t filtered = 0;   ///< points the score fn skipped (nullopt)
     size_t skipped = 0;    ///< points with a non-finite/negative evaluation
     bool all_finite = true;
+    RefinementPriceErrors price_errors;
+
+    /// Both channels guide exploration; IV remains explicitly a proxy.
+    [[nodiscard]] double exploration_error(double price_target, double iv_proxy_target) const {
+        if (!all_finite || !price_errors.max_error) return std::numeric_limits<double>::infinity();
+        return std::max(*price_errors.max_error / price_target,
+                        measured > 0 ? max_error / iv_proxy_target : 0.0);
+    }
 
     /// D5 viability: every engaged evaluation finite and nonnegative, at
     /// least one *measurement*, and the max error within the absolute garbage
@@ -479,7 +529,7 @@ struct FinalScore {
 /// Retry trigger (spec D9 step 2): the original assembled surface misses the
 /// target, or it is not viable at all.
 [[nodiscard]] bool needs_final_retry(const FinalScore& original,
-                                     double target_iv_error);
+                                     double target_iv_error, double price_target = 0.01);
 
 /// Which assembled surface the builder returns (spec D9 step 3).
 enum class FinalPick { None, Original, Retry };
@@ -490,7 +540,8 @@ enum class FinalPick { None, Original, Retry };
 /// retry is strictly larger, so equal accuracy is not worth the extra knots.
 [[nodiscard]] FinalPick select_final_surface(
     const FinalScore& original,
-    const std::optional<FinalScore>& retry);
+    const std::optional<FinalScore>& retry,
+    double target_iv_error = 2e-5, double price_target = 0.01);
 
 /// Monotonicity statistics for a returned surface (spec D7).
 ///

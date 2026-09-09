@@ -222,8 +222,8 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, TracksIterationDiagnostics) {
 
     for (const auto& iter : result->iterations) {
         // Each iteration should have valid stats
-        EXPECT_GE(iter.pde_solves_table, 0);
-        EXPECT_GE(iter.pde_solves_validation, 0);
+        EXPECT_LE(iter.table_work.failed_requests, iter.table_work.requests);
+        EXPECT_LE(iter.reference_work.failed_requests, iter.reference_work.requests);
         EXPECT_GE(iter.max_error, 0.0);
         EXPECT_GE(iter.avg_error, 0.0);
         EXPECT_LE(iter.avg_error, iter.max_error);
@@ -235,12 +235,19 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, TracksIterationDiagnostics) {
         }
     }
 
-    // Total PDE solves should be consistent
-    size_t computed_total = 0;
+    // Fixed holdout work is charged once, in addition to each iteration.
+    OperationWork table_work;
+    OperationWork references = result->diagnostics.holdout_reference_work;
     for (const auto& iter : result->iterations) {
-        computed_total += iter.pde_solves_table + iter.pde_solves_validation;
+        table_work += iter.table_work;
+        references += iter.reference_work;
     }
-    EXPECT_EQ(result->total_pde_solves, computed_total);
+    RefinementWork reconstructed{.references = references, .tables = table_work};
+    EXPECT_EQ(result->total_pde_solves, reconstructed.total_pde_attempts());
+    EXPECT_EQ(result->total_pde_solves, result->diagnostics.work.total_pde_attempts());
+    EXPECT_EQ(result->diagnostics.iterations.front().reference_work.requests,
+              result->iterations.front().reference_work.requests);
+
 }
 
 }  // namespace

@@ -40,6 +40,13 @@
 #include <vector>
 
 using namespace mango;
+
+static std::string pde_work_label(std::optional<size_t> attempts) {
+    return attempts ? std::to_string(*attempts) : "unknown";
+}
+static std::string pde_work_label(const OperationWork& work) {
+    return pde_work_label(work.pde ? std::optional<size_t>(work.pde->attempted) : std::nullopt);
+}
 using namespace mango::bench;
 
 // ============================================================================
@@ -192,14 +199,14 @@ static std::vector<std::pair<size_t, BSplineDivSolver>> build_div_solvers() {
         }
 
         // Print convergence stats
-        std::printf("  T=%s: iters=%zu target_met=%s max_err=%.1f bps "
-                    "avg_err=%.1f bps PDE=%zu%s\n",
+        std::printf("  T=%s: iters=%zu target_met=%s max_proxy=%.1f bps "
+                    "avg_proxy=%.1f bps PDE=%s%s\n",
                     kMatLabels[ti],
                     result->iterations.size(),
                     result->target_met ? "yes" : "no",
                     result->achieved_max_error * 1e4,
                     result->achieved_avg_error * 1e4,
-                    result->total_pde_solves,
+                    pde_work_label(result->total_pde_solves).c_str(),
                     result->used_retry ? " (retry)" : "");
 
         // Wrap in BSplineMultiKRefSurface → InterpolatedIVSolver
@@ -655,18 +662,18 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
     }
 
     // Print iteration stats
-    std::printf("  Iterations: %zu, PDE solves: %zu, target_met: %s\n",
+    std::printf("  Iterations: %zu, PDE attempts: %s, target_met: %s\n",
                 result->iterations.size(),
-                result->total_pde_solves,
+                pde_work_label(result->total_pde_solves).c_str(),
                 result->target_met ? "yes" : "no");
     for (const auto& it : result->iterations) {
         std::printf("  iter %zu: grid [%zu, %zu, %zu, %zu] "
-                    "max_err=%.1f bps avg_err=%.1f bps PDE=%zu\n",
+                    "max_proxy=%.1f bps avg_proxy=%.1f bps PDE=%s\n",
                     it.iteration,
                     it.grid_sizes[0], it.grid_sizes[1],
                     it.grid_sizes[2], it.grid_sizes[3],
                     it.max_error * 1e4, it.avg_error * 1e4,
-                    it.pde_solves_table);
+                    pde_work_label(it.table_work).c_str());
     }
 
     // Wrap in InterpolatedIVSolver for consistent vega pre-check
@@ -733,13 +740,13 @@ run_chebyshev_dividends(const PriceGrid& prices) {
         return empty;
     }
 
-    std::printf("  Iterations: %zu, PDE solves: %zu, target_met: %s\n",
+    std::printf("  Iterations: %zu, PDE attempts: %s, target_met: %s\n",
                 result->iterations.size(),
-                result->total_pde_solves,
+                pde_work_label(result->total_pde_solves).c_str(),
                 result->target_met ? "yes" : "no");
     for (const auto& it : result->iterations) {
         std::printf("  iter %zu: grid [%zu, %zu, %zu, %zu] "
-                    "max_err=%.1f bps avg_err=%.1f bps\n",
+                    "max_proxy=%.1f bps avg_proxy=%.1f bps\n",
                     it.iteration,
                     it.grid_sizes[0], it.grid_sizes[1],
                     it.grid_sizes[2], it.grid_sizes[3],

@@ -618,7 +618,9 @@ TEST(ExpandSegmentedDomainTest, InvalidVolatilityIsNotRepairedByPadding) {
         IVGrid domain{.moneyness = {-.1, .1}, .vol = {sigma, .2}, .rate = {-.1, -.06}};
         auto support = expand_segmented_domain(domain, .25, 0.0, {}, 100.0);
         EXPECT_FALSE(support);
-        if (!support) EXPECT_EQ(support.error().code, PriceTableErrorCode::InvalidConfig);
+        if (!support) {
+            EXPECT_EQ(support.error().code, PriceTableErrorCode::InvalidConfig);
+        }
         SegmentedAdaptiveConfig config{.spot = 100.0, .option_type = OptionType::PUT,
             .dividend_yield = 0.0, .maturity = .25,
             .kref_config = {.K_refs = {100.0}}, .strike_bounds = StrikeBounds{100.0, 100.0}};
@@ -924,9 +926,8 @@ TEST(SegmentedChebyshevRefineFn, HonorsRequestedAxisAndCap) {
 // and then check the assembled B-spline path reports its *returned* surface.
 // ===========================================================================
 
-/// A validation set of `n` points, all at the same coordinates, whose refs
-/// carry a price and a vega large enough that the score is dominated by the
-/// price error rather than the vega floor.
+/// Synthetic zero-price references let the passthrough proxy equal absolute
+/// price error; the two channels remain independently counted.
 std::vector<detail::ValidationPoint> make_points(size_t n) {
     std::vector<detail::ValidationPoint> pts;
     pts.reserve(n);
@@ -934,7 +935,7 @@ std::vector<detail::ValidationPoint> make_points(size_t n) {
         pts.push_back(detail::ValidationPoint{
             .coords = {0.0, 0.5, 0.20 + 0.01 * static_cast<double>(i), 0.05},
             .strike = 100.0, .spot = 100.0,
-            .refs = {.ref_price = 10.0, .vega = 1.0}});
+            .refs = {.ref_price = 0.0, .vega = 1.0}});
     }
     return pts;
 }
@@ -978,7 +979,16 @@ detail::FinalScore score_of(double max_error, bool all_finite = true,
     s.avg_error = max_error;
     s.measured = measured;
     s.all_finite = all_finite;
+    s.price_errors = {.measured = 8, .max_error = 0.0, .mean_error = 0.0};
     return s;
+}
+
+TEST(SegmentedFinalContract, PriceMissSurvivesExactIvProxyForRetrySelection) {
+    auto original = score_of(0.0);
+    original.price_errors = {.measured = 8, .max_error = .05, .mean_error = .05};
+    const auto retry = score_of(0.0);
+    EXPECT_TRUE(detail::needs_final_retry(original, 1e-4));
+    EXPECT_EQ(detail::select_final_surface(original, retry), detail::FinalPick::Retry);
 }
 
 // Regression: `if (err > 0.0) valid++` counted only *nonzero* errors, so a
@@ -1127,7 +1137,7 @@ TEST(SegmentedFinalContract, NoMeasuredPointsIsNotViable) {
 // toward "at least one measurement".  A surface filtered everywhere reported
 // max 0 / avg 0 and passed the viability gate having been measured nowhere
 // (final-review amendment 2026-08-29).
-TEST(SegmentedFinalContract, FilteredPointsEnterNoStatistic) {
+TEST(SegmentedFinalContract, FilteredIvStillRetainsPriceStatistics) {
     const auto pts = make_points(8);
     const auto ctx = make_score_ctx();
     // Every point would score 0.10; half of them are filtered out.
@@ -1140,6 +1150,9 @@ TEST(SegmentedFinalContract, FilteredPointsEnterNoStatistic) {
 
     EXPECT_EQ(s.measured, 4u);
     EXPECT_EQ(s.filtered, 4u);
+    EXPECT_EQ(s.price_errors.measured, pts.size());
+    ASSERT_TRUE(s.price_errors.max_error);
+    EXPECT_DOUBLE_EQ(*s.price_errors.max_error, .10);
     EXPECT_EQ(s.skipped, 0u);
     EXPECT_TRUE(s.all_finite);
     // Averaged over the measured points only -- a filtered point pulled the

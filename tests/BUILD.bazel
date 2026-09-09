@@ -1667,6 +1667,8 @@ cc_test(
     srcs = ["price_table_error_mapping_test.cc"],
     deps = [
         "//src/option:price_table_error_mapping",
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table:reference_selection",
         "@googletest//:gtest_main",
     ],
 )
@@ -2156,4 +2158,14 @@ cc_test(
     name = "proof_bspline_box_test",
     srcs = ["proof_bspline_box_test.cc"],
     deps = ["//src/math/proof:bspline_box", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "reference_selection_work_test",
+    size = "small",
+    srcs = ["reference_selection_work_test.cc"],
+    deps = [
+        "//src/option/table:reference_selection_builder",
+        "@googletest//:gtest_main",
+    ],
 )

@@ -125,10 +125,11 @@ int main(int argc,char** argv) {
             field("adaptive_iterations",diagnostics->total_iterations);
             field("adaptive_measured",diagnostics->holdout_points_measured);
             field("adaptive_invalid",diagnostics->holdout_points_invalid);
-            size_t solves=0;
-            for (const auto& iteration:diagnostics->iterations)
-                solves+=iteration.pde_solves_table+iteration.pde_solves_validation;
-            field("adaptive_recorded_pde_solves",solves);
+            field("reference_preparations",diagnostics->work.references.requests);
+            field("failed_reference_preparations",diagnostics->work.references.failed_requests);
+            const auto attempts=diagnostics->work.total_pde_attempts();
+            field("actual_pde_work_known",attempts.has_value());
+            if (attempts) field("actual_pde_attempts",*attempts);
         }
         auto saved=table->save(path,PriceTableCompression::NONE);
         field("save_ok",saved.has_value());

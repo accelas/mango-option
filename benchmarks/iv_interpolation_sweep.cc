@@ -138,7 +138,7 @@ static std::vector<double> refine_axis(const std::vector<double>& base, int scal
 struct AdaptiveSolverEntry {
     std::unique_ptr<InterpolatedIVSolver<BSplinePriceTable>> solver;
     double build_time_ms = 0.0;
-    size_t n_pde_solves = 0;
+    std::optional<size_t> n_pde_solves;
     std::array<size_t, 4> base_grid_sizes = {};  // [m, tau, sigma, r]
     bool target_met = false;
 };
@@ -187,7 +187,7 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
     // 2. For scale=1, use adaptive result directly
     std::shared_ptr<const BSplineND<double, 4>> spline;
     double surface_K_ref = base_K_ref;
-    size_t total_pde = base_result->total_pde_solves;
+    std::optional<size_t> total_pde = base_result->total_pde_solves;
     std::array<size_t, 4> grid_sizes = {};
 
     if (scale == 1) {
@@ -311,7 +311,8 @@ static void BM_Adaptive_IV_Scaled(benchmark::State& state) {
     state.counters["interp_err_bps"] = interp_err_bps;
     state.counters["iters"] = static_cast<double>(last_result->iterations);
     state.counters["build_ms"] = entry.build_time_ms;
-    state.counters["n_pde_solves"] = static_cast<double>(entry.n_pde_solves);
+    state.counters["pde_work_known"] = entry.n_pde_solves.has_value() ? 1.0 : 0.0;
+    if (entry.n_pde_solves) state.counters["n_pde_solves"] = static_cast<double>(*entry.n_pde_solves);
     state.counters["base_grid_m"] = static_cast<double>(entry.base_grid_sizes[0]);
     state.counters["base_grid_tau"] = static_cast<double>(entry.base_grid_sizes[1]);
     state.counters["base_grid_sig"] = static_cast<double>(entry.base_grid_sizes[2]);
@@ -333,7 +334,7 @@ BENCHMARK(BM_Adaptive_IV_Scaled)
 struct ChebyshevSolverEntry {
     std::unique_ptr<InterpolatedIVSolver<ChebyshevRawSurface>> solver;
     double build_time_ms = 0.0;
-    size_t n_pde_solves = 0;
+    std::optional<size_t> n_pde_solves;
     bool target_met = false;
 };
 
@@ -417,7 +418,8 @@ static void BM_Chebyshev_IV(benchmark::State& state) {
     state.counters["iv_err_bps"] = iv_err_bps;
     state.counters["iters"] = static_cast<double>(last_result->iterations);
     state.counters["build_ms"] = entry.build_time_ms;
-    state.counters["n_pde_solves"] = static_cast<double>(entry.n_pde_solves);
+    state.counters["pde_work_known"] = entry.n_pde_solves.has_value() ? 1.0 : 0.0;
+    if (entry.n_pde_solves) state.counters["n_pde_solves"] = static_cast<double>(*entry.n_pde_solves);
     state.counters["target_met"] = entry.target_met ? 1.0 : 0.0;
 }
 

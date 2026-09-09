@@ -10,6 +10,7 @@
 #include <optional>
 #include <span>
 #include <vector>
+#include <variant>
 
 namespace mango {
 
@@ -114,6 +115,17 @@ struct ReferenceSelectionFailure {
     ReferenceSelectionStopReason stop_reason;
     std::optional<PriceTableError> error;
     std::vector<ReferenceCandidateDiagnostics> candidates;
+};
+
+/// Detached typed history for failed publication. Reference selection may
+/// itself fail, or succeed before a subsequent numerical build fails.
+class ReferenceSelectionHistory {
+public:
+    explicit ReferenceSelectionHistory(const ReferenceSelectionResult& result) : outcome_(result) {}
+    explicit ReferenceSelectionHistory(const ReferenceSelectionFailure& failure) : outcome_(failure) {}
+    [[nodiscard]] const auto& outcome() const noexcept { return outcome_; }
+private:
+    std::variant<ReferenceSelectionResult, ReferenceSelectionFailure> outcome_;
 };
 
 /// Validate using resolve_k_refs, then measure bounded covering candidates.

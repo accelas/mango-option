@@ -44,8 +44,8 @@ TEST(IterationStatsTest, DefaultConstruction) {
     EXPECT_EQ(stats.grid_sizes[1], 0);
     EXPECT_EQ(stats.grid_sizes[2], 0);
     EXPECT_EQ(stats.grid_sizes[3], 0);
-    EXPECT_EQ(stats.pde_solves_table, 0);
-    EXPECT_EQ(stats.pde_solves_validation, 0);
+    EXPECT_EQ(stats.table_work.requests, 0u);
+    EXPECT_EQ(stats.reference_work.requests, 0u);
     EXPECT_DOUBLE_EQ(stats.max_error, 0.0);
     EXPECT_DOUBLE_EQ(stats.avg_error, 0.0);
     EXPECT_EQ(stats.refined_dim, -1);
@@ -56,8 +56,8 @@ TEST(IterationStatsTest, SetValues) {
     IterationStats stats;
     stats.iteration = 2;
     stats.grid_sizes = {10, 8, 6, 4};
-    stats.pde_solves_table = 24;
-    stats.pde_solves_validation = 64;
+    stats.table_work.record(true, PdeWork{24, 24, 0});
+    stats.reference_work.record(true, PdeWork{64, 64, 0});
     stats.max_error = 0.0003;
     stats.avg_error = 0.0001;
     stats.refined_dim = 1;
@@ -68,8 +68,10 @@ TEST(IterationStatsTest, SetValues) {
     EXPECT_EQ(stats.grid_sizes[1], 8);
     EXPECT_EQ(stats.grid_sizes[2], 6);
     EXPECT_EQ(stats.grid_sizes[3], 4);
-    EXPECT_EQ(stats.pde_solves_table, 24);
-    EXPECT_EQ(stats.pde_solves_validation, 64);
+    ASSERT_TRUE(stats.table_work.pde);
+    EXPECT_EQ(stats.table_work.pde->attempted, 24u);
+    ASSERT_TRUE(stats.reference_work.pde);
+    EXPECT_EQ(stats.reference_work.pde->attempted, 64u);
     EXPECT_DOUBLE_EQ(stats.max_error, 0.0003);
     EXPECT_DOUBLE_EQ(stats.avg_error, 0.0001);
     EXPECT_EQ(stats.refined_dim, 1);
