@@ -21,6 +21,7 @@ def constrained_least_squares(matrix, values, cuts, lower, max_iterations=100):
     f = matrix.T @ values
     x = np.zeros(n)
     active = []
+    dependent_tangencies = set()
     tolerance = 1e-10
     for iteration in range(max_iterations):
         gradient = h @ x - f
@@ -42,6 +43,7 @@ def constrained_least_squares(matrix, values, cuts, lower, max_iterations=100):
             return {'status':'solved','coefficients':x,'iterations':iteration+1,
                     'min_normalized_slack': float(residual.min()) if residual.size else 0.,
                     'active_constraints':len(active),
+                    'dependent_tangencies':len(dependent_tangencies),
                     'condition':float(np.linalg.cond(matrix)),
                     'sample_rms':float(np.linalg.norm(matrix@x-values)/np.sqrt(len(values)))}
         slack = g @ x - b
@@ -49,6 +51,13 @@ def constrained_least_squares(matrix, values, cuts, lower, max_iterations=100):
         alpha, blocker = 1., None
         for i in range(len(b)):
             if i in active or velocity[i] >= 0: continue
+            # A normal in the active row space has zero derivative along
+            # the equality-constrained step. Roundoff in that zero must not
+            # install a dependent active equality (or imply infeasibility).
+            # Its inequality remains in the final all-row feasibility audit.
+            if active and np.linalg.matrix_rank(g[active+[i]]) == len(active):
+                dependent_tangencies.add(i)
+                continue
             candidate = max(0.,slack[i]) / -velocity[i]
             if candidate < alpha:
                 alpha, blocker = candidate, i

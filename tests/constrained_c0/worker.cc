@@ -12,7 +12,7 @@
 #include <iostream>
 using namespace mango;
 std::vector<double> rate_grid() { return {-.05, -.0375, -.025, 0, .05, .1}; }
-std::vector<double> rate_knots() { return clamped_knots_cubic(rate_grid()); }
+std::vector<double> rate_knots() { return {-.05, -.05, -.05, -.05, 0, 0, .1, .1, .1, .1}; }
 std::vector<double> midpoints(std::vector<double> x) {
   auto y = x;
   for (size_t i = 1; i < x.size(); ++i)

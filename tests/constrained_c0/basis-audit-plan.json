@@ -1,0 +1,24 @@
+{
+  "scope": "Read-only capacity on existing construction samples; no new PDE/sample panel/candidate",
+  "source_samples": "candidate.samples.tsv",
+  "fixed_negative_knot": -0.0125,
+  "reason": "closest existing negative sample plane; highest localized residual there",
+  "variants": [
+    {
+      "name": "original",
+      "negative_free_coefficients": 2,
+      "new_knot_multiplicity": 0
+    },
+    {
+      "name": "one_C2_knot",
+      "negative_free_coefficients": 3,
+      "new_knot_multiplicity": 1
+    },
+    {
+      "name": "one_C1_knot",
+      "negative_free_coefficients": 4,
+      "new_knot_multiplicity": 2
+    }
+  ],
+  "all_variants": "same double0 knot/zero right coefficients; no shape or financial accuracy claim"
+}
