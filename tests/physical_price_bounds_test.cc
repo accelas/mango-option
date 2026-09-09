@@ -83,3 +83,18 @@ TEST(PhysicalPriceBoundsTest, OnlyInactiveBranchesMayIgnoreUnknownDerivativeBoun
         weighted_sum(pieces, std::array<Interval, 2>{Interval(.5), Interval(.5)}).finite());
     EXPECT_FALSE(weighted_sum(pieces, std::array<Interval, 2>{Interval(-1), Interval(2)}).finite());
 }
+
+TEST(PhysicalPriceBoundsTest, OuterIntrinsicFloorNeedsMoreThanStrikeEndpointSigns) {
+    using namespace mango;
+    using namespace mango::detail::certification;
+    const Interval ratio(.5); // put intrinsic/K=.5
+    const std::array<PriceBounds,2> ends{{{Interval(1),Interval(0)},
+                                        {Interval(.4),Interval(-1)}}};
+    EXPECT_TRUE(intrinsic_floor(ends[0],ratio,OptionType::PUT).sigma_partial.nonnegative());
+    EXPECT_TRUE(intrinsic_floor(ends[1],ratio,OptionType::PUT).sigma_partial.nonnegative());
+    const std::array<Interval,2> weights{Interval(.5),Interval(.5)};
+    // The interior blend lies above intrinsic and decreases with sigma,
+    // although each separately projected endpoint is sigma-flat.
+    auto interior=intrinsic_floor(weighted_sum(ends,weights),ratio,OptionType::PUT);
+    EXPECT_TRUE(interior.sigma_partial.strictly_negative());
+}
