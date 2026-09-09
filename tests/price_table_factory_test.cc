@@ -84,6 +84,8 @@ IVSolverFactoryConfig segmented_bspline_config() {
         .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0},
                                 {.calendar_time = 1.0, .amount = 3.0}},
         .kref_config = MultiKRefConfig{.K_refs = {80.0, 100.0, 120.0}},
+        // The provenance tests query K100; the saved-domain test overrides this.
+        .strike_bounds = StrikeBounds{100.0, 100.0},
     };
     return config;
 }

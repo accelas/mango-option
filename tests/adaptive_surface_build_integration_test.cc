@@ -222,26 +222,8 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
     EXPECT_EQ(solves1, solves2) << "Second build should recompute all slices for new chain";
 }
 
-// A two-K_ref list cannot blend accurately across the strike range it is
-// asked to serve, and the build refuses rather than shipping the blend.
-//
-// K_refs {90, 110} against S/K in [0.91, 1.1] means strikes in [90.9, 109.9]
-// served by exactly two surfaces: every query but the two endpoints is a
-// linear-in-strike blend across a 20-point gap.  The assembled surface
-// measures **0.4756 (4,756 bps) max IV error** on the D9 validation set
-// (avg 0.1191, 15 of 16 points measured), and the bumped-grid retry measures
-// 0.4766 -- both far outside the 0.20 viability bound, so the build returns
-// `NoViableSurface`.
-//
-// This shipped silently before #434.  The test previously asserted success:
-// with the full dividend schedule handed to every reference solve, each
-// sample below the dividend date lost its reference and only the long-tau
-// tail was measured, which was not enough to expose the blend.  Once
-// `make_validate_fn` filters the schedule by the sampled maturity all 16
-// samples measure, and the sparse-K_ref error is unavoidable.
-//
-// Tracked as the sparse-K_ref accuracy follow-up (MultiKRefSplit blend
-// resolution); the refusal is the correct behavior until it lands.
+// These two references cover the original strike interval, but coverage alone
+// does not establish adequacy. Keep the fixed-expiry assessment and budget.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -263,18 +245,12 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_FALSE(result.has_value())
-        << "a two-K_ref blend measuring 4,756 bps must not be returned";
+        << "an inadequate explicit reference set must not be returned";
     EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
 }
 
-// Large discrete dividend (total_div/K_ref > 0.2, stresses moneyness expansion)
-//
-// $20 of *absolute* dividends against a $100 spot does not produce a usable
-// surface: the assembled multi-K_ref surface measures 58.4 IV error (583,897
-// bps) on plain user-domain validation, and the worst probe measures 0.97
-// (9,740 bps) against the 0.20 viability bound.  Returning that surface
-// silently was the pre-#434 behavior and is the defect this branch exists to
-// fix -- refusal is the contract (spec D5).
+// The broad original domain implies K in [66.7, 200]. References [70, 130]
+// do not cover it, independently of the large dividend or fitting accuracy.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -297,8 +273,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_FALSE(result.has_value())
-        << "an unusable surface must not be returned";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
+        << "references must cover the complete requested strike domain";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
 // No dividends (single segment, degenerates to simple case)
@@ -455,13 +431,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsOneReferenceBudgetForBroadDom
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
-// Coverage: Very short maturity — tau domain compressed, max_tau clamped
-//
-// A 0.05-year maturity with a discrete dividend has vega near zero, so any
-// price error divides into an enormous IV error: the assembled surface
-// measures 229 (2.29 million bps) on user-domain validation and the worst
-// probe 3,847.  Returning it silently was the pre-#434 behavior; the build
-// now refuses (spec D5).
+// Short remaining life retains its full construction interval, including the
+// analytical payoff row. This original strike range still exceeds its refs.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -481,47 +452,26 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    // The tau domain is still built and clamped to the maturity -- the
-    // refusal below comes from the accuracy gate, not from a domain error.
+    // Construction includes tau0 without adding an exact-expiry query API.
     auto bounds = expand_segmented_domain(
         {m, v, r}, seg_config.maturity, seg_config.dividend_yield,
         seg_config.discrete_dividends, 90.0);
     ASSERT_TRUE(bounds.has_value());
     EXPECT_LE(bounds->tau_max, seg_config.maturity);
-    EXPECT_GT(bounds->tau_min, 0.0);
+    EXPECT_EQ(bounds->tau_min, 0.0);
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_FALSE(result.has_value())
-        << "an unusable surface must not be returned";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
+        << "references [90, 110] do not cover requested strikes [83.3, 125]";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
 // ===========================================================================
 // Coverage gap tests — Priority 3 (Medium)
 // ===========================================================================
 
-// Coverage: Large expansion clamps moneyness to 0.01
-//
-// The clamp itself is asserted directly (no build needed).  The adaptive
-// build over the same config is then refused: $50 of absolute dividends
-// against a $100 spot leaves no usable surface, and the D5 viability gate in
-// the probe loop says so -- `NoViableSurface`.
-//
-// This expected `ValidationFailed` before #434, and the reason it no longer
-// does is the point: with the full schedule handed to every reference solve,
-// every sampled tau below the last dividend date (0.75 of a 1y surface) lost
-// its reference and the holdout fell under the `max(4, n/4)` floor, so the
-// build died at reference validation without ever scoring a surface.  Now
-// that `make_validate_fn` filters the schedule by the sampled maturity those
-// references solve, the holdout clears the floor, and the build proceeds far
-// enough for the viability gate to do the refusing.  Both codes mean "this
-// must not be returned"; the build simply gets further before saying it.
-//
-// The D4 `ValidationFailed` path keeps its own coverage elsewhere, at both
-// levels: `SegmentedFinalContract.SparseReferencesFailValidation` drives
-// `prepare_final_validation` past the floor (and back under it) directly, and
-// `RunRefinementTest.HoldoutValidityThresholds` does the same for the
-// refinement loop's holdout.
+// The dividend-padding floor keeps numerical support positive. It does not
+// excuse incomplete reference coverage for the original broad strike domain.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -556,8 +506,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_FALSE(result.has_value())
-        << "a surface this config cannot support must not be certified";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
+        << "references [50, 150] do not cover requested strikes through 200";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
 // Coverage: Negative K_ref in explicit list (K_ref_min <= 0 guard)
@@ -610,7 +560,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
 
     // Maturity=0.02 (~7 days) with dividend at mid-point.
     // Gap ε=5e-4 on each side of tau_split=0.01 creates segments
-    // [0.005, 0.0095] and [0.0105, 0.015] — narrow but real.
+    // [0, 0.0095] and [0.0105, 0.02] — narrow but real.
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
@@ -618,20 +568,15 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
         .discrete_dividends = {Dividend{.calendar_time = 0.01, .amount = 0.50}},
         .maturity = 0.02,
         .kref_config = {.K_refs = {100.0}},
+        .strike_bounds = StrikeBounds{100.0, 100.0},
     };
 
     auto m_domain = to_log_m({0.9, 1.0, 1.1});
     std::vector<double> v_domain = {0.15, 0.25};
     std::vector<double> r_domain = {0.05};
 
-    // A 7-day option has near-zero vega, so any price error divides into an
-    // enormous IV error: the assembled surface measures 970 (9.7 million
-    // bps) on the final validation, and the adaptive path now refuses it
-    // (spec D9) exactly as BuildSegmentedVeryShortMaturity does.  The
-    // regression under test is in segment classification, not in
-    // refinement, so it is pinned on the fixed-level build of the same
-    // configuration.  Revisit when MultiKRefSplit spot-scaling is fixed
-    // (follow-up): part of this error is the lone K_ref, not the maturity.
+    // Preserve the original adaptive budget and manual geometry checks.
+    // Short positive maturity alone is not proof of unidentifiable IV.
     auto adaptive = build_adaptive_chebyshev_segmented(
         params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_FALSE(adaptive.has_value());
@@ -1125,26 +1070,9 @@ double dividend_fdm_reference_price(double S, double K, double tau,
     return ref->value_at(S);
 }
 
-// Regression (#480, S2): the segmented Chebyshev build solved its dividend
-// batch gridless.  A batch with discrete dividends is normalized-ineligible,
-// so it solved on the batch-union grid: half-width 5 * sigma_hi * sqrt(T)
-// with T = 1.01 * 0.25 and sigma_hi = 0.15 + 0.075 (CC headroom on the
-// [0.05, 0.15] sample range) ~= 0.57, left edge nudged by the dividend
-// extension.  The moneyness nodes span the user range [ln 0.49, ln 2]
-// (dividend-widened) plus 3/32 of headroom ~= [-0.85, 0.83], so every
-// endpoint node was extrapolated; the queried S = 50 and S = 200 are
-// themselves outside the old domain.
-// Pre-fix max abs error on this branch's parent (coverage oracle):
-// 6.31e+10 at S=50, sigma=0.05 -- the surface returned
-// 63,086,864,583.46 for a put whose reference value is 50.51.  The other
-// two failing cases show the same signature at different scales: S=50 /
-// sigma=0.15 returned exactly 0 against a reference of 50.5089 (error
-// 50.51), and S=200 / sigma=0.05 returned 2,991,753.61 against a
-// reference of 7.5e-163 (error 2.99e+06).  Only S=200 / sigma=0.15
-// happened to land close enough to pass.  Runaway magnitudes of that
-// kind, and an exact 0 where the put is 50 in the money, are the
-// signature of a cubic spline evaluated far outside its data range, not
-// of interpolation error.
+// Regression (#480): endpoint samples previously extrapolated from a PDE grid
+// that missed the interpolation tails. Preserve the same four physical queries
+// and converged direct oracle, with the one-cent criterion established by #486.
 TEST(AdaptiveGridBuilderTest, SegmentedChebyshevTailsMatchFdmAtExtremeMoneyness) {
     const std::vector<Dividend> dividends = {
         Dividend{.calendar_time = 0.1, .amount = 1.0}};
@@ -1155,10 +1083,11 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevTailsMatchFdmAtExtremeMoneyness)
         .discrete_dividends = dividends,
         .maturity = 0.25,
         .kref_config = {.K_refs = {100.0}},   // single K_ref: no strike blend
+        .strike_bounds = StrikeBounds{100.0, 100.0},
     };
     IVGrid grid{
         .moneyness = {std::log(0.5), 0.0, std::log(2.0)},  // log(S/K) here
-        .vol = {0.10},                                       // -> [0.05, 0.15]
+        .vol = {0.05, 0.15},  // exact original price-query population
         .rate = {0.03, 0.05},
     };
 
