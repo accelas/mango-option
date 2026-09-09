@@ -538,28 +538,15 @@ protected:
         auto spline_ptr = std::make_shared<const BSplineND<double, 3>>(
             std::move(spline.value()));
 
-        // 5. Wrap in layered PriceTable
+        // 5. Retain the raw numerical leaf for PDE and chain-rule accuracy.
+        // Financial publication/certification is a separate contract.
         SharedBSplineInterp<3> interp(std::move(spline_ptr));
         DimensionlessTransform3D xform;
         BSpline3DTransformLeaf leaf(std::move(interp), xform, K_ref_);
         AnalyticalEEP eep(OptionType::PUT, 0.0);
         BSpline3DLeaf eep_leaf(std::move(leaf), std::move(eep));
 
-        const double sigma_min = 0.10;
-        const double sigma_max = 0.80;
-        SurfaceBounds bounds{
-            .m_min = axes.log_moneyness.front(),
-            .m_max = axes.log_moneyness.back(),
-            .tau_min = 2.0 * axes.tau_prime.front() / (sigma_max * sigma_max),
-            .tau_max = 2.0 * axes.tau_prime.back() / (sigma_min * sigma_min),
-            .sigma_min = sigma_min,
-            .sigma_max = sigma_max,
-            .rate_min = 0.005,
-            .rate_max = 0.10,
-        };
-
-        table_ = std::make_unique<BSpline3DPriceTable>(
-            std::move(eep_leaf), bounds, OptionType::PUT, 0.0);
+        leaf_ = std::make_unique<BSpline3DLeaf>(std::move(eep_leaf));
     }
 
     /// ATM put with dividend_yield=0.0 (matching the 3D surface)
@@ -573,15 +560,15 @@ protected:
     }
 
     static constexpr double K_ref_ = 100.0;
-    static std::unique_ptr<BSpline3DPriceTable> table_;
+    static std::unique_ptr<BSpline3DLeaf> leaf_;
 };
 
-std::unique_ptr<BSpline3DPriceTable> Dimensionless3DGreeksTest::table_;
+std::unique_ptr<BSpline3DLeaf> Dimensionless3DGreeksTest::leaf_;
 
 TEST_F(Dimensionless3DGreeksTest, DeltaMatchesFDM) {
     auto params = atm_put();
 
-    auto surface_delta = table_->delta(params);
+    auto surface_delta = leaf_->greek(Greek::Delta, params);
     ASSERT_TRUE(surface_delta.has_value()) << "3D delta failed";
 
     auto fdm = solve_american_option(params);
@@ -598,7 +585,7 @@ TEST_F(Dimensionless3DGreeksTest, DeltaMatchesFDM) {
 TEST_F(Dimensionless3DGreeksTest, GammaIsPositive) {
     auto params = atm_put();
 
-    auto surface_gamma = table_->gamma(params);
+    auto surface_gamma = leaf_->gamma(params);
     ASSERT_TRUE(surface_gamma.has_value()) << "3D gamma failed";
 
     EXPECT_GT(*surface_gamma, 0.0)
@@ -608,7 +595,7 @@ TEST_F(Dimensionless3DGreeksTest, GammaIsPositive) {
 TEST_F(Dimensionless3DGreeksTest, GammaMatchesFDM) {
     auto params = atm_put();
 
-    auto surface_gamma = table_->gamma(params);
+    auto surface_gamma = leaf_->gamma(params);
     ASSERT_TRUE(surface_gamma.has_value()) << "3D gamma failed";
 
     auto fdm = solve_american_option(params);
@@ -625,7 +612,7 @@ TEST_F(Dimensionless3DGreeksTest, GammaMatchesFDM) {
 TEST_F(Dimensionless3DGreeksTest, ThetaMatchesFD) {
     auto params = atm_put();
 
-    auto surface_theta = table_->theta(params);
+    auto surface_theta = leaf_->greek(Greek::Theta, params);
     ASSERT_TRUE(surface_theta.has_value()) << "3D theta failed";
 
     // Theta should be negative (time decay)
@@ -635,9 +622,9 @@ TEST_F(Dimensionless3DGreeksTest, ThetaMatchesFD) {
     // Cross-check via finite difference on the surface
     double rate = get_zero_rate(params.rate, params.maturity);
     double dtau = 0.001;
-    double price_base = table_->price(
+    double price_base = leaf_->price(
         params.spot, params.strike, params.maturity, params.volatility, rate);
-    double price_up = table_->price(
+    double price_up = leaf_->price(
         params.spot, params.strike, params.maturity + dtau, params.volatility, rate);
     double fd_theta = -(price_up - price_base) / dtau;
 
@@ -649,10 +636,10 @@ TEST_F(Dimensionless3DGreeksTest, ThetaMatchesFD) {
 TEST_F(Dimensionless3DGreeksTest, AllGreeksAreFinite) {
     auto params = atm_put();
 
-    auto d = table_->delta(params);
-    auto g = table_->gamma(params);
-    auto t = table_->theta(params);
-    auto r = table_->rho(params);
+    auto d = leaf_->greek(Greek::Delta, params);
+    auto g = leaf_->gamma(params);
+    auto t = leaf_->greek(Greek::Theta, params);
+    auto r = leaf_->greek(Greek::Rho, params);
 
     ASSERT_TRUE(d.has_value()) << "delta failed";
     ASSERT_TRUE(g.has_value()) << "gamma failed";

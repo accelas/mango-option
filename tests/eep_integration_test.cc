@@ -16,8 +16,8 @@ namespace {
 // End-to-end integration tests for EEP decomposition
 // ===========================================================================
 
-/// Build a price table and verify that the reconstructed
-/// American price from BSplinePriceTable matches a direct PDE solve.
+/// Fit EEP samples and verify that the raw layer
+/// reconstructs an American price matching a direct PDE solve.
 TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     // Grid covering a modest range for the price table
     // Each axis needs >= 4 points for B-spline fitting
@@ -50,11 +50,12 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     ASSERT_NE(result->spline, nullptr);
 
 
-    // Wrap in BSplinePriceTable for reconstruction
-    auto wrapper_result = make_bspline_surface(result->spline, result->K_ref, result->dividends.dividend_yield, OptionType::PUT);
-    ASSERT_TRUE(wrapper_result.has_value())
-        << "make_bspline_surface failed: " << wrapper_result.error();
-    auto wrapper = std::move(*wrapper_result);
+    // Exercise numerical EEP reconstruction with the exact fitted payload.
+    // This does not assert that the fit qualifies for financial publication.
+    BSplineLeaf reconstructed_leaf(
+        BSplineTransformLeaf(SharedBSplineInterp<4>(result->spline),
+            StandardTransform4D{}, result->K_ref),
+        AnalyticalEEP(OptionType::PUT, result->dividends.dividend_yield));
 
     // Test point: ATM put, 1-year, 20% vol, 5% rate
     double S     = 100.0;
@@ -63,7 +64,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     double sigma = 0.20;
     double r     = 0.05;
 
-    double reconstructed = wrapper.price(S, K, tau, sigma, r);
+    double reconstructed = reconstructed_leaf.price(S, K, tau, sigma, r);
     EXPECT_GT(reconstructed, 0.0) << "Reconstructed price should be positive";
 
     // Direct PDE solve for comparison

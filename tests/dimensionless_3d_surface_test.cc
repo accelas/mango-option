@@ -53,32 +53,19 @@ protected:
         auto spline_ptr = std::make_shared<const BSplineND<double, 3>>(
             std::move(spline.value()));
 
-        // 5. Wrap in layered PriceTable
+        // 5. Retain the raw numerical EEP leaf. These assertions measure the
+        // fitted PDE approximation, not certified financial publication.
         SharedBSplineInterp<3> interp(std::move(spline_ptr));
         DimensionlessTransform3D xform;
         BSpline3DTransformLeaf leaf(std::move(interp), xform, K_ref_);
         AnalyticalEEP eep(OptionType::PUT, 0.0);
         BSpline3DLeaf eep_leaf(std::move(leaf), std::move(eep));
 
-        const double sigma_min = 0.10;
-        const double sigma_max = 0.80;
-        SurfaceBounds bounds{
-            .m_min = axes.log_moneyness.front(),
-            .m_max = axes.log_moneyness.back(),
-            .tau_min = 2.0 * axes.tau_prime.front() / (sigma_max * sigma_max),
-            .tau_max = 2.0 * axes.tau_prime.back() / (sigma_min * sigma_min),
-            .sigma_min = sigma_min,
-            .sigma_max = sigma_max,
-            .rate_min = 0.005,
-            .rate_max = 0.10,
-        };
-
-        table_ = std::make_unique<BSpline3DPriceTable>(
-            std::move(eep_leaf), bounds, OptionType::PUT, 0.0);
+        leaf_ = std::make_unique<BSpline3DLeaf>(std::move(eep_leaf));
     }
 
     static constexpr double K_ref_ = 100.0;
-    std::unique_ptr<BSpline3DPriceTable> table_;
+    std::unique_ptr<BSpline3DLeaf> leaf_;
 };
 
 TEST_F(Dimensionless3DSurfaceTest, PriceMatchesPDE) {
@@ -90,7 +77,7 @@ TEST_F(Dimensionless3DSurfaceTest, PriceMatchesPDE) {
     };
 
     for (const auto& p : points) {
-        double surface_price = table_->price(p.S, p.K, p.tau, p.sigma, p.rate);
+        double surface_price = leaf_->price(p.S, p.K, p.tau, p.sigma, p.rate);
 
         auto ref = solve_american_option(PricingParams(
             OptionSpec{.spot = p.S, .strike = p.K, .maturity = p.tau,
@@ -108,7 +95,7 @@ TEST_F(Dimensionless3DSurfaceTest, PriceMatchesPDE) {
 }
 
 TEST_F(Dimensionless3DSurfaceTest, VegaIsPositive) {
-    double v = table_->vega(100.0, 100.0, 1.0, 0.20, 0.05);
+    double v = leaf_->vega(100.0, 100.0, 1.0, 0.20, 0.05);
     EXPECT_GT(v, 0.0) << "Vega should be positive for ATM option";
 }
 
