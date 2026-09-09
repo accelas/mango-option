@@ -1,0 +1,291 @@
+{
+  "adaptive": {
+    "lhs_seed": 42,
+    "max_failure_rate": 0.5,
+    "max_iter": 8,
+    "max_points_per_dim": 160,
+    "min_moneyness_points": 60,
+    "refinement_factor": 1.3,
+    "target_iv_error": 2e-05,
+    "validation_samples": 64,
+    "vega_floor": 0.0001
+  },
+  "cases": [
+    {
+      "anchor_maturity": 2.0,
+      "anchored_dividends": [],
+      "backends": [
+        "BSpline",
+        "Chebyshev"
+      ],
+      "dividend_yield": 0.0,
+      "factory": "make_price_table, BSplineBackend, adaptive default parameters explicit",
+      "factory_inputs": {
+        "maturity": [
+          0.019178082191780823,
+          0.1,
+          0.5,
+          1,
+          2
+        ],
+        "moneyness": [
+          0.7,
+          0.8,
+          0.9,
+          1,
+          1.1,
+          1.2,
+          1.3
+        ],
+        "rate": [
+          -0.05,
+          0,
+          0.05,
+          0.1
+        ],
+        "vol": [
+          0.05,
+          0.1,
+          0.2,
+          0.3,
+          0.5
+        ]
+      },
+      "id": "C0-CALL",
+      "option_type": "CALL",
+      "proof_domain": "Full actual published bounds, including clamps; original requested domain retained and differences reported. Continuous strike homogeneity; reference K100 is within required strike bounds.",
+      "reference_selection": "automatic",
+      "requested_bounds": {
+        "maturity": [
+          0.019178082191780823,
+          2.0
+        ],
+        "moneyness": [
+          0.7,
+          1.3
+        ],
+        "rate": [
+          -0.05,
+          0.1
+        ],
+        "strike": [
+          80.0,
+          120.0
+        ],
+        "volatility": [
+          0.05,
+          0.5
+        ]
+      },
+      "spot": 100
+    },
+    {
+      "anchor_maturity": 0.019178082191780823,
+      "anchored_dividends": [],
+      "backends": [
+        "BSpline",
+        "Chebyshev"
+      ],
+      "dividend_yield": 0.02,
+      "factory": "make_price_table, BSplineBackend, adaptive default parameters explicit",
+      "factory_inputs": {
+        "maturity": [
+          0.0027397260273972603,
+          0.005479452054794521,
+          0.010958904109589041,
+          0.019178082191780823
+        ],
+        "moneyness": [
+          0.9,
+          0.95,
+          1,
+          1.05,
+          1.1
+        ],
+        "rate": [
+          -0.05,
+          0,
+          0.05,
+          0.1
+        ],
+        "vol": [
+          0.05,
+          0.1,
+          0.2,
+          0.3,
+          0.5
+        ]
+      },
+      "id": "CS-PUT",
+      "option_type": "PUT",
+      "proof_domain": "Full actual published bounds, including clamps; original requested domain retained and differences reported. Continuous strike homogeneity; reference K100 is within required strike bounds.",
+      "reference_selection": "automatic",
+      "requested_bounds": {
+        "maturity": [
+          0.0027397260273972603,
+          0.019178082191780823
+        ],
+        "moneyness": [
+          0.9,
+          1.1
+        ],
+        "rate": [
+          -0.05,
+          0.1
+        ],
+        "strike": [
+          90.0,
+          110.0
+        ],
+        "volatility": [
+          0.05,
+          0.5
+        ]
+      },
+      "spot": 100
+    },
+    {
+      "anchor_maturity": 2.0,
+      "anchored_dividends": [],
+      "backends": [
+        "BSpline",
+        "Chebyshev"
+      ],
+      "dividend_yield": 0.02,
+      "factory": "make_price_table, BSplineBackend, adaptive default parameters explicit",
+      "factory_inputs": {
+        "maturity": [
+          0.019178082191780823,
+          0.1,
+          0.5,
+          1,
+          2
+        ],
+        "moneyness": [
+          0.7,
+          0.8,
+          0.9,
+          1,
+          1.1,
+          1.2,
+          1.3
+        ],
+        "rate": [
+          -0.05,
+          0,
+          0.05,
+          0.1
+        ],
+        "vol": [
+          0.05,
+          0.1,
+          0.2,
+          0.3,
+          0.5
+        ]
+      },
+      "id": "C2-PUT",
+      "option_type": "PUT",
+      "proof_domain": "Full actual published bounds, including clamps; original requested domain retained and differences reported. Continuous strike homogeneity; reference K100 is within required strike bounds.",
+      "reference_selection": "automatic",
+      "requested_bounds": {
+        "maturity": [
+          0.019178082191780823,
+          2.0
+        ],
+        "moneyness": [
+          0.7,
+          1.3
+        ],
+        "rate": [
+          -0.05,
+          0.1
+        ],
+        "strike": [
+          80.0,
+          120.0
+        ],
+        "volatility": [
+          0.05,
+          0.5
+        ]
+      },
+      "spot": 100
+    },
+    {
+      "anchor_maturity": 0.019178082191780823,
+      "anchored_dividends": [],
+      "backends": [
+        "BSpline",
+        "Chebyshev"
+      ],
+      "dividend_yield": 0.02,
+      "factory": "make_price_table, BSplineBackend, adaptive default parameters explicit",
+      "factory_inputs": {
+        "maturity": [
+          0.0027397260273972603,
+          0.005479452054794521,
+          0.010958904109589041,
+          0.019178082191780823
+        ],
+        "moneyness": [
+          0.9,
+          0.95,
+          1,
+          1.05,
+          1.1
+        ],
+        "rate": [
+          -0.05,
+          0,
+          0.05,
+          0.1
+        ],
+        "vol": [
+          0.05,
+          0.1,
+          0.2,
+          0.3,
+          0.5
+        ]
+      },
+      "id": "CS-CALL",
+      "option_type": "CALL",
+      "proof_domain": "Full actual published bounds, including clamps; original requested domain retained and differences reported. Continuous strike homogeneity; reference K100 is within required strike bounds.",
+      "reference_selection": "automatic",
+      "requested_bounds": {
+        "maturity": [
+          0.0027397260273972603,
+          0.019178082191780823
+        ],
+        "moneyness": [
+          0.9,
+          1.1
+        ],
+        "rate": [
+          -0.05,
+          0.1
+        ],
+        "strike": [
+          90.0,
+          110.0
+        ],
+        "volatility": [
+          0.05,
+          0.5
+        ]
+      },
+      "spot": 100
+    }
+  ],
+  "external_wall_seconds_per_build": 240,
+  "external_wall_seconds_per_proof": 180,
+  "proof_budget": {
+    "max_depth": 24,
+    "max_nodes": 4096
+  },
+  "selection": "Fixed before any build/proof outcome; first two are pilot, remaining two declared extension",
+  "source_commit": "e9e10221f37901a4a269c7b7bae94d3d7a09914c",
+  "source_requests_sha256": "8f3e8b5ac03632573c4d835b8474ce37a9676dd4c5854d3562833a475c2b424a",
+  "version": "459-phase-a-v1"
+}
