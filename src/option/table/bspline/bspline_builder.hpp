@@ -370,11 +370,9 @@ void for_each_axis_index(const PriceTableAxesND<N>& axes, Func&& func) {
     for_each_axis_index_impl<StartAxis>(axes, indices, std::forward<Func>(func));
 }
 
-#ifndef NDEBUG
 namespace testing {
 template <size_t N> struct PriceTableBuilderAccess;
 }  // namespace testing
-#endif
 
 
 /// Result from price table build with diagnostics
@@ -646,9 +644,7 @@ private:
         const std::vector<bool>& slice_valid) const;
 
     friend class SegmentedPriceTableBuilder;
-#ifndef NDEBUG
     template <size_t M> friend struct testing::PriceTableBuilderAccess;
-#endif
 
     PriceTableConfig config_;
     bool allow_tau_zero_ = false;
