@@ -976,9 +976,11 @@ TEST(AdaptiveGridBuilderTest, AutomaticGridCoversMoneynessTailsWithFixedBudget) 
 }
 
 // Regression (#480, S1): the continuous Chebyshev build solved its
-// (sigma, rate) batch gridless.  extract_chain_domain floors the tau axis
-// to a 0.5y spread and build_adaptive_chebyshev adds CC headroom, so for
-// this chain the PDE maturity is 1.01 * 0.6875 and the old batch-union
+// (sigma, rate) batch gridless. This fixture now declares the historical
+// effective measurement ranges explicitly; numerical support is no longer
+// mistaken for the caller's domain. Original input seeds and raw-node query
+// classes remain. With the historical half-year support and CC headroom,
+// this chain's old PDE maturity was 1.01 * 0.6875 and the old batch-union
 // half-width is 5 * sigma_hi * sqrt(0.694) ~= 5 * 0.225 * 0.833 ~= 0.94
 // (the batch is normalized-ineligible: its first param is the sigma_lo =
 // 0.01 node, whose margin is far below 0.35).  The moneyness nodes reach
@@ -1003,9 +1005,9 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     chain.spot = 100.0;
     chain.dividend_yield = 0.0;
     chain.strikes = {40.0, 60.0, 100.0, 160.0, 250.0};
-    chain.maturities = {0.05, 0.1};
-    chain.implied_vols = {0.10};
-    chain.rates = {0.03, 0.05};
+    chain.maturities = {1e-6, 0.05, 0.1, .500001};
+    chain.implied_vols = {.05, .10, .10 + .05};
+    chain.rates = {.02, .03, .05, .06};
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.002;  // relaxed: accuracy is asserted below
@@ -1073,6 +1075,26 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
                 << q.what << " m=" << q.m << " sigma=" << sigma;
         }
     }
+}
+
+TEST(AdaptiveGridBuilderTest, NarrowChebyshevRequestWithFilteredHoldoutIsRefused) {
+    // Preserve the original narrow request separately. With the unchanged
+    // seed and eight holdout points, every reference has TV/K below 1e-4;
+    // a zero maximum over no IV measurements must not qualify a surface.
+    OptionGrid chain;
+    chain.spot = 100.;
+    chain.dividend_yield = 0.;
+    chain.strikes = {40., 60., 100., 160., 250.};
+    chain.maturities = {.05, .1};
+    chain.implied_vols = {.10};
+    chain.rates = {.03, .05};
+    AdaptiveGridParams params;
+    params.target_iv_error = .002;
+    params.max_iter = 2;
+    params.validation_samples = 8;
+    auto result = build_adaptive_chebyshev(params, chain, OptionType::PUT);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
 }
 
 // Direct pricing oracle for the contract at the query valuation point.

@@ -13,7 +13,8 @@ Previously, `extract_chain_domain` applied a minimum half-year spread to the
 measurement domain. Validation consequently sampled `[1e-6, .500001]`, with
 numerical maturity seeds ending in a gap from `7/365` to `.500001`.
 
-The unchanged public request refused with `NoViableSurface` in 78.6 seconds.
+In a matched `bazel -c opt` reproduction, the unchanged public request refused
+with `NoViableSurface` in 78.6 seconds.
 All eight candidate fits succeeded, all 64 holdout references were valid, and
 62 holdout points were measured with finite values. No viable candidate was
 discarded: every holdout maximum exceeded the unchanged `.20` viability bound.
@@ -55,6 +56,13 @@ preserved maturity seeds and ceilings, fixed-axis sampling/refinement, existing
 B-spline singleton use, continuous Chebyshev singleton use, and a public
 all-point price-table save/load with IV-bracket refusal. The adaptive loop's
 all-filtered and nonfinite-data rejection criteria remain in force.
+
+The historical raw-node PDE-coverage fixture now declares its former effective
+measurement ranges explicitly, retaining the original seeds, query classes,
+and `1e-5`/`.2` price criteria. Its original narrow request is a separate
+regression: all eight fixed holdout references have negligible time value,
+so a vacuous zero maximum must still return `NoViableSurface`. This fixture
+alignment changes neither frozen cohort nor numerical acceptance criteria.
 
 The detailed baseline, per-iteration traces, exact spline payloads, replay
 source, and after-fix measurements are retained under
