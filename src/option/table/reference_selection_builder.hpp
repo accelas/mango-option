@@ -57,13 +57,17 @@ auto build_with_reference_selection(
         return price(*candidate, s, k, t, v, r);
     }};
     size_t evaluations = 0;
+    // Preserve available reference evidence if a later rescue build fails.
+    std::vector<std::optional<ReferenceCandidateMetrics>> available_metrics;
     auto selected = select_k_refs(config.kref_config, *requested.strike_bounds,
         [&](std::span<const double> refs) -> std::expected<ReferenceCandidateMetrics, PriceTableError> {
             ++evaluations;
+            available_metrics.emplace_back();
             auto assessed = evaluator->evaluate(refs);
             work.selection.record(assessed.has_value(), assessed ? assessed->provider_work
                 : assessed.error().work ? assessed.error().work->total_pde() : std::nullopt);
             if (!assessed) return fail(assessed.error());
+            available_metrics.back() = *assessed;
             const bool inadequate = assessed->decision != ReferenceCandidateDecision::Adequate &&
                 assessed->decision != ReferenceCandidateDecision::FitLimited &&
                 assessed->decision != ReferenceCandidateDecision::IvUnmeasured;
@@ -82,15 +86,27 @@ auto build_with_reference_selection(
                 else composed->provider_work.reset();
                 composed->pde_solves += assessed->pde_solves;
                 composed->elapsed_seconds += assessed->elapsed_seconds;
+                available_metrics.back() = *composed;
                 return composed;
             }
             return assessed;
         });
-    if (!selected) return fail(selected.error().error.value_or(
-        PriceTableError{PriceTableErrorCode::NoViableSurface, 4,
-                       static_cast<size_t>(selected.error().stop_reason)}));
+    if (!selected) {
+        auto failure = std::move(selected.error());
+        for (size_t i = 0; i < std::min(failure.candidates.size(), available_metrics.size()); ++i) {
+            if (!failure.candidates[i].metrics) failure.candidates[i].metrics = available_metrics[i];
+        }
+        auto error = failure.error.value_or(PriceTableError{
+            PriceTableErrorCode::NoViableSurface, 4, static_cast<size_t>(failure.stop_reason)});
+        error.reference_selection = std::make_shared<const ReferenceSelectionHistory>(failure);
+        return fail(std::move(error));
+    }
     auto built = ensure_candidate(selected->refs);
-    if (!built) return std::unexpected(built.error());
+    if (!built) {
+        auto error = built.error();
+        error.reference_selection = std::make_shared<const ReferenceSelectionHistory>(*selected);
+        return fail(std::move(error));
+    }
     // Ordinary selection establishes reference adequacy. Full fit/total
     // publication measurement remains with the acceptance gate; composed
     // rescue above is the exceptional path that measures a complete table.
