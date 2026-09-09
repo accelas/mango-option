@@ -69,7 +69,6 @@ TEST(IVRootSensitivityTest, PositiveVegaCannotIdentifyRoundedPricePlateau) {
     ASSERT_GT(table->vega(128, 128, .5, .125, .0625), 0.0);
     InterpolatedIVSolverConfig config;
     config.vega_threshold = 0.0;
-    config.detect_multiple_roots = false;
     auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(*table, config);
     ASSERT_TRUE(solver);
     auto result = solver->solve(root_query());
@@ -82,7 +81,6 @@ TEST(IVRootSensitivityTest, ZeroThresholdCannotDisableFlatRootAdmission) {
     ASSERT_TRUE(table);
     InterpolatedIVSolverConfig config;
     config.vega_threshold = 0.0;
-    config.detect_multiple_roots = false;
     auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(*table, config);
     ASSERT_TRUE(solver);
     auto result = solver->solve(root_query());
@@ -95,7 +93,6 @@ TEST(IVRootSensitivityTest, InteriorRootRequiresSensitivityAfterBrent) {
     auto table = certified_curve({8.0, .75, 0.0, .25});
     ASSERT_TRUE(table);
     InterpolatedIVSolverConfig config;
-    config.detect_multiple_roots = false;
     auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(*table, config);
     ASSERT_TRUE(solver);
     auto result = solver->solve(root_query());
@@ -156,7 +153,6 @@ TEST(IVRootSensitivityTest, NumericalAdmissionHasNoAbsoluteCurrencyFloor) {
     ASSERT_TRUE(table);
     InterpolatedIVSolverConfig config;
     config.vega_threshold = 0.0;
-    config.detect_multiple_roots = false;
     auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(*table, config);
     ASSERT_TRUE(solver);
     auto result = solver->solve(root_query(quote));

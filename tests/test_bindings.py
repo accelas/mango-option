@@ -280,21 +280,15 @@ def test_price_table_validation_and_iv_error_parity():
         assert hasattr(e, "code")
 
 
-def test_multiple_root_screen_is_configurable():
-    """The query-time multi-root screen is on by default and switchable."""
+def test_certification_has_no_optional_screen_toggle():
+    """Certified publication and root identifiability have no opt-out toggle."""
     config = mo.InterpolatedIVSolverConfig()
-    assert config.detect_multiple_roots is True
-
-    config.detect_multiple_roots = False
-    assert config.detect_multiple_roots is False
-
-    # An unscreened solve on a monotone surface is unaffected.
-    table = mo.make_price_table(make_price_table_config())
-    price = table.price(make_pricing_params())
-    solver = table.make_iv_solver(config)
-    success, result, error = solver.solve(make_iv_query(price))
-    assert success, error.message if error else ""
-    assert isinstance(result, mo.IVSuccess)
+    assert not hasattr(config, "detect_multiple_roots")
+    try:
+        config.detect_multiple_roots = False
+        raise AssertionError("the retired screen field must not be configurable")
+    except AttributeError:
+        pass
 
 
 def test_legacy_interpolated_iv_solver_factory_still_works():
@@ -429,6 +423,7 @@ def main():
         test_rate_spec_conversions,
         test_sequence_conversions_for_vectors_and_axes,
         test_optional_and_backend_variant_conversions,
+        test_certification_has_no_optional_screen_toggle,
         test_grid_accuracy_coverage_roundtrip,
         test_dividend_conversions,
         test_segmented_domain_and_reference_controls,
