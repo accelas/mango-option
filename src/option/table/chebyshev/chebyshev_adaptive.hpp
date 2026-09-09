@@ -20,6 +20,11 @@ namespace mango {
 
 namespace detail {
 
+/// Numerical padding for validated bounds and CC levels. Support must enclose
+/// every requested endpoint; padding floors are not query-domain limits.
+[[nodiscard]] SurfaceBounds chebyshev_support_bounds(
+    const SurfaceBounds& domain, std::array<size_t, 4> cc_levels);
+
 /// State for Chebyshev CC-level refinement.
 ///
 /// All 4 dimensions use Clenshaw-Curtis levels for nested node placement;
@@ -237,7 +242,7 @@ private:
     [[nodiscard]] std::vector<double> generate_tau_nodes(size_t tau_level) const;
 
     struct ExtendedBounds {
-        double m_lo, m_hi, sigma_lo, sigma_hi, rate_lo, rate_hi;
+        double m_lo, m_hi, tau_lo, tau_hi, sigma_lo, sigma_hi, rate_lo, rate_hi;
     };
     [[nodiscard]] ExtendedBounds compute_headroom(
         std::array<size_t, 4> cc_levels) const;

@@ -239,6 +239,38 @@ TEST(ChebyshevPDECacheTest, RejectsUnrepresentableManualLevels) {
 
 // #486: an explicit manual level request is a constraint, even when defaults
 // use more nodes. Requested-accuracy acceptance is a separate builder policy.
+TEST(ChebyshevPDECacheTest, ManualNumericalSupportContainsRequestedLowEndpoints) {
+    const std::array domains{
+        IVGrid{.moneyness = {std::log(.001), std::log(.005), std::log(.02)},
+            .vol = {.15, .25}, .rate = {-.10, -.06}},
+        IVGrid{.moneyness = {-.05, .0, .05},
+            .vol = {.005, .15}, .rate = {-.10, -.06}}};
+    for (size_t i = 0; i < domains.size(); ++i) {
+        SCOPED_TRACE(i);
+        SegmentedAdaptiveConfig config{.spot = 100.0, .option_type = OptionType::PUT,
+            .dividend_yield = 0.0, .discrete_dividends = {{.01, .1}}, .maturity = .025,
+            .kref_config = {.K_refs = {100.0}}, .strike_bounds = StrikeBounds{100.0, 100.0}};
+        auto builder = ChebyshevSegmentedBuilder::create(config, domains[i]);
+        ASSERT_TRUE(builder);
+        auto table = builder->build({3, 2, 1, 1});
+        ASSERT_TRUE(table) << table.error();
+        EXPECT_EQ(table->m_min(), domains[i].moneyness.front());
+        EXPECT_EQ(table->sigma_min(), domains[i].vol.front());
+        EXPECT_EQ(table->rate_min(), domains[i].rate.front());
+        for (const auto& segment : table->inner().pieces().front().pieces()) {
+            const auto& stored = segment.interpolant().domain();
+            EXPECT_LE(stored.lo[0], domains[i].moneyness.front());
+            EXPECT_GE(stored.hi[0], domains[i].moneyness.back());
+            EXPECT_GT(stored.lo[2], 0.0);
+            EXPECT_LE(stored.lo[2], domains[i].vol.front());
+            EXPECT_GE(stored.hi[2], domains[i].vol.back());
+            EXPECT_LE(stored.lo[3], domains[i].rate.front());
+            EXPECT_GE(stored.hi[3], domains[i].rate.back());
+            EXPECT_EQ(segment.interpolant().num_pts(), (std::array<size_t, 4>{9, 5, 3, 3}));
+        }
+    }
+}
+
 TEST(ChebyshevPDECacheTest, ExplicitManualLevelsRemainConstraints) {
     SegmentedAdaptiveConfig config{
         .spot = 100.0, .option_type = OptionType::PUT,

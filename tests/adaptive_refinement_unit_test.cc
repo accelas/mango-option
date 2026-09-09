@@ -332,6 +332,35 @@ TEST(BSplineRefineFnTest, FocusIntervalTargetsBin) {
 // Regression: headroom used to be 3 * width / (n_strikes - 1), which for a
 // 7-strike chain gave 3 * w / 6 -- an order of magnitude too wide.  Spec D3
 // requires the *expected seeded moneyness density* instead.
+TEST(ExtractChainDomainTest, MinimumSpreadRetainsSmallPositiveInputs) {
+    mango::OptionGrid chain;
+    chain.spot = 100.0;
+    chain.strikes = {90.0, 100.0, 110.0};
+    chain.maturities = {1e-8, .01};
+    chain.implied_vols = {1e-8, .005};
+    chain.rates = {-.10, -.06};
+    auto context = mango::extract_chain_domain(chain, 10);
+    ASSERT_TRUE(context);
+    EXPECT_GT(context->bounds.tau_min, 0.0);
+    EXPECT_LE(context->bounds.tau_min, 1e-8);
+    EXPECT_GT(context->bounds.sigma_min, 0.0);
+    EXPECT_LE(context->bounds.sigma_min, 1e-8);
+    EXPECT_LE(context->bounds.rate_min, -.10);
+}
+
+TEST(ExtractChainDomainTest, InvalidVolatilityIsNotRepairedByPadding) {
+    for (double sigma : {0.0, -.01, std::numeric_limits<double>::infinity(),
+                         std::numeric_limits<double>::quiet_NaN()}) {
+        mango::OptionGrid chain;
+        chain.spot = 100.0; chain.strikes = {90.0, 100.0, 110.0};
+        chain.maturities = {.01, .25}; chain.implied_vols = {sigma, .2};
+        chain.rates = {-.10, -.06};
+        auto context = mango::extract_chain_domain(chain, 10);
+        EXPECT_FALSE(context);
+        if (!context) EXPECT_EQ(context.error().code, mango::PriceTableErrorCode::InvalidConfig);
+    }
+}
+
 TEST(ExtractChainDomainTest, HeadroomUsesExpectedKnots) {
     mango::OptionGrid chain;
     chain.spot = 100.0;

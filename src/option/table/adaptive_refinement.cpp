@@ -1429,9 +1429,9 @@ expand_segmented_domain(const IVGrid& domain,
                         double /*dividend_yield*/,
                         const std::vector<Dividend>& discrete_dividends,
                         double min_K_ref) {
-    if (domain.moneyness.empty() || domain.vol.empty() || domain.rate.empty()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-    }
+    // Input admission is separate from optional numerical padding.
+    auto requested = requested_segmented_domain(domain, maturity);
+    if (!requested) return std::unexpected(requested.error());
 
     // domain.moneyness is already log(S/K) — take min/max directly
     double min_m = domain.moneyness.front();
@@ -1443,7 +1443,8 @@ expand_segmented_domain(const IVGrid& domain,
     if (expansion > 0.0) {
         double m_min_money = std::exp(min_m);
         double expanded = std::max(m_min_money - expansion, 0.01);
-        min_m = std::log(expanded);
+        // Padding may add support, but its floor cannot remove a requested tail.
+        min_m = std::min(min_m, std::log(expanded));
     }
 
     double min_vol = domain.vol.front();
@@ -1453,7 +1454,7 @@ expand_segmented_domain(const IVGrid& domain,
 
     // Apply standard minimum spreads
     expand_domain_bounds(min_m, max_m, 0.10);
-    expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
+    expand_domain_bounds(min_vol, max_vol, 0.10, std::min(kMinPositive, min_vol));
     expand_domain_bounds(min_rate, max_rate, 0.04);
 
     // The first segment includes an exact analytical payoff construction row.
@@ -1472,6 +1473,14 @@ std::expected<RefinementContext, PriceTableError>
 extract_chain_domain(const OptionGrid& chain, size_t expected_m_knots) {
     if (chain.strikes.empty() || chain.maturities.empty() ||
         chain.implied_vols.empty() || chain.rates.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    const auto positive_finite = [](double value) {
+        return std::isfinite(value) && value > 0.0;
+    };
+    if (!std::ranges::all_of(chain.maturities, positive_finite) ||
+        !std::ranges::all_of(chain.implied_vols, positive_finite)) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
@@ -1494,8 +1503,8 @@ extract_chain_domain(const OptionGrid& chain, size_t expected_m_knots) {
     // The minimum-spread widening is part of the SAMPLE domain: it is a
     // usability floor on degenerate user ranges, not interpolation headroom.
     expand_domain_bounds(min_m, max_m, 0.10);
-    expand_domain_bounds(lo_tau, hi_tau, 0.5, kMinPositive);
-    expand_domain_bounds(lo_vol, hi_vol, 0.10, kMinPositive);
+    expand_domain_bounds(lo_tau, hi_tau, 0.5, std::min(kMinPositive, lo_tau));
+    expand_domain_bounds(lo_vol, hi_vol, 0.10, std::min(kMinPositive, lo_vol));
     expand_domain_bounds(lo_rate, hi_rate, 0.04);
 
     SurfaceBounds sample{
