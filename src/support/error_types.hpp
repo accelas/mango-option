@@ -425,7 +425,7 @@ inline PriceTableError convert_to_price_table_error(const InterpolationError& er
 
 /// Convert ValidationError to PriceTableError
 inline PriceTableError convert_to_price_table_error(const ValidationError& err) {
-    PriceTableErrorCode code;
+    PriceTableErrorCode code = PriceTableErrorCode::SurfaceBuildFailed;
     switch (err.code) {
         case ValidationErrorCode::InvalidStrike:
         case ValidationErrorCode::InvalidSpotPrice:

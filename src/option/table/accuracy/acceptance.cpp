@@ -41,8 +41,7 @@ std::optional<bool> target_met(const std::optional<ReferenceErrorSummary>& chann
 
 Assessment assess(const ReferenceAccuracySummary& evidence, Prerequisites prerequisites,
                   Targets targets, Policy policy, IvMetricKind iv_metric_kind) {
-    if (!std::isfinite(targets.price) || targets.price <= 0.0
-        || (targets.iv && (!std::isfinite(*targets.iv) || *targets.iv <= 0.0))) {
+    if (!AccuracyRequest{targets.price, targets.iv, policy}.valid()) {
         return {evidence, prerequisites, targets, policy, Decision::InvalidTargets,
                 std::nullopt, std::nullopt, iv_metric_kind};
     }
@@ -71,6 +70,12 @@ Assessment assess(const ReferenceAccuracySummary& evidence, Prerequisites prereq
     else if (targets.iv && (!evidence.iv || evidence.iv->measured==0)) decision=Decision::IvUnmeasured;
     else if (targets.iv && iv_metric_kind!=IvMetricKind::AbsoluteIvError) decision=Decision::IvMetricNotActual;
     return {evidence, prerequisites, targets, policy, decision, price_met, iv_met, iv_metric_kind};
+}
+
+Assessment assess_request(const ReferenceAccuracySummary& evidence,
+    Prerequisites prerequisites, const AccuracyRequest& request, IvMetricKind iv_metric_kind) {
+    return assess(evidence, prerequisites, Targets{request.max_price_error, request.max_iv_error},
+                  request.policy, iv_metric_kind);
 }
 
 } // namespace mango::detail::accuracy

@@ -14,10 +14,19 @@ cc_library(
     srcs = ["acceptance.cpp"],
     hdrs = ["acceptance.hpp"],
     deps = [
+        ":request",
         "//src/option/table:reference_selection",
         "//src/option/table/certification:certificate_status",
     ],
     visibility = ["//src/option/table:__subpackages__", "//tests:__pkg__"],
+    strip_include_prefix = "/src/option/table/accuracy",
+    include_prefix = "mango/option/table/accuracy",
+)
+
+cc_library(
+    name = "request",
+    hdrs = ["request.hpp"],
+    visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table/accuracy",
     include_prefix = "mango/option/table/accuracy",
 )
