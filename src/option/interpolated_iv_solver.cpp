@@ -94,6 +94,16 @@ std::shared_ptr<const AccuracyReport> AnyInterpIVSolver::accuracy_report() const
     return impl_->accuracy_report;
 }
 
+PriceProofStatus AnyInterpIVSolver::proof_status() const noexcept {
+    if (!impl_) return PriceProofStatus::NotRun;
+    return std::visit([](const auto& solver) { return solver.proof_status(); }, impl_->solver);
+}
+
+std::size_t AnyInterpIVSolver::proof_work() const noexcept {
+    if (!impl_) return 0;
+    return std::visit([](const auto& solver) { return solver.proof_work(); }, impl_->solver);
+}
+
 void AnyInterpIVSolver::attach_accuracy_report(std::shared_ptr<const AccuracyReport> report) {
     impl_->accuracy_report = std::move(report);
 }

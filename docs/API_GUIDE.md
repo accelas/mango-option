@@ -470,6 +470,8 @@ Public price-table factories and loads certify that the final represented physic
 
 Interpolated IV construction accepts only a certified immutable price table. Every returned root must have finite positive vega and enough sensitivity to resolve a representable price change at the configured volatility resolution. A positive `vega_threshold` also applies at the returned root; setting it to zero cannot disable mandatory identifiability. Flat price regions remain valid for pricing and return `IVErrorCode::VegaTooSmall` when IV cannot be identified. Successful root finding alone is not an accuracy or confidence claim.
 
+The volatility search interval is the intersection of the certified table domain and `InterpolatedIVSolverConfig` bounds. Configured bounds must be finite, positive and ordered; an empty intersection refuses solver construction. Defaults remain `sigma_min = 0.01` and `sigma_max = 3.0`, so callers seeking higher volatility roots must configure that range. Fixed moneyness, maturity and rate slices are supported when the volatility interval has positive width. `AnyInterpIVSolver::proof_status()` and `proof_work()` report current evidence from its retained payload, independently of historical accuracy reports.
+
 Certification and final-root identifiability replace the former optional 17-point screen. There is no `detect_multiple_roots` configuration field in C++ or Python, and no such C ABI field.
 
 ### Build Diagnostics

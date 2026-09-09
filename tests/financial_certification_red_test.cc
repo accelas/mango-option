@@ -115,6 +115,16 @@ TEST(FinancialCertificationRedTest, AllRepresentationsRecomputeEvidenceAndPreser
         using Table = PriceTable<Inner>;
         auto iv = InterpolatedIVSolver<Table>::create(*loaded);
         ASSERT_TRUE(iv);
+        auto any_iv = make_any_interpolated_solver(std::move(*iv));
+        EXPECT_EQ(any_iv.proof_status(), loaded->proof_status());
+        EXPECT_EQ(any_iv.proof_work(), loaded->proof_work());
+        using View = detail::SharedPriceTableSurface<Table>;
+        auto shared_iv = InterpolatedIVSolver<View>::create(
+            View(std::make_shared<const Table>(*loaded)));
+        ASSERT_TRUE(shared_iv);
+        auto any_shared = make_any_interpolated_solver(std::move(*shared_iv));
+        EXPECT_EQ(any_shared.proof_status(), loaded->proof_status());
+        EXPECT_EQ(any_shared.proof_work(), loaded->proof_work());
         auto original_handle = *loaded;
         auto retained_handle = std::move(original_handle);
         auto empty_iv = InterpolatedIVSolver<Table>::create(std::move(original_handle));
