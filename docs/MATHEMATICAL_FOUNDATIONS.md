@@ -392,14 +392,25 @@ The workhorse grid for option pricing. A hyperbolic sine transformation concentr
 
 $$\xi_i = -1 + \frac{2i}{n-1} \qquad \text{(uniform in } [-1, 1]\text{)}$$
 
-$$x_i = x_c + \frac{\Delta x}{\alpha}\sinh(\alpha\xi_i) \qquad \text{(sinh-spaced in } x\text{)}$$
+$$x_i = x_c + h\,\frac{\sinh(\alpha\xi_i/2)}{\sinh(\alpha/2)}$$
 
-where $x_c$ is the center (typically $0$ = ATM), $\Delta x$ is the half-width, and $\alpha$ controls the concentration. With $\alpha = 2$:
+Here $x_c$ is the midpoint of the supplied bounds, $h$ is their half-width,
+and $\alpha$ is the API concentration parameter. The ratio of edge to center
+spacing tends to $\cosh(\alpha/2)$ as the grid is refined (about 1.54 for
+$\alpha=2$).
 
-- Spacing near center: $\Delta x_\min \sim (\Delta x / n)e^{-\alpha}$ — about 7× finer than uniform
-- Spacing at boundaries: $\Delta x_\max \sim (\Delta x / n)e^{\alpha}$ — about 7× coarser than uniform
+The implementation forms the centered integer-index offset before multiplying
+by the transformed step. It then adds the scaled sinh displacement to the
+midpoint. This preserves small coordinates near zero without subtracting
+large endpoint terms. The supplied endpoints are assigned exactly. Centered
+single-cluster multi-sinh grids share this implementation; asymmetric maps
+retain their endpoint-normalized parameterization.
 
-This puts resolution where it matters (near the strike) and saves points where it doesn't (far tails). The spacing varies smoothly and monotonically, so the non-uniform finite difference weights remain well-conditioned.
+Controlled domain ladders can therefore retain accurate common interior
+coordinates. Independently rounded input bounds and concentrations need not
+produce universally bit-identical nodes. Reference error qualification still
+checks spatial, temporal and domain sequences with its existing uncertainty
+criteria.
 
 ### Multi-Sinh Grids
 
