@@ -52,6 +52,7 @@ struct AnyPriceTable::Impl {
     /// Adaptive-build diagnostics (spec D7).  `nullopt` for manual builds
     /// and Parquet loads; never visited by `to_data()`/serialization.
     std::optional<BuildDiagnostics> diagnostics;
+    std::shared_ptr<const AccuracyReport> accuracy_report;
 
     template <typename T>
     explicit Impl(T t,
@@ -951,16 +952,34 @@ AnyPriceTable::make_iv_solver(
         auto solver = InterpolatedIVSolver<SharedSurface>::create(
             SharedSurface(table_ptr), config, std::move(divs));
         if (!solver.has_value()) {
-            return std::unexpected(solver.error());
+            auto error = solver.error();
+            error.accuracy_report = impl_->accuracy_report;
+            return std::unexpected(std::move(error));
         }
-        return make_any_interpolated_solver(
+        auto result = make_any_interpolated_solver(
             std::move(*solver), impl_->diagnostics);
+        result.attach_accuracy_report(impl_->accuracy_report);
+        return result;
     }, impl_->table);
 }
 
 std::optional<BuildDiagnostics> AnyPriceTable::build_diagnostics() const {
     return impl_->diagnostics;
 }
+
+std::shared_ptr<const AccuracyReport> AnyPriceTable::accuracy_report() const {
+    return impl_->accuracy_report;
+}
+
+PriceProofStatus AnyPriceTable::proof_status() const noexcept {
+    return std::visit([](const auto& table) { return table->proof_status(); }, impl_->table);
+}
+
+size_t AnyPriceTable::proof_work() const noexcept {
+    return std::visit([](const auto& table) { return table->proof_work(); }, impl_->table);
+}
+
+
 
 std::expected<IVSuccess, IVError>
 AnyPriceTable::solve_iv(

@@ -57,6 +57,15 @@ public:
     /// never enter serialization.
     [[nodiscard]] std::optional<BuildDiagnostics> build_diagnostics() const;
 
+    /// Final measured accuracy, independent of adaptive exploration history.
+    /// Absent when no final population has been assessed.
+    [[nodiscard]] std::shared_ptr<const AccuracyReport> accuracy_report() const;
+
+    /// Diagnostics from the actual frozen numeric payload, not report metadata.
+    [[nodiscard]] PriceProofStatus proof_status() const noexcept;
+    [[nodiscard]] size_t proof_work() const noexcept;
+
+
     /// Convenience one-shot IV solve. Constructs a fresh solver (bounds
     /// extraction + variant dispatch) on every call — not intended for
     /// repeated or hot-path queries. For those, create the solver once
