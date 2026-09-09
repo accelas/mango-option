@@ -676,6 +676,9 @@ Residual and vega evidence may use direct mesh differences or independently
 qualified component-price uncertainty estimates. Diagnostics record those
 methods separately. These empirical convergence estimates do not constitute
 mathematical price-error certificates or actual inverted-IV measurements.
+The reference cache retains scalar prices at every frozen actual quote ratio,
+including multiplication/division rounding, and releases each solved grid.
+This reduces retained memory without changing the reference work or criteria.
 
 `AnyPriceTable::build_diagnostics()` includes immutable `reference_selection`
 evidence for segmented builds. Python exposes the same selection history;
@@ -683,6 +686,10 @@ reference-only manual evidence leaves whole-fit accuracy fields as `None`.
 Its `iv_error_kind` is `price_vega_proxy`, not actual inverted-IV error.
 Typed manual Chebyshev callers can request `build_with_diagnostics()` to keep
 this evidence alongside the returned surface.
+Failed C++ builds can retain typed reference history in
+`ValidationError::reference_selection`, including a completed selection when
+fitting fails afterward. The separate `work` ledger distinguishes actual
+solver calls from requests; unavailable provider work remains unknown.
 
 For numerical fitting and diagnostics,
 `BSplineSegmentedBuilder::fit_adaptive_candidate()` fits the configured
