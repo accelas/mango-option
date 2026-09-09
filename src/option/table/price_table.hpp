@@ -28,13 +28,6 @@ public:
         return false;
     }();
 
-    PriceTable(const Inner& inner, const SurfaceBounds& bounds,
-                   OptionType option_type, double dividend_yield,
-                   const std::optional<FixedExpiryMetadata>& fixed_expiry = std::nullopt)
-        : payload_(std::make_shared<const Payload>(
-            freeze_inner(inner), bounds, option_type, dividend_yield, fixed_expiry))
-    {}
-
     /// Explicit certified creation. All numeric storage and model/domain
     /// metadata are detached before proving the exact retained payload.
     /// The certificate concerns the represented real price's sigma shape.
@@ -63,9 +56,9 @@ public:
         }
     }
     [[nodiscard]] PriceProofStatus proof_status() const noexcept {
-        return payload_->certificate.status;
+        return payload_ ? payload_->certificate.status : PriceProofStatus::NotRun;
     }
-    [[nodiscard]] std::size_t proof_work() const noexcept { return payload_->certificate.work; }
+    [[nodiscard]] std::size_t proof_work() const noexcept { return payload_ ? payload_->certificate.work : 0; }
 
     /// Unchecked numerical primitive; requires admitted query/model metadata.
     [[nodiscard]] double price(double spot, double strike,
@@ -213,7 +206,7 @@ private:
     PriceTable(std::shared_ptr<const Payload> payload,AdoptPayload) : payload_(std::move(payload)) {}
 
     // Copying a published table copies only this immutable handle. Numeric
-    // storage is detached once by the publication constructor above.
+    // storage is detached once by certified creation above.
     std::shared_ptr<const Payload> payload_;
 };
 

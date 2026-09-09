@@ -618,8 +618,6 @@ TEST(PhysicalCellProofTest, ZeroProofBudgetCannotProduceAnAdmissionToken) {
     auto source = std::make_shared<const BSplineND<double, 4>>(bezier({0, 0, 0, 0}, b));
     BSplineLeaf leaf(BSplineTransformLeaf(SharedBSplineInterp<4>(source), {}, 100),
                      AnalyticalEEP(OptionType::PUT, 0));
-    BSplinePriceTable legacy(leaf, b, OptionType::PUT, 0);
-    EXPECT_EQ(legacy.proof_status(), PriceProofStatus::NotRun);
     auto exhausted = BSplinePriceTable::create(leaf, b, OptionType::PUT, 0, std::nullopt, {0, 24});
     ASSERT_FALSE(exhausted);
     EXPECT_EQ(exhausted.error().code, PriceTableErrorCode::CertificationIndeterminate);
