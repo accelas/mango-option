@@ -1104,6 +1104,17 @@ cc_test(
 )
 
 cc_test(
+    name = "interpolated_iv_root_sensitivity_test",
+    size = "small",
+    srcs = ["interpolated_iv_root_sensitivity_test.cc"],
+    deps = [
+        "//src/option:interpolated_iv_solver",
+        "//src/option/table/serialization:from_data",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "batch_bracketing_test",
     size = "small",
     srcs = ["batch_bracketing_test.cc"],
