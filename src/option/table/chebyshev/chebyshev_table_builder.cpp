@@ -200,8 +200,10 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     ChebyshevTransformLeaf tleaf(std::move(*interp), StandardTransform4D{},
                                  config.K_ref);
     ChebyshevLeaf leaf(std::move(tleaf), eep);
-    return make_result(ChebyshevSurface(
-        std::move(leaf), bounds, config.option_type, config.dividend_yield));
+    auto surface = ChebyshevSurface::create(
+        leaf, bounds, config.option_type, config.dividend_yield);
+    if (!surface) return std::unexpected(surface.error());
+    return make_result(std::move(*surface));
 }
 
 }  // namespace mango
