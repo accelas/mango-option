@@ -192,7 +192,7 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
         };
     };
 
-    auto interp = ChebyshevInterpolant<4, RawTensor<4>>::build_from_values(
+    auto interp = ChebyshevModalInterpolant<4>::build_from_values(
         eep_span, config.domain, config.num_pts);
     if (!interp.has_value()) {
         return std::unexpected(convert_to_price_table_error(interp.error()));

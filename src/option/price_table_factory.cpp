@@ -704,7 +704,7 @@ build_dimensionless_chebyshev_table(const IVSolverFactoryConfig& config,
         .hi = {d.m_max, d.tp_max, d.lk_max},
     };
 
-    auto cheb = ChebyshevInterpolant<3, RawTensor<3>>::build_from_values(
+    auto cheb = ChebyshevModalInterpolant<3>::build_from_values(
         std::span<const double>(pde->values), domain, backend.chebyshev_pts);
     if (!cheb.has_value()) {
         return std::unexpected(detail::to_validation_error(

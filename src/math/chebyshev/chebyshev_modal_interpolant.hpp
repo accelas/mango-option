@@ -14,7 +14,7 @@
 
 namespace mango {
 
-/// Opt-in modal polynomial; existing financial aliases remain nodal.
+/// Owning modal polynomial used by financial Chebyshev surfaces.
 /// The stored binary64 coefficients define the polynomial used for values,
 /// derivatives and proof access. Converting nodal data is an explicit DCT-I
 /// approximation, not an exact reinterpretation of barycentric storage.

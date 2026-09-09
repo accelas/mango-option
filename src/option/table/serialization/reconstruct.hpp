@@ -360,4 +360,36 @@ template <size_t N, typename Xform>
         std::move(leaves), std::move(split));
 }
 
+/// Build a TauSegmentSplit + vector of Chebyshev modal leaves for one K_ref group.
+template <size_t N, typename Xform>
+[[nodiscard]] auto reconstruct_chebyshev_modal_tau_split(
+    const std::vector<const PriceTableData::Segment*>& group, double K_ref)
+    -> std::expected<
+        SplitSurface<TransformLeaf<ChebyshevModalInterpolant<N>, Xform>,
+                     TauSegmentSplit>,
+        PriceTableError> {
+    using LeafType = TransformLeaf<ChebyshevModalInterpolant<N>, Xform>;
+
+    auto tau_valid = validate_tau_segments(group);
+    if (!tau_valid) return std::unexpected(tau_valid.error());
+
+    std::vector<LeafType> leaves;
+    std::vector<double> tau_starts, tau_ends, tau_mins, tau_maxs;
+
+    for (const auto* seg : group) {
+        auto leaf = reconstruct_chebyshev_modal_leaf<N, Xform>(*seg);
+        if (!leaf) return std::unexpected(leaf.error());
+        leaves.push_back(std::move(*leaf));
+        tau_starts.push_back(seg->tau_start);
+        tau_ends.push_back(seg->tau_end);
+        tau_mins.push_back(seg->tau_min);
+        tau_maxs.push_back(seg->tau_max);
+    }
+
+    TauSegmentSplit split(std::move(tau_starts), std::move(tau_ends),
+                          std::move(tau_mins), std::move(tau_maxs), K_ref);
+    return SplitSurface<LeafType, TauSegmentSplit>(
+        std::move(leaves), std::move(split));
+}
+
 }  // namespace mango
