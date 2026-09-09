@@ -92,6 +92,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         fixture_ptr->K_ref = 100.0;
 
         std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
+        for (double& m : m_grid) m = std::log(m);
         std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
         std::vector<double> vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30};
         std::vector<double> rate_grid = {0.0, 0.025, 0.05, 0.10};
