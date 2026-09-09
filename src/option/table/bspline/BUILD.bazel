@@ -176,3 +176,18 @@ cc_library(
     strip_include_prefix = "/src/option/table/bspline",
     include_prefix = "mango/option/table/bspline",
 )
+
+cc_library(
+    name = "exact_european_candidate",
+    srcs = ["exact_european_candidate.cpp"],
+    hdrs = ["exact_european_candidate.hpp"],
+    deps = [
+        ":bspline_types",
+        "//src/option/table:surface_bounds",
+        "//src/option/table:fixed_expiry",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/bspline",
+    include_prefix = "mango/option/table/bspline",
+)

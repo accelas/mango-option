@@ -2227,3 +2227,15 @@ exports_files(
     ["price_table_builder_test_access.hpp"],
     visibility = ["//tests/constrained_c0:__pkg__"],
 )
+
+cc_test(
+    name = "exact_european_candidate_test",
+    size = "small",
+    srcs = ["exact_european_candidate_test.cc"],
+    deps = [
+        "//src/option/table/bspline:exact_european_candidate",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option:interpolated_iv_solver",
+        "@googletest//:gtest_main",
+    ],
+)
