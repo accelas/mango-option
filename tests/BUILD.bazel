@@ -2210,3 +2210,15 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "accuracy_final_candidate_test",
+    size = "small",
+    srcs = ["accuracy_final_candidate_test.cc"],
+    deps = [
+        "//src/option/table/accuracy:final_candidate",
+        "//src/option:interpolated_iv_solver_core",
+        "//src/option:european_option",
+        "@googletest//:gtest_main",
+    ],
+)

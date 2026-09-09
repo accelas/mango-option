@@ -21,7 +21,7 @@ TEST(AccuracyReportTest, SnapshotOwnsEvidenceAndPreservesUnknownOutcomes) {
     EXPECT_FALSE(report.iv_target_met());
     EXPECT_EQ(report.request().max_price_error, .01);
     EXPECT_FALSE(report.request().max_iv_error);
-    EXPECT_EQ(report.decision(), AccuracyDecision::ViabilityUnassessed);
+    EXPECT_EQ(report.decision(), AccuracyDecision::CertificateNotRun);
     EXPECT_EQ(report.prerequisites().certificate, PriceProofStatus::NotRun);
     static_assert(!std::is_default_constructible_v<AccuracyReport>);
     static_assert(!std::is_copy_assignable_v<AccuracyReport>);
@@ -38,7 +38,7 @@ TEST(AccuracyReportTest, PublicFailureMappingRetainsSameOwnedReport) {
     ASSERT_EQ(roundtrip.accuracy_report, report);
     source.accuracy_report.reset();
     report.reset();
-    EXPECT_EQ(roundtrip.accuracy_report->decision(), AccuracyDecision::ViabilityUnassessed);
+    EXPECT_EQ(roundtrip.accuracy_report->decision(), AccuracyDecision::CertificateNotRun);
 }
 } // namespace
 } // namespace mango

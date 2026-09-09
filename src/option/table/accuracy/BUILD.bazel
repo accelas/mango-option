@@ -43,3 +43,13 @@ cc_library(
     strip_include_prefix = "/src/option/table/accuracy",
     include_prefix = "mango/option/table/accuracy",
 )
+
+cc_library(
+    name = "final_candidate",
+    srcs = ["final_candidate.cpp"],
+    hdrs = ["final_candidate.hpp"],
+    deps = [":collector", "//src/option:interpolated_iv_solver_core"],
+    visibility = ["//src/option:__pkg__", "//tests:__pkg__"],
+    strip_include_prefix = "/src/option/table/accuracy",
+    include_prefix = "mango/option/table/accuracy",
+)

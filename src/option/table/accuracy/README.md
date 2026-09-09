@@ -80,3 +80,34 @@ scaled accumulation to avoid overflow/underflow of squared errors; positive
 RMS below representable range reports the smallest positive double rather
 than false exactness. This collector remains private; factory hooks, qualified
 cohort adapters, certification tokens, and persistence binding are pending.
+
+## Certified final candidate adapter
+
+`collect_final_candidate` accepts exactly the six supported financial table
+aliases. It reads proof status from the frozen payload and creates the existing
+conditioned IV solver only for a certified table. A caller-defined surface or
+report with a `Certified` getter is not an accepted type. The table is copied
+as a cheap immutable handle; coefficient storage is not frozen again. Price
+observations validate the complete physical contract, including exact rolled
+cash schedules, before evaluating that same payload.
+
+The adapter derives hard viability from observations instead of receiving a
+caller-supplied `Passed` flag. Where qualified sensitivity bounds are available,
+price error divided by the positive reference-vega lower bound must stay within
+the existing 0.20 exploratory hard guard. This conservative proxy is separate
+from actual-IV errors, which always come from conditioned inversion. A complete
+price-only target pass may establish viability even if every IV row is filtered.
+A price-only best-effort miss with no applicable independent guard stays
+`ViabilityUnassessed`; no new absolute-price ceiling is invented for that case.
+
+Known hard failures and incomplete proof retain priority. Missing requested
+price/IV evidence is reported before merely unassessed viability, so an
+all-filtered IV request reports `IvUnmeasured` without manufacturing a passed
+viability check. Per-channel counts and absent error statistics remain intact.
+
+`AccuracyRequest` and the immutable `AccuracyReport` are public metadata types;
+the private `Assessment` name aliases that same report implementation. Table,
+IV-handle and factory-error report pointers share ownership. A report alone
+never grants admission, and an absent report still means no final population
+was assessed. Common factory acceptance and population/persistence integration
+remain separate activation steps.

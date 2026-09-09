@@ -38,6 +38,9 @@ struct PhysicalReferenceRow {
     std::optional<double> price_uncertainty;
     std::optional<double> iv_uncertainty;
     ReferenceProvenance provenance;
+    /// Independently qualified positive sensitivity lower bound. Used only
+    /// for conditioning/legacy hard-viability checks, never actual IV error.
+    std::optional<double> reference_vega_lower_bound;
 };
 
 enum class ObservationOutcome : uint8_t {
