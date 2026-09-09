@@ -96,6 +96,15 @@ public:
         return interp_.eval(coords);
     }
 
+    /// Copy owning interpolants and recursively detach shared storage.
+    [[nodiscard]] TransformLeaf immutable_snapshot() const {
+        if constexpr (requires { interp_.immutable_snapshot(); }) {
+            return TransformLeaf(interp_.immutable_snapshot(), xform_, K_ref_);
+        } else {
+            return TransformLeaf(interp_, xform_, K_ref_);
+        }
+    }
+
     [[nodiscard]] const Interp& interpolant() const noexcept { return interp_; }
     [[nodiscard]] double K_ref() const noexcept { return K_ref_; }
 

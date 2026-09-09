@@ -340,20 +340,30 @@ BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>
 
 **Fixed-expiry sampling:** A segmented table stores one expiry across remaining
 life. Query schedules and adaptive references roll anchored dividend offsets
-by `T0 - tau`. The Chebyshev builder solves once per parameter pair to `T0`
-and registers exact mandatory rows. Its routing and leaf coordinates share
+by `T0 - tau`. Both segmented backends solve once per reference strike and
+volatility/rate pair to `T0` and register exact mandatory rows. Routing and leaf coordinates share
 one origin; excluded event gaps are checked domain failures. The ordinary
 PDE snapshot is after the backward jump, so its exact event value is the
 pre-dividend calendar side; this is not the supported exact query convention.
 
-**B-spline backward chaining (pending #488):** Segments are built from expiry backward. The last segment (dividend-free) solves the standard American PDE. Earlier segments use the next segment's price as their initial condition (after adjusting spot for the dividend drop). This propagates the dividend effect through the full maturity range.
+**Raw segment fitting:** Every B-spline segment is fitted independently from
+snapshots of that same end-to-end PDE solve. The solver applies dividend jumps;
+no fitted segment supplies another segment's initial condition. The analytic
+payoff row at tau=0 supports construction; public queries require positive tau.
 
-**Multi-K_ref:** With continuous dividends, American option prices are homogeneous in strike: P(S, K) = K * f(S/K). Cash dividends break this property because the dividend amount is absolute, not proportional. To maintain interpolation accuracy, multiple reference strikes (K_ref) are used. Each K_ref produces a separate segmented surface, and queries interpolate across K_ref values weighted by proximity to the actual strike.
+**Multi-K_ref:** With continuous dividends, American option prices are homogeneous
+in strike: P(S, K) = K * f(S/K). Absolute cash dividends break this property.
+Each reference K_i has its own segmented surface. A query maps spot to
+S_i = S*K_i/K, preserving moneyness, and blends normalized prices with positive,
+sigma-independent weights linear in absolute strike. The query strike restores
+quote units. Delta and gamma include the spot-map chain factors K_i/K and its
+square. This reference blend remains an approximation requiring measurement.
 
-### EEP vs Raw Price by Segment
+### Continuous EEP and Segmented Raw Prices
 
-- **Last segment** (no dividend boundary): Uses EEP decomposition, same as the standard path. The European component can be computed analytically.
-- **Earlier segments**: Store raw prices. The initial condition comes from the next segment's surface evaluation (not from a closed-form expression), so no clean European decomposition exists.
+- **Continuous-dividend tables:** Use EEP decomposition and an analytic European add-back.
+- **Segmented tables:** Every leaf stores raw normalized American prices V/K_ref,
+  including the dividend-free segment nearest expiry. Queries need no European add-back.
 
 ### Type Erasure
 

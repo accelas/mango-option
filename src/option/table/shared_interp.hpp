@@ -39,6 +39,11 @@ public:
         return ptr_->eval_second_partial(axis, coords);
     }
 
+    /// Detach caller-owned numeric storage at financial-table publication.
+    [[nodiscard]] SharedInterp immutable_snapshot() const {
+        return SharedInterp(std::make_shared<const T>(*ptr_));
+    }
+
     /// Access the underlying interpolant.
     [[nodiscard]] const T& get() const { return *ptr_; }
 

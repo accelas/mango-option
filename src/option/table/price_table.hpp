@@ -8,6 +8,7 @@
 #include "mango/option/table/fixed_expiry.hpp"
 #include <expected>
 #include <cmath>
+#include <memory>
 
 namespace mango {
 
@@ -25,6 +26,8 @@ struct SurfaceBounds {
 };
 
 /// Top-level queryable price surface with runtime metadata.
+/// Publication detaches numerical storage and model metadata from caller
+/// aliases. Later copies share that immutable payload, including in IV solvers.
 /// Used directly by InterpolatedIVSolver.
 template <typename Inner>
 class PriceTable {
@@ -35,29 +38,22 @@ public:
         return false;
     }();
 
-    PriceTable(Inner inner, const SurfaceBounds& bounds,
+    PriceTable(const Inner& inner, const SurfaceBounds& bounds,
                    OptionType option_type, double dividend_yield,
-                   std::optional<FixedExpiryMetadata> fixed_expiry = std::nullopt)
-        : inner_(std::move(inner))
-        , bounds_(bounds)
-        , option_type_(option_type)
-        , dividend_yield_(dividend_yield)
-        , moneyness_domain_(bounds.ratio_bounds ? *bounds.ratio_bounds
-            : MoneynessBounds{std::exp(bounds.m_min), std::exp(bounds.m_max)})
-        , fixed_expiry_(std::move(fixed_expiry))
-        , fixed_expiry_valid_(fixed_expiry_ ? fixed_expiry_->valid(bounds.tau_max)
-                                           : !requires_fixed_expiry)
+                   const std::optional<FixedExpiryMetadata>& fixed_expiry = std::nullopt)
+        : payload_(std::make_shared<const Payload>(
+            freeze_inner(inner), bounds, option_type, dividend_yield, fixed_expiry))
     {}
 
     /// Unchecked numerical primitive; requires admitted query/model metadata.
     [[nodiscard]] double price(double spot, double strike,
                                 double tau, double sigma, double rate) const {
-        return inner_.price(spot, strike, tau, sigma, rate);
+        return payload_->inner.price(spot, strike, tau, sigma, rate);
     }
 
     [[nodiscard]] double vega(double spot, double strike,
                                double tau, double sigma, double rate) const {
-        return inner_.vega(spot, strike, tau, sigma, rate);
+        return payload_->inner.vega(spot, strike, tau, sigma, rate);
     }
 
     [[nodiscard]] std::expected<double, GreekError>
@@ -65,7 +61,7 @@ public:
         if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
-        return inner_.greek(Greek::Delta, params);
+        return payload_->inner.greek(Greek::Delta, params);
     }
 
     [[nodiscard]] std::expected<double, GreekError>
@@ -73,7 +69,7 @@ public:
         if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
-        return inner_.gamma(params);
+        return payload_->inner.gamma(params);
     }
 
     [[nodiscard]] std::expected<double, GreekError>
@@ -81,7 +77,7 @@ public:
         if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
-        return inner_.greek(Greek::Theta, params);
+        return payload_->inner.greek(Greek::Theta, params);
     }
 
     [[nodiscard]] std::expected<double, GreekError>
@@ -89,67 +85,67 @@ public:
         if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
-        return inner_.greek(Greek::Rho, params);
+        return payload_->inner.greek(Greek::Rho, params);
     }
 
-    [[nodiscard]] double m_min() const noexcept { return bounds_.m_min; }
-    [[nodiscard]] double m_max() const noexcept { return bounds_.m_max; }
-    [[nodiscard]] double tau_min() const noexcept { return bounds_.tau_min; }
-    [[nodiscard]] double tau_max() const noexcept { return bounds_.tau_max; }
+    [[nodiscard]] double m_min() const noexcept { return payload_->bounds.m_min; }
+    [[nodiscard]] double m_max() const noexcept { return payload_->bounds.m_max; }
+    [[nodiscard]] double tau_min() const noexcept { return payload_->bounds.tau_min; }
+    [[nodiscard]] double tau_max() const noexcept { return payload_->bounds.tau_max; }
     [[nodiscard]] bool contains_maturity(double tau) const noexcept {
-        if (!fixed_expiry_valid_ || !std::isfinite(tau) || tau <= 0.0 || tau < tau_min() || tau > tau_max()) return false;
-        if constexpr (requires { inner_.contains_maturity(tau); }) {
-            return inner_.contains_maturity(tau);
+        if (!payload_->fixed_expiry_valid || !std::isfinite(tau) || tau <= 0.0 || tau < tau_min() || tau > tau_max()) return false;
+        if constexpr (requires { payload_->inner.contains_maturity(tau); }) {
+            return payload_->inner.contains_maturity(tau);
         }
         return true;
     }
-    [[nodiscard]] double sigma_min() const noexcept { return bounds_.sigma_min; }
-    [[nodiscard]] double sigma_max() const noexcept { return bounds_.sigma_max; }
-    [[nodiscard]] double rate_min() const noexcept { return bounds_.rate_min; }
-    [[nodiscard]] double rate_max() const noexcept { return bounds_.rate_max; }
-    [[nodiscard]] OptionType option_type() const noexcept { return option_type_; }
-    [[nodiscard]] double dividend_yield() const noexcept { return dividend_yield_; }
+    [[nodiscard]] double sigma_min() const noexcept { return payload_->bounds.sigma_min; }
+    [[nodiscard]] double sigma_max() const noexcept { return payload_->bounds.sigma_max; }
+    [[nodiscard]] double rate_min() const noexcept { return payload_->bounds.rate_min; }
+    [[nodiscard]] double rate_max() const noexcept { return payload_->bounds.rate_max; }
+    [[nodiscard]] OptionType option_type() const noexcept { return payload_->option_type; }
+    [[nodiscard]] double dividend_yield() const noexcept { return payload_->dividend_yield; }
 
     [[nodiscard]] const std::optional<FixedExpiryMetadata>& fixed_expiry() const noexcept {
-        return fixed_expiry_;
+        return payload_->fixed_expiry;
     }
 
     [[nodiscard]] const std::optional<StrikeBounds>& strike_bounds() const noexcept {
-        return bounds_.strike_bounds;
+        return payload_->bounds.strike_bounds;
     }
     /// Requested ratio endpoints and conservative real S/K enclosure are
     /// carried separately from interpolation coordinates and support headroom.
     [[nodiscard]] const MoneynessBounds& ratio_bounds() const noexcept {
-        return moneyness_domain_.requested();
+        return payload_->moneyness_domain.requested();
     }
     [[nodiscard]] const MoneynessBounds& ratio_enclosure() const noexcept {
-        return moneyness_domain_.enclosure();
+        return payload_->moneyness_domain.enclosure();
     }
     [[nodiscard]] bool contains_moneyness(double spot, double strike) const noexcept {
-        return moneyness_domain_.contains_quote(spot, strike);
+        return payload_->moneyness_domain.contains_quote(spot, strike);
     }
 
     [[nodiscard]] bool contains_strike(double strike) const noexcept {
         if (!std::isfinite(strike) || strike <= 0.0) return false;
-        if (!bounds_.strike_bounds) {
+        if (!payload_->bounds.strike_bounds) {
             if constexpr (requires { Inner::requires_strike_bounds; }) {
                 if (Inner::requires_strike_bounds) return false;
             }
-        } else if (!bounds_.strike_bounds->contains(strike)) {
+        } else if (!payload_->bounds.strike_bounds->contains(strike)) {
             return false;
         }
-        if constexpr (requires { inner_.contains_strike(strike); }) {
-            return inner_.contains_strike(strike);
+        if constexpr (requires { payload_->inner.contains_strike(strike); }) {
+            return payload_->inner.contains_strike(strike);
         }
         return true;
     }
 
-    [[nodiscard]] const Inner& inner() const noexcept { return inner_; }
+    [[nodiscard]] const Inner& inner() const noexcept { return payload_->inner; }
 
 private:
     [[nodiscard]] bool contains_pricing_params(const PricingParams& params) const {
-        if (!mango::validate_pricing_params(params) || params.option_type != option_type_ ||
-            std::abs(params.dividend_yield - dividend_yield_) > 1e-10 ||
+        if (!mango::validate_pricing_params(params) || params.option_type != payload_->option_type ||
+            std::abs(params.dividend_yield - payload_->dividend_yield) > 1e-10 ||
             !contains_strike(params.strike) || !contains_moneyness(params.spot, params.strike) ||
             !contains_maturity(params.maturity)) return false;
         const double rate = get_zero_rate(params.rate, params.maturity);
@@ -157,13 +153,38 @@ private:
             params.volatility <= sigma_max() && rate >= rate_min() && rate <= rate_max();
     }
 
-    Inner inner_;
-    SurfaceBounds bounds_;
-    OptionType option_type_;
-    double dividend_yield_;
-    MoneynessDomain moneyness_domain_;
-    std::optional<FixedExpiryMetadata> fixed_expiry_;
-    bool fixed_expiry_valid_;
+    static Inner freeze_inner(const Inner& inner) {
+        if constexpr (requires { inner.immutable_snapshot(); }) {
+            return inner.immutable_snapshot();
+        } else {
+            return inner;
+        }
+    }
+
+    struct Payload {
+        Inner inner;
+        SurfaceBounds bounds;
+        OptionType option_type;
+        double dividend_yield;
+        MoneynessDomain moneyness_domain;
+        std::optional<FixedExpiryMetadata> fixed_expiry;
+        bool fixed_expiry_valid;
+
+        Payload(Inner value, const SurfaceBounds& domain, OptionType type, double yield,
+                const std::optional<FixedExpiryMetadata>& model)
+            : inner(std::move(value)), bounds(domain), option_type(type), dividend_yield(yield)
+            , moneyness_domain(domain.ratio_bounds ? *domain.ratio_bounds
+                : MoneynessBounds{std::exp(domain.m_min), std::exp(domain.m_max)})
+            // Moving the caller's vector could preserve a mutable data() alias.
+            , fixed_expiry(model)
+            , fixed_expiry_valid(fixed_expiry ? fixed_expiry->valid(domain.tau_max)
+                                             : !requires_fixed_expiry)
+        {}
+    };
+
+    // Copying a published table copies only this immutable handle. Numeric
+    // storage is detached once by the publication constructor above.
+    std::shared_ptr<const Payload> payload_;
 };
 
 }  // namespace mango

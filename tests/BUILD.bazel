@@ -1,5 +1,25 @@
 # SPDX-License-Identifier: MIT
 cc_test(
+    name = "accuracy_collector_test",
+    size = "small",
+    srcs = ["accuracy_collector_test.cc"],
+    deps = [
+        "//src/option/table/accuracy:collector",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "accuracy_acceptance_test",
+    size = "small",
+    srcs = ["accuracy_acceptance_test.cc"],
+    deps = [
+        "//src/option/table/accuracy:acceptance",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "reference_selection_test",
     size = "small",
     srcs = ["reference_selection_test.cc"],
@@ -2002,6 +2022,29 @@ cc_test(
     ],
 )
 
+py_test(
+    name = "reference_qualification_test",
+    srcs = ["reference_qualification_test.py"],
+    deps = ["//tools:reference_qualification"],
+    size = "small",
+)
+
+py_test(
+    name = "reference_cohort_test",
+    srcs = ["reference_cohort_test.py"],
+    deps = ["//tools:reference_qualification"],
+    data = ["//benchmarks/data/483_reference_cohort:fixtures"],
+    size = "small",
+)
+
+py_test(
+    name = "reference_worker_test",
+    srcs = ["reference_worker_test.py"],
+    deps = ["//tools:reference_qualification"],
+    data = ["//benchmarks:reference_oracle_worker"],
+    size = "small",
+)
+
 cc_test(
     name = "proof_interval_test",
     srcs = ["proof_interval_test.cc"],
@@ -2050,6 +2093,12 @@ cc_test(
     name = "physical_price_bounds_test",
     srcs = ["physical_price_bounds_test.cc"],
     deps = ["//src/option/table/certification:physical_bounds", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "reference_strike_evaluator_test",
+    srcs = ["reference_strike_evaluator_test.cc"],
+    deps = ["//src/option/table:reference_strike_evaluator", "@googletest//:gtest_main"],
 )
 
 cc_test(

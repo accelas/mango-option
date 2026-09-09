@@ -156,6 +156,20 @@ public:
         }
         return true;
     }
+    /// Detach every leaf while preserving the exact routing metadata.
+    [[nodiscard]] SplitSurface immutable_snapshot() const {
+        std::vector<Inner> pieces;
+        pieces.reserve(pieces_.size());
+        for (const auto& piece : pieces_) {
+            if constexpr (requires { piece.immutable_snapshot(); }) {
+                pieces.push_back(piece.immutable_snapshot());
+            } else {
+                pieces.push_back(piece);
+            }
+        }
+        return SplitSurface(std::move(pieces), split_);
+    }
+
     [[nodiscard]] const std::vector<Inner>& pieces() const noexcept { return pieces_; }
     [[nodiscard]] const Split& split() const noexcept { return split_; }
 
