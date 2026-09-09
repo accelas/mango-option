@@ -316,6 +316,14 @@ py::dict reference_selection_to_py(const mango::ReferenceSelectionResult& value)
             row["total"] = reference_accuracy_to_py(m.total);
             row["pde_solves"] = m.pde_solves;
             row["elapsed_seconds"] = m.elapsed_seconds;
+            if (m.qualification_paths) {
+                py::dict paths;
+                paths["residual_direct"] = m.qualification_paths->residual_direct;
+                paths["residual_component"] = m.qualification_paths->residual_component;
+                paths["vega_direct"] = m.qualification_paths->vega_direct;
+                paths["vega_component"] = m.qualification_paths->vega_component;
+                row["empirical_qualification_paths"] = std::move(paths);
+            }
         }
         if (candidate.evaluator_error) {
             py::dict error;

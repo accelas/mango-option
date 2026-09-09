@@ -668,6 +668,10 @@ are measured without replacement. A qualified failure witness can stop an
 inadequate candidate early; untested and oracle-unresolved rows remain distinct
 from filtered IV observations. Error and uncertainty budgets follow requested
 criteria, including the configured positive vega floor on adaptive builds.
+Residual and vega evidence may use direct mesh differences or independently
+qualified component-price uncertainty estimates. Diagnostics record those
+methods separately. These empirical convergence estimates do not constitute
+mathematical price-error certificates or actual inverted-IV measurements.
 
 `AnyPriceTable::build_diagnostics()` includes immutable `reference_selection`
 evidence for segmented builds. Python exposes the same selection history;

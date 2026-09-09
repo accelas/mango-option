@@ -14,9 +14,11 @@
 
 namespace mango {
 namespace {
+enum class QualificationPath { None, Direct, Component };
 struct Observation {
     double value = std::numeric_limits<double>::quiet_NaN();
     std::optional<double> allowance;
+    QualificationPath path = QualificationPath::None;
 };
 
 std::optional<double> convergence_allowance(
@@ -82,6 +84,7 @@ struct ReferenceStrikeEvaluator::Impl {
     std::vector<PhysicalQuery> queries;
     double price_target, iv_target, vega_floor;
     double full_u;
+    ReferenceSequenceObserver observer;
     size_t solves = 0;
     static constexpr size_t kSolveBudget = 8192;
     using SolveKey = std::tuple<double, double, double, double, size_t, size_t, double>;
@@ -89,6 +92,17 @@ struct ReferenceStrikeEvaluator::Impl {
     using PriceKey = std::tuple<double, double, double, double, double, size_t>;
     std::map<PriceKey, Observation> prices;
     std::map<std::vector<double>, ReferenceAccuracySummary> reference_witnesses;
+
+    void trace(const char* quantity, const PhysicalQuery& query, double reference_strike,
+               size_t round, double bump, std::array<double, 3> space,
+               std::array<double, 3> time, std::array<double, 3> domain,
+               std::optional<double> allowance, double scale = 1.0) const {
+        if (!observer) return;
+        for (auto* axis : {&space, &time, &domain}) for (double& value : *axis) value *= scale;
+        if (allowance) *allowance *= scale;
+        observer({quantity, query.spot, query.strike, reference_strike, query.tau, query.sigma,
+                  query.rate, bump, round, space, time, domain, allowance});
+    }
 
     std::shared_ptr<AmericanOptionResult> solve(
         double strike, double tau, double sigma, double rate,
@@ -165,6 +179,9 @@ struct ReferenceStrikeEvaluator::Impl {
             const double intrinsic = intrinsic_value(local_k * ratio, local_k, config.option_type);
             if (finest + allowance >= intrinsic) result.allowance = allowance;
         }
+        auto shifted_query = query;
+        shifted_query.sigma = sigma;
+        trace("price", shifted_query, strike, round, 0.0, space, time, domain, result.allowance, scale);
         prices.emplace(key, result);
         result.value *= scale;
         if (result.allowance) *result.allowance *= scale;
@@ -197,7 +214,55 @@ struct ReferenceStrikeEvaluator::Impl {
         auto b = convergence_allowance(time, floor);
         auto c = convergence_allowance(domain, floor);
         Observation result{.value = finest};
-        if (a && b && c) result.allowance = *a + *b + *c;
+        trace("residual", query, query.strike, round, 0.0, space, time, domain,
+              a && b && c ? std::optional<double>{*a + *b + *c} : std::nullopt);
+        if (a && b && c) {
+            result.allowance = *a + *b + *c;
+            result.path = QualificationPath::Direct;
+            return result;
+        }
+        // Independent component-price allowances can still bound the
+        // residual when cancellation makes its own mesh sequence irregular.
+        // This uses the same cached solves and the triangle inequality;
+        // no noncontracting sequence is relabelled as convergent.
+        auto direct = price(query, query.strike, query.sigma, round);
+        if (!direct.allowance) return result;
+        double allowance = *direct.allowance;
+        for (size_t i = 0; i < bracket.count; ++i) {
+            const auto entry = bracket.entries[i];
+            const double k = refs[entry.index];
+            auto component = price(query, k, query.sigma, round);
+            if (!component.allowance) return result;
+            allowance += query.strike * entry.weight / k * *component.allowance;
+        }
+        if (std::isfinite(allowance)) {
+            result.allowance = allowance;
+            result.path = QualificationPath::Component;
+        }
+        return result;
+    }
+
+    Observation vega_from_price_bounds(const PhysicalQuery& query, size_t round) {
+        std::array<double, 3> values{}, uncertainties{};
+        for (size_t i = 0; i < 3; ++i) {
+            const double h = std::ldexp(0.02 * query.sigma, -static_cast<int>(i));
+            if (!(h > 0.0) || !std::isfinite(query.sigma + h) ||
+                !(query.sigma - h > 0.0) || query.sigma + h == query.sigma - h)
+                return {};
+            auto up = price(query, query.strike, query.sigma + h, round);
+            auto down = price(query, query.strike, query.sigma - h, round);
+            values[i] = (up.value - down.value) / (2.0 * h);
+            if (!up.allowance || !down.allowance) return Observation{.value = values[i]};
+            uncertainties[i] = (*up.allowance + *down.allowance) / (2.0 * h);
+            if (!std::isfinite(uncertainties[i])) return Observation{.value = values[i]};
+        }
+        Observation result{.value = values.back()};
+        const double mesh = *std::ranges::max_element(uncertainties);
+        auto bump = convergence_allowance(values, mesh);
+        if (bump) {
+            result.allowance = mesh + *bump;
+            result.path = QualificationPath::Component;
+        }
         return result;
     }
 
@@ -208,6 +273,9 @@ struct ReferenceStrikeEvaluator::Impl {
         std::array<double, 3> values{}, uncertainties{};
         for (size_t i = 0; i < 3; ++i) {
             const double h = std::ldexp(0.02 * query.sigma, -static_cast<int>(i));
+            if (!(h > 0.0) || !std::isfinite(query.sigma + h) ||
+                !(query.sigma - h > 0.0) || query.sigma + h == query.sigma - h)
+                return {};
             auto derivative = [&](size_t intervals, size_t steps, double u) {
                 const double up = sample(query, query.strike, query.sigma + h,
                                          round, intervals, steps, u);
@@ -228,14 +296,20 @@ struct ReferenceStrikeEvaluator::Impl {
             auto a = convergence_allowance(space, floor);
             auto b = convergence_allowance(time, floor);
             auto c = convergence_allowance(domain, floor);
-            if (!a || !b || !c) return Observation{.value = finest};
+            trace("vega", query, query.strike, round, h, space, time, domain,
+                  a && b && c ? std::optional<double>{*a + *b + *c} : std::nullopt);
+            if (!a || !b || !c) return vega_from_price_bounds(query, round);
             uncertainties[i] = *a + *b + *c;
         }
         Observation result{.value = values.back()};
         const double mesh = *std::ranges::max_element(uncertainties);
         auto bump = convergence_allowance(values, mesh);
-        if (bump) result.allowance = mesh + *bump;
-        return result;
+        if (bump) {
+            result.allowance = mesh + *bump;
+            result.path = QualificationPath::Direct;
+            return result;
+        }
+        return vega_from_price_bounds(query, round);
     }
 
 };
@@ -248,7 +322,7 @@ ReferenceStrikeEvaluator::~ReferenceStrikeEvaluator() = default;
 std::expected<ReferenceStrikeEvaluator, PriceTableError>
 ReferenceStrikeEvaluator::create(const SegmentedAdaptiveConfig& config, const SurfaceBounds& requested,
     std::vector<std::pair<double, double>> admitted_times, double price_target, double iv_target,
-    double vega_floor) {
+    double vega_floor, ReferenceSequenceObserver observer) {
     const auto invalid = [] { return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig}); };
     const std::array endpoints{requested.m_min, requested.m_max, requested.tau_min, requested.tau_max,
         requested.sigma_min, requested.sigma_max, requested.rate_min, requested.rate_max};
@@ -272,6 +346,7 @@ ReferenceStrikeEvaluator::create(const SegmentedAdaptiveConfig& config, const Su
     impl->price_target = price_target;
     impl->iv_target = iv_target;
     impl->vega_floor = vega_floor;
+    impl->observer = std::move(observer);
     const double reach = std::max(std::abs(requested.m_min), std::abs(requested.m_max))
         + 5.0 * 1.04 * requested.sigma_max * std::sqrt(config.maturity)
         + (std::max(std::abs(requested.rate_min), std::abs(requested.rate_max))
@@ -363,6 +438,7 @@ ReferenceStrikeEvaluator::evaluate(std::span<const double> refs, const SurfaceHa
     const auto started = std::chrono::steady_clock::now();
     const size_t starting_solves = impl_->solves;
     ReferenceCandidateMetrics metrics;
+    metrics.qualification_paths.emplace();
     const MultiKRefSplit split(*validated);
     const auto prior_witness = impl_->reference_witnesses.find(*validated);
     const bool has_prior_witness = prior_witness != impl_->reference_witnesses.end();
@@ -391,6 +467,9 @@ ReferenceStrikeEvaluator::evaluate(std::span<const double> refs, const SurfaceHa
         for (size_t round = 0; round < 2; ++round) {
             iv_qualified = false;
             iv_filtered = false;
+            direct_qualified = false;
+            direct = {};
+            sensitivity = {};
             residual = invariant ? Observation{0.0, 0.0} : impl_->residual(query, *validated, round);
             price_refused = !std::isfinite(residual.value);
             price_qualified = !price_refused && residual.allowance && *residual.allowance <= price_allowance;
@@ -443,6 +522,14 @@ ReferenceStrikeEvaluator::evaluate(std::span<const double> refs, const SurfaceHa
                 if (!fitted && round == 0 && (price_ambiguous || iv_ambiguous)) continue;
                 break;
             }
+        }
+        if (residual.allowance) {
+            if (residual.path == QualificationPath::Direct) ++metrics.qualification_paths->residual_direct;
+            if (residual.path == QualificationPath::Component) ++metrics.qualification_paths->residual_component;
+        }
+        if (sensitivity.allowance) {
+            if (sensitivity.path == QualificationPath::Direct) ++metrics.qualification_paths->vega_direct;
+            if (sensitivity.path == QualificationPath::Component) ++metrics.qualification_paths->vega_component;
         }
         if (witnessed_price_failure) {
             ideal.price.observe(std::abs(residual.value), *residual.allowance, impl_->price_target);
