@@ -4,7 +4,7 @@
  * @brief Implied volatility solver using pre-computed price interpolation
  *
  * Provides:
- * - InterpolatedIVSolver<Surface>: Newton-Raphson IV solver on any PriceTable
+ * - InterpolatedIVSolver<Surface>: Brent IV solver on certified price tables
  * - AnyInterpIVSolver: type-erased wrapper for convenient use
  * - make_interpolated_iv_solver(): factory that builds the price surface and solver
  *
@@ -45,8 +45,8 @@ namespace mango {
 
 /// Configuration for interpolation-based IV solver
 struct InterpolatedIVSolverConfig {
-    size_t max_iter = 50;          ///< Maximum Newton iterations
-    double tolerance = 1e-6;       ///< Price convergence tolerance
+    size_t max_iter = 50;          ///< Maximum Brent iterations
+    double tolerance = 1e-6;       ///< Absolute root-finding tolerance
     double sigma_min = 0.01;       ///< Minimum volatility (1%)
     double sigma_max = 3.0;        ///< Maximum volatility (300%)
 
@@ -64,94 +64,7 @@ struct InterpolatedIVSolverConfig {
     /// volatility resolution. A positive threshold also applies at that root.
     double vega_threshold = 1e-4;
 
-    /// Screen the solve bracket for multiple roots before inverting.
-    ///
-    /// When true (default), `solve` evaluates the objective at 17 equally
-    /// spaced volatilities across the bracket and refuses to return a root
-    /// when the samples show more than one sign change, a tangency contact,
-    /// or an endpoint root alongside an interior crossing (IVErrorCode::
-    /// MultipleRoots).  A single sign change narrows the search handed to
-    /// Brent.
-    ///
-    /// Cost: 17 surface evaluations (~4 us) on top of a ~3.5 us solve.
-    /// Set to false to restore the unscreened path exactly; the signed vega
-    /// pre-check is unconditional and applies either way.
-    ///
-    /// **This is a screen, not a proof of uniqueness.**  Guaranteed to
-    /// detect any objective sign excursion spanning at least one
-    /// bracket/16 cell, and any tangency that lands within `zero_tol =
-    /// 1e-9 * spot` of zero at a scan point.  A fold narrower than one cell
-    /// that also evades the post-hoc slope check across the narrowed
-    /// interval can still pass undetected.  Certified-monotone surfaces are
-    /// the complete answer to root uniqueness; this screen is an explicit
-    /// interim measure.
-    bool detect_multiple_roots = true;
 };
-
-namespace detail {
-
-/// Non-owning view of the IV objective f(sigma).
-///
-/// `screen_bracket` runs on the `noexcept` solve path, where a
-/// `std::function` conversion could heap-allocate (the solve objective
-/// captures more than the small-object buffer holds) and so introduce a
-/// `std::bad_alloc` that would terminate.  The view must not outlive the
-/// callable it wraps; the screen only calls it during the scan.
-class ObjectiveRef {
-public:
-    template <typename F>
-    ObjectiveRef(const F& f) noexcept  // NOLINT(google-explicit-constructor)
-        : ctx_(&f), call_([](const void* ctx, double sigma) {
-              return (*static_cast<const F*>(ctx))(sigma);
-          }) {}
-
-    double operator()(double sigma) const { return call_(ctx_, sigma); }
-
-private:
-    const void* ctx_;
-    double (*call_)(const void*, double);
-};
-
-/// Verdict of the multiple-root bracket screen (spec D8.2).
-///
-/// Exactly one of three outcomes is expressed:
-///  - `refusal` engaged: the screen refuses the query (MultipleRoots,
-///    NumericalInstability at a scan point, or BracketingFailed at an
-///    endpoint whose residual misses the solver tolerance).
-///  - `boundary_root` engaged: an endpoint satisfies the solver tolerance
-///    and is the only root feature; the caller returns it directly (after
-///    setting `used_rate_approximation`, which the screen cannot know).
-///  - neither engaged: proceed to Brent on `[lo, hi]` — the full bracket,
-///    or the single scan interval containing the one sign change, in which
-///    case `check_slope` is set and `f_lo`/`f_hi` carry the scan samples
-///    for the caller's post-hoc slope check.
-struct BracketScreen {
-    std::optional<IVError> refusal;
-    std::optional<IVSuccess> boundary_root;
-    double lo = 0.0;           ///< bracket to hand Brent
-    double hi = 0.0;
-    bool check_slope = false;  ///< post-hoc slope check applies to [lo, hi]
-    double f_lo = 0.0;         ///< objective at lo (valid when check_slope)
-    double f_hi = 0.0;         ///< objective at hi (valid when check_slope)
-};
-
-/// Screen the solve bracket for multiple roots before inverting (spec D8.2).
-///
-/// Samples `objective` at 17 equally spaced volatilities across
-/// `[sigma_min, sigma_max]` and classifies the sign pattern: consecutive
-/// zeros (|f| <= `zero_tol` = 1e-9 * spot) collapse into one run, a run
-/// between opposite signs is a transition, between equal signs a tangency
-/// (counted as two features — an even-multiplicity contact is at least a
-/// double root), at an endpoint a boundary root.  More than one feature is
-/// ambiguous by construction.  Pure function of its arguments; the
-/// guarantees and blind spots are documented on
-/// `InterpolatedIVSolverConfig::detect_multiple_roots`.
-[[nodiscard]] BracketScreen screen_bracket(
-    ObjectiveRef objective,
-    double sigma_min, double sigma_max,
-    double spot, double tolerance);
-
-}  // namespace detail
 
 /// Interpolation-based IV Solver
 ///
@@ -166,32 +79,11 @@ struct BracketScreen {
 /// For full yield curve support, use IVSolver instead.
 /// When rate approximation is used, IVSuccess::used_rate_approximation is set to true.
 ///
-/// Multiple-root screen (config `detect_multiple_roots`, on by default):
-/// inversion assumes the price surface is monotone in sigma.  An
-/// interpolated surface need not be, and Brent will happily return one of
-/// several roots without saying so.  Before inverting, `solve` samples the
-/// objective at 17 equally spaced volatilities across the bracket and
-/// returns `IVErrorCode::MultipleRoots` when those samples reveal more than
-/// one root feature (sign change, tangency contact within
-/// `zero_tol = 1e-9 * spot`, or a bracket-endpoint root beside an interior
-/// crossing).  One sign change narrows the search handed to Brent, and the
-/// converged root is rejected if the objective slope across that narrowed
-/// interval is not positive.
-///
-/// On a `MultipleRoots` return, `final_error` is the number of **root
-/// features** the scan found — sign changes, tangency contacts and
-/// bracket-endpoint roots together, not sign changes alone — and `last_vol`
-/// is the lowest sigma among them (an interval bound or an endpoint, never a
-/// root).  A tangency reports `2.0`: an even-multiplicity contact is at
-/// least a double root.  The all-zero scan reports `0.0`.
-///
-/// **The screen is not a proof of uniqueness.**  What it guarantees: every
-/// sign excursion spanning at least one bracket/16 cell is detected, as is
-/// every tangency that lands within `zero_tol` at a scan point.  What it
-/// does not: a fold narrower than one cell, which also happens to leave the
-/// slope across its containing scan interval positive, passes undetected.
-/// Certified-monotone surfaces are the complete solution to root
-/// uniqueness; this screen is an explicit interim measure.
+/// Construction requires a payload-bound proof that the represented physical
+/// price is nondecreasing in sigma over its admitted domain. Every returned
+/// root must also have finite positive sensitivity sufficient to resolve a
+/// representable price change at the configured volatility resolution.
+/// Legitimate flat prices remain priceable; their IV is refused as unidentifiable.
 ///
 /// @tparam Surface A PriceTable<Inner> instantiation
 template <typename Surface>
@@ -213,7 +105,7 @@ public:
 
     /// Solve for implied volatility (single query)
     ///
-    /// Uses Newton-Raphson method with price surface interpolation.
+    /// Uses Brent's method with the certified price surface.
     ///
     /// @param query Option specification and market price
     /// @return Success with IV and diagnostics, or error with details
@@ -793,7 +685,7 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
         return eval_price(moneyness, query.maturity, sigma, rate_value, query.strike) - query.market_price;
     };
 
-    // Every success, including a screened endpoint, must be sensitive at the
+    // Every success, including an endpoint, must be sensitive at the
     // returned root. A healthy bracket probe cannot establish this property.
     auto admit_root = [&](IVSuccess success) -> std::expected<IVSuccess, IVError> {
         const double vega = surface_.vega(query.spot, query.strike,
@@ -835,43 +727,13 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
         return success;
     };
 
-    // Bracket handed to Brent.  The multiple-root screen may narrow it to
-    // the single scan interval that contains a sign change.
-    double brent_lo = sigma_min;
-    double brent_hi = sigma_max;
-    bool check_narrowed_slope = false;
-    double narrowed_f_lo = 0.0;
-    double narrowed_f_hi = 0.0;
-
-    // Multiple-root screen (spec D8.2).  A price surface that is not
-    // monotone in sigma admits several implied vols for one market price;
-    // Brent would silently return whichever one it lands on.
-    // `detail::screen_bracket` samples the objective on a uniform 17-point
-    // scan and refuses ambiguous brackets; a single sign change narrows the
-    // bracket handed to Brent.
-    if (config_.detect_multiple_roots) {
-        auto screen = detail::screen_bracket(objective, sigma_min, sigma_max,
-                                             query.spot, config_.tolerance);
-        if (screen.refusal.has_value()) {
-            return std::unexpected(*screen.refusal);
-        }
-        if (screen.boundary_root.has_value()) {
-            return admit_root(*screen.boundary_root);
-        }
-        brent_lo = screen.lo;
-        brent_hi = screen.hi;
-        check_narrowed_slope = screen.check_slope;
-        narrowed_f_lo = screen.f_lo;
-        narrowed_f_hi = screen.f_hi;
-    }
-
     // Brent's method
     RootFindingConfig brent_config{
         .max_iter = config_.max_iter,
         .brent_tol_abs = config_.tolerance
     };
 
-    auto result = find_root(objective, brent_lo, brent_hi, brent_config);
+    auto result = find_root(objective, sigma_min, sigma_max, brent_config);
 
     // Check convergence - transform RootFindingError to IVError
     if (!result.has_value()) {
@@ -901,23 +763,6 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
             .final_error = root_error.final_error,
             .last_vol = root_error.last_value
         });
-    }
-
-    // Post-hoc slope check on the narrowed interval.  A converged root is
-    // only trustworthy if the objective rises through it; a falling
-    // objective means the surface is non-monotone in sigma there, so the
-    // root the screen isolated is not the only one.  Reuses the scan
-    // samples — no extra surface evaluations.
-    if (check_narrowed_slope) {
-        const double slope = (narrowed_f_hi - narrowed_f_lo) / (brent_hi - brent_lo);
-        if (!(slope > 0.0)) {
-            return std::unexpected(IVError{
-                .code = IVErrorCode::MultipleRoots,
-                .iterations = result->iterations,
-                .final_error = 1.0,
-                .last_vol = brent_lo
-            });
-        }
     }
 
     return admit_root(IVSuccess{

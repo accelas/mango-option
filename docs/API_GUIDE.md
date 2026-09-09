@@ -464,30 +464,13 @@ if (auto diag = solver.build_diagnostics(); diag.has_value()) {
 
 If every candidate built during refinement fails the internal viability gate (holdout error above an absolute, target-independent garbage-detection bound — or no holdout point could be measured at all, e.g. a domain where implied vol is everywhere undefined), the build itself fails with `ValidationErrorCode::NoViableSurface` rather than silently returning a broken surface — check for it alongside the usual validation errors.
 
-### Multiple-Root Screening
+### Certified IV Admission
 
-Because the fitted surface is not certified monotone in σ (unconstrained least squares can wiggle slightly wherever vega is small), `InterpolatedIVSolver` screens for multiple roots before running Brent's method. It is on by default:
+Public price-table factories and loads certify that the final represented physical price is nondecreasing in volatility over the admitted domain. Manual construction uses `PriceTable::create` or `make_bspline_surface`; raw mathematical interpolants remain available separately. A rigorous negative-vega witness returns `NonMonotoneSurface`, while an exhausted or inconclusive proof returns `CertificationIndeterminate`. Loading recomputes the proof on the stored coefficients, model and domain.
 
-```cpp
-mango::InterpolatedIVSolverConfig config{
-    .detect_multiple_roots = true,  // default; set false to restore the
-                                     // pre-screen, unscreened path exactly
-};
-```
+Interpolated IV construction accepts only a certified immutable price table. Every returned root must have finite positive vega and enough sensitivity to resolve a representable price change at the configured volatility resolution. A positive `vega_threshold` also applies at the returned root; setting it to zero cannot disable mandatory identifiability. Flat price regions remain valid for pricing and return `IVErrorCode::VegaTooSmall` when IV cannot be identified. Successful root finding alone is not an accuracy or confidence claim.
 
-A query whose bracket contains more than one sign transition, a tangency, or an ambiguous boundary root returns `mango::IVErrorCode::MultipleRoots` instead of an arbitrary root:
-
-```cpp
-auto iv_result = solver.solve(query);
-if (!iv_result.has_value()) {
-    if (iv_result.error().code == mango::IVErrorCode::MultipleRoots) {
-        // The 17-point bracket screen found more than one candidate root —
-        // treat the surface as ambiguous here rather than trusting a guess.
-    }
-}
-```
-
-This is a **screen, not a proof of uniqueness**: it is guaranteed to catch any sign excursion spanning at least one bracket/16 cell and any tangency at a scan point, but a narrower fold that also passes the post-hoc slope check can slip through. `detect_multiple_roots = false` disables the screen (Python: same-named config field); C API callers always get the default-on screen (the toggle is not exposed through the C ABI).
+Certification and final-root identifiability replace the former optional 17-point screen. There is no `detect_multiple_roots` configuration field in C++ or Python, and no such C ABI field.
 
 ### Build Diagnostics
 

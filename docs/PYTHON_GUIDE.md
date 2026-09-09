@@ -317,7 +317,7 @@ return shape.
 | `InterpolatedIVSolver` | Fast interpolation IV solver (created via `make_interpolated_iv_solver`) |
 | `IVSolverFactoryConfig` | Configuration for IV solver factory (grid, backend, solver params) |
 | `PriceTableConfig` | Alias for `IVSolverFactoryConfig` when building reusable price tables |
-| `InterpolatedIVSolverConfig` | Interpolated IV config (`max_iter`, `tolerance`, `sigma_min`, `sigma_max`, `vega_threshold`, `detect_multiple_roots`) |
+| `InterpolatedIVSolverConfig` | Interpolated IV config (`max_iter`, `tolerance`, `sigma_min`, `sigma_max`, `vega_threshold`) |
 | `IVGrid` | Grid specification (moneyness, vol, rate arrays) |
 | `BSplineBackend` | B-spline interpolation backend config (maturity_grid) |
 | `ChebyshevBackend` | Chebyshev interpolation backend config (maturity, num_pts) |
@@ -329,23 +329,11 @@ return shape.
 | `PriceTable` | Reusable price table with `price`, `delta`, `gamma`, `vega`, IV solving, and save/load |
 | `SolverError` | Error detail with `code`, `iterations`, `residual` |
 
-### Adaptive Build Diagnostics and Root Screening
+### Adaptive Build Diagnostics and IV Admission
 
-Two safety features of the C++ solver are exposed to Python.
+Price-table construction and loading require a proof that the final represented physical price is nondecreasing in volatility. IV construction uses that certified immutable payload. Every returned root also needs finite positive vega and sufficient sensitivity at the solver's volatility resolution; `vega_threshold = 0` does not disable that mandatory check. Flat price regions can remain valid for pricing while IV returns `IVErrorCode.VegaTooSmall`.
 
-**`detect_multiple_roots`** (on `InterpolatedIVSolverConfig`, default `True`)
-screens the sigma bracket for more than one root before inverting the surface.
-When the 17-point scan finds several root features, the solve fails with
-`IVErrorCode.MultipleRoots` instead of returning whichever root Brent happened
-to land on. It is a screen, not a proof of uniqueness: a fold narrower than one
-bracket/16 cell can still slip through. Set it to `False` to restore the older
-first-root-wins behavior.
-
-```python
-config = mo.IVSolverFactoryConfig()
-# ... grid / backend / adaptive setup ...
-config.solver_config.detect_multiple_roots = True   # default
-```
+The former `detect_multiple_roots` field and 17-point screen are removed. There is no optional certification or root-identifiability toggle. Historical build measurements remain separate from current mathematical proof and root conditioning.
 
 **`build_diagnostics`** is a read-only property on both `PriceTable` and
 `InterpolatedIVSolver`. It is `None` for a manually-gridded table, a table
