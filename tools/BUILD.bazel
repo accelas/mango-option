@@ -7,3 +7,10 @@ py_library(
     srcs = ["reference_qualification.py"],
     visibility = ["//visibility:public"],
 )
+
+py_library(
+    name = "reference_consumption",
+    srcs = ["reference_consumption.py"],
+    deps = [":reference_qualification"],
+    visibility = ["//visibility:public"],
+)

@@ -2038,6 +2038,13 @@ cc_test(
 )
 
 py_test(
+    name = "reference_consumption_test",
+    srcs = ["reference_consumption_test.py"],
+    data = ["data/reference_evidence/earlier_prefixes.json"],
+    deps = ["//tools:reference_consumption"],
+)
+
+py_test(
     name = "reference_qualification_test",
     srcs = ["reference_qualification_test.py"],
     deps = ["//tools:reference_qualification"],
