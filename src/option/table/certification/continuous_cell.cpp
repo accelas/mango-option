@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/certification/continuous_cell.hpp"
+#include "mango/math/proof/bspline_box.hpp"
 #include "mango/math/proof/bspline_cell.hpp"
 #include "mango/option/table/certification/physical_bounds.hpp"
 #include <algorithm>
@@ -73,10 +74,11 @@ std::optional<PricingParams> reachable_witness(const std::array<Interval, 4> &lo
                          p[2]);
 }
 } // namespace
-static PhysicalCellProof prove_patch(proof::BernsteinTensor value, proof::BernsteinTensor derivative,
-                              const PhysicalBox &physical, double reference_strike, OptionType type,
-                              double dividend_yield, const SurfaceBounds &requested,
-                              proof::ProofBudget budget) {
+static PhysicalCellProof prove_patch(proof::BernsteinTensor value,
+                                     proof::BernsteinTensor derivative, const PhysicalBox &physical,
+                                     double reference_strike, OptionType type,
+                                     double dividend_yield, const SurfaceBounds &requested,
+                                     proof::ProofBudget budget) {
     PhysicalCellProof result;
     std::vector<Node> pending;
     pending.push_back(
@@ -254,29 +256,39 @@ std::vector<AxisPiece> axis_pieces(std::span<const double> knots, const Interval
     return result;
 }
 } // namespace
-PhysicalCellProof prove_continuous_bspline(const BSplineND<double, 4> &spline,
-                                           double reference_strike, OptionType type,
-                                           double dividend_yield, const SurfaceBounds &requested,
-                                           proof::ProofBudget budget) {
-    PhysicalCellProof result;
+
+namespace {
+std::optional<PhysicalBox> requested_domain(const SurfaceBounds &requested) {
     MoneynessDomain moneyness(requested.ratio_bounds.value_or(
         MoneynessBounds{std::exp(requested.m_min), std::exp(requested.m_max)}));
     const auto ratio = moneyness.enclosure();
-    if (!ratio.valid() || !std::isfinite(reference_strike) || reference_strike <= 0 ||
-        !std::isfinite(requested.tau_min) || !std::isfinite(requested.tau_max) ||
+    if (!ratio.valid() || !std::isfinite(requested.tau_min) || !std::isfinite(requested.tau_max) ||
         requested.tau_min < 0 || requested.tau_max <= 0 || requested.tau_max < requested.tau_min ||
         !std::isfinite(requested.sigma_min) || !std::isfinite(requested.sigma_max) ||
         requested.sigma_min <= 0 || requested.sigma_max <= requested.sigma_min ||
         !std::isfinite(requested.rate_min) || !std::isfinite(requested.rate_max) ||
         requested.rate_max < requested.rate_min) {
-        result.reason = proof::StopReason::Arithmetic;
-        return result;
+        return std::nullopt;
     }
     PhysicalBox domain{
         {{log(Interval(ratio.min)).lower_endpoint(), log(Interval(ratio.max)).upper_endpoint()},
          {Interval(requested.tau_min), Interval(requested.tau_max)},
          {Interval(requested.sigma_min), Interval(requested.sigma_max)},
          {Interval(requested.rate_min), Interval(requested.rate_max)}}};
+    return domain;
+}
+} // namespace
+PhysicalCellProof prove_continuous_bspline(const BSplineND<double, 4> &spline,
+                                           double reference_strike, OptionType type,
+                                           double dividend_yield, const SurfaceBounds &requested,
+                                           proof::ProofBudget budget) {
+    PhysicalCellProof result;
+    auto resolved = requested_domain(requested);
+    if (!resolved || !std::isfinite(reference_strike) || reference_strike <= 0) {
+        result.reason = proof::StopReason::Arithmetic;
+        return result;
+    }
+    const auto &domain = *resolved;
     std::array<std::span<const double>, 4> knots;
     std::array<std::vector<AxisPiece>, 4> pieces;
     for (std::size_t d = 0; d < 4; ++d) {
@@ -356,6 +368,117 @@ PhysicalCellProof prove_continuous_bspline(const BSplineND<double, 4> &spline,
             if (d == 1)
                 done = true;
         }
+    }
+    if (!unresolved)
+        result.status = PriceProofStatus::Certified;
+    return result;
+}
+
+PhysicalCellProof prove_dimensionless_bspline(const BSplineND<double, 3> &spline,
+                                              double reference_strike, OptionType type,
+                                              const SurfaceBounds &requested,
+                                              proof::ProofBudget budget) {
+    PhysicalCellProof result;
+    auto domain = requested_domain(requested);
+    if (!domain || requested.rate_min <= 0 || !std::isfinite(reference_strike) ||
+        reference_strike <= 0) {
+        result.reason = proof::StopReason::Arithmetic;
+        return result;
+    }
+    std::array<std::span<const double>, 3> knots;
+    for (std::size_t d = 0; d < 3; ++d) {
+        knots[d] = spline.knots(d);
+        const auto &grid = spline.grid(d);
+        for (std::size_t i = 0; i < grid.size(); ++i)
+            if (!std::isfinite(grid[i]) || (i && !(grid[i - 1] < grid[i]))) {
+                result.reason = proof::StopReason::Arithmetic;
+                return result;
+            }
+        if (grid.front() != knots[d].front() || grid.back() != knots[d].back()) {
+            result.reason = proof::StopReason::Arithmetic;
+            return result;
+        }
+    }
+
+    struct QueryNode {
+        Box unit;
+        std::size_t depth = 0;
+    };
+    std::vector<QueryNode> pending{{Box{{{0, 1}, {0, 1}, {0, 1}, {0, 1}}}}};
+    bool unresolved = false;
+    const auto depth_limit = std::min<std::size_t>(budget.max_depth, 52);
+    while (!pending.empty()) {
+        if (result.nodes == budget.max_nodes) {
+            result.reason = proof::StopReason::NodeBudget;
+            return result;
+        }
+        auto node = pending.back();
+        pending.pop_back();
+        ++result.nodes;
+        std::array<Interval, 4> lower, upper, bounds;
+        for (std::size_t d = 0; d < 4; ++d) {
+            lower[d] = coordinate((*domain)[d].first, (*domain)[d].second, node.unit[d].first);
+            upper[d] = coordinate((*domain)[d].first, (*domain)[d].second, node.unit[d].second);
+            bounds[d] = hull(lower[d], upper[d]);
+        }
+        const auto sigma_squared = square(bounds[2]);
+        const std::array<Interval, 3> coordinates{bounds[0],
+                                                  sigma_squared * bounds[1] / Interval(2),
+                                                  log(Interval(2) * bounds[3] / sigma_squared)};
+        const std::array<std::size_t, 2> axes{1, 2};
+        auto raw = proof::enclose_cubic_bspline_box(knots, spline.coefficients(), coordinates, axes,
+                                                    budget.max_nodes - result.nodes);
+        result.nodes += raw.cells;
+        if (raw.reason == proof::StopReason::NodeBudget) {
+            result.reason = raw.reason;
+            return result;
+        }
+        if (raw.reason != proof::StopReason::None) {
+            unresolved = true;
+            result.reason = raw.reason;
+            continue;
+        }
+        const auto total = dimensionless_eep(raw.value, raw.partials[0], raw.partials[1],
+                                             {exp(bounds[0]), bounds[1], bounds[2], bounds[3]},
+                                             reference_strike, type);
+        if (!total.finite()) {
+            unresolved = true;
+            result.reason = proof::StopReason::Arithmetic;
+            continue;
+        }
+        if (total.sigma_partial.nonnegative())
+            continue;
+        if (total.sigma_partial.strictly_negative()) {
+            auto witness = reachable_witness(lower, upper, reference_strike, type, 0, requested);
+            if (witness) {
+                result.status = PriceProofStatus::NegativeWitness;
+                result.reason = proof::StopReason::None;
+                result.witness = std::move(witness);
+                result.witness_vega_per_strike = total.sigma_partial;
+                return result;
+            }
+            unresolved = true;
+            result.reason = proof::StopReason::Arithmetic;
+            continue;
+        }
+        if (node.depth == depth_limit) {
+            unresolved = true;
+            result.reason = proof::StopReason::DepthBudget;
+            continue;
+        }
+        // Subdivide physical coordinates, not independent transformed u/z:
+        // their sigma coupling is rebuilt on every child box.
+        const std::array<std::size_t, 4> order{2, 1, 3, 0};
+        std::size_t choice = node.depth % 4;
+        while (((*domain)[order[choice]].second - (*domain)[order[choice]].first).exact_zero())
+            choice = (choice + 1) % 4;
+        const auto axis = order[choice];
+        auto right = node.unit;
+        const double middle = std::midpoint(node.unit[axis].first, node.unit[axis].second);
+        node.unit[axis].second = middle;
+        right[axis].first = middle;
+        pending.push_back({right, node.depth + 1});
+        pending.push_back({node.unit, node.depth + 1});
     }
     if (!unresolved)
         result.status = PriceProofStatus::Certified;

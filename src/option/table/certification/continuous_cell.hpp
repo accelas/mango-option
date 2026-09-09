@@ -20,6 +20,11 @@ PhysicalCellProof prove_continuous_bspline(const BSplineND<double, 4> &spline,
                                            double reference_strike, OptionType type,
                                            double dividend_yield, const SurfaceBounds &requested,
                                            proof::ProofBudget budget = {});
+/// Dimensionless (x,sigma^2*tau/2,log(2*r/sigma^2)) EEP proof for q=0,r>0.
+PhysicalCellProof prove_dimensionless_bspline(const BSplineND<double, 3> &spline,
+                                              double reference_strike, OptionType type,
+                                              const SurfaceBounds &requested,
+                                              proof::ProofBudget budget = {});
 /// Bounds one explicit stored-knot cell of the continuous EEP expression.
 /// A certified cell is not a whole-table certificate. The caller must cover
 /// every admitted cell, clamped coordinate branch and composition.
