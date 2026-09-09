@@ -43,9 +43,10 @@ bounds_from_data(const PriceTableData& data) {
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::InvalidConfig});
     }
-    // Validate min < max
-    if (b.m_min >= b.m_max || b.tau_min >= b.tau_max ||
-        b.sigma_min >= b.sigma_max || b.rate_min >= b.rate_max) {
+    // A price table may publish a fixed coordinate on an axis while its
+    // interpolant uses wider numerical support. IV brackets remain separate.
+    if (b.m_min > b.m_max || b.tau_min > b.tau_max ||
+        b.sigma_min > b.sigma_max || b.rate_min > b.rate_max) {
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::InvalidConfig});
     }

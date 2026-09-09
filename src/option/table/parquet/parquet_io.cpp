@@ -403,10 +403,12 @@ write_parquet(const PriceTableData& data,
         !std::isfinite(data.bounds_rate_min) || !std::isfinite(data.bounds_rate_max)) {
         return std::unexpected(serialization_error());
     }
-    if (data.bounds_m_min >= data.bounds_m_max ||
-        data.bounds_tau_min >= data.bounds_tau_max ||
-        data.bounds_sigma_min >= data.bounds_sigma_max ||
-        data.bounds_rate_min >= data.bounds_rate_max) {
+    // Equal bounds describe a price-only point domain; numerical grids are
+    // still nondegenerate, and IV creation validates its own sigma bracket.
+    if (data.bounds_m_min > data.bounds_m_max ||
+        data.bounds_tau_min > data.bounds_tau_max ||
+        data.bounds_sigma_min > data.bounds_sigma_max ||
+        data.bounds_rate_min > data.bounds_rate_max) {
         return std::unexpected(serialization_error());
     }
 

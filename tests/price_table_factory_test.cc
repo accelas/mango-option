@@ -84,6 +84,8 @@ IVSolverFactoryConfig segmented_bspline_config() {
         .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0},
                                 {.calendar_time = 1.0, .amount = 3.0}},
         .kref_config = MultiKRefConfig{.K_refs = {80.0, 100.0, 120.0}},
+        // The provenance tests query K100; the saved-domain test overrides this.
+        .strike_bounds = StrikeBounds{100.0, 100.0},
     };
     return config;
 }
@@ -326,6 +328,74 @@ TEST(PriceTableFactoryTest, AdaptiveBuildExposesBuildDiagnostics) {
     EXPECT_EQ(solver_diag->total_iterations, diag->total_iterations);
     EXPECT_EQ(solver_diag->target_met, diag->target_met);
     EXPECT_EQ(solver_diag->achieved_max_error, diag->achieved_max_error);
+}
+
+TEST(PriceTableFactoryTest, AdaptiveShortMaturitiesPreserveTheRequestedPublicDomain) {
+    // Frozen Phase-A CS-PUT: all defaults and ceilings remain unchanged.
+    IVSolverFactoryConfig config;
+    config.spot = 100.;
+    config.option_type = OptionType::PUT;
+    config.dividend_yield = .02;
+    config.grid.moneyness = {.9, .95, 1., 1.05, 1.1};
+    config.grid.vol = {.05, .1, .2, .3, .5};
+    config.grid.rate = {-.05, 0., .05, .1};
+    config.backend = BSplineBackend{.maturity_grid = {1. / 365, 2. / 365, 4. / 365, 7. / 365}};
+    config.adaptive = AdaptiveGridParams{};
+    auto built = make_price_table(config);
+    ASSERT_TRUE(built) << "Short-domain build must not validate invented six-month maturities";
+    const auto data = built->to_data();
+    EXPECT_EQ(data.bounds_tau_min, 1. / 365);
+    EXPECT_EQ(data.bounds_tau_max, 7. / 365);
+    PricingParams query(OptionSpec{.spot = 100., .strike = 100., .maturity = 4. / 365,
+        .rate = .05, .dividend_yield = .02, .option_type = OptionType::PUT}, .2);
+    EXPECT_TRUE(built->validate_pricing_params(query));
+    query.maturity = .25;
+    EXPECT_FALSE(built->validate_pricing_params(query));
+    auto diagnostics = built->build_diagnostics();
+    ASSERT_TRUE(diagnostics);
+    EXPECT_LE(diagnostics->total_iterations, config.adaptive->max_iter);
+    for (const auto& iteration : diagnostics->iterations) {
+        for (size_t count : iteration.grid_sizes) {
+            EXPECT_LE(count, config.adaptive->max_points_per_dim);
+        }
+    }
+}
+
+TEST(PriceTableFactoryTest, AdaptivePointDomainPricesAndRoundTripsWithoutAnIVBracket) {
+    IVSolverFactoryConfig config;
+    config.spot = 100.;
+    config.option_type = OptionType::PUT;
+    config.dividend_yield = 0.;
+    config.grid.moneyness = {1.};
+    config.grid.vol = {.2};
+    config.grid.rate = {.05};
+    config.backend = BSplineBackend{.maturity_grid = {.5}};
+    config.adaptive = AdaptiveGridParams{};
+    auto built = make_price_table(config);
+    ASSERT_TRUE(built);
+    const auto data = built->to_data();
+    EXPECT_EQ(data.bounds_m_min, 0.);
+    EXPECT_EQ(data.bounds_m_max, 0.);
+    EXPECT_EQ(data.bounds_tau_min, .5);
+    EXPECT_EQ(data.bounds_tau_max, .5);
+    EXPECT_EQ(data.bounds_sigma_min, .2);
+    EXPECT_EQ(data.bounds_sigma_max, .2);
+    EXPECT_EQ(data.bounds_rate_min, .05);
+    EXPECT_EQ(data.bounds_rate_max, .05);
+    PricingParams query(OptionSpec{.spot = 100., .strike = 100., .maturity = .5,
+        .rate = .05, .dividend_yield = 0., .option_type = OptionType::PUT}, .2);
+    ASSERT_TRUE(built->validate_pricing_params(query));
+    EXPECT_GT(built->price(query), 0.);
+    EXPECT_FALSE(built->make_iv_solver());
+    TempDirectory dir;
+    const auto path = dir.path() / "singleton-domain.parquet";
+    ASSERT_TRUE(built->save(path));
+    auto loaded = load_price_table(path);
+    ASSERT_TRUE(loaded);
+    ASSERT_TRUE(loaded->validate_pricing_params(query));
+    EXPECT_EQ(loaded->price(query), built->price(query));
+    query.volatility = .201;
+    EXPECT_FALSE(loaded->validate_pricing_params(query));
 }
 
 TEST(PriceTableFactoryTest, ParquetRoundTripDropsBuildDiagnostics) {

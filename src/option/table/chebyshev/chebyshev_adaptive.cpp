@@ -739,6 +739,16 @@ build_adaptive_chebyshev(
     ctx.option_type = type;
     ctx.bounds = ctx.sample_bounds;
 
+    // Preserve the historical numerical minimum spreads before applying CC
+    // headroom, including support for singleton axes. Only sample_bounds
+    // governs validation/publication, so this never invents a caller range.
+    expand_domain_bounds(ctx.bounds.m_min, ctx.bounds.m_max, .10);
+    expand_domain_bounds(ctx.bounds.tau_min, ctx.bounds.tau_max, .5,
+                         std::min(1e-6, ctx.bounds.tau_min));
+    expand_domain_bounds(ctx.bounds.sigma_min, ctx.bounds.sigma_max, .10,
+                         std::min(1e-6, ctx.bounds.sigma_min));
+    expand_domain_bounds(ctx.bounds.rate_min, ctx.bounds.rate_max, .04);
+
     // Initial CC levels for each dimension
     constexpr size_t kInitMLevel = 5;      // 33 nodes
     constexpr size_t kInitTauLevel = 3;    // 9 nodes
