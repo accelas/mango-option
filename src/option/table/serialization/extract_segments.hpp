@@ -10,6 +10,7 @@
 #include "mango/option/table/shared_interp.hpp"
 #include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/math/chebyshev/chebyshev_interpolant.hpp"
+#include "mango/math/chebyshev/chebyshev_modal_interpolant.hpp"
 #include "mango/math/chebyshev/raw_tensor.hpp"
 
 #include <cstddef>
@@ -80,6 +81,21 @@ void fill_chebyshev_raw_segment(PriceTableData::Segment& seg,
     seg.values = interp.storage().values();
 }
 
+/// Explicit modal payload: coefficients, never values sampled at nodes.
+template <size_t N>
+void fill_chebyshev_modal_segment(PriceTableData::Segment& seg,
+                                  const ChebyshevModalInterpolant<N>& interp) {
+    seg.interp_type = "chebyshev_modal";
+    seg.ndim = N;
+    seg.domain_lo.assign(interp.domain().lo.begin(), interp.domain().lo.end());
+    seg.domain_hi.assign(interp.domain().hi.begin(), interp.domain().hi.end());
+    seg.num_pts.assign(interp.num_pts().begin(), interp.num_pts().end());
+    seg.grids.clear();
+    seg.knots.clear();
+    const auto coefficients = interp.polynomial().coefficients();
+    seg.values.assign(coefficients.begin(), coefficients.end());
+}
+
 }  // namespace detail
 
 // ---------------------------------------------------------------------------
@@ -123,6 +139,26 @@ void extract_segments(const TransformLeaf<ChebyshevInterpolant<N, RawTensor<N>>,
     seg.tau_max = tau_max;
 
     detail::fill_chebyshev_raw_segment<N>(seg, leaf.interpolant());
+    out.push_back(std::move(seg));
+}
+
+// ---------------------------------------------------------------------------
+// Leaf-level overload: explicitly selected modal Chebyshev polynomial
+// ---------------------------------------------------------------------------
+
+template <size_t N, typename Xform>
+void extract_segments(const TransformLeaf<ChebyshevModalInterpolant<N>, Xform>& leaf,
+                      std::vector<PriceTableData::Segment>& out,
+                      double /*K_ref_hint*/, double tau_start, double tau_end,
+                      double tau_min, double tau_max) {
+    PriceTableData::Segment seg;
+    seg.segment_id = static_cast<int32_t>(out.size());
+    seg.K_ref = leaf.K_ref();
+    seg.tau_start = tau_start;
+    seg.tau_end = tau_end;
+    seg.tau_min = tau_min;
+    seg.tau_max = tau_max;
+    detail::fill_chebyshev_modal_segment(seg, leaf.interpolant());
     out.push_back(std::move(seg));
 }
 
