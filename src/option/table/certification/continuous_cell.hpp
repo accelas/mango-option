@@ -3,9 +3,9 @@
 #include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/math/chebyshev/chebyshev_modal_interpolant.hpp"
 #include "mango/math/proof/bernstein.hpp"
-#include "mango/option/table/bspline/bspline_surface.hpp"
+#include "mango/option/table/bspline/bspline_types.hpp"
 #include "mango/option/table/certification/certificate_status.hpp"
-#include "mango/option/table/price_table.hpp"
+#include "mango/option/table/surface_bounds.hpp"
 #include <array>
 #include <optional>
 namespace mango::detail::certification {

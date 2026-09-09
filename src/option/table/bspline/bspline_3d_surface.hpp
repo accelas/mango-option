@@ -10,8 +10,6 @@
 
 namespace mango {
 
-using BSpline3DTransformLeaf = TransformLeaf<SharedBSplineInterp<3>, DimensionlessTransform3D>;
-using BSpline3DLeaf = EEPLayer<BSpline3DTransformLeaf, AnalyticalEEP>;
 using BSpline3DPriceTable = PriceTable<BSpline3DLeaf>;
 
 }  // namespace mango
