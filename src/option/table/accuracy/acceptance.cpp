@@ -51,8 +51,9 @@ Assessment assess(const ReferenceAccuracySummary& evidence, Prerequisites prereq
                 std::nullopt, std::nullopt, iv_metric_kind};
     }
     const auto price_met=target_met(evidence.price, targets.price);
-    const auto iv_met=targets.iv && iv_metric_kind==IvMetricKind::AbsoluteIvError
-        ? target_met(evidence.iv, *targets.iv) : std::nullopt;
+    std::optional<bool> iv_met=std::nullopt;
+    if (targets.iv && iv_metric_kind==IvMetricKind::AbsoluteIvError)
+        iv_met=target_met(evidence.iv, *targets.iv);
     auto decision=price_met==true && (!targets.iv || iv_met==true)
         ? Decision::Accepted : policy==Policy::BestEffort
             ? Decision::AcceptedBestEffort : Decision::TargetsMissed;
