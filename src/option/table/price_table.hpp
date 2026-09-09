@@ -7,7 +7,9 @@
 #include "mango/option/table/moneyness_bounds.hpp"
 #include "mango/option/table/surface_bounds.hpp"
 #include "mango/option/table/fixed_expiry.hpp"
+#include "mango/option/table/certification/publication.hpp"
 #include <expected>
+#include <concepts>
 #include <cmath>
 #include <memory>
 
@@ -33,6 +35,38 @@ public:
             freeze_inner(inner), bounds, option_type, dividend_yield, fixed_expiry))
     {}
 
+    /// Explicit certified creation. All numeric storage and model/domain
+    /// metadata are detached before proving the exact retained payload.
+    /// The certificate concerns the represented real price's sigma shape.
+    /// A genuinely unrepresentable output at an extreme currency scale can
+    /// still require NumericalFailure at the checked query boundary.
+    [[nodiscard]] static std::expected<PriceTable, PriceTableError> create(
+        const Inner& inner, const SurfaceBounds& bounds, OptionType type, double q,
+        const std::optional<FixedExpiryMetadata>& fixed_expiry = std::nullopt,
+        PriceTableProofBudget budget = {}) {
+        if constexpr (std::same_as<Inner, BSplineLeaf> || std::same_as<Inner, BSpline3DLeaf> ||
+            std::same_as<Inner, BSplineMultiKRefInner> || std::same_as<Inner, ChebyshevModalLeaf> ||
+            std::same_as<Inner, ChebyshevModal3DLeaf> ||
+            std::same_as<Inner, ChebyshevModalMultiKRefInner>) {
+            auto owned = std::make_shared<Payload>(freeze_inner(inner), bounds, type, q, fixed_expiry);
+            auto evidence = detail::certification::certify_payload(owned->inner, owned->bounds,
+                owned->option_type, owned->dividend_yield, owned->fixed_expiry, budget);
+            if (!evidence) return std::unexpected(evidence.error());
+            if (evidence->status != PriceProofStatus::Certified) {
+                return std::unexpected(PriceTableError{
+                    PriceTableErrorCode::CertificationIndeterminate, 0, evidence->work});
+            }
+            owned->certificate = *evidence;
+            return PriceTable(std::move(owned), AdoptPayload{});
+        } else {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::UnsupportedRepresentation});
+        }
+    }
+    [[nodiscard]] PriceProofStatus proof_status() const noexcept {
+        return payload_->certificate.status;
+    }
+    [[nodiscard]] std::size_t proof_work() const noexcept { return payload_->certificate.work; }
+
     /// Unchecked numerical primitive; requires admitted query/model metadata.
     [[nodiscard]] double price(double spot, double strike,
                                 double tau, double sigma, double rate) const {
@@ -49,7 +83,7 @@ public:
         if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
-        return payload_->inner.greek(Greek::Delta, params);
+        return checked_greek(payload_->inner.greek(Greek::Delta, params));
     }
 
     [[nodiscard]] std::expected<double, GreekError>
@@ -57,7 +91,7 @@ public:
         if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
-        return payload_->inner.gamma(params);
+        return checked_greek(payload_->inner.gamma(params));
     }
 
     [[nodiscard]] std::expected<double, GreekError>
@@ -65,7 +99,7 @@ public:
         if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
-        return payload_->inner.greek(Greek::Theta, params);
+        return checked_greek(payload_->inner.greek(Greek::Theta, params));
     }
 
     [[nodiscard]] std::expected<double, GreekError>
@@ -73,7 +107,7 @@ public:
         if (!contains_pricing_params(params)) {
             return std::unexpected(GreekError::OutOfDomain);
         }
-        return payload_->inner.greek(Greek::Rho, params);
+        return checked_greek(payload_->inner.greek(Greek::Rho, params));
     }
 
     [[nodiscard]] double m_min() const noexcept { return payload_->bounds.m_min; }
@@ -131,6 +165,10 @@ public:
     [[nodiscard]] const Inner& inner() const noexcept { return payload_->inner; }
 
 private:
+    static std::expected<double, GreekError> checked_greek(std::expected<double, GreekError> result) {
+        if (result && !std::isfinite(*result)) return std::unexpected(GreekError::NumericalFailure);
+        return result;
+    }
     [[nodiscard]] bool contains_pricing_params(const PricingParams& params) const {
         if (!mango::validate_pricing_params(params) || params.option_type != payload_->option_type ||
             std::abs(params.dividend_yield - payload_->dividend_yield) > 1e-10 ||
@@ -157,6 +195,7 @@ private:
         MoneynessDomain moneyness_domain;
         std::optional<FixedExpiryMetadata> fixed_expiry;
         bool fixed_expiry_valid;
+        detail::certification::PublicationEvidence certificate;
 
         Payload(Inner value, const SurfaceBounds& domain, OptionType type, double yield,
                 const std::optional<FixedExpiryMetadata>& model)
@@ -169,6 +208,9 @@ private:
                                              : !requires_fixed_expiry)
         {}
     };
+
+    struct AdoptPayload {};
+    PriceTable(std::shared_ptr<const Payload> payload,AdoptPayload) : payload_(std::move(payload)) {}
 
     // Copying a published table copies only this immutable handle. Numeric
     // storage is detached once by the publication constructor above.

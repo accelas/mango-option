@@ -28,3 +28,14 @@ cc_library(
     strip_include_prefix = "/src/option/table/certification",
     include_prefix = "mango/option/table/certification",
 )
+
+cc_library(
+    name = "publication",
+    srcs = ["publication.cpp"],
+    hdrs = ["publication.hpp"],
+    deps = [":certificate_status", ":continuous_cell", "//src/option/table/bspline:bspline_types", "//src/option/table/chebyshev:modal_types", "//src/option/table:surface_bounds", "//src/option/table:fixed_expiry"],
+    copts = ["-O3", "-fno-fast-math", "-ffp-contract=off"],
+    visibility = ["//src:__subpackages__", "//tests:__subpackages__"],
+    strip_include_prefix = "/src/option/table/certification",
+    include_prefix = "mango/option/table/certification",
+)

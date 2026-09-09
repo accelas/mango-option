@@ -13,6 +13,15 @@ static ValidationError map_error_code(const PriceTableError& error) {
             return ValidationError{ValidationErrorCode::InvalidGridSize,
                                    static_cast<double>(error.count),
                                    error.axis_index};
+        case PriceTableErrorCode::UnsupportedRepresentation:
+            return ValidationError{ValidationErrorCode::UnsupportedRepresentation,
+                                   static_cast<double>(error.count), error.axis_index};
+        case PriceTableErrorCode::NonMonotoneSurface:
+            return ValidationError{ValidationErrorCode::NonMonotoneSurface,
+                                   static_cast<double>(error.count), error.axis_index};
+        case PriceTableErrorCode::CertificationIndeterminate:
+            return ValidationError{ValidationErrorCode::CertificationIndeterminate,
+                                   static_cast<double>(error.count), error.axis_index};
         case PriceTableErrorCode::InvalidConfig:
         case PriceTableErrorCode::EmptyBatch:
         case PriceTableErrorCode::ExtractionFailed:

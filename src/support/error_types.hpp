@@ -60,7 +60,10 @@ enum class ValidationErrorCode {
     // Appended after PriceTableBuildFailed: merged ordinals stay stable
     // (Python exposes the numeric value; see ADR 0001).
     NoViableSurface,           ///< No adaptive-build candidate passed the D5 viability gate
-    AdaptiveValidationFailed   ///< Adaptive build's holdout validation set could not measure error
+    AdaptiveValidationFailed, ///< Adaptive build's holdout validation set could not measure error
+    UnsupportedRepresentation, ///< No financial proof for this numeric representation
+    NonMonotoneSurface,        ///< Rigorous admitted physical-price sigma violation
+    CertificationIndeterminate ///< Bounded physical-price proof could not complete
 };
 
 /// Detailed validation error for parameter validation failures
@@ -219,7 +222,10 @@ enum class PriceTableErrorCode {
 
     // Adaptive build errors (see design D5)
     ValidationFailed,          ///< Holdout validation set could not measure error
-    NoViableSurface            ///< No candidate surface passed the viability gate
+    NoViableSurface,           ///< No candidate surface passed the viability gate
+    UnsupportedRepresentation, ///< No financial proof for this numeric representation
+    NonMonotoneSurface,        ///< Rigorous admitted physical-price sigma violation
+    CertificationIndeterminate ///< Bounded physical-price proof could not complete
 };
 
 /// Detailed price table error with axis information
@@ -358,6 +364,9 @@ inline IVError convert_to_iv_error(const ValidationError& err) {
         case ValidationErrorCode::PriceTableBuildFailed:
         case ValidationErrorCode::NoViableSurface:
         case ValidationErrorCode::AdaptiveValidationFailed:
+        case ValidationErrorCode::UnsupportedRepresentation:
+        case ValidationErrorCode::NonMonotoneSurface:
+        case ValidationErrorCode::CertificationIndeterminate:
             // Adaptive-build failures are grid/config-shaped problems, not a
             // bad market input — same bucket as the other grid-config codes.
             code = IVErrorCode::InvalidGridConfig;
@@ -443,6 +452,15 @@ inline PriceTableError convert_to_price_table_error(const ValidationError& err) 
         case ValidationErrorCode::DividendYieldMismatch:
         case ValidationErrorCode::DiscreteDividendMismatch:
             code = PriceTableErrorCode::InvalidConfig;
+            break;
+        case ValidationErrorCode::UnsupportedRepresentation:
+            code = PriceTableErrorCode::UnsupportedRepresentation;
+            break;
+        case ValidationErrorCode::NonMonotoneSurface:
+            code = PriceTableErrorCode::NonMonotoneSurface;
+            break;
+        case ValidationErrorCode::CertificationIndeterminate:
+            code = PriceTableErrorCode::CertificationIndeterminate;
             break;
         case ValidationErrorCode::PriceTableBuildFailed:
             code = PriceTableErrorCode::SurfaceBuildFailed;

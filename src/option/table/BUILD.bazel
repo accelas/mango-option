@@ -130,6 +130,7 @@ cc_library(
     name = "price_table",
     hdrs = ["price_table.hpp"],
     deps = [
+        "//src/option/table/certification:publication",
         ":greek_types",
         ":surface_bounds",
         ":strike_bounds",

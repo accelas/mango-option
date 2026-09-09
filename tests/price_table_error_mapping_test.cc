@@ -13,17 +13,13 @@ using mango::ValidationErrorCode;
 //      extraction, serialization, allocation, and config failures all to
 //      InvalidGridSize — a grid-size lie that destroyed diagnostics.
 TEST(PriceTableErrorMappingTest, BuildFailuresMapToPriceTableBuildFailed) {
-    for (auto code : {PriceTableErrorCode::InvalidConfig,
-                      PriceTableErrorCode::EmptyBatch,
-                      PriceTableErrorCode::ExtractionFailed,
-                      PriceTableErrorCode::RepairFailed,
-                      PriceTableErrorCode::FittingFailed,
-                      PriceTableErrorCode::SurfaceBuildFailed,
-                      PriceTableErrorCode::SerializationFailed,
-                      PriceTableErrorCode::ArenaAllocationFailed,
-                      PriceTableErrorCode::TensorCreationFailed}) {
-        auto ve = mango::detail::to_validation_error(
-            PriceTableError{code, 0, 0});
+    for (auto code :
+         {PriceTableErrorCode::InvalidConfig, PriceTableErrorCode::EmptyBatch,
+          PriceTableErrorCode::ExtractionFailed, PriceTableErrorCode::RepairFailed,
+          PriceTableErrorCode::FittingFailed, PriceTableErrorCode::SurfaceBuildFailed,
+          PriceTableErrorCode::SerializationFailed, PriceTableErrorCode::ArenaAllocationFailed,
+          PriceTableErrorCode::TensorCreationFailed}) {
+        auto ve = mango::detail::to_validation_error(PriceTableError{code, 0, 0});
         EXPECT_EQ(ve.code, ValidationErrorCode::PriceTableBuildFailed)
             << "code " << static_cast<int>(code);
     }
@@ -31,13 +27,16 @@ TEST(PriceTableErrorMappingTest, BuildFailuresMapToPriceTableBuildFailed) {
 
 TEST(PriceTableErrorMappingTest, SpecificArmsUnchanged) {
     EXPECT_EQ(mango::detail::to_validation_error(
-                  PriceTableError{PriceTableErrorCode::NonPositiveValue, 0, 0}).code,
+                  PriceTableError{PriceTableErrorCode::NonPositiveValue, 0, 0})
+                  .code,
               ValidationErrorCode::InvalidBounds);
     EXPECT_EQ(mango::detail::to_validation_error(
-                  PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0, 3}).code,
+                  PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0, 3})
+                  .code,
               ValidationErrorCode::InvalidGridSize);
     EXPECT_EQ(mango::detail::to_validation_error(
-                  PriceTableError{PriceTableErrorCode::GridNotSorted, 0, 0}).code,
+                  PriceTableError{PriceTableErrorCode::GridNotSorted, 0, 0})
+                  .code,
               ValidationErrorCode::InvalidGridSize);
 }
 
@@ -79,4 +78,20 @@ TEST(PriceTableErrorMappingTest, SelectionFailureHistoryRemainsOwnedAndTyped) {
     ASSERT_TRUE(restored.reference_selection);
     EXPECT_TRUE(std::holds_alternative<mango::ReferenceSelectionFailure>(
         restored.reference_selection->outcome()));
+}
+
+TEST(PriceTableErrorMappingTest, PhysicalProofOutcomesStayDistinctAcrossPublicErrors) {
+    const std::pair<PriceTableErrorCode, ValidationErrorCode> cases[]{
+        {PriceTableErrorCode::UnsupportedRepresentation,
+         ValidationErrorCode::UnsupportedRepresentation},
+        {PriceTableErrorCode::NonMonotoneSurface, ValidationErrorCode::NonMonotoneSurface},
+        {PriceTableErrorCode::CertificationIndeterminate,
+         ValidationErrorCode::CertificationIndeterminate}};
+    for (auto [source, target] : cases) {
+        const auto public_error =
+            mango::detail::to_validation_error(PriceTableError{source, 0, 123});
+        EXPECT_EQ(public_error.code, target);
+        EXPECT_EQ(public_error.value, 123);
+        EXPECT_EQ(mango::convert_to_price_table_error(public_error).code, source);
+    }
 }

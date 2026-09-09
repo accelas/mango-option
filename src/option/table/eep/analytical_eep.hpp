@@ -13,6 +13,9 @@ public:
     AnalyticalEEP(OptionType option_type, double dividend_yield)
         : option_type_(option_type), dividend_yield_(dividend_yield) {}
 
+    [[nodiscard]] OptionType option_type() const noexcept { return option_type_; }
+    [[nodiscard]] double dividend_yield() const noexcept { return dividend_yield_; }
+
     [[nodiscard]] double european_price(double spot, double strike, double tau, double sigma,
                                         double rate) const {
         // Preserve the exact payoff subtraction at the construction closure.
