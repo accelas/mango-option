@@ -4,6 +4,7 @@
 #include "mango/option/table/price_table.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
+#include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 
 using namespace mango;
 
@@ -186,28 +187,62 @@ TEST(SplitSurfaceTest, ExactReferenceDoesNotReadAnInactiveNeighbor) {
     EXPECT_DOUBLE_EQ(surface.price(100.0, 100.0, 0.5, 0.2, 0.05), 1.0);
 }
 
+namespace {
+ChebyshevLeaf continuous_fixture(const SurfaceBounds& bounds) {
+    Domain<4> domain{{bounds.m_min, bounds.tau_min, bounds.sigma_min, bounds.rate_min},
+                     {bounds.m_max, bounds.tau_max, bounds.sigma_max, bounds.rate_max}};
+    auto polynomial = ChebyshevModalInterpolant<4>::build_from_coefficients(
+        std::vector<double>(16, 0.0), domain, {2, 2, 2, 2}).value();
+    return ChebyshevLeaf(ChebyshevTransformLeaf(std::move(polynomial), {}, 100),
+                        AnalyticalEEP(OptionType::CALL, 0));
+}
+
+ChebyshevModalMultiKRefInner segmented_fixture(const SurfaceBounds& bounds,
+                                               double start = 0, double end = 1) {
+    std::vector<ChebyshevModalSegmentedSurface> references;
+    for (double strike : {80., 100., 120.}) {
+        Domain<4> domain{{bounds.m_min, 0, bounds.sigma_min, bounds.rate_min},
+                         {bounds.m_max, end - start, bounds.sigma_max, bounds.rate_max}};
+        std::vector<double> coefficients(16, 0.0);
+        coefficients[0] = .1;
+        auto polynomial = ChebyshevModalInterpolant<4>::build_from_coefficients(
+            coefficients, domain, {2, 2, 2, 2}).value();
+        references.emplace_back(
+            std::vector<ChebyshevModalSegmentedLeaf>{
+                ChebyshevModalSegmentedLeaf(std::move(polynomial), {}, strike)},
+            TauSegmentSplit({start}, {end}, {0}, {end - start}, strike));
+    }
+    return ChebyshevModalMultiKRefInner(std::move(references), MultiKRefSplit({80, 100, 120}));
+}
+} // namespace
+
 TEST(SplitSurfaceTest, SegmentedCheckedQueriesRequireStrikeMetadata) {
-    using Multi = SplitSurface<SmoothHomogeneousPrice, MultiKRefSplit>;
+    using Table = PriceTable<ChebyshevModalMultiKRefInner>;
     SurfaceBounds bounds{-.3, .3, .1, 1.0, .1, .4, .01, .1};
-    PriceTable<Multi> missing(Multi(std::vector<SmoothHomogeneousPrice>(3),
-        MultiKRefSplit({80.0, 100.0, 120.0})), bounds, OptionType::CALL, 0.0);
-    EXPECT_FALSE(missing.contains_strike(100.0));
+    const auto inner = segmented_fixture(bounds);
+    auto missing = Table::create(inner, bounds, OptionType::CALL, 0, FixedExpiryMetadata{1, {}});
+    ASSERT_FALSE(missing);
+    EXPECT_EQ(missing.error().code, PriceTableErrorCode::InvalidConfig);
     bounds.strike_bounds = StrikeBounds{90.0, 110.0};
-    PriceTable<Multi> published(Multi(std::vector<SmoothHomogeneousPrice>(3),
-        MultiKRefSplit({80.0, 100.0, 120.0})), bounds, OptionType::CALL, 0.0);
-    EXPECT_TRUE(published.contains_strike(90.0));
-    EXPECT_TRUE(published.contains_strike(110.0));
-    EXPECT_FALSE(published.contains_strike(80.0));  // extra support is not publication
-    EXPECT_FALSE(published.contains_strike(120.0));
+    auto published = Table::create(inner, bounds, OptionType::CALL, 0, FixedExpiryMetadata{1, {}});
+    ASSERT_TRUE(published);
+    EXPECT_EQ(published->proof_status(), PriceProofStatus::Certified);
+    EXPECT_TRUE(published->contains_strike(90.0));
+    EXPECT_TRUE(published->contains_strike(110.0));
+    EXPECT_FALSE(published->contains_strike(80.0));  // extra support is not publication
+    EXPECT_FALSE(published->contains_strike(120.0));
     bounds.strike_bounds.reset();
-    PriceTable<SmoothHomogeneousPrice> continuous({}, bounds, OptionType::CALL, 0.0);
-    EXPECT_TRUE(continuous.contains_strike(1000.0));
+    auto continuous = ChebyshevSurface::create(continuous_fixture(bounds), bounds, OptionType::CALL, 0);
+    ASSERT_TRUE(continuous);
+    EXPECT_TRUE(continuous->contains_strike(1000.0));
 }
 
 TEST(SplitSurfaceTest, RequestedRatiosAndPositiveMaturityDefineAdmission) {
     SurfaceBounds bounds{std::log(.1), std::log(.13), 0, 1, .1, .4, .01, .1};
     bounds.ratio_bounds = MoneynessBounds{.1, .13};
-    PriceTable<SmoothHomogeneousPrice> table({}, bounds, OptionType::CALL, 0.0);
+    auto created = ChebyshevSurface::create(continuous_fixture(bounds), bounds, OptionType::CALL, 0);
+    ASSERT_TRUE(created);
+    const auto& table = *created;
     EXPECT_TRUE(table.contains_moneyness(10, 100));
     EXPECT_EQ(table.ratio_bounds().min, .1);
     EXPECT_FALSE(table.contains_maturity(0));
@@ -216,7 +251,9 @@ TEST(SplitSurfaceTest, RequestedRatiosAndPositiveMaturityDefineAdmission) {
 
 TEST(SplitSurfaceTest, TypedGreeksRejectUnsupportedSigmaRateAndModel) {
     const SurfaceBounds bounds{-.3, .3, .1, 1.0, .1, .4, .01, .1};
-    PriceTable<SmoothHomogeneousPrice> table({}, bounds, OptionType::CALL, 0.0);
+    auto created = ChebyshevSurface::create(continuous_fixture(bounds), bounds, OptionType::CALL, 0);
+    ASSERT_TRUE(created);
+    const auto& table = *created;
     const PricingParams valid(OptionSpec{.spot = 100, .strike = 100,
         .maturity = .5, .rate = .05, .option_type = OptionType::CALL}, .2);
     ASSERT_TRUE(table.delta(valid));
@@ -248,10 +285,12 @@ TEST(SplitSurfaceTest, TypedGreeksRejectUnsupportedSigmaRateAndModel) {
 }
 
 TEST(SplitSurfaceTest, RequestedTimeBoundsDoNotAdmitMissingEdgeSegments) {
-    using Segmented = SplitSurface<SmoothHomogeneousPrice, TauSegmentSplit>;
-    PriceTable<Segmented> table(Segmented(std::vector<SmoothHomogeneousPrice>(1),
-        TauSegmentSplit({.2}, {.8}, {0.}, {.6}, 100.)),
-        SurfaceBounds{-.3, .3, 0., 1., .1, .4, .01, .1}, OptionType::CALL, 0.);
+    SurfaceBounds bounds{-.3, .3, 0., 1., .1, .4, .01, .1, StrikeBounds{90, 110}};
+    auto created = PriceTable<ChebyshevModalMultiKRefInner>::create(
+        segmented_fixture(bounds, .2, .8), bounds, OptionType::CALL, 0,
+        FixedExpiryMetadata{1, {}});
+    ASSERT_TRUE(created);
+    const auto& table = *created;
     EXPECT_FALSE(table.contains_maturity(.1));
     EXPECT_TRUE(table.contains_maturity(.5));
     EXPECT_FALSE(table.contains_maturity(.9));

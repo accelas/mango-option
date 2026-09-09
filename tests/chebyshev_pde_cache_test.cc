@@ -186,16 +186,19 @@ TEST(ChebyshevPDECacheTest, SegmentedRoutingPreservesLabelledTime) {
     EXPECT_NEAR(surface.price(100.0, 100.0, 0.7, 0.15, 0.04), 70.0, 1e-11);
     // An omitted event neighborhood cannot silently become another time.
     EXPECT_FALSE(std::isfinite(surface.price(100.0, 100.0, 0.5, 0.15, 0.04)));
-    PriceTable<ChebyshevTauSegmented> table(std::move(surface),
-        SurfaceBounds{-0.2, 0.2, 0.01, 1.0, 0.1, 0.2, 0.03, 0.05},
-        OptionType::PUT, 0.0);
+    auto created = ChebyshevMultiKRefSurface::create(
+        ChebyshevMultiKRefInner({std::move(surface)}, MultiKRefSplit({100.})),
+        SurfaceBounds{-0.2, 0.2, 0.01, 1.0, 0.1, 0.2, 0.03, 0.05, StrikeBounds{100, 100}},
+        OptionType::PUT, 0.0, FixedExpiryMetadata{1, {{.5, 1}}});
+    ASSERT_TRUE(created);
+    auto table = *created;
     EXPECT_FALSE(table.contains_maturity(0.5));
     PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
         .maturity = 0.5, .rate = 0.04, .option_type = OptionType::PUT}, 0.15);
     auto gamma = table.gamma(p);
     ASSERT_FALSE(gamma.has_value());
     EXPECT_EQ(gamma.error(), GreekError::OutOfDomain);
-    auto solver = InterpolatedIVSolver<PriceTable<ChebyshevTauSegmented>>::create(
+    auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
         std::move(table));
     ASSERT_TRUE(solver.has_value());
     IVQuery query(static_cast<const OptionSpec&>(p), 5.0);

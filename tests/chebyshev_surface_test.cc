@@ -83,7 +83,9 @@ TEST(ChebyshevSurfaceTest, ConstructAndQuery) {
         .rate_min = 0.01, .rate_max = 0.10,
     };
 
-    ChebyshevSurface surface(std::move(leaf), bounds, OptionType::PUT, 0.02);
+    auto created = ChebyshevSurface::create(leaf, bounds, OptionType::PUT, 0.02);
+    ASSERT_TRUE(created);
+    const auto& surface = *created;
 
     double p = surface.price(100.0, 100.0, 1.0, 0.20, 0.05);
     EXPECT_GT(p, 0.0);
@@ -233,9 +235,12 @@ TEST(ChebyshevSurfaceTest, NonfiniteMaturityIsOutsideContinuousDomain) {
         [](std::array<double, 4>) { return 1.0; }, domain, {2, 2, 2, 2});
     ASSERT_TRUE(interp.has_value());
     ChebyshevTransformLeaf leaf(std::move(*interp), StandardTransform4D{}, 100.0);
-    PriceTable<ChebyshevTransformLeaf> table(std::move(leaf),
+    auto created = ChebyshevSurface::create(
+        ChebyshevLeaf(std::move(leaf), AnalyticalEEP(OptionType::PUT, 0)),
         SurfaceBounds{-0.2, 0.2, 0.1, 1.0, 0.1, 0.3, 0.01, 0.1},
         OptionType::PUT, 0.0);
+    ASSERT_TRUE(created);
+    const auto& table = *created;
     EXPECT_TRUE(table.contains_maturity(0.1));
     EXPECT_TRUE(table.contains_maturity(1.0));
     EXPECT_FALSE(table.contains_maturity(std::numeric_limits<double>::quiet_NaN()));

@@ -4,6 +4,7 @@
 // Tests all surface types plus checksum verification and compression variants.
 
 #include <gtest/gtest.h>
+#include "polynomial_table_fixtures.hpp"
 
 #include <arrow/api.h>
 #include <arrow/io/api.h>
@@ -317,7 +318,7 @@ TEST_F(ParquetIOTest, BSpline4DRoundTrip) {
     ASSERT_TRUE(result.has_value()) << "build failed";
 
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value()) << "make_bspline_surface failed";
 
@@ -351,9 +352,9 @@ TEST_F(ParquetIOTest, ChebyshevRaw4DRoundTrip) {
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
     };
-    auto result = build_chebyshev_table(config);
-    ASSERT_TRUE(result.has_value()) << "build_chebyshev_table failed";
-    auto& surface = result->surface;
+    auto result = test::chebyshev_table(config);
+    ASSERT_TRUE(result.has_value()) << "certified polynomial fixture failed";
+    auto& surface = *result;
 
     auto data = to_data(surface);
     auto write_result = write_parquet(data, temp_path_);
@@ -380,32 +381,14 @@ TEST_F(ParquetIOTest, BSpline3DRoundTrip) {
     axes.tau_prime = {0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.12, 0.16};
     axes.ln_kappa = {-2.5, -1.5, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 2.8};
 
-    auto pde = solve_dimensionless_pde(axes, K_ref, OptionType::PUT);
-    ASSERT_TRUE(pde.has_value())
-        << "PDE solve failed: code=" << static_cast<int>(pde.error().code);
-
-    Dimensionless3DAccessor accessor(pde->values, axes, K_ref);
-    eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
-
-    std::array<std::vector<double>, 3> grids = {
+    // The round trip measures persistence, independently of PDE-fit shape.
+    // Preserve every original numerical axis with a zero EEP polynomial.
+    const std::array<std::vector<double>, 3> grids = {
         axes.log_moneyness, axes.tau_prime, axes.ln_kappa};
-    auto fitter = BSplineNDSeparable<double, 3>::create(grids);
-    ASSERT_TRUE(fitter.has_value());
-    auto fit = fitter->fit(std::move(pde->values));
-    ASSERT_TRUE(fit.has_value());
-
-    std::array<std::vector<double>, 3> bspline_grids = {
-        axes.log_moneyness, axes.tau_prime, axes.ln_kappa};
-    std::array<std::vector<double>, 3> bspline_knots;
-    for (size_t i = 0; i < 3; ++i) {
-        bspline_knots[i] = clamped_knots_cubic(bspline_grids[i]);
-    }
-    auto spline = BSplineND<double, 3>::create(
-        bspline_grids, std::move(bspline_knots), std::move(fit->coefficients));
-    ASSERT_TRUE(spline.has_value());
+    auto spline = test::constant_spline<3>(grids, 0.0);
 
     auto spline_ptr = std::make_shared<const BSplineND<double, 3>>(
-        std::move(spline.value()));
+        std::move(spline));
 
     SharedBSplineInterp<3> interp(std::move(spline_ptr));
     DimensionlessTransform3D xform;
@@ -426,8 +409,10 @@ TEST_F(ParquetIOTest, BSpline3DRoundTrip) {
         .rate_max = 0.10,
     };
 
-    BSpline3DPriceTable surface(
+    auto certified = BSpline3DPriceTable::create(
         std::move(eep_leaf), bounds, OptionType::PUT, 0.0);
+    ASSERT_TRUE(certified) << static_cast<int>(certified.error().code);
+    const auto& surface = *certified;
 
     auto data = to_data(surface);
     auto write_result = write_parquet(data, temp_path_);
@@ -454,13 +439,7 @@ TEST_F(ParquetIOTest, Chebyshev3DRoundTrip) {
     axes.tau_prime = {0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.12, 0.16};
     axes.ln_kappa = {-2.5, -1.5, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 2.8};
 
-    auto pde = solve_dimensionless_pde(axes, K_ref, OptionType::PUT);
-    ASSERT_TRUE(pde.has_value())
-        << "PDE solve failed: code=" << static_cast<int>(pde.error().code);
-
-    Dimensionless3DAccessor accessor(pde->values, axes, K_ref);
-    eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
-
+    // Exact zero EEP isolates serialization from PDE sampling and fitting.
     std::array<size_t, 3> num_pts = {
         axes.log_moneyness.size(),
         axes.tau_prime.size(),
@@ -471,8 +450,8 @@ TEST_F(ParquetIOTest, Chebyshev3DRoundTrip) {
         .hi = {axes.log_moneyness.back(), axes.tau_prime.back(), axes.ln_kappa.back()},
     };
 
-    auto cheb = ChebyshevModalInterpolant<3>::build_from_values(
-        std::span<const double>(pde->values),
+    auto cheb = ChebyshevModalInterpolant<3>::build_from_coefficients(
+        std::vector<double>(num_pts[0] * num_pts[1] * num_pts[2], 0.0),
         domain, num_pts).value();
 
     DimensionlessTransform3D xform;
@@ -493,8 +472,10 @@ TEST_F(ParquetIOTest, Chebyshev3DRoundTrip) {
         .rate_max = 0.10,
     };
 
-    Chebyshev3DPriceTable surface(
-        std::move(eep_leaf), bounds, OptionType::PUT, 0.0);
+    auto certified = Chebyshev3DPriceTable::create(
+        eep_leaf, bounds, OptionType::PUT, 0.0);
+    ASSERT_TRUE(certified) << static_cast<int>(certified.error().code);
+    const auto& surface = *certified;
 
     auto data = to_data(surface);
     auto write_result = write_parquet(data, temp_path_);
@@ -514,26 +495,23 @@ TEST_F(ParquetIOTest, Chebyshev3DRoundTrip) {
 // ===========================================================================
 
 TEST_F(ParquetIOTest, BSplineSegmentedRoundTrip) {
-    SegmentedPriceTableBuilder::Config config{
-        .K_ref = 100.0,
-        .option_type = OptionType::PUT,
-        .dividends = {
-            .dividend_yield = 0.02,
-            .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
-        },
-        .grid = IVGrid{
+    SegmentedPriceTableBuilder::Config config{};
+    config.K_ref = 100.0;
+    config.option_type = OptionType::PUT;
+    config.dividends.dividend_yield = .02;
+    config.dividends.discrete_dividends = {{.calendar_time = .5, .amount = 2.0}};
+    config.grid = IVGrid{
             .moneyness = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
-        },
-        .maturity = 1.0,
-    };
+        };
+    config.maturity = 1.0;
 
     auto bspline_seg = SegmentedPriceTableBuilder::build(config);
     ASSERT_TRUE(bspline_seg.has_value()) << "SegmentedPriceTableBuilder failed";
 
     auto multi = build_multi_kref_surface({BSplineMultiKRefEntry{
-        .K_ref = 100.0, .surface = std::move(*bspline_seg)}});
+        .K_ref = 100.0, .surface = test::constant_segments(*bspline_seg)}});
     ASSERT_TRUE(multi.has_value()) << "build_multi_kref_surface failed";
 
     SurfaceBounds bounds{
@@ -548,9 +526,11 @@ TEST_F(ParquetIOTest, BSplineSegmentedRoundTrip) {
     };
 
     bounds.strike_bounds = StrikeBounds{100.0, 100.0};
-    BSplineMultiKRefSurface surface(
+    auto certified = BSplineMultiKRefSurface::create(
         std::move(*multi), bounds, OptionType::PUT, 0.02,
         make_fixed_expiry_metadata(config.maturity, config.dividends.discrete_dividends));
+    ASSERT_TRUE(certified) << static_cast<int>(certified.error().code);
+    const auto& surface = *certified;
 
     auto data = to_data(surface);
     auto write_result = write_parquet(data, temp_path_);
@@ -592,7 +572,7 @@ TEST_F(ParquetIOTest, ChecksumCorruptionDetected) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -665,7 +645,7 @@ TEST_F(ParquetIOTest, CompressionVariants) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -722,7 +702,7 @@ TEST_F(ParquetIOTest, TypeMismatchViaParquet) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -770,7 +750,7 @@ TEST_F(ParquetIOTest, MetadataPreservation) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -857,7 +837,7 @@ TEST_F(ParquetIOTest, MalformedListChildTypeRejected) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -924,7 +904,7 @@ TEST_F(ParquetIOTest, NullContainingColumnRejected) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -986,7 +966,7 @@ TEST_F(ParquetIOTest, ZeroKRefRejected) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -1028,7 +1008,7 @@ TEST_F(ParquetIOTest, InvalidBoundsRejected) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -1074,7 +1054,7 @@ TEST_F(ParquetIOTest, TamperedKRefDetectedByCRC) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -1135,7 +1115,7 @@ TEST_F(ParquetIOTest, TamperedMetadataDetectedByCRC) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -1265,8 +1245,10 @@ TEST_F(ParquetIOTest, ChebyshevSegmentedMultiKRefRoundTrip) {
         .strike_bounds = StrikeBounds{95.0, 105.0},
     };
 
-    ChebyshevMultiKRefSurface surface(std::move(inner), bounds,
+    auto certified = ChebyshevMultiKRefSurface::create(std::move(inner), bounds,
                                        OptionType::PUT, 0.02, FixedExpiryMetadata{2.0, {{1.5, 2.0}}});
+    ASSERT_TRUE(certified) << static_cast<int>(certified.error().code);
+    const auto& surface = *certified;
 
     // Round-trip through Parquet
     auto data = to_data(surface);
@@ -1316,26 +1298,23 @@ TEST_F(ParquetIOTest, ChebyshevSegmentedMultiKRefRoundTrip) {
 TEST_F(ParquetIOTest, TauSegmentGapRejected) {
     // Build valid segmented data, then introduce a gap between tau segments.
     // from_data should reject it via validate_tau_segments.
-    SegmentedPriceTableBuilder::Config config{
-        .K_ref = 100.0,
-        .option_type = OptionType::PUT,
-        .dividends = {
-            .dividend_yield = 0.02,
-            .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
-        },
-        .grid = IVGrid{
+    SegmentedPriceTableBuilder::Config config{};
+    config.K_ref = 100.0;
+    config.option_type = OptionType::PUT;
+    config.dividends.dividend_yield = .02;
+    config.dividends.discrete_dividends = {{.calendar_time = .5, .amount = 2.0}};
+    config.grid = IVGrid{
             .moneyness = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
-        },
-        .maturity = 1.0,
-    };
+        };
+    config.maturity = 1.0;
 
     auto bspline_seg = SegmentedPriceTableBuilder::build(config);
     ASSERT_TRUE(bspline_seg.has_value());
 
     auto multi = build_multi_kref_surface({BSplineMultiKRefEntry{
-        .K_ref = 100.0, .surface = std::move(*bspline_seg)}});
+        .K_ref = 100.0, .surface = test::constant_segments(*bspline_seg)}});
     ASSERT_TRUE(multi.has_value());
 
     SurfaceBounds bounds{
@@ -1346,9 +1325,11 @@ TEST_F(ParquetIOTest, TauSegmentGapRejected) {
     };
 
     bounds.strike_bounds = StrikeBounds{100.0, 100.0};
-    BSplineMultiKRefSurface surface(
+    auto certified = BSplineMultiKRefSurface::create(
         std::move(*multi), bounds, OptionType::PUT, 0.02,
         make_fixed_expiry_metadata(config.maturity, config.dividends.discrete_dividends));
+    ASSERT_TRUE(certified) << static_cast<int>(certified.error().code);
+    const auto& surface = *certified;
 
     auto data = to_data(surface);
     ASSERT_GE(data.segments.size(), 2u);
@@ -1387,9 +1368,9 @@ TEST_F(ParquetIOTest, ChebyshevInvalidDomainRejected) {
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
     };
-    auto result = build_chebyshev_table(config);
+    auto result = test::chebyshev_table(config);
     ASSERT_TRUE(result.has_value());
-    auto& surface = result->surface;
+    auto& surface = *result;
     auto data = to_data(surface);
     ASSERT_EQ(data.segments.size(), 1u);
 
@@ -1447,7 +1428,7 @@ TEST_F(ParquetIOTest, WriterRejectsInvalidMetadata) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
     auto data = to_data(*surface);
@@ -1499,9 +1480,9 @@ TEST_F(ParquetIOTest, NaNSegmentValuesRejected) {
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
     };
-    auto result = build_chebyshev_table(config);
+    auto result = test::chebyshev_table(config);
     ASSERT_TRUE(result.has_value());
-    auto& surface = result->surface;
+    auto& surface = *result;
     auto data = to_data(surface);
     ASSERT_EQ(data.segments.size(), 1u);
     ASSERT_FALSE(data.segments[0].values.empty());

@@ -4,6 +4,7 @@
 // Tests all 7+1 surface types (including Chebyshev3DRaw).
 
 #include <gtest/gtest.h>
+#include "polynomial_table_fixtures.hpp"
 
 #include <cmath>
 #include <memory>
@@ -51,10 +52,10 @@ ChebyshevMultiKRefSurface metadata_surface() {
     }
     SurfaceBounds bounds{-0.3, 0.3, 0.01, 1.0, 0.1, 0.4, 0.02, 0.08,
                          StrikeBounds{95.0, 105.0}};
-    return ChebyshevMultiKRefSurface(
+    return ChebyshevMultiKRefSurface::create(
         ChebyshevMultiKRefInner(std::move(references), MultiKRefSplit({80.0, 120.0})),
         bounds, OptionType::PUT, 0.02,
-        FixedExpiryMetadata{2.0, {{1.5, 2.0}, {1.8, 3.0}}});
+        FixedExpiryMetadata{2.0, {{1.5, 2.0}, {1.8, 3.0}}}).value();
 }
 
 TEST(PriceTableDataTest, FinancialChebyshevStoresThePolynomialUsedForQueries) {
@@ -216,7 +217,7 @@ TEST(PriceTableDataTest, BSpline4DRoundTrip) {
     ASSERT_TRUE(result.has_value()) << "build failed";
 
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value()) << "make_bspline_surface failed";
 
@@ -252,9 +253,9 @@ TEST(PriceTableDataTest, ChebyshevRaw4DRoundTrip) {
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
     };
-    auto result = build_chebyshev_table(config);
-    ASSERT_TRUE(result.has_value()) << "build_chebyshev_table failed";
-    auto& surface = result->surface;
+    auto result = test::chebyshev_table(config);
+    ASSERT_TRUE(result.has_value()) << "certified polynomial fixture failed";
+    auto& surface = *result;
 
     auto data = to_data(surface);
 
@@ -281,32 +282,14 @@ TEST(PriceTableDataTest, BSpline3DRoundTrip) {
     axes.tau_prime = {0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.12, 0.16};
     axes.ln_kappa = {-2.5, -1.5, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 2.8};
 
-    auto pde = solve_dimensionless_pde(axes, K_ref, OptionType::PUT);
-    ASSERT_TRUE(pde.has_value())
-        << "PDE solve failed: code=" << static_cast<int>(pde.error().code);
-
-    Dimensionless3DAccessor accessor(pde->values, axes, K_ref);
-    eep_decompose(accessor, AnalyticalEEP(OptionType::PUT, 0.0));
-
-    std::array<std::vector<double>, 3> grids = {
+    // The round trip measures persistence, independently of PDE-fit shape.
+    // Preserve every original numerical axis with a zero EEP polynomial.
+    const std::array<std::vector<double>, 3> grids = {
         axes.log_moneyness, axes.tau_prime, axes.ln_kappa};
-    auto fitter = BSplineNDSeparable<double, 3>::create(grids);
-    ASSERT_TRUE(fitter.has_value());
-    auto fit = fitter->fit(std::move(pde->values));
-    ASSERT_TRUE(fit.has_value());
-
-    std::array<std::vector<double>, 3> bspline_grids = {
-        axes.log_moneyness, axes.tau_prime, axes.ln_kappa};
-    std::array<std::vector<double>, 3> bspline_knots;
-    for (size_t i = 0; i < 3; ++i) {
-        bspline_knots[i] = clamped_knots_cubic(bspline_grids[i]);
-    }
-    auto spline = BSplineND<double, 3>::create(
-        bspline_grids, std::move(bspline_knots), std::move(fit->coefficients));
-    ASSERT_TRUE(spline.has_value());
+    auto spline = test::constant_spline<3>(grids, 0.0);
 
     auto spline_ptr = std::make_shared<const BSplineND<double, 3>>(
-        std::move(spline.value()));
+        std::move(spline));
 
     SharedBSplineInterp<3> interp(std::move(spline_ptr));
     DimensionlessTransform3D xform;
@@ -327,8 +310,10 @@ TEST(PriceTableDataTest, BSpline3DRoundTrip) {
         .rate_max = 0.10,
     };
 
-    BSpline3DPriceTable surface(
+    auto certified = BSpline3DPriceTable::create(
         std::move(eep_leaf), bounds, OptionType::PUT, 0.0);
+    ASSERT_TRUE(certified) << static_cast<int>(certified.error().code);
+    const auto& surface = *certified;
 
     auto data = to_data(surface);
 
@@ -349,26 +334,23 @@ TEST(PriceTableDataTest, BSpline3DRoundTrip) {
 // ===========================================================================
 
 TEST(PriceTableDataTest, BSplineSegmentedRoundTrip) {
-    SegmentedPriceTableBuilder::Config config{
-        .K_ref = 100.0,
-        .option_type = OptionType::PUT,
-        .dividends = {
-            .dividend_yield = 0.02,
-            .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
-        },
-        .grid = IVGrid{
+    SegmentedPriceTableBuilder::Config config{};
+    config.K_ref = 100.0;
+    config.option_type = OptionType::PUT;
+    config.dividends.dividend_yield = .02;
+    config.dividends.discrete_dividends = {{.calendar_time = .5, .amount = 2.0}};
+    config.grid = IVGrid{
             .moneyness = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
-        },
-        .maturity = 1.0,
-    };
+        };
+    config.maturity = 1.0;
 
     auto bspline_seg = SegmentedPriceTableBuilder::build(config);
     ASSERT_TRUE(bspline_seg.has_value()) << "SegmentedPriceTableBuilder failed";
 
     auto multi = build_multi_kref_surface({BSplineMultiKRefEntry{
-        .K_ref = 100.0, .surface = std::move(*bspline_seg)}});
+        .K_ref = 100.0, .surface = test::constant_segments(*bspline_seg)}});
     ASSERT_TRUE(multi.has_value()) << "build_multi_kref_surface failed";
 
     SurfaceBounds bounds{
@@ -383,9 +365,11 @@ TEST(PriceTableDataTest, BSplineSegmentedRoundTrip) {
     };
 
     bounds.strike_bounds = StrikeBounds{100.0, 100.0};
-    BSplineMultiKRefSurface surface(
+    auto certified = BSplineMultiKRefSurface::create(
         std::move(*multi), bounds, OptionType::PUT, 0.02,
         make_fixed_expiry_metadata(config.maturity, config.dividends.discrete_dividends));
+    ASSERT_TRUE(certified) << static_cast<int>(certified.error().code);
+    const auto& surface = *certified;
 
     auto data = to_data(surface);
 
@@ -436,8 +420,8 @@ TEST(PriceTableDataTest, ChebyshevSegmentedRoundTrip) {
         .rate = {0.03, 0.05},
     };
 
-    auto surface_result = build_chebyshev_segmented_manual(seg_config, grid);
-    ASSERT_TRUE(surface_result.has_value()) << "build_chebyshev_segmented_manual failed";
+    auto surface_result = test::chebyshev_segments(seg_config, grid);
+    ASSERT_TRUE(surface_result.has_value()) << "certified segmented polynomial fixture failed";
     auto& surface = *surface_result;
 
     auto data = to_data(surface);
@@ -531,7 +515,7 @@ TEST(PriceTableDataTest, BSpline4DSegmentMetadata) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -570,9 +554,9 @@ TEST(PriceTableDataTest, Chebyshev4DSegmentMetadata) {
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
     };
-    auto result = build_chebyshev_table(config);
+    auto result = test::chebyshev_table(config);
     ASSERT_TRUE(result.has_value());
-    auto& surface = result->surface;
+    auto& surface = *result;
 
     auto data = to_data(surface);
     ASSERT_EQ(data.segments.size(), 1u);
@@ -595,26 +579,23 @@ TEST(PriceTableDataTest, Chebyshev4DSegmentMetadata) {
 // ===========================================================================
 
 TEST(PriceTableDataTest, SegmentedSegmentMetadata) {
-    SegmentedPriceTableBuilder::Config config{
-        .K_ref = 100.0,
-        .option_type = OptionType::PUT,
-        .dividends = {
-            .dividend_yield = 0.02,
-            .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
-        },
-        .grid = IVGrid{
+    SegmentedPriceTableBuilder::Config config{};
+    config.K_ref = 100.0;
+    config.option_type = OptionType::PUT;
+    config.dividends.dividend_yield = .02;
+    config.dividends.discrete_dividends = {{.calendar_time = .5, .amount = 2.0}};
+    config.grid = IVGrid{
             .moneyness = to_log_m({0.8, 0.9, 1.0, 1.1, 1.2}),
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
-        },
-        .maturity = 1.0,
-    };
+        };
+    config.maturity = 1.0;
 
     auto bspline_seg = SegmentedPriceTableBuilder::build(config);
     ASSERT_TRUE(bspline_seg.has_value());
 
     auto multi = build_multi_kref_surface({BSplineMultiKRefEntry{
-        .K_ref = 100.0, .surface = std::move(*bspline_seg)}});
+        .K_ref = 100.0, .surface = test::constant_segments(*bspline_seg)}});
     ASSERT_TRUE(multi.has_value());
 
     SurfaceBounds bounds{
@@ -629,9 +610,11 @@ TEST(PriceTableDataTest, SegmentedSegmentMetadata) {
     };
 
     bounds.strike_bounds = StrikeBounds{100.0, 100.0};
-    BSplineMultiKRefSurface surface(
+    auto certified = BSplineMultiKRefSurface::create(
         std::move(*multi), bounds, OptionType::PUT, 0.02,
         make_fixed_expiry_metadata(config.maturity, config.dividends.discrete_dividends));
+    ASSERT_TRUE(certified) << static_cast<int>(certified.error().code);
+    const auto& surface = *certified;
 
     auto data = to_data(surface);
     EXPECT_GE(data.segments.size(), 2u)
@@ -660,7 +643,7 @@ TEST(PriceTableDataTest, MetadataPreservation) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value());
     auto surface = make_bspline_surface(
-        result->spline, result->K_ref, result->dividends.dividend_yield,
+        test::zero_eep(result->spline), result->K_ref, result->dividends.dividend_yield,
         OptionType::PUT);
     ASSERT_TRUE(surface.has_value());
 
@@ -686,7 +669,9 @@ TEST(PriceTableDataTest, PreservesOriginalRatioEndpointsAcrossReconstruction) {
     SurfaceBounds bounds{std::log(.1), std::log(.13), .01, 1, .1, .4, .02, .08,
                          StrikeBounds{95,105}};
     bounds.ratio_bounds = MoneynessBounds{.1,.13};
-    ChebyshevMultiKRefSurface original(source.inner(),bounds,OptionType::PUT,.02,source.fixed_expiry());
+    auto certified = ChebyshevMultiKRefSurface::create(source.inner(), bounds, OptionType::PUT, .02, source.fixed_expiry());
+    ASSERT_TRUE(certified);
+    const auto& original = *certified;
     ASSERT_TRUE(original.contains_moneyness(10,100));
     auto reconstructed = from_data<ChebyshevMultiKRefInner>(to_data(original));
     ASSERT_TRUE(reconstructed);

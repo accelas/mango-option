@@ -1768,6 +1768,7 @@ cc_test(
         "//src/option/table:price_table",
         "//src/option/table:tau_segment_split",
         "//src/option/table:multi_kref_split",
+        "//src/option/table/chebyshev:chebyshev_surface",
         "@googletest//:gtest_main",
     ],
 )
@@ -1972,6 +1973,18 @@ cc_test(
     ],
 )
 
+cc_library(
+    name = "polynomial_table_fixtures",
+    testonly = True,
+    hdrs = ["polynomial_table_fixtures.hpp"],
+    deps = [
+        "//src/math/bspline:bspline_basis",
+        "//src/option/table/bspline:bspline_types",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+    ],
+)
+
 cc_test(
     name = "price_table_data_test",
     size = "large",
@@ -1980,6 +1993,7 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
+        ":polynomial_table_fixtures",
         "//src/option/table/serialization:to_data",
         "//src/option/table/serialization:from_data",
         "//src/option/table/bspline:bspline_builder",
@@ -2011,6 +2025,7 @@ cc_test(
     linkopts = ["-fopenmp"],
     tags = ["manual"],  # Requires system Arrow/Parquet libraries
     deps = [
+        ":polynomial_table_fixtures",
         "//src/option:price_table_factory",
         "//src/option/table/serialization:to_data",
         "//src/option/table/serialization:from_data",
