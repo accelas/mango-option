@@ -33,7 +33,8 @@ struct BSplineAdaptiveResult {
     SurfaceBounds sample_bounds{};
 };
 
-/// Result of adaptive segmented B-spline surface construction
+/// Raw numerical result of adaptive segmented B-spline surface construction.
+/// This inner surface is not a certified price table or an IV solver input.
 struct BSplineSegmentedAdaptiveResult {
     BSplineMultiKRefInner surface;
     IVGrid grid;
@@ -111,6 +112,16 @@ public:
     [[nodiscard]] std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
     build_adaptive(const AdaptiveGridParams& params) const;
 
+    /// Fit the configured reference vector and report the returned surface
+    /// diagnostics. Validates refinement inputs before numerical work.
+    ///
+    /// This numerical seam does not select or qualify reference density and
+    /// does not certify or publish a table. The returned inner surface and
+    /// diagnostics are untrusted inputs to those separate stages; callers
+    /// needing reference validation should use build_adaptive().
+    [[nodiscard]] std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
+    fit_adaptive_candidate(const AdaptiveGridParams& params) const;
+
 private:
     BSplineSegmentedBuilder(
         SegmentedAdaptiveConfig config,
@@ -118,9 +129,6 @@ private:
         SurfaceBounds sample_domain,
         SurfaceBounds support_domain,
         IVGrid initial_grid);
-
-    [[nodiscard]] std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
-    build_adaptive_candidate(const AdaptiveGridParams& params) const;
 
     /// Assemble multi-K_ref surface from per-K_ref segmented surfaces.
     [[nodiscard]] std::expected<BSplineMultiKRefInner, PriceTableError>

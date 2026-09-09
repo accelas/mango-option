@@ -697,9 +697,21 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
     IVGrid domain{m_domain, v_domain, r_domain};
 
-    auto result = build_adaptive_bspline_segmented(params, seg_config, domain);
+    auto builder = BSplineSegmentedBuilder::create(seg_config, domain);
+    ASSERT_TRUE(builder.has_value());
+    auto invalid_params = params;
+    invalid_params.max_iter = 0;
+    auto invalid = builder->fit_adaptive_candidate(invalid_params);
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, PriceTableErrorCode::InvalidConfig);
+
+    auto result = builder->fit_adaptive_candidate(params);
     ASSERT_TRUE(result.has_value())
         << "code " << static_cast<int>(result.error().code);
+
+    // Raw fitting reports numerical evidence without reference selection or
+    // publication. The strict public builder owns those subsequent steps.
+    EXPECT_FALSE(result->diagnostics.reference_selection);
 
     // The target is unreachable, so the builder must have tried the retry and
     // reported the miss honestly.

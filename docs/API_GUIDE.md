@@ -676,6 +676,14 @@ Its `iv_error_kind` is `price_vega_proxy`, not actual inverted-IV error.
 Typed manual Chebyshev callers can request `build_with_diagnostics()` to keep
 this evidence alongside the returned surface.
 
+For numerical fitting and diagnostics,
+`BSplineSegmentedBuilder::fit_adaptive_candidate()` fits the configured
+reference vector and reports errors for the returned inner surface. This
+validated numerical entry point returns untrusted data: reference-density
+qualification, certification and public-table acceptance are separate steps.
+Use `build_adaptive()` for reference selection; a successful raw fit alone
+does not establish a usable public price table or IV solver.
+
 The factory dispatches on two orthogonal variants:
 
 - **`backend`**: `BSplineBackend`, `ChebyshevBackend`, or `DimensionlessBackend`

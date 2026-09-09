@@ -595,7 +595,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const 
         [&](std::span<const double> refs) {
             auto candidate = *this;
             candidate.K_refs_.assign(refs.begin(), refs.end());
-            return candidate.build_adaptive_candidate(params);
+            return candidate.fit_adaptive_candidate(params);
         }, [](const BSplineSegmentedAdaptiveResult& result, double s, double k, double t, double v, double r) {
             return result.surface.price(s, k, t, v, r);
         }, 0.01, params.target_iv_error, params.vega_floor);
@@ -607,7 +607,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const 
 }
 
 std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
-BSplineSegmentedBuilder::build_adaptive_candidate(const AdaptiveGridParams& params) const
+BSplineSegmentedBuilder::fit_adaptive_candidate(const AdaptiveGridParams& params) const
 {
     const auto regime = compute_segment_boundaries(config_.discrete_dividends,
         config_.maturity, 0.0, config_.maturity);
@@ -615,6 +615,12 @@ BSplineSegmentedBuilder::build_adaptive_candidate(const AdaptiveGridParams& para
         regime.bounds, regime.is_gap, K_refs_.front());
     const auto admitted_times = admitted_maturity_intervals(
         tau_split, sample_domain_.tau_min, sample_domain_.tau_max);
+    const RefinementContext context{.spot = config_.spot,
+        .dividend_yield = config_.dividend_yield, .option_type = config_.option_type,
+        .bounds = sample_domain_, .sample_bounds = sample_domain_,
+        .maturity_intervals = admitted_times};
+    auto valid = validate_refinement_request(params, context);
+    if (!valid) return std::unexpected(valid.error());
 
     // 0. Derive the fit domain from the sample domain (spec D3): headroom
     //    scale is the expected seeded moneyness density, not the user's
