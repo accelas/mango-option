@@ -1634,6 +1634,7 @@ cc_test(
     srcs = ["price_table_error_mapping_test.cc"],
     deps = [
         "//src/option:price_table_error_mapping",
+        "//src/option/table:adaptive_grid_types",
         "@googletest//:gtest_main",
     ],
 )
