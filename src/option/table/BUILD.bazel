@@ -202,9 +202,17 @@ cc_library(
 )
 
 cc_library(
+    name = "quote_scale",
+    hdrs = ["quote_scale.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "transform_leaf",
     hdrs = ["transform_leaf.hpp"],
-    deps = [":greek_types", ":surface_concepts", "//src/option:option_spec"],
+    deps = [":greek_types", ":surface_concepts", ":quote_scale", "//src/option:option_spec"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",
@@ -247,7 +255,7 @@ cc_library(
 cc_library(
     name = "multi_kref_split",
     hdrs = ["splits/multi_kref.hpp"],
-    deps = [":split_surface"],
+    deps = [":split_surface", ":quote_scale"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",

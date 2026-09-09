@@ -3,6 +3,7 @@
 
 #include "mango/option/table/greek_types.hpp"
 #include "mango/option/table/surface_concepts.hpp"
+#include "mango/option/table/quote_scale.hpp"
 #include "mango/option/option_spec.hpp"
 #include <algorithm>
 #include <cmath>
@@ -33,7 +34,7 @@ public:
         // NaN-preserving floor (issue #466): keep +0.0 canonicalization for
         // finite raw, propagate NaN instead of masking it as a 0.0 price
         double floored = std::isnan(raw) ? raw : std::max(0.0, raw);
-        return floored * strike / K_ref_;
+        return detail::scale_quote(floored, strike, K_ref_);
     }
 
     [[nodiscard]] double vega(double spot, double strike,
@@ -46,7 +47,7 @@ public:
         for (size_t i = 0; i < Xform::kDim; ++i)
             if (w[i] != 0.0)
                 v += w[i] * interp_.partial(i, coords);
-        return v * strike / K_ref_;
+        return detail::scale_quote(v, strike, K_ref_);
     }
 
     /// Compute a first-order Greek (delta, vega, theta, rho).
@@ -66,7 +67,7 @@ public:
         for (size_t i = 0; i < Xform::kDim; ++i)
             if (w[i] != 0.0)
                 result += w[i] * interp_.partial(i, coords);
-        return result * strike / K_ref_;
+        return detail::scale_quote(result, strike, K_ref_);
     }
 
     /// Compute gamma = d^2V/dS^2.
@@ -85,7 +86,9 @@ public:
         double d2f_dx2 = compute_second_partial_x(coords);
 
         // d^2V/dS^2 = (d^2f/dx^2 - df/dx) / S^2 * strike/K_ref
-        return (d2f_dx2 - df_dx) / (spot * spot) * strike / K_ref_;
+        // Keep the two 1/S chain factors without materializing S*S, which
+        // can overflow while the final gamma is a representable subnormal.
+        return detail::scale_quote(d2f_dx2 - df_dx, strike / spot, K_ref_) / spot;
     }
 
     /// Expose the raw (unscaled, unclamped) interpolant value, for
