@@ -53,3 +53,11 @@ cc_library(
     strip_include_prefix = "/src/option/table/accuracy",
     include_prefix = "mango/option/table/accuracy",
 )
+
+cc_library(
+    name = "population_types",
+    hdrs = ["population_types.hpp"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/accuracy",
+    include_prefix = "mango/option/table/accuracy",
+)
