@@ -212,12 +212,14 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
     auto result1 = build_adaptive_bspline(params, chain1,
         PDEGridConfig{grid_spec, 100, {}}, OptionType::PUT);
     ASSERT_TRUE(result1.has_value());
-    size_t solves1 = result1->iterations[0].pde_solves_table;
+    ASSERT_TRUE(result1->iterations[0].table_work.pde);
+    size_t solves1 = result1->iterations[0].table_work.pde->attempted;
 
     auto result2 = build_adaptive_bspline(params, chain2,
         PDEGridConfig{grid_spec, 100, {}}, OptionType::PUT);
     ASSERT_TRUE(result2.has_value());
-    size_t solves2 = result2->iterations[0].pde_solves_table;
+    ASSERT_TRUE(result2->iterations[0].table_work.pde);
+    size_t solves2 = result2->iterations[0].table_work.pde->attempted;
 
     EXPECT_EQ(solves1, solves2) << "Second build should recompute all slices for new chain";
 }

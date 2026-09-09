@@ -114,7 +114,7 @@ struct ChebyshevAdaptiveResult {
     double achieved_max_error = 0.0;
     double achieved_avg_error = 0.0;
     bool target_met = false;
-    size_t total_pde_solves = 0;
+    std::optional<size_t> total_pde_solves;  ///< Derived attempts; absent if any work is unreported
 
     /// Build diagnostics (spec D7) and the user-facing measurement domain
     /// (spec D2). The surface publishes these sample bounds; the factory
@@ -166,7 +166,7 @@ struct ChebyshevSegmentedAdaptiveResult {
     double achieved_max_error = 0.0;
     double achieved_avg_error = 0.0;
     bool target_met = false;
-    size_t total_pde_solves = 0;
+    std::optional<size_t> total_pde_solves;  ///< Derived attempts; absent if any work is unreported
 
     /// Diagnostics for the returned final surface (spec D7/D9), with the
     /// sizing-loop iterations appended for forensics.  `picked_iteration`

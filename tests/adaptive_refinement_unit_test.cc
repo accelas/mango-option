@@ -690,7 +690,7 @@ public:
                     }
                     return base + s.fresh_err;
                 },
-                .pde_solves = 1,
+                .pde_solves = 0,  // Explicit synthetic provider: no PDE work.
             };
         };
     }
@@ -791,6 +791,108 @@ std::function<SurfaceScript(const GridSizes&, size_t)> by_growth(
 // ---------------------------------------------------------------------------
 // Parameter validation (spec D3)
 // ---------------------------------------------------------------------------
+// Price errors remain evidence where the IV metric is deliberately filtered.
+// A perfect IV-measurable half-domain must not hide a five-cent price error.
+TEST(RunRefinementTest, FilteredIvPriceErrorStillDrivesRefinement) {
+    Harness h;
+    h.params.max_iter = 3;
+    mango::SurfaceHandle delivered;
+    mango::BuildFn build = [&](std::span<const double> m, std::span<const double>,
+                              std::span<const double>, std::span<const double>)
+        -> std::expected<mango::SurfaceHandle, mango::PriceTableError> {
+        h.setup_done = true;
+        const double bias = m.size() == kSeedSizes[0] ? .05 : 0.0;
+        delivered = mango::SurfaceHandle{.price = [bias](double spot, double strike,
+            double tau, double, double rate) {
+            return analytic_ref(spot, strike, tau, rate) + (spot < strike ? bias : 0.0);
+        }};
+        return delivered;
+    };
+    mango::ScoreErrorFn iv_proxy = [](double price, const mango::ErrorRefs& refs,
+        double spot, double strike, double, double, double) -> std::optional<double> {
+        if (spot < strike) return std::nullopt;
+        return std::abs(price - refs.ref_price);
+    };
+    auto result = mango::run_refinement(h.params, build, h.refine_fn(), h.ctx,
+        h.prepare_fn(), iv_proxy, h.initial, {});
+    ASSERT_TRUE(result);
+    EXPECT_NEAR(delivered.price(90.0, 100.0, .5, .2, .05),
+                analytic_ref(90.0, 100.0, .5, .05), .01);
+}
+
+TEST(RunRefinementWork, LegacyProvidersRemainUnknownAndHoldoutIsCountedOnce) {
+    Harness h;
+    h.fail_setup_refs = {0, 1};
+    auto result = h.run();
+    ASSERT_TRUE(result);
+    const auto& work = result->diagnostics.work.references;
+    EXPECT_EQ(work.requests, 16u);
+    EXPECT_EQ(work.failed_requests, 2u);
+    EXPECT_FALSE(work.pde.has_value());
+    EXPECT_EQ(result->diagnostics.holdout_reference_work.requests, 8u);
+    ASSERT_EQ(result->iterations.size(), 1u);
+    EXPECT_EQ(result->iterations.front().reference_work.requests, 8u);
+    EXPECT_EQ(h.prepare_calls, 16u);
+}
+
+TEST(RunRefinementWork, TerminalReferenceFailureRetainsSpentWork) {
+    Harness h;
+    h.fail_setup_refs = {0, 1, 2, 3, 4, 5, 6, 7};
+    auto result = h.run();
+    ASSERT_FALSE(result);
+    ASSERT_TRUE(result.error().work);
+    EXPECT_EQ(result.error().work->references.requests, 8u);
+    EXPECT_EQ(result.error().work->references.failed_requests, 8u);
+    EXPECT_FALSE(result.error().work->references.pde.has_value());
+}
+
+TEST(RunRefinementWork, ExplicitAnalyticProviderReportsZeroWorkIncludingFailure) {
+    Harness h;
+    h.fail_setup_refs = {0, 1};
+    auto legacy = h.prepare_fn();
+    mango::PrepareRefsFn analytic = [legacy](double s, double k, double t, double v, double r) {
+        auto result = legacy(s, k, t, v, r);
+        result.work = mango::PdeWork{};
+        return result;
+    };
+    auto result = mango::run_refinement(h.params, h.build_fn(), h.refine_fn(), h.ctx,
+        analytic, h.score_fn(), h.initial, {});
+    ASSERT_TRUE(result);
+    const auto& work = result->diagnostics.work;
+    ASSERT_TRUE(work.references.pde);
+    EXPECT_EQ(work.references.requests, 16u);
+    EXPECT_EQ(work.references.failed_requests, 2u);
+    EXPECT_EQ(work.references.pde->attempted, 0u);
+    ASSERT_TRUE(work.total_pde_attempts());
+    EXPECT_EQ(*work.total_pde_attempts(), 0u);
+}
+
+TEST(ReferenceProviderWork, FdBumpFailureKeepsOnlyActuallyPerformedSolve) {
+    const auto direct = mango::make_validate_fn(0.0, mango::OptionType::PUT);
+    size_t calls = 0;
+    mango::ValidateFn provider = [&](double s, double k, double t, double v, double r)
+        -> mango::ProviderResult<double, mango::SolverError> {
+        if (++calls == 2) return {std::unexpected(mango::SolverError{}), mango::PdeWork{}};
+        return direct(s, k, t, v, r);
+    };
+    auto prepare = mango::make_fd_vega_refs_fn({}, provider);
+    const auto result = prepare(100.0, 100.0, .1, .2, .05);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(calls, 2u);  // The third request must not be charged.
+    ASSERT_TRUE(result.work);
+    EXPECT_EQ(result.work->attempted, 1u);
+    EXPECT_EQ(result.work->completed, 1u);
+    EXPECT_EQ(result.work->failed, 0u);
+}
+
+TEST(ReferenceProviderWork, RejectedConfigurationDoesNotInventASolve) {
+    const auto direct = mango::make_validate_fn(0.0, mango::OptionType::PUT);
+    const auto result = direct(100.0, 100.0, .1, 0.0, .05);
+    ASSERT_FALSE(result);
+    ASSERT_TRUE(result.work);
+    EXPECT_EQ(result.work->attempted, 0u);
+}
+
 TEST(RunRefinementTest, ParamValidation) {
     auto expect_invalid = [](Harness& h, const char* what) {
         auto r = h.run();
@@ -1204,6 +1306,10 @@ TEST(RunRefinementTest, SeedBuildFailurePropagates) {
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::FittingFailed);
     EXPECT_EQ(h.build_calls, 1u);
+    ASSERT_TRUE(r.error().work);
+    EXPECT_EQ(r.error().work->tables.requests, h.build_calls);
+    EXPECT_EQ(r.error().work->tables.failed_requests, 1u);
+    EXPECT_FALSE(r.error().work->tables.pde);
 }
 
 TEST(RunRefinementTest, TrialBuildFailureContinuesExploration) {
@@ -1233,6 +1339,10 @@ TEST(RunRefinementTest, TrialBuildFailureContinuesExploration) {
         }
     }
     EXPECT_EQ(failed, 1u);
+    EXPECT_EQ(r->diagnostics.work.tables.requests, h.build_calls);
+    EXPECT_EQ(r->diagnostics.work.tables.failed_requests, 1u);
+    EXPECT_FALSE(r->diagnostics.work.tables.pde);
+    EXPECT_EQ(r->diagnostics.work.references.requests, h.prepare_calls);
 
     // After the failure the exploration base (the seed) was restored, so the
     // axis-1 trial refines the seed grids, not the failed axis-0 grids.
@@ -1273,6 +1383,10 @@ TEST(RunRefinementTest, FinalRebuildFailurePropagates) {
     auto r = h.run();
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::FittingFailed);
+    ASSERT_TRUE(r.error().work);
+    EXPECT_EQ(r.error().work->tables.requests, h.build_calls);
+    EXPECT_EQ(r.error().work->references.requests, h.prepare_calls);
+    EXPECT_FALSE(r.error().work->tables.pde);
 }
 
 // ---------------------------------------------------------------------------

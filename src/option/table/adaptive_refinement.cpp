@@ -133,7 +133,8 @@ struct SampleEval {
     /// score fn deliberately skipped (TV/K or vega floor) are not counted
     /// here: they are not measurements of this surface.
     size_t measured = 0;
-    size_t pde_solves_validation = 0;
+    OperationWork reference_work;
+    RefinementPriceErrors price_errors;
     ErrorBins error_bins;
     /// False when any evaluation produced a non-finite price/score or a
     /// negative score (spec D5 viability).
@@ -146,7 +147,9 @@ struct Candidate {
     std::shared_ptr<const void> state;
     double holdout_max = std::numeric_limits<double>::quiet_NaN();
     double holdout_avg = std::numeric_limits<double>::quiet_NaN();
-    size_t holdout_measured = 0;  ///< holdout points that actually measured it
+    size_t holdout_measured = 0;  ///< holdout points that actually measured its IV proxy
+    RefinementPriceErrors holdout_price;
+    double holdout_priority = std::numeric_limits<double>::infinity();
     ErrorBins bins;
     size_t iteration = 0;
     bool viable = false;
@@ -611,8 +614,8 @@ static std::vector<std::array<double, 4>> generate_validation_samples(
 
 /// Score a candidate surface over freshly drawn samples (spec D4).
 ///
-/// Failed reference solves are skipped (they carry no evidence about the
-/// surface), as are points the score fn filters out (`std::nullopt`).
+/// Failed references remain counted as unavailable and retain provider work.
+/// IV-filtered rows still contribute independent price observations.
 /// Non-finite prices or scores do not contribute to the error statistics but
 /// do clear `all_finite`, which disqualifies the candidate.
 static SampleEval evaluate_fresh_samples(
@@ -635,18 +638,15 @@ static SampleEval evaluate_fresh_samples(
         double strike = sample.strike;
         double interp_price = handle.price(sample.spot, strike, tau, sigma, rate);
 
-        // Fresh FD refs (price + vega) for reference via callback.
-        // Note: prepare_refs performs 3 PDE solves internally (base + two
-        // sigma-bump solves), but we count 1 per successful sample here to
-        // preserve pre-existing pde_solves_validation accounting -- callers
-        // (e.g. bspline_adaptive.cpp) multiply this count by 3 downstream.
         auto refs_result = prepare_refs(sample.spot, strike, tau, sigma, rate);
-
-        if (!refs_result.has_value()) {
-            continue;  // Skip failed solves
+        const bool usable = refs_result.has_value() &&
+            std::isfinite(refs_result->ref_price) && std::isfinite(refs_result->vega);
+        ev.reference_work.record(usable, refs_result.work);
+        if (!usable) {
+            if (refs_result.has_value()) ev.all_finite = false;
+            ++ev.price_errors.unavailable;
+            continue;
         }
-
-        ev.pde_solves_validation++;
 
         auto scored = score(
             interp_price, refs_result.value(),
@@ -656,22 +656,25 @@ static SampleEval evaluate_fresh_samples(
         // even if the fixed holdout missed that location (spec D5) -- and
         // even where the error metric is filtered out: the filter says the
         // *IV error* is undefined there, not that garbage prices are fine.
-        if (!std::isfinite(interp_price)) {
+        const double price_error = std::abs(interp_price - refs_result->ref_price);
+        if (!std::isfinite(interp_price) || !std::isfinite(price_error)) {
             ev.all_finite = false;
+            ++ev.price_errors.unavailable;
             continue;
         }
-        if (!scored.has_value()) {
-            continue;  // filtered: the metric is undefined here (D4)
+        ev.price_errors.observe(price_error);
+        double priority = price_error / ctx.price_target;
+        if (scored.has_value()) {
+            const double iv_proxy = *scored;
+            if (!std::isfinite(iv_proxy) || iv_proxy < 0.0) {
+                ev.all_finite = false;
+                continue;
+            }
+            ev.max_error = std::max(ev.max_error, iv_proxy);
+            sum_error += iv_proxy;
+            ++ev.measured;
+            priority = std::max(priority, iv_proxy / target_iv_error);
         }
-        const double iv_error = *scored;
-        if (!std::isfinite(iv_error) || iv_error < 0.0) {
-            ev.all_finite = false;
-            continue;
-        }
-
-        ev.max_error = std::max(ev.max_error, iv_error);
-        sum_error += iv_error;
-        ev.measured++;
 
         // Normalize position for error bins over the SAMPLE domain (spec
         // D2) -- bins must line up with the domain the samples came from.
@@ -687,7 +690,7 @@ static SampleEval evaluate_fresh_samples(
             normalized(sigma, sb.sigma_min, sb.sigma_max),
             normalized(rate, sb.rate_min, sb.rate_max)
         }};
-        ev.error_bins.record_error(norm_pos, iv_error, target_iv_error);
+        ev.error_bins.record_error(norm_pos, priority, 1.0);
     }
 
     ev.avg_error = ev.measured > 0
@@ -707,7 +710,7 @@ static SampleEval evaluate_fresh_samples(
 /// builders' final gate scores its surfaces exactly the way the loop scores
 /// its candidates, and the two must not drift apart.  This wrapper only
 /// re-shapes the result into `SampleEval`; the holdout leaves
-/// `pde_solves_validation` and `error_bins` at their defaults (it performs no
+/// `reference_work` and `error_bins` at their defaults (it performs no
 /// solves, and refinement bins come from the fresh samples).
 static SampleEval evaluate_holdout(
     const std::vector<HoldoutPoint>& holdout,
@@ -719,6 +722,7 @@ static SampleEval evaluate_holdout(
     ev.max_error = scored.max_error;
     ev.avg_error = scored.avg_error;
     ev.measured = scored.measured;
+    ev.price_errors = scored.price_errors;
     ev.all_finite = scored.all_finite;
     return ev;
 }
@@ -834,7 +838,6 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
     auto physical = physical_samples(scaled, ctx, seed);
     if (!physical) return std::unexpected(physical.error());
     for (auto pt : *physical) {
-        ++set.ref_attempts;
         auto refs = prepare_refs(pt.spot, pt.strike, pt.coords[1], pt.coords[2], pt.coords[3]);
         if (!refs.has_value() || !std::isfinite(refs->ref_price) || !std::isfinite(refs->vega)) {
             ++set.invalid;
@@ -847,8 +850,10 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
     const size_t min_valid =
         std::max<size_t>(4, params.validation_samples / 4);
     if (set.points.size() < min_valid) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::ValidationFailed});
+        PriceTableError error{PriceTableErrorCode::ValidationFailed};
+        error.work = std::make_shared<const RefinementWork>(
+            RefinementWork{.references = set.reference_work});
+        return std::unexpected(std::move(error));
     }
     return set;
 }
@@ -869,15 +874,16 @@ detail::FinalScore detail::score_final_surface(
             handle.price(pt.spot, pt.strike, tau, sigma, rate);
         const auto err = score(interp, pt.refs, pt.spot, pt.strike,
                                tau, sigma, rate);
-        // A NaN price is garbage whether or not the metric is defined here.
-        if (!std::isfinite(interp)) {
+        const double price_error = std::abs(interp - pt.refs.ref_price);
+        if (!std::isfinite(interp) || !std::isfinite(price_error)) {
             ev.all_finite = false;
             ++ev.skipped;
+            ++ev.price_errors.unavailable;
             continue;
         }
+        ev.price_errors.observe(price_error);
         if (!err.has_value()) {
-            // Deliberately filtered (TV/K or vega floor): no evidence either
-            // way, so it enters no statistic and cannot certify the surface.
+            // No IV-proxy observation; the measured price error above remains.
             ++ev.filtered;
             continue;
         }
@@ -906,19 +912,21 @@ detail::FinalScore detail::score_final_surface(
 }
 
 bool detail::needs_final_retry(const FinalScore& original,
-                               double target_iv_error) {
-    return original.max_error > target_iv_error || !original.viable();
+                               double target_iv_error, double price_target) {
+    return original.max_error > target_iv_error || !original.viable() ||
+        !original.price_errors.max_error || *original.price_errors.max_error > price_target;
 }
 
 detail::FinalPick detail::select_final_surface(
     const FinalScore& original,
-    const std::optional<FinalScore>& retry) {
+    const std::optional<FinalScore>& retry, double target_iv_error, double price_target) {
     const bool orig_ok = original.viable();
     const bool retry_ok = retry.has_value() && retry->viable();
 
     if (orig_ok && retry_ok) {
-        return retry->max_error < original.max_error ? FinalPick::Retry
-                                                     : FinalPick::Original;
+        return retry->exploration_error(price_target, target_iv_error) <
+            original.exploration_error(price_target, target_iv_error)
+            ? FinalPick::Retry : FinalPick::Original;
     }
     if (orig_ok) return FinalPick::Original;
     if (retry_ok) return FinalPick::Retry;
@@ -974,6 +982,7 @@ std::expected<void, PriceTableError> validate_refinement_request(
     };
 
     if (!valid_measurement_domain(ctx)) return invalid_config();
+    if (!std::isfinite(ctx.price_target) || ctx.price_target <= 0.0) return invalid_config();
     if (!std::isfinite(params.target_iv_error) || params.target_iv_error <= 0.0) {
         return invalid_config();
     }
@@ -1025,11 +1034,16 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     const InitialGrids& initial_grids,
     const RefineStateHooks& hooks)
 {
+    RefinementWork work;
+    const auto fail = [&work](PriceTableError error) {
+        error.work = std::make_shared<const RefinementWork>(work);
+        return std::unexpected(std::move(error));
+    };
     // ---------------------------------------------------------------------
     // 1. Parameter validation (spec D3)
     // ---------------------------------------------------------------------
     auto valid = validate_refinement_request(params, ctx);
-    if (!valid) return std::unexpected(valid.error());
+    if (!valid) return fail(valid.error());
     const std::array<std::pair<double, double>, 4> sample_axis_bounds = {{
         {ctx.sample_bounds.m_min, ctx.sample_bounds.m_max},
         {ctx.sample_bounds.tau_min, ctx.sample_bounds.tau_max},
@@ -1058,11 +1072,14 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     std::vector<HoldoutPoint> holdout;
     holdout.reserve(holdout_scaled.size());
     size_t holdout_invalid = 0;
+    OperationWork holdout_work;
     auto physical_holdout = physical_samples(holdout_scaled, ctx, params.lhs_seed ^ kHoldoutSeedMix);
-    if (!physical_holdout) return std::unexpected(physical_holdout.error());
+    if (!physical_holdout) return fail(physical_holdout.error());
     for (auto pt : *physical_holdout) {
         auto refs = prepare_refs(pt.spot, pt.strike, pt.coords[1], pt.coords[2], pt.coords[3]);
-        if (!refs.has_value() || !std::isfinite(refs->ref_price) || !std::isfinite(refs->vega)) {
+        const bool usable = refs.has_value() && std::isfinite(refs->ref_price) && std::isfinite(refs->vega);
+        holdout_work.record(usable, refs.work);
+        if (!usable) {
             ++holdout_invalid;
             continue;
         }
@@ -1070,11 +1087,12 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         holdout.push_back(std::move(pt));
     }
 
+    work.references += holdout_work;
     // A holdout that cannot measure cannot certify retention.
     const size_t min_valid_holdout =
         std::max<size_t>(4, params.validation_samples / 4);
     if (holdout.size() < min_valid_holdout) {
-        return std::unexpected(PriceTableError{
+        return fail(PriceTableError{
             PriceTableErrorCode::ValidationFailed});
     }
 
@@ -1098,6 +1116,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     // the returned surface is `holdout_points_measured`, filled in from the
     // picked candidate below -- the two differ by the points the score fn
     // filters out (TV/K, vega floor).
+    diag.holdout_reference_work = holdout_work;
     diag.holdout_points = holdout.size();
     diag.holdout_points_invalid = holdout_invalid;
 
@@ -1136,10 +1155,12 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         auto surface_result =
             build_fn(moneyness_grid, maturity_grid, vol_grid, rate_grid);
 
+        stats.table_work.record(surface_result.has_value(), surface_result.work);
+        work.tables += stats.table_work;
         if (!surface_result.has_value()) {
             // Seed build failure is terminal (spec D5).
             if (iteration == 0) {
-                return std::unexpected(surface_result.error());
+                return fail(surface_result.error());
             }
             // A failed refinement trial must not strand exploration: mark the
             // axis tried, roll back to the exploration base, and continue.
@@ -1161,19 +1182,20 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             ++iteration;
         } else {
             auto& handle = surface_result.value();
-            stats.pde_solves_table = handle.pde_solves;
 
             // b. FRESH SAMPLES (from the sample domain, spec D2)
             auto samples = generate_validation_samples(
                 params, iteration, sample_axis_bounds, focus_bins,
                 focus_active);
             auto physical = physical_samples(samples, ctx, params.lhs_seed + iteration);
-            if (!physical) return std::unexpected(physical.error());
+            if (!physical) return fail(physical.error());
             auto fresh = evaluate_fresh_samples(
                 *physical, handle, prepare_refs, score, ctx, params.target_iv_error);
-            stats.pde_solves_validation = fresh.pde_solves_validation;
+            stats.reference_work = fresh.reference_work;
+            work.references += fresh.reference_work;
             stats.max_error = fresh.max_error;
             stats.avg_error = fresh.avg_error;
+            stats.price_errors = fresh.price_errors;
 
             // c. HOLDOUT (cached refs, no FD solves)
             auto hold = evaluate_holdout(holdout, handle, score, ctx);
@@ -1188,10 +1210,16 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             cand.holdout_max = hold.max_error;
             cand.holdout_avg = hold.avg_error;
             cand.holdout_measured = hold.measured;
+            cand.holdout_price = hold.price_errors;
+            cand.holdout_priority = hold.all_finite ? std::max(
+                hold.price_errors.max_error.value_or(std::numeric_limits<double>::infinity()) / ctx.price_target,
+                hold.measured > 0 ? hold.max_error / params.target_iv_error : 0.0)
+                : std::numeric_limits<double>::infinity();
             cand.bins = fresh.error_bins;
             cand.iteration = iteration;
             cand.fresh_converged =
-                fresh.measured > 0 &&
+                fresh.measured > 0 && fresh.price_errors.max_error &&
+                *fresh.price_errors.max_error <= ctx.price_target &&
                 fresh.max_error <= params.target_iv_error;
             // `hold.measured > 0`: a candidate whose every holdout point was
             // filtered out has been measured nowhere, and a max of 0 over an
@@ -1213,8 +1241,8 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 
             // e. WALK BOOKKEEPING (spec D6 step 5)
             if (pending_refined_dim >= 0 && pending_refined_dim < 4) {
-                if (std::isfinite(cand.holdout_max) &&
-                    cand.holdout_max <
+                if (std::isfinite(cand.holdout_priority) &&
+                    cand.holdout_priority <
                         prev_best_holdout * (1.0 - kMinRelImprovement)) {
                     tried = fixed_axes;  // restart only nonconstant requested axes
                 } else {
@@ -1222,18 +1250,18 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
                 }
             }
 
-            // Any improvement (even sub-threshold) advances the base.  A
-            // candidate measured nowhere (holdout_measured == 0) reports
-            // holdout_max = 0 vacuously and must not seize the base.
+            // Both price and proxy observations guide the base. IV filtering
+            // does not erase a measured pricing miss; unavailable price rows
+            // cannot manufacture a zero-error exploration candidate.
             if (!have_base ||
-                (cand.holdout_measured > 0 &&
-                 std::isfinite(cand.holdout_max) &&
-                 (!have_finite_base || cand.holdout_max < prev_best_holdout))) {
+                (cand.holdout_price.measured > 0 &&
+                 std::isfinite(cand.holdout_priority) &&
+                 (!have_finite_base || cand.holdout_priority < prev_best_holdout))) {
                 base = cand;
                 have_base = true;
-                if (std::isfinite(cand.holdout_max)) {
+                if (std::isfinite(cand.holdout_priority)) {
                     have_finite_base = true;
-                    prev_best_holdout = cand.holdout_max;
+                    prev_best_holdout = cand.holdout_priority;
                 }
             }
 
@@ -1245,7 +1273,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             //    would otherwise read as converged and strand untried axes.
             if (candidates.back().viable &&
                 candidates.back().fresh_converged &&
-                candidates.back().holdout_max <= params.target_iv_error) {
+                candidates.back().holdout_priority <= 1.0) {
                 break;
             }
         }
@@ -1302,14 +1330,14 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     for (const auto& cand : candidates) {
         if (!cand.viable) continue;
         if (picked == nullptr ||
-            cand.holdout_max < picked->holdout_max ||
-            (cand.holdout_max == picked->holdout_max &&
+            cand.holdout_priority < picked->holdout_priority ||
+            (cand.holdout_priority == picked->holdout_priority &&
              cand.holdout_avg < picked->holdout_avg)) {
             picked = &cand;  // earliest iteration wins remaining ties
         }
     }
     if (picked == nullptr) {
-        return std::unexpected(PriceTableError{
+        return fail(PriceTableError{
             PriceTableErrorCode::NoViableSurface});
     }
 
@@ -1327,17 +1355,21 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         auto iter_start = std::chrono::steady_clock::now();
         auto rebuilt = build_fn(picked->moneyness, picked->tau,
                                 picked->vol, picked->rate);
+        OperationWork rebuild_work;
+        rebuild_work.record(rebuilt.has_value(), rebuilt.work);
+        work.tables += rebuild_work;
         if (!rebuilt.has_value()) {
-            return std::unexpected(rebuilt.error());
+            return fail(rebuilt.error());
         }
         IterationStats stats;
         stats.iteration = iteration;  // next slot in the build sequence
         stats.refined_dim = -2;  // final rebuild marker (spec D7)
         stats.grid_sizes = {picked->moneyness.size(), picked->tau.size(),
                             picked->vol.size(), picked->rate.size()};
-        stats.pde_solves_table = rebuilt->pde_solves;
+        stats.table_work = rebuild_work;
         stats.max_error = picked->holdout_max;
         stats.avg_error = picked->holdout_avg;
+        stats.price_errors = picked->holdout_price;
         stats.elapsed_seconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - iter_start).count();
         diag.iterations.push_back(stats);
@@ -1355,9 +1387,12 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     result.tau_points = static_cast<int>(picked->tau.size());
     result.achieved_max_error = picked->holdout_max;
     result.achieved_avg_error = picked->holdout_avg;
-    result.target_met = picked->holdout_max <= params.target_iv_error &&
+    result.target_met = picked->holdout_priority <= 1.0 &&
                         picked->fresh_converged;
 
+    diag.work = work;
+    diag.price_errors = picked->holdout_price;
+    diag.price_errors.unavailable += holdout_invalid;
     diag.target_met = result.target_met;
     diag.achieved_max_error = result.achieved_max_error;
     diag.achieved_avg_error = result.achieved_avg_error;

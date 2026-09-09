@@ -23,7 +23,7 @@ struct BSplineAdaptiveResult {
     double achieved_max_error = 0.0;
     double achieved_avg_error = 0.0;
     bool target_met = false;
-    size_t total_pde_solves = 0;
+    std::optional<size_t> total_pde_solves;  ///< Derived attempts; absent if any work is unreported
 
     /// Build diagnostics (spec D7) and the user-facing measurement domain
     /// (spec D2).  Callers publishing this surface must use `sample_bounds`
@@ -49,7 +49,7 @@ struct BSplineSegmentedAdaptiveResult {
     double achieved_max_error = 0.0;         ///< Max error from final LHS validation
     double achieved_avg_error = 0.0;
     bool target_met = false;
-    size_t total_pde_solves = 0;
+    std::optional<size_t> total_pde_solves;  ///< Derived attempts; absent if any work is unreported
     bool used_retry = false;                 ///< True if bumped-grid retry was returned
     size_t aggregate_candidates = 0;         ///< Final grids attempted, including retry
     size_t sample_rows = 0;                  ///< Returned physical tau × sigma × rate × K_ref rows

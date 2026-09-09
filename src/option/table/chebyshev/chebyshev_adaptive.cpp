@@ -837,8 +837,8 @@ build_adaptive_chebyshev(
     result.achieved_max_error = grids.achieved_max_error;
     result.achieved_avg_error = grids.achieved_avg_error;
     result.target_met = grids.target_met;
-    result.total_pde_solves = pde_cache.total_pde_solves();
     result.diagnostics = std::move(grids.diagnostics);
+    result.total_pde_solves = result.diagnostics.work.total_pde_attempts();
     result.sample_bounds = ctx.sample_bounds;
 
     return result;
@@ -1039,8 +1039,8 @@ ChebyshevSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) cons
         }, 0.01, params.target_iv_error, params.vega_floor);
     if (!selected) return std::unexpected(selected.error());
     selected->build.diagnostics.reference_selection = std::move(selected->selection);
-    for (const auto& candidate : selected->build.diagnostics.reference_selection->candidates)
-        if (candidate.metrics) selected->build.total_pde_solves += candidate.metrics->pde_solves;
+    selected->build.diagnostics.work = std::move(selected->work);
+    selected->build.total_pde_solves = selected->build.diagnostics.work.total_pde_attempts();
     return std::move(selected->build);
 }
 
@@ -1121,13 +1121,20 @@ ChebyshevSegmentedBuilder::build_adaptive_candidate(
         prepare_refs_fn, score_fn, initial, state_hooks);
     if (!grid_result) return std::unexpected(grid_result.error());
     auto& grids = *grid_result;
+    RefinementWork work = grids.diagnostics.work;
 
     // Assemble final surface from converged grids.  Published bounds =
     // the user-facing sample domain (spec D2), not the CC-extended node
     // domain the grids actually span.
     auto surface = build_all_krefs(
         grids.moneyness, grids.tau, grids.vol, grids.rate, sample_domain_);
-    if (!surface) return std::unexpected(surface.error());
+    work.tables.record(surface.has_value(), surface ? std::optional<PdeWork>(
+        PdeWork{surface->pde_solves, surface->pde_solves, 0}) : std::nullopt);
+    if (!surface) {
+        auto error = surface.error();
+        error.work = std::make_shared<const RefinementWork>(work);
+        return std::unexpected(std::move(error));
+    }
 
     // Mandatory final validation of the assembled surface (spec D9).
     //
@@ -1140,7 +1147,13 @@ ChebyshevSegmentedBuilder::build_adaptive_candidate(
     auto final_prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
     auto validation = detail::prepare_final_validation(
         params, ctx, final_prepare_refs_fn, params.lhs_seed + 999);
-    if (!validation) return std::unexpected(validation.error());
+    if (!validation) {
+        auto error = validation.error();
+        if (error.work) work += *error.work;
+        error.work = std::make_shared<const RefinementWork>(work);
+        return std::unexpected(std::move(error));
+    }
+    work.references += validation->reference_work;
 
     const SurfaceHandle final_handle{
         .price = [&s = surface->surface](double spot, double strike, double tau,
@@ -1153,14 +1166,19 @@ ChebyshevSegmentedBuilder::build_adaptive_candidate(
         validation->points, final_handle, score_fn, ctx);
 
     if (!final_score.viable()) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::NoViableSurface});
+        PriceTableError error{PriceTableErrorCode::NoViableSurface};
+        error.work = std::make_shared<const RefinementWork>(work);
+        return std::unexpected(std::move(error));
     }
 
     BuildDiagnostics diagnostics = grids.diagnostics;
+    diagnostics.work = work;
+    diagnostics.holdout_reference_work += validation->reference_work;
+    diagnostics.price_errors = final_score.price_errors;
+    diagnostics.price_errors.unavailable += validation->invalid;
     diagnostics.target_met =
         final_score.measured > 0 &&
-        final_score.max_error <= params.target_iv_error;
+        final_score.exploration_error(ctx.price_target, params.target_iv_error) <= 1.0;
     diagnostics.achieved_max_error = final_score.max_error;
     diagnostics.achieved_avg_error = final_score.avg_error;
     // Same meaning as the loop's (spec D7): `holdout_points` is the usable
@@ -1184,10 +1202,7 @@ ChebyshevSegmentedBuilder::build_adaptive_candidate(
         .achieved_max_error = final_score.max_error,
         .achieved_avg_error = final_score.avg_error,
         .target_met = diagnostics.target_met,
-        // The final validation is not free: every reference is a base solve
-        // plus two sigma bumps, and the caller's PDE budget should say so.
-        .total_pde_solves = pde_cache.total_pde_solves() + surface->pde_solves
-                          + validation->ref_attempts * 3,
+        .total_pde_solves = work.total_pde_attempts(),
         .diagnostics = std::move(diagnostics),
         .sample_bounds = sample_domain_,
     };

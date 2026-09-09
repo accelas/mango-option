@@ -178,7 +178,7 @@ std::expected<std::vector<BSplineSegmentedSurface>, PriceTableError>
 build_segmented_surfaces(
     SegmentedPriceTableBuilder::Config base_config,
     const std::vector<double>& ref_values,
-    size_t& total_pde_solves)
+    RefinementWork& work)
 {
     std::vector<BSplineSegmentedSurface> surfaces;
     surfaces.reserve(ref_values.size());
@@ -186,10 +186,14 @@ build_segmented_surfaces(
     for (double ref : ref_values) {
         base_config.K_ref = ref;
         auto result = SegmentedPriceTableBuilder::build_with_diagnostics(base_config);
+        const auto reported = result ? std::optional<PdeWork>(PdeWork{
+            result->pde_solves, result->pde_solves, 0}) : std::nullopt;
+        work.tables.record(result.has_value(), reported);
         if (!result.has_value()) {
-            return std::unexpected(result.error());
+            auto error = result.error();
+            error.work = std::make_shared<const RefinementWork>(work);
+            return std::unexpected(std::move(error));
         }
-        total_pde_solves += result->pde_solves;
         surfaces.push_back(std::move(result->surface));
     }
 
@@ -505,12 +509,7 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
     result.target_met = grids.target_met;
     result.diagnostics = std::move(grids.diagnostics);
     result.sample_bounds = ctx.sample_bounds;
-    result.total_pde_solves = 0;
-    for (auto& it : result.iterations) {
-        // Standard path uses FD American vega: 1 base solve + 2 vega bump solves = 3x
-        it.pde_solves_validation *= 3;
-        result.total_pde_solves += it.pde_solves_table + it.pde_solves_validation;
-    }
+    result.total_pde_solves = result.diagnostics.work.total_pde_attempts();
 
     return result;
 }
@@ -601,8 +600,8 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const 
         }, 0.01, params.target_iv_error, params.vega_floor);
     if (!selected) return std::unexpected(selected.error());
     selected->build.diagnostics.reference_selection = std::move(selected->selection);
-    for (const auto& candidate : selected->build.diagnostics.reference_selection->candidates)
-        if (candidate.metrics) selected->build.total_pde_solves += candidate.metrics->pde_solves;
+    selected->build.diagnostics.work = std::move(selected->work);
+    selected->build.total_pde_solves = selected->build.diagnostics.work.total_pde_attempts();
     return std::move(selected->build);
 }
 
@@ -685,6 +684,12 @@ BSplineSegmentedBuilder::fit_adaptive_candidate(const AdaptiveGridParams& params
 
     // 2. Run adaptive refinement per probe, measured over its own band
     std::vector<RefinementResult> probe_results;
+    RefinementWork work;
+    OperationWork holdout_work;
+    const auto failed = [&work](PriceTableError error) {
+        error.work = std::make_shared<const RefinementWork>(work);
+        return std::unexpected(std::move(error));
+    };
     for (double probe_ref : probes) {
         SurfaceBounds probe_sample = sample_domain_;
         bool band_usable = false;
@@ -785,12 +790,12 @@ BSplineSegmentedBuilder::fit_adaptive_candidate(const AdaptiveGridParams& params
         PrepareRefsFn prepare_refs_fn =
             [base_refs_fn, probe_ref](double spot, double strike, double tau,
                                       double sigma, double rate)
-            -> std::expected<ErrorRefs, SolverError> {
+            -> ProviderResult<ErrorRefs, SolverError> {
             const double scale = (strike > 0.0) ? strike / probe_ref : 1.0;
             auto refs = base_refs_fn(spot / scale, probe_ref, tau, sigma, rate);
-            if (!refs) return std::unexpected(refs.error());
-            return ErrorRefs{.ref_price = scale * refs->ref_price,
-                             .vega = scale * refs->vega};
+            if (!refs) return {std::unexpected(refs.error()), refs.work};
+            return {ErrorRefs{.ref_price = scale * refs->ref_price,
+                             .vega = scale * refs->vega}, refs.work};
         };
         auto score_fn = make_iv_score_fn(params, config_.option_type);
 
@@ -811,21 +816,27 @@ BSplineSegmentedBuilder::fit_adaptive_candidate(const AdaptiveGridParams& params
                                     refine_fn, ctx,
                                     prepare_refs_fn, score_fn, initial_grids,
                                     RefineStateHooks{});
-        if (!sizes) return std::unexpected(sizes.error());
+        if (!sizes) {
+            auto error = sizes.error();
+            if (error.work) work += *error.work;
+            else work.tables.record(false, std::nullopt);
+            error.work = std::make_shared<const RefinementWork>(work);
+            return std::unexpected(std::move(error));
+        }
+        work += sizes->diagnostics.work;
+        holdout_work += sizes->diagnostics.holdout_reference_work;
         probe_results.push_back(std::move(*sizes));
     }
 
     auto plan = aggregate_refinement_grids(probe_results, required,
                                            params.max_points_per_dim, tau_intervals);
-    if (!plan) return std::unexpected(plan.error());
+    if (!plan) return failed(plan.error());
 
     // Worst-case convergence stats across probes
     std::vector<IterationStats> all_iterations;
-    size_t total_pde = 0;
     for (const auto& pr : probe_results) {
         for (const auto& it : pr.iterations) {
             all_iterations.push_back(it);
-            total_pde += it.pde_solves_table + it.pde_solves_validation;
         }
     }
 
@@ -852,11 +863,14 @@ BSplineSegmentedBuilder::fit_adaptive_candidate(const AdaptiveGridParams& params
     // assembled surfaces are compared on identical coordinates.
     auto validation = detail::prepare_final_validation(
         params, final_ctx, final_prepare_refs_fn, params.lhs_seed + 999);
-    if (!validation) return std::unexpected(validation.error());
+    if (!validation) {
+        auto error = validation.error();
+        if (error.work) work += *error.work;
+        return failed(std::move(error));
+    }
 
-    // The final validation is not free: every reference is a base solve plus
-    // two sigma bumps, and the caller's PDE budget should say so.
-    total_pde += validation->ref_attempts * 3;
+    work.references += validation->reference_work;
+    holdout_work += validation->reference_work;
 
     // The lambda captures the surface by pointer, not by reference to the
     // parameter: a reference capture would dangle the moment `handle_for`
@@ -883,27 +897,30 @@ BSplineSegmentedBuilder::fit_adaptive_candidate(const AdaptiveGridParams& params
     const auto consider = [&](const SeededGrids& grids, bool retry) {
         ++aggregate_attempts;
         auto spec = make_seg_config(config_, grids.moneyness, grids.vol, grids.rate, grids.tau);
-        auto pieces = build_segmented_surfaces(spec, K_refs_, total_pde);
+        auto pieces = build_segmented_surfaces(spec, K_refs_, work);
         if (!pieces) { aggregate_build_failed = true; return; }
         auto surface = assemble(std::move(*pieces));
         if (!surface) { aggregate_build_failed = true; return; }
         auto score = detail::score_final_surface(validation->points, handle_for(*surface),
                                                 final_score_fn, final_ctx);
         if (!score.all_finite || score.measured == 0 || !std::isfinite(score.max_error)) return;
-        if (!best || score.max_error < best->score.max_error ||
-            (score.max_error == best->score.max_error && score.avg_error < best->score.avg_error)) {
+        const double priority = score.exploration_error(final_ctx.price_target, params.target_iv_error);
+        const double best_priority = best ? best->score.exploration_error(
+            final_ctx.price_target, params.target_iv_error) : std::numeric_limits<double>::infinity();
+        if (!best || priority < best_priority ||
+            (priority == best_priority && score.avg_error < best->score.avg_error)) {
             best.emplace(FinalCandidate{std::move(*surface), grids, score, retry});
         }
     };
     for (const auto& grids : *plan) consider(grids, false);
-    if (!best || detail::needs_final_retry(best->score, params.target_iv_error)) {
+    if (!best || detail::needs_final_retry(best->score, params.target_iv_error, final_ctx.price_target)) {
         const auto base = best ? best->grids : plan->front();
         auto retry = refine_aggregate_grids(base, params.max_points_per_dim, tau_intervals);
-        if (!retry) return std::unexpected(retry.error());
+        if (!retry) return failed(retry.error());
         if (retry->moneyness != base.moneyness || retry->tau != base.tau ||
             retry->vol != base.vol || retry->rate != base.rate) consider(*retry, true);
     }
-    if (!best || !best->score.viable()) return std::unexpected(
+    if (!best || !best->score.viable()) return failed(
         PriceTableError{PriceTableErrorCode::NoViableSurface});
     const auto final_score = best->score;
     const bool use_retry = best->retry;
@@ -919,10 +936,14 @@ BSplineSegmentedBuilder::fit_adaptive_candidate(const AdaptiveGridParams& params
     }
 
     BuildDiagnostics diagnostics;
+    diagnostics.work = work;
+    diagnostics.holdout_reference_work = holdout_work;
+    diagnostics.price_errors = final_score.price_errors;
+    diagnostics.price_errors.unavailable += validation->invalid;
     diagnostics.build_failure_fallback = aggregate_build_failed;
     diagnostics.target_met =
         final_score.measured > 0 &&
-        final_score.max_error <= params.target_iv_error;
+        final_score.exploration_error(final_ctx.price_target, params.target_iv_error) <= 1.0;
     diagnostics.achieved_max_error = final_score.max_error;
     diagnostics.achieved_avg_error = final_score.avg_error;
     // Iterations actually built across the probe loops: the retention final
@@ -956,7 +977,7 @@ BSplineSegmentedBuilder::fit_adaptive_candidate(const AdaptiveGridParams& params
         .achieved_max_error = final_score.max_error,
         .achieved_avg_error = final_score.avg_error,
         .target_met = diagnostics.target_met,
-        .total_pde_solves = total_pde,
+        .total_pde_solves = work.total_pde_attempts(),
         .used_retry = use_retry,
         .aggregate_candidates = aggregate_attempts,
         .sample_rows = sample_rows,

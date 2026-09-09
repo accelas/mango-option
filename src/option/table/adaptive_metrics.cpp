@@ -24,15 +24,21 @@ PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& /*params*/,
     // Copy validate_fn by value so the returned lambda is self-contained.
     return [validate_fn](
         double spot, double strike, double tau,
-        double sigma, double rate) -> std::expected<ErrorRefs, SolverError>
+        double sigma, double rate) -> ProviderResult<ErrorRefs, SolverError>
     {
+        std::optional<PdeWork> work = PdeWork{};
+        const auto add_work = [&work](const std::optional<PdeWork>& next) {
+            if (work && next) *work += *next;
+            else work.reset();
+        };
         auto fd_base = validate_fn(spot, strike, tau, sigma, rate);
+        add_work(fd_base.work);
         if (!fd_base.has_value()) {
-            return std::unexpected(fd_base.error());
+            return {std::unexpected(fd_base.error()), work};
         }
         double ref_price = fd_base.value();
         if (!std::isfinite(ref_price)) {
-            return std::unexpected(SolverError{});
+            return {std::unexpected(SolverError{}), work};
         }
 
         // FD American vega via central difference
@@ -42,12 +48,14 @@ PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& /*params*/,
         double effective_eps = (sigma_up - sigma_dn) / 2.0;
 
         auto fd_up = validate_fn(spot, strike, tau, sigma_up, rate);
+        add_work(fd_up.work);
         if (!fd_up.has_value()) {
-            return std::unexpected(fd_up.error());
+            return {std::unexpected(fd_up.error()), work};
         }
         auto fd_dn = validate_fn(spot, strike, tau, sigma_dn, rate);
+        add_work(fd_dn.work);
         if (!fd_dn.has_value()) {
-            return std::unexpected(fd_dn.error());
+            return {std::unexpected(fd_dn.error()), work};
         }
 
         double vega = 0.0;
@@ -55,10 +63,10 @@ PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& /*params*/,
             vega = (fd_up.value() - fd_dn.value()) / (2.0 * effective_eps);
         }
         if (!std::isfinite(vega)) {
-            return std::unexpected(SolverError{});
+            return {std::unexpected(SolverError{}), work};
         }
 
-        return ErrorRefs{.ref_price = ref_price, .vega = vega};
+        return {ErrorRefs{.ref_price = ref_price, .vega = vega}, work};
     };
 }
 
@@ -106,7 +114,7 @@ ValidateFn make_validate_fn(double dividend_yield,
                             std::optional<double> reference_maturity) {
     return [dividend_yield, option_type, discrete_dividends, reference_maturity](
         double spot, double strike, double tau,
-        double sigma, double rate) -> std::expected<double, SolverError>
+        double sigma, double rate) -> ProviderResult<double, SolverError>
     {
         PricingParams p;
         p.spot = spot;
@@ -121,9 +129,14 @@ ValidateFn make_validate_fn(double dividend_yield,
         p.discrete_dividends = reference_maturity
             ? rolled_dividends(discrete_dividends, *reference_maturity, tau)
             : filter_and_merge_dividends(discrete_dividends, tau);
-        auto fd = solve_american_option(p);
-        if (!fd.has_value()) return std::unexpected(fd.error());
-        return fd->value();
+        auto solver = AmericanOptionSolver::create(p);
+        if (!solver) return {std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration, .iterations = 0}), PdeWork{}};
+        auto fd = solver->solve();
+        const PdeWork work{.attempted = 1, .completed = fd.has_value() ? 1u : 0u,
+                           .failed = fd.has_value() ? 0u : 1u};
+        if (!fd) return {std::unexpected(fd.error()), work};
+        return {fd->value(), work};
     };
 }
 

@@ -2,9 +2,12 @@
 #pragma once
 
 #include "mango/option/option_spec.hpp"
+#include "mango/option/table/refinement_work.hpp"
 #include "mango/option/table/strike_bounds.hpp"
 #include "mango/option/table/moneyness_bounds.hpp"
+#include <algorithm>
 #include <array>
+#include <optional>
 #include <vector>
 #include <cstddef>
 #include <cstdint>
@@ -87,6 +90,22 @@ struct SegmentedAdaptiveConfig {
     std::optional<MoneynessBounds> ratio_bounds = std::nullopt;
 };
 
+/// Price observations used only to guide numerical refinement. These may use
+/// unqualified exploratory references; they are not final accuracy evidence.
+struct RefinementPriceErrors {
+    size_t measured = 0;
+    size_t unavailable = 0;
+    std::optional<double> max_error;
+    std::optional<double> mean_error;
+
+    void observe(double error) {
+        ++measured;
+        max_error = std::max(max_error.value_or(0.0), error);
+        const double mean = mean_error.value_or(0.0);
+        mean_error = mean + (error - mean) / static_cast<double>(measured);
+    }
+};
+
 /// Per-iteration diagnostics
 ///
 /// `refined_dim` is a dimension index (0 = moneyness, 1 = tau, 2 = sigma,
@@ -103,19 +122,23 @@ struct IterationStats {
     /// [m, tau, sigma, r] working sizes. Segmented tau counts the complete
     /// physical sampling vector; individual temporal leaves obey the cap.
     std::array<size_t, 4> grid_sizes = {};
-    size_t pde_solves_table = 0;             ///< Slices computed for table
-    size_t pde_solves_validation = 0;        ///< Fresh solves for validation
-    double max_error = 0.0;                  ///< Max IV error observed
-    double avg_error = 0.0;                  ///< Mean IV error
+    OperationWork table_work;               ///< Numerical build attempts
+    OperationWork reference_work;           ///< Fresh reference preparations
+    double max_error = 0.0;                  ///< Maximum exploratory IV proxy (not actual IV error)
+    double avg_error = 0.0;                  ///< Mean exploratory IV proxy
     int refined_dim = -1;                    ///< Refined dim, or -1/-2/-3 (above)
     double elapsed_seconds = 0.0;            ///< Wall-clock time for this iteration
     bool build_failed = false;               ///< Refinement trial build failed (D5)
+    RefinementPriceErrors price_errors;       ///< Fresh exploratory price observations
 };
 
 /// Adaptive refinement build diagnostics
 struct BuildDiagnostics {
-    bool target_met = false;
-    double achieved_max_error = 0.0;   // holdout, returned candidate
+    RefinementWork work;
+    OperationWork holdout_reference_work;   ///< Included exactly once in work.references
+    RefinementPriceErrors price_errors;  ///< Returned holdout, not a final accuracy claim
+    bool target_met = false;          ///< Exploration goals only, not final acceptance
+    double achieved_max_error = 0.0;   ///< Returned holdout IV proxy, not actual IV error
     double achieved_avg_error = 0.0;
     size_t picked_iteration = 0;
     size_t total_iterations = 0;       // built iterations, excl. final rebuild

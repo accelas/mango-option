@@ -19,14 +19,15 @@
 
 namespace mango {
 
-/// Compute IV error from price error and vega, with floor and cap.
+/// Compute an exploration-only price/vega proxy, never actual inverted-IV error.
 double compute_iv_error(double price_error, double vega,
                         double vega_floor, double target_iv_error);
 
 /// Produce ErrorRefs (FD American price + FD central-difference vega) for
 /// one point: base solve + two sigma-bump solves.
 /// 2 extra PDE solves per point — acceptable at build time.
-/// Any failed or non-finite solve => unexpected.
+/// Any failed or non-finite solve => failure with all provider work retained.
+/// Legacy validators without work metadata remain unknown, not three PDEs.
 PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& params,
                                     const ValidateFn& validate_fn);
 
