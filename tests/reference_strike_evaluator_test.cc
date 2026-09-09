@@ -28,6 +28,10 @@ TEST(ReferenceStrikeEvaluatorTest, RolledCashFreeDomainUsesExactHomogeneity) {
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->decision, ReferenceCandidateDecision::Adequate);
     EXPECT_EQ(result->pde_solves, 0u);
+    ASSERT_TRUE(result->provider_work.has_value());
+    EXPECT_EQ(result->provider_work->attempted, 0u);
+    EXPECT_EQ(result->provider_work->completed, 0u);
+    EXPECT_EQ(result->provider_work->failed, 0u);
     ASSERT_TRUE(result->ideal_blend.price.has_value());
     EXPECT_GT(result->ideal_blend.price->requested, 0u);
     EXPECT_EQ(result->ideal_blend.price->structurally_exact, result->ideal_blend.price->requested);
@@ -83,6 +87,39 @@ TEST(ReferenceStrikeEvaluatorTest, SmallVegaFiltersDespiteTimeValueThresholdStra
     EXPECT_FALSE(result->ideal_blend.iv->max_error.has_value());
 }
 
+TEST(ReferenceStrikeEvaluatorTest, RejectedSolverConstructionIsNotPdeWork) {
+    SegmentedAdaptiveConfig config{
+        .spot = 105.0, .option_type = OptionType::PUT,
+        .discrete_dividends = {{0.5, 1.0}}, .maturity = 1.0,
+        .kref_config = {.K_refs = {100.0, 110.0}},
+        .strike_bounds = StrikeBounds{105.0, 105.0},
+    };
+    // The requested rate violates the existing projected-LCP domain for
+    // every remaining life here, so construction rejects before solve().
+    SurfaceBounds bounds{
+        .m_min = 0.0, .m_max = 0.0, .tau_min = 0.9, .tau_max = 1.0,
+        .sigma_min = 0.2, .sigma_max = 0.2, .rate_min = -4.0, .rate_max = -4.0,
+        .strike_bounds = config.strike_bounds, .ratio_bounds = MoneynessBounds{1.0, 1.0},
+    };
+    auto evaluator = ReferenceStrikeEvaluator::create(config, bounds, {{0.9, 1.0}});
+    ASSERT_TRUE(evaluator.has_value());
+    auto result = evaluator->evaluate(config.kref_config.K_refs);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->decision, ReferenceCandidateDecision::ReferenceUnqualified);
+    EXPECT_GT(result->pde_solves, 0u);  // Retained attempted-request budget.
+    ASSERT_TRUE(result->provider_work.has_value());
+    EXPECT_EQ(result->provider_work->attempted, 0u);
+    EXPECT_EQ(result->provider_work->completed, 0u);
+    EXPECT_EQ(result->provider_work->failed, 0u);
+
+    auto invalid = evaluator->evaluate(std::vector<double>{});
+    ASSERT_FALSE(invalid.has_value());
+    ASSERT_TRUE(invalid.error().work);
+    const auto work = invalid.error().work->total_pde();
+    ASSERT_TRUE(work.has_value());
+    EXPECT_EQ(work->attempted, 0u);  // This failed request did no new work.
+}
+
 // Independent controlled-FDE audit at K=S97.1 finds a roughly .030552
 // quote-unit residual for K90/K110. This exceeds the .01 price criterion
 // without relying on an unqualified or filtered IV observation.
@@ -109,6 +146,19 @@ TEST(ReferenceStrikeEvaluatorTest, SparseCashReferencesHaveQualifiedPriceWitness
         result->ideal_blend.price->unresolved + result->ideal_blend.price->refused +
         result->ideal_blend.price->structurally_exact + result->ideal_blend.price->untested);
     EXPECT_FALSE(result->total_target_met.has_value());
+    ASSERT_TRUE(result->provider_work.has_value());
+    EXPECT_GT(result->provider_work->attempted, 0u);
+    EXPECT_EQ(result->provider_work->completed, result->provider_work->attempted);
+    EXPECT_EQ(result->provider_work->failed, 0u);
+
+    auto cached = evaluator->evaluate(config.kref_config.K_refs);
+    ASSERT_TRUE(cached.has_value());
+    ASSERT_TRUE(cached->provider_work.has_value());
+    EXPECT_EQ(cached->provider_work->attempted, 0u);
+    EXPECT_EQ(cached->provider_work->completed, 0u);
+    EXPECT_EQ(cached->provider_work->failed, 0u);
+    EXPECT_EQ(cached->decision, result->decision);
+
 }
 
 }  // namespace
