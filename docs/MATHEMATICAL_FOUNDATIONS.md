@@ -410,6 +410,26 @@ Its smallest local spacing occurs near $c$ when that center lies in the domain.
 Increasing concentration changes the spacing and therefore the time-step
 estimate; it does not change the requested spatial bounds.
 
+For centered grids, let $H=(h-l)/2$ and $\xi_i=2\eta_i-1$. Then
+
+$$x_i=c+H\,\frac{\sinh(\alpha\xi_i/2)}{\sinh(\alpha/2)}.$$
+
+The ratio of edge to center spacing tends to $\cosh(\alpha/2)$ as the
+grid is refined (about 1.54 for $\alpha=2$).
+
+The implementation forms the centered integer-index offset before multiplying
+by the transformed step. It then adds the scaled sinh displacement to the
+midpoint. This preserves small coordinates near zero without subtracting
+large endpoint terms. The supplied endpoints are assigned exactly. Centered
+single-cluster multi-sinh grids share this implementation; asymmetric maps
+retain their endpoint-normalized parameterization.
+
+Controlled domain ladders can therefore retain accurate common interior
+coordinates. Independently rounded input bounds and concentrations need not
+produce universally bit-identical nodes. Reference error qualification still
+checks spatial, temporal and domain sequences with its existing uncertainty
+criteria.
+
 ### Multi-Sinh Grids
 
 `GridSpec::multi_sinh` combines endpoint-preserving maps $f_k$ with positive

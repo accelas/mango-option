@@ -12,6 +12,7 @@
 #include <optional>
 #include <algorithm>
 #include <limits>
+#include <numeric>
 #include <experimental/mdspan>
 #include "mango/support/aligned_allocator.hpp"
 #include "mango/support/error_types.hpp"
@@ -359,6 +360,33 @@ GridBuffer<T> GridSpec<T>::generate() const {
     std::vector<T> points;
     points.reserve(n_points_);
 
+    // Center the arithmetic as well as the mathematical map. Forming a
+    // normalized [0,1] coordinate and subtracting a large endpoint destroys
+    // relative accuracy near zero and perturbs shared interior grid nodes.
+    const auto generate_centered_sinh = [&](T concentration) {
+        const T midpoint = std::midpoint(x_min_, x_max_);
+        const T half_width = std::midpoint(-x_min_, x_max_);
+        const T intervals = static_cast<T>(n_points_ - 1);
+        const T half_count = intervals / T(2);
+        const T half_sinh = std::sinh(concentration / T(2));
+        const T scale = half_width / half_sinh;
+        const T step = concentration / intervals;
+        points.push_back(x_min_);
+        for (size_t i = 1; i + 1 < n_points_; ++i) {
+            const T offset = static_cast<T>(i) - half_count;
+            const T u = step != T(0) ? offset * step
+                : concentration * (offset / intervals);
+            // Retain the ratio form when its scale overflows or underflows,
+            // and the linear limit if halving a tiny concentration underflows.
+            const T displacement = half_sinh == T(0)
+                ? half_width * (offset / half_count)
+                : std::isnormal(scale) ? scale * std::sinh(u)
+                : half_width * (std::sinh(u) / half_sinh);
+            points.push_back(midpoint + displacement);
+        }
+        points.push_back(x_max_);
+    };
+
     switch (type_) {
         case Type::Uniform: {
             const T dx = (x_max_ - x_min_) / static_cast<T>(n_points_ - 1);
@@ -379,17 +407,7 @@ GridBuffer<T> GridSpec<T>::generate() const {
         }
 
         case Type::SinhSpaced: {
-            // Sinh spacing: concentrates points at center
-            // x(eta) = x_min + (x_max - x_min) * [1 + sinh(c*(eta - 0.5)) / sinh(c/2)] / 2
-            // where eta goes from 0 to 1
-            const T c = concentration_;
-            const T sinh_half_c = std::sinh(c / T(2.0));
-            for (size_t i = 0; i < n_points_; ++i) {
-                const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-                const T sinh_term = std::sinh(c * (eta - T(0.5))) / sinh_half_c;
-                const T normalized = (T(1.0) + sinh_term) / T(2.0);
-                points.push_back(x_min_ + (x_max_ - x_min_) * normalized);
-            }
+            generate_centered_sinh(concentration_);
             break;
         }
 
@@ -401,7 +419,6 @@ GridBuffer<T> GridSpec<T>::generate() const {
                 const T c = cluster.alpha;
                 const T center = cluster.center_x;
                 const T range = x_max_ - x_min_;
-                const T sinh_half_c = std::sinh(c / T(2.0));
 
                 // Compute normalized center position
                 const T eta_center = (center - x_min_) / range;
@@ -410,13 +427,7 @@ GridBuffer<T> GridSpec<T>::generate() const {
                 const bool is_centered = std::abs(eta_center - T(0.5)) < T(1e-10);
 
                 if (is_centered) {
-                    // Centered cluster: use standard sinh formula (guaranteed in-bounds)
-                    for (size_t i = 0; i < n_points_; ++i) {
-                        const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-                        const T sinh_term = std::sinh(c * (eta - T(0.5))) / sinh_half_c;
-                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
-                        points.push_back(x_min_ + range * normalized);
-                    }
+                    generate_centered_sinh(c);
                 } else {
                     // Parameterize both endpoints in sinh coordinates about
                     // the requested center. Merely shifting the centered map
