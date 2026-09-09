@@ -407,55 +407,56 @@ public:
     using inner_type = typename Table::inner_type;
 
     explicit SharedPriceTableSurface(std::shared_ptr<const Table> table)
-        : table_(std::move(table)) {}
+        : table_(*table) {}
 
     [[nodiscard]] double price(double spot, double strike,
                                double tau, double sigma, double rate) const {
-        return table_->price(spot, strike, tau, sigma, rate);
+        return table_.price(spot, strike, tau, sigma, rate);
     }
 
     [[nodiscard]] double vega(double spot, double strike,
                               double tau, double sigma, double rate) const {
-        return table_->vega(spot, strike, tau, sigma, rate);
+        return table_.vega(spot, strike, tau, sigma, rate);
     }
 
     [[nodiscard]] std::expected<double, GreekError>
-    delta(const PricingParams& params) const { return table_->delta(params); }
+    delta(const PricingParams& params) const { return table_.delta(params); }
 
     [[nodiscard]] std::expected<double, GreekError>
-    gamma(const PricingParams& params) const { return table_->gamma(params); }
+    gamma(const PricingParams& params) const { return table_.gamma(params); }
 
     [[nodiscard]] std::expected<double, GreekError>
-    theta(const PricingParams& params) const { return table_->theta(params); }
+    theta(const PricingParams& params) const { return table_.theta(params); }
 
     [[nodiscard]] std::expected<double, GreekError>
-    rho(const PricingParams& params) const { return table_->rho(params); }
+    rho(const PricingParams& params) const { return table_.rho(params); }
 
-    [[nodiscard]] double m_min() const noexcept { return table_->m_min(); }
-    [[nodiscard]] double m_max() const noexcept { return table_->m_max(); }
-    [[nodiscard]] double tau_min() const noexcept { return table_->tau_min(); }
-    [[nodiscard]] double tau_max() const noexcept { return table_->tau_max(); }
+    [[nodiscard]] double m_min() const noexcept { return table_.m_min(); }
+    [[nodiscard]] double m_max() const noexcept { return table_.m_max(); }
+    [[nodiscard]] double tau_min() const noexcept { return table_.tau_min(); }
+    [[nodiscard]] double tau_max() const noexcept { return table_.tau_max(); }
     [[nodiscard]] const std::optional<FixedExpiryMetadata>& fixed_expiry() const noexcept {
-        return table_->fixed_expiry();
+        return table_.fixed_expiry();
     }
     [[nodiscard]] bool contains_moneyness(double spot, double strike) const noexcept {
-        return table_->contains_moneyness(spot, strike);
+        return table_.contains_moneyness(spot, strike);
     }
     [[nodiscard]] bool contains_strike(double strike) const noexcept {
-        return table_->contains_strike(strike);
+        return table_.contains_strike(strike);
     }
     [[nodiscard]] bool contains_maturity(double tau) const noexcept {
-        return table_->contains_maturity(tau);
+        return table_.contains_maturity(tau);
     }
-    [[nodiscard]] double sigma_min() const noexcept { return table_->sigma_min(); }
-    [[nodiscard]] double sigma_max() const noexcept { return table_->sigma_max(); }
-    [[nodiscard]] double rate_min() const noexcept { return table_->rate_min(); }
-    [[nodiscard]] double rate_max() const noexcept { return table_->rate_max(); }
-    [[nodiscard]] OptionType option_type() const noexcept { return table_->option_type(); }
-    [[nodiscard]] double dividend_yield() const noexcept { return table_->dividend_yield(); }
+    [[nodiscard]] double sigma_min() const noexcept { return table_.sigma_min(); }
+    [[nodiscard]] double sigma_max() const noexcept { return table_.sigma_max(); }
+    [[nodiscard]] double rate_min() const noexcept { return table_.rate_min(); }
+    [[nodiscard]] double rate_max() const noexcept { return table_.rate_max(); }
+    [[nodiscard]] OptionType option_type() const noexcept { return table_.option_type(); }
+    [[nodiscard]] double dividend_yield() const noexcept { return table_.dividend_yield(); }
 
 private:
-    std::shared_ptr<const Table> table_;
+    // Snapshot the immutable payload handle, not a caller-reassignable wrapper.
+    Table table_;
 };
 
 }  // namespace detail
