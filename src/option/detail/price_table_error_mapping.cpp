@@ -44,6 +44,7 @@ static ValidationError map_error_code(const PriceTableError& error) {
 ValidationError to_validation_error(const PriceTableError& error) {
     auto result = map_error_code(error);
     result.work = error.work;
+    result.reference_selection = error.reference_selection;
     return result;
 }
 

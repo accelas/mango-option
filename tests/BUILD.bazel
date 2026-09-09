@@ -1635,6 +1635,7 @@ cc_test(
     deps = [
         "//src/option:price_table_error_mapping",
         "//src/option/table:adaptive_grid_types",
+        "//src/option/table:reference_selection",
         "@googletest//:gtest_main",
     ],
 )
@@ -2013,4 +2014,14 @@ cc_test(
     name = "reference_strike_evaluator_test",
     srcs = ["reference_strike_evaluator_test.cc"],
     deps = ["//src/option/table:reference_strike_evaluator", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "reference_selection_work_test",
+    size = "small",
+    srcs = ["reference_selection_work_test.cc"],
+    deps = [
+        "//src/option/table:reference_selection_builder",
+        "@googletest//:gtest_main",
+    ],
 )
