@@ -111,3 +111,37 @@ IV-handle and factory-error report pointers share ownership. A report alone
 never grants admission, and an absent report still means no final population
 was assessed. Common factory acceptance and population/persistence integration
 remain separate activation steps.
+
+## Frozen factory population v1
+
+`make_accuracy_population` plans an owned finite physical population before
+fitting or reference work. Requested ratios and absolute strikes vary
+independently, and every cash query owns its schedule rolled from the numerical
+anchor. Global physical corners, per-regime interiors, event-side pricing,
+event/expiry admission, zero-rate strata and a dense moneyness strip retain
+their labels after exact physical-query deduplication. These empirical strata
+are not a uniform whole-domain price-error proof.
+
+The strip uses the declared interpolation m-node constraint plus one, resolved
+before candidate fitting. It does not assume every manual or Chebyshev axis is
+limited to 160. With the default adaptive constraint of 160, ordinary continuous,
+one-, four- and eight-event families have 198, 214, 259 and 319 declared rows;
+when rates cross zero, the counts are 201, 220, 274 and 346. Singleton dimensions
+remain singleton. If rounding leaves too few representable interior spots,
+the report does not claim off-node coverage for that direction.
+
+`AccuracyEvaluationLimits` owns separate final-stage ceilings: 512 combined
+pricing/admission rows, 8192 cache-miss reference requests and two qualification
+rounds by default. Explicit round limits 1 through 3 are supported. The request
+budget stays hard when a caller enables the third round; no automatic increase
+occurs. `validation_samples` remains an unrelated training-work control.
+Scalar-cache storage estimates use checked arithmetic, with a default upper
+bound of 32 MiB for sampled doubles alone (excluding maps and live PDE work).
+
+Insufficient row capacity refuses before numerical work and reports either
+an exact required count or an explicitly marked lower bound. Planning stores
+at most the cap plus one physical rows. Binary search skips equal rounded strip
+spots, so a huge declared node limit over a narrow representable domain cannot
+cause an unbounded linear loop. No required stratum is silently removed to
+fit a budget. The oracle and final admission adapter remain separate steps;
+this generator does not claim that its rows have been numerically qualified.

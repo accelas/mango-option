@@ -3,6 +3,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <optional>
 
 namespace mango {
 
@@ -11,8 +13,16 @@ struct AccuracyEvaluationLimits {
     size_t max_population_rows=512;
     size_t max_reference_requests=8192;
     size_t max_qualification_rounds=2;
+    [[nodiscard]] std::optional<size_t> max_scalar_cache_bytes() const noexcept {
+        constexpr size_t maximum=std::numeric_limits<size_t>::max();
+        if (max_population_rows>maximum/sizeof(double) ||
+            (max_population_rows && max_reference_requests>
+                maximum/(max_population_rows*sizeof(double)))) return std::nullopt;
+        return max_population_rows*sizeof(double)*max_reference_requests;
+    }
     [[nodiscard]] bool valid() const noexcept {
-        return max_population_rows>0 && max_reference_requests>0 && max_qualification_rounds>0 && max_qualification_rounds<=3;
+        return max_population_rows>0 && max_reference_requests>0 && max_qualification_rounds>0 && max_qualification_rounds<=3 &&
+            max_scalar_cache_bytes().has_value();
     }
 };
 
