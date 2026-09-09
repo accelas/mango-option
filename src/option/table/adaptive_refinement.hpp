@@ -42,9 +42,8 @@ struct SurfaceHandle {
 ///  - `bounds` is the **fit** domain: the span the grids/nodes handed to the
 ///    builder cover, including any backend-specific support extension.
 ///  - `sample_bounds` is the **measurement** domain the user actually asked
-///    for (their moneyness/tau/vol/rate ranges, after the minimum-spread
-///    widening in `expand_domain_bounds`, which is a usability floor rather
-///    than headroom).  Every validation sample and every error-bin
+///    for, including singleton coordinates. Numerical minimum-spread padding
+///    belongs only to `bounds`. Every validation sample and every error-bin
 ///    normalization uses this domain, so accuracy is never measured in the
 ///    unqueryable support band.
 struct RefinementContext {
@@ -542,9 +541,12 @@ expand_segmented_domain(const IVGrid& domain,
 
 /// Extract domain bounds from OptionGrid (spec D2/D3).
 ///
-/// Produces both the sample domain (user ranges + minimum-spread widening)
-/// and the B-spline fit domain (sample domain + `spline_support_headroom` on
-/// moneyness only).  `expected_m_knots` is the *expected seeded moneyness
+/// Produces the exact requested sample domain and separate numerical fit
+/// support (minimum spreads plus `spline_support_headroom` on moneyness).
+/// Padding never expands validation or publication. Singleton sample axes
+/// remain singletons and are sampled at their fixed coordinate without
+/// creating a broader caller range or a nonzero IV bracket.
+/// `expected_m_knots` is the *expected seeded moneyness
 /// density* -- `max(user_moneyness_knots, params.min_moneyness_points)` --
 /// not the user strike count; passing the strike count makes the headroom an
 /// order of magnitude too wide.

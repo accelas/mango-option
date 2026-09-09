@@ -348,6 +348,32 @@ TEST(ExtractChainDomainTest, MinimumSpreadRetainsSmallPositiveInputs) {
     EXPECT_LE(context->bounds.rate_min, -.10);
 }
 
+TEST(ExtractChainDomainTest, NarrowRequestedRangesDoNotBecomeSampleSupportPadding) {
+    mango::OptionGrid chain;
+    chain.spot = 100.;
+    chain.strikes = {100. / 1.01, 100., 100. / .99};
+    chain.maturities = {1. / 365, 2. / 365, 4. / 365, 7. / 365};
+    chain.implied_vols = {.199, .2, .201};
+    chain.rates = {.049, .05, .051};
+    auto context = mango::extract_chain_domain(chain, 60);
+    ASSERT_TRUE(context);
+    const auto& sample = context->sample_bounds;
+    EXPECT_NEAR(sample.m_min, std::log(.99), 2e-16);
+    EXPECT_NEAR(sample.m_max, std::log(1.01), 2e-16);
+    EXPECT_EQ(sample.tau_min, 1. / 365);
+    EXPECT_EQ(sample.tau_max, 7. / 365);
+    EXPECT_EQ(sample.sigma_min, .199);
+    EXPECT_EQ(sample.sigma_max, .201);
+    EXPECT_EQ(sample.rate_min, .049);
+    EXPECT_EQ(sample.rate_max, .051);
+    // Numerical support may be wider, but every supplied time remains a seed.
+    const auto seeds = mango::seed_refinement_grids(
+        mango::AdaptiveGridParams{}, *context, mango::extract_initial_grids(chain));
+    for (double tau : chain.maturities) {
+        EXPECT_NE(std::find(seeds.tau.begin(), seeds.tau.end(), tau), seeds.tau.end());
+    }
+}
+
 TEST(ExtractChainDomainTest, InvalidVolatilityIsNotRepairedByPadding) {
     for (double sigma : {0.0, -.01, std::numeric_limits<double>::infinity(),
                          std::numeric_limits<double>::quiet_NaN()}) {
@@ -357,7 +383,9 @@ TEST(ExtractChainDomainTest, InvalidVolatilityIsNotRepairedByPadding) {
         chain.rates = {-.10, -.06};
         auto context = mango::extract_chain_domain(chain, 10);
         EXPECT_FALSE(context);
-        if (!context) EXPECT_EQ(context.error().code, mango::PriceTableErrorCode::InvalidConfig);
+        if (!context) {
+            EXPECT_EQ(context.error().code, mango::PriceTableErrorCode::InvalidConfig);
+        }
     }
 }
 
@@ -389,8 +417,7 @@ TEST(ExtractChainDomainTest, HeadroomUsesExpectedKnots) {
     EXPECT_EQ(ctx->bounds.rate_max, ctx->sample_bounds.rate_max);
 }
 
-// sample_bounds is the user's own range (after minimum-spread widening,
-// which is a usability floor rather than headroom).
+// sample_bounds is the user's own range; numerical padding is separate.
 TEST(ExtractChainDomainTest, SampleBoundsAreTheUserRange) {
     mango::OptionGrid chain;
     chain.spot = 100.0;
@@ -793,18 +820,36 @@ TEST(RunRefinementTest, ParamValidation) {
         expect_invalid(h, "validation_samples < 8"); }
     {   Harness h; h.params.min_moneyness_points = 3;
         expect_invalid(h, "min_moneyness_points < 4"); }
-    // sample_bounds must be non-degenerate on every axis.
-    {   Harness h; h.ctx.sample_bounds.m_max = h.ctx.sample_bounds.m_min;
-        expect_invalid(h, "degenerate moneyness range"); }
-    {   Harness h; h.ctx.sample_bounds.tau_max = h.ctx.sample_bounds.tau_min;
-        expect_invalid(h, "degenerate tau range"); }
-    {   Harness h; h.ctx.sample_bounds.sigma_max = h.ctx.sample_bounds.sigma_min;
-        expect_invalid(h, "degenerate sigma range"); }
-    {   Harness h; h.ctx.sample_bounds.rate_max = h.ctx.sample_bounds.rate_min;
-        expect_invalid(h, "degenerate rate range"); }
+    // Singleton requested axes are valid, but inverted intervals are not.
+    {   Harness h; h.ctx.sample_bounds.m_max = h.ctx.sample_bounds.m_min - 1.;
+        expect_invalid(h, "inverted moneyness range"); }
+    {   Harness h; h.ctx.sample_bounds.tau_max = h.ctx.sample_bounds.tau_min - 1.;
+        expect_invalid(h, "inverted tau range"); }
+    {   Harness h; h.ctx.sample_bounds.sigma_max = h.ctx.sample_bounds.sigma_min - 1.;
+        expect_invalid(h, "inverted sigma range"); }
+    {   Harness h; h.ctx.sample_bounds.rate_max = h.ctx.sample_bounds.rate_min - 1.;
+        expect_invalid(h, "inverted rate range"); }
     {   Harness h;
         h.ctx.sample_bounds.rate_max = std::numeric_limits<double>::infinity();
         expect_invalid(h, "non-finite rate bound"); }
+}
+
+TEST(RunRefinementTest, SingletonSampleAxesRemainFixedAndAreNotRefined) {
+    Harness h;
+    h.ctx.sample_bounds.m_min = h.ctx.sample_bounds.m_max = 0.;
+    h.ctx.sample_bounds.sigma_min = h.ctx.sample_bounds.sigma_max = .2;
+    h.ctx.sample_bounds.rate_min = h.ctx.sample_bounds.rate_max = .05;
+    h.script = by_growth({}, SurfaceScript{.holdout_err = .05});
+    auto result = h.run();
+    ASSERT_TRUE(result);
+    ASSERT_FALSE(h.refine_axes.empty());
+    for (size_t axis : h.refine_axes) EXPECT_EQ(axis, 1u);
+    for (const auto& query : h.queried) {
+        EXPECT_EQ(query[0], 0.);
+        EXPECT_EQ(query[2], .2);
+        EXPECT_EQ(query[3], .05);
+        for (double coordinate : query) EXPECT_TRUE(std::isfinite(coordinate));
+    }
 }
 
 // ---------------------------------------------------------------------------

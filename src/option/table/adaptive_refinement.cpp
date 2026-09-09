@@ -676,11 +676,16 @@ static SampleEval evaluate_fresh_samples(
         // Normalize position for error bins over the SAMPLE domain (spec
         // D2) -- bins must line up with the domain the samples came from.
         const auto& sb = ctx.sample_bounds;
+        const auto normalized = [](double value, double lo, double hi) {
+            // A singleton requested axis has one physical coordinate, not
+            // a zero-denominator interval. It is never selected for refinement.
+            return hi > lo ? (value - lo) / (hi - lo) : 0.5;
+        };
         std::array<double, 4> norm_pos = {{
-            (m - sb.m_min) / (sb.m_max - sb.m_min),
-            (tau - sb.tau_min) / (sb.tau_max - sb.tau_min),
-            (sigma - sb.sigma_min) / (sb.sigma_max - sb.sigma_min),
-            (rate - sb.rate_min) / (sb.rate_max - sb.rate_min)
+            normalized(m, sb.m_min, sb.m_max),
+            normalized(tau, sb.tau_min, sb.tau_max),
+            normalized(sigma, sb.sigma_min, sb.sigma_max),
+            normalized(rate, sb.rate_min, sb.rate_max)
         }};
         ev.error_bins.record_error(norm_pos, iv_error, target_iv_error);
     }
@@ -753,6 +758,7 @@ static std::vector<std::pair<double, double>> bins_to_intervals(
     intervals.reserve(problematic.size());
     constexpr double kNBins = static_cast<double>(ErrorBins::N_BINS);
     const double span = axis_bounds.second - axis_bounds.first;
+    if (span == 0.0) return intervals;
     for (size_t bin : problematic) {
         intervals.push_back({
             axis_bounds.first + span * static_cast<double>(bin) / kNBins,
@@ -1009,11 +1015,15 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         {ctx.sample_bounds.rate_min, ctx.sample_bounds.rate_max}
     }};
 
-    // A measurement domain that cannot be sampled cannot certify anything.
-    for (const auto& [lo, hi] : sample_axis_bounds) {
-        if (!std::isfinite(lo) || !std::isfinite(hi) || !(hi > lo)) {
+    // Singleton axes are sampled at their one requested coordinate. They
+    // need numerical fit support, but have no requested interval to refine.
+    std::array<bool, 4> fixed_axes{};
+    for (size_t d = 0; d < sample_axis_bounds.size(); ++d) {
+        const auto [lo, hi] = sample_axis_bounds[d];
+        if (!std::isfinite(lo) || !std::isfinite(hi) || hi < lo) {
             return invalid_config();
         }
+        fixed_axes[d] = hi == lo;
     }
 
     auto seeded = seed_refinement_grids(params, ctx, initial_grids);
@@ -1084,7 +1094,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     bool have_finite_base = false;
     double prev_best_holdout = std::numeric_limits<double>::infinity();
 
-    std::array<bool, 4> tried = {false, false, false, false};
+    std::array<bool, 4> tried = fixed_axes;
     std::array<std::vector<size_t>, 4> focus_bins;
     bool focus_active = false;
 
@@ -1191,7 +1201,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
                 if (std::isfinite(cand.holdout_max) &&
                     cand.holdout_max <
                         prev_best_holdout * (1.0 - kMinRelImprovement)) {
-                    tried.fill(false);  // measured improvement: restart
+                    tried = fixed_axes;  // restart only nonconstant requested axes
                 } else {
                     tried[static_cast<size_t>(pending_refined_dim)] = true;
                 }
@@ -1265,7 +1275,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
 
         focus_active = false;
         for (size_t d = 0; d < focus_bins.size(); ++d) {
-            focus_bins[d] = base.bins.problematic_bins(d);
+            focus_bins[d] = fixed_axes[d] ? std::vector<size_t>{} : base.bins.problematic_bins(d);
             if (!focus_bins[d].empty()) focus_active = true;
         }
     }
@@ -1482,29 +1492,29 @@ extract_chain_domain(const OptionGrid& chain, size_t expected_m_knots) {
     auto [min_vol, max_vol] = std::minmax_element(chain.implied_vols.begin(), chain.implied_vols.end());
     auto [min_rate, max_rate] = std::minmax_element(chain.rates.begin(), chain.rates.end());
 
-    double lo_tau = *min_tau, hi_tau = *max_tau;
-    double lo_vol = *min_vol, hi_vol = *max_vol;
-    double lo_rate = *min_rate, hi_rate = *max_rate;
-
-    // The minimum-spread widening is part of the SAMPLE domain: it is a
-    // usability floor on degenerate user ranges, not interpolation headroom.
-    expand_domain_bounds(min_m, max_m, 0.10);
-    expand_domain_bounds(lo_tau, hi_tau, 0.5, std::min(kMinPositive, lo_tau));
-    expand_domain_bounds(lo_vol, hi_vol, 0.10, std::min(kMinPositive, lo_vol));
-    expand_domain_bounds(lo_rate, hi_rate, 0.04);
-
+    // The requested physical domain is independent of numerical support.
+    // In particular, a nondegenerate 1--7 day request must not acquire a
+    // six-month validation/publication range through minimum-spread padding.
     SurfaceBounds sample{
         .m_min = min_m, .m_max = max_m,
-        .tau_min = lo_tau, .tau_max = hi_tau,
-        .sigma_min = lo_vol, .sigma_max = hi_vol,
-        .rate_min = lo_rate, .rate_max = hi_rate,
+        .tau_min = *min_tau, .tau_max = *max_tau,
+        .sigma_min = *min_vol, .sigma_max = *max_vol,
+        .rate_min = *min_rate, .rate_max = *max_rate,
     };
 
-    // Fit domain = sample domain + B-spline support headroom on moneyness
-    // only (spec D3).  The headroom scale is set by the *expected seeded*
-    // moneyness density, not by the user's strike count.
+    // Preserve the existing numerical support policy and supplied seeds.
+    // A singleton request remains a singleton in sample_bounds: this padding
+    // does not grant callers a wider physical query domain.
     SurfaceBounds fit = sample;
-    double h = spline_support_headroom(sample.m_max - sample.m_min,
+    expand_domain_bounds(fit.m_min, fit.m_max, 0.10);
+    expand_domain_bounds(fit.tau_min, fit.tau_max, 0.5,
+                         std::min(kMinPositive, fit.tau_min));
+    expand_domain_bounds(fit.sigma_min, fit.sigma_max, 0.10,
+                         std::min(kMinPositive, fit.sigma_min));
+    expand_domain_bounds(fit.rate_min, fit.rate_max, 0.04);
+    // B-spline support headroom uses the expected seeded moneyness density,
+    // not the number of user strikes, and never changes sample_bounds.
+    double h = spline_support_headroom(fit.m_max - fit.m_min,
                                        expected_m_knots);
     fit.m_min -= h;
     fit.m_max += h;

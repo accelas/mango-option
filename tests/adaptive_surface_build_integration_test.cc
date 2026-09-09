@@ -144,13 +144,43 @@ TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
     auto result = build_adaptive_bspline(params, chain,
         PDEGridConfig{grid_spec, 100, {}}, OptionType::PUT);
 
-    // Should succeed (bounds expanded) rather than fail with InsufficientGridPoints
+    // Numerical support expands; the requested singleton axes do not.
     ASSERT_TRUE(result.has_value())
-        << "Single-value axes should be expanded to valid ranges. "
+        << "Single-value axes need numerical support without broader publication. "
         << "Error code: " << (result.has_value() ? 0 : static_cast<int>(result.error().code));
 
     // Spline should be usable
     EXPECT_NE(result->spline, nullptr);
+    EXPECT_EQ(result->sample_bounds.m_min, 0.);
+    EXPECT_EQ(result->sample_bounds.m_max, 0.);
+    EXPECT_EQ(result->sample_bounds.sigma_min, .2);
+    EXPECT_EQ(result->sample_bounds.sigma_max, .2);
+    EXPECT_EQ(result->sample_bounds.rate_min, .05);
+    EXPECT_EQ(result->sample_bounds.rate_max, .05);
+}
+
+TEST(AdaptiveGridBuilderTest, ChebyshevSingletonAxesKeepTheirRequestedDomain) {
+    OptionGrid chain;
+    chain.spot = 100.;
+    chain.dividend_yield = 0.;
+    chain.strikes = {100.};
+    chain.maturities = {.25, .5, 1.};
+    chain.implied_vols = {.2};
+    chain.rates = {.05};
+    AdaptiveGridParams params;
+    params.target_iv_error = .01;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    auto result = build_adaptive_chebyshev(params, chain, OptionType::PUT);
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->sample_bounds.m_min, 0.);
+    EXPECT_EQ(result->sample_bounds.m_max, 0.);
+    EXPECT_EQ(result->sample_bounds.sigma_min, .2);
+    EXPECT_EQ(result->sample_bounds.sigma_max, .2);
+    EXPECT_EQ(result->sample_bounds.rate_min, .05);
+    EXPECT_EQ(result->sample_bounds.rate_max, .05);
+    EXPECT_TRUE(std::isfinite(result->surface->price(100., 100., .5, .2, .05)));
+    EXPECT_FALSE(result->surface->contains_moneyness(101., 100.));
 }
 
 // Regression: Cache should clear on new build
