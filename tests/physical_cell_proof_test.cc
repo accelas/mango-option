@@ -245,3 +245,94 @@ TEST(PhysicalCellProofTest, DimensionlessClampAndBudgetKeepTheirPhysicalMeaning)
     EXPECT_EQ(unsupported.status, PriceProofStatus::Indeterminate);
     EXPECT_FALSE(unsupported.witness);
 }
+
+namespace {
+BSplineMultiKRefInner two_references(double left_slope, double right_slope) {
+    const SurfaceBounds b{-.1, .1, 0, 1, .1, .4, .01, .1};
+    std::vector<BSplineSegmentedSurface> members;
+    const std::array<double, 2> refs{80, 120}, slopes{left_slope, right_slope};
+    for (std::size_t i = 0; i < 2; ++i) {
+        const double slope = slopes[i];
+        auto spline = std::make_shared<const BSplineND<double, 4>>(
+            bezier({.5 - .1 * slope, .5, .5 + .1 * slope, .5 + .2 * slope}, b));
+        std::vector<BSplineSegmentedLeaf> leaves;
+        leaves.emplace_back(SharedBSplineInterp<4>(spline), StandardTransform4D{}, refs[i]);
+        members.emplace_back(std::move(leaves), TauSegmentSplit({0}, {1}, {0}, {1}, refs[i]));
+    }
+    return BSplineMultiKRefInner(std::move(members), MultiKRefSplit({80, 120}));
+}
+} // namespace
+TEST(PhysicalCellProofTest, PositiveReferenceMixtureCanMaskADecreasingRawMember) {
+    auto inner = two_references(-.1, .4);
+    SurfaceBounds b{-.01, .01, .1, .9, .15, .35, .04, .06, StrikeBounds{95, 105}};
+    auto result = prove_segmented_bspline(inner, OptionType::CALL, 0, b);
+    EXPECT_EQ(result.status, PriceProofStatus::Certified);
+    EXPECT_FALSE(result.witness);
+    b.strike_bounds = StrikeBounds{80, 105};
+    auto negative = prove_segmented_bspline(inner, OptionType::CALL, 0, b);
+    ASSERT_EQ(negative.status, PriceProofStatus::NegativeWitness);
+    ASSERT_TRUE(negative.witness);
+    const auto &p = *negative.witness;
+    EXPECT_LT(
+        inner.vega(p.spot, p.strike, p.maturity, p.volatility, get_zero_rate(p.rate, p.maturity)),
+        0);
+    EXPECT_TRUE(inner.contains_maturity(p.maturity));
+    EXPECT_TRUE(b.strike_bounds->contains(p.strike));
+}
+
+TEST(PhysicalCellProofTest, EmptyRawInterpolantSnapshotRemainsInspectableForAdmission) {
+    SharedBSplineInterp<4> empty(nullptr);
+    EXPECT_FALSE(empty.has_value());
+    auto snapshot = empty.immutable_snapshot();
+    EXPECT_FALSE(snapshot.has_value());
+}
+
+TEST(PhysicalCellProofTest, SegmentedWitnessCannotLandInAnOmittedTimeGap) {
+    auto source = two_references(-.1, -.1);
+    std::vector<BSplineSegmentedSurface> members;
+    for (std::size_t i = 0; i < 2; ++i) {
+        const auto leaf = source.pieces()[i].pieces().front();
+        members.emplace_back(
+            std::vector<BSplineSegmentedLeaf>{leaf, leaf},
+            TauSegmentSplit({0, .6}, {.4, 1}, {0, 0}, {.4, .4}, source.split().k_refs()[i]));
+    }
+    BSplineMultiKRefInner inner(std::move(members), MultiKRefSplit({80, 120}));
+    const SurfaceBounds b{-.01, .01, .1, .9, .15, .35, .04, .06, StrikeBounds{95, 105}};
+    ASSERT_FALSE(inner.contains_maturity(.5));
+    auto result = prove_segmented_bspline(inner, OptionType::CALL, 0, b);
+    ASSERT_EQ(result.status, PriceProofStatus::NegativeWitness);
+    ASSERT_TRUE(result.witness);
+    EXPECT_TRUE(inner.contains_maturity(result.witness->maturity));
+    EXPECT_NE(result.witness->maturity, .5);
+}
+
+TEST(PhysicalCellProofTest, SegmentedFloorsMaskInactiveRawNegativeSlopes) {
+    const SurfaceBounds support{-.1, .1, 0, 1, .1, .4, .01, .1};
+    auto spline = std::make_shared<const BSplineND<double, 4>>(bezier({-1, -2, -3, -4}, support));
+    auto source = two_references(0, 0);
+    std::vector<BSplineSegmentedSurface> members;
+    members.emplace_back(std::vector<BSplineSegmentedLeaf>{BSplineSegmentedLeaf(
+                             SharedBSplineInterp<4>(spline), {}, 80)},
+                         TauSegmentSplit({0}, {1}, {0}, {1}, 80));
+    members.push_back(source.pieces()[1]);
+    BSplineMultiKRefInner inner(std::move(members), MultiKRefSplit({80, 120}));
+    const SurfaceBounds b{-.01, .01, .1, .9, .15, .35, .04, .06, StrikeBounds{100, 100}};
+    auto result = prove_segmented_bspline(inner, OptionType::CALL, 0, b);
+    EXPECT_EQ(result.status, PriceProofStatus::Certified);
+    EXPECT_FALSE(result.witness);
+}
+
+TEST(PhysicalCellProofTest, SegmentedNullPayloadAndInconsistentReferencesAreIndeterminate) {
+    auto source = two_references(0, 0);
+    std::vector<BSplineSegmentedSurface> members = source.pieces();
+    members[0] = BSplineSegmentedSurface(std::vector<BSplineSegmentedLeaf>{BSplineSegmentedLeaf(
+                                             SharedBSplineInterp<4>(nullptr), {}, 80)},
+                                         TauSegmentSplit({0}, {1}, {0}, {1}, 80));
+    const SurfaceBounds b{-.01, .01, .1, .9, .15, .35, .04, .06, StrikeBounds{95, 105}};
+    BSplineMultiKRefInner empty(std::move(members), MultiKRefSplit({80, 120}));
+    EXPECT_EQ(prove_segmented_bspline(empty, OptionType::CALL, 0, b).status,
+              PriceProofStatus::Indeterminate);
+    BSplineMultiKRefInner mismatched(source.pieces(), MultiKRefSplit({70, 120}));
+    EXPECT_EQ(prove_segmented_bspline(mismatched, OptionType::CALL, 0, b).status,
+              PriceProofStatus::Indeterminate);
+}

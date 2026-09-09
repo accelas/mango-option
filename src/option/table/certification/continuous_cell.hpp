@@ -2,6 +2,7 @@
 #pragma once
 #include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/math/proof/bernstein.hpp"
+#include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/certification/certificate_status.hpp"
 #include "mango/option/table/price_table.hpp"
 #include <array>
@@ -14,6 +15,13 @@ struct PhysicalCellProof {
     std::optional<PricingParams> witness;
     proof::Interval witness_vega_per_strike{0};
 };
+/// Segmented normalized total-price proof. Positive reference weights are
+/// proved at requested strike/bracket endpoints; no independent K axis.
+/// This proves the current per-leaf zero floors BEFORE reference blending.
+/// An outer intrinsic projection would require a different K-domain proof.
+PhysicalCellProof prove_segmented_bspline(const BSplineMultiKRefInner &inner, OptionType type,
+                                          double dividend_yield, const SurfaceBounds &requested,
+                                          proof::ProofBudget budget = {});
 /// Internal whole-domain continuous EEP proof, including grid-clamped
 /// coordinate branches. Still diagnostic evidence; cannot publish a table.
 PhysicalCellProof prove_continuous_bspline(const BSplineND<double, 4> &spline,

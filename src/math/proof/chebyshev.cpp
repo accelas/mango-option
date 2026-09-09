@@ -69,28 +69,30 @@ std::expected<Prepared, InputError> prepare(const ChebyshevPolynomial &polynomia
     }
     return result;
 }
-std::expected<Interval, InputError> bound(const Prepared &p,
-                                          std::span<const std::pair<double, double>> box) {
+std::expected<Interval, InputError> bound(const Prepared &p, std::span<const Interval> box) {
     if (box.size() != p.shape.size())
         return std::unexpected(InputError::Shape);
     std::array<std::vector<Interval>, 4> basis;
     for (std::size_t d = 0; d < p.shape.size(); ++d) {
-        const auto [lo, hi] = box[d];
-        if (!std::isfinite(lo) || !std::isfinite(hi) || lo < 0 || hi > 1 || lo > hi)
+        const auto &unit = box[d];
+        if (!unit.nonnegative() || !(Interval(1) - unit).nonnegative())
             return std::unexpected(InputError::Cell);
+        const bool left = unit.exact_zero(), right = (unit - Interval(1)).exact_zero();
+        const bool center = (unit - Interval(.5)).exact_zero();
+        const bool whole = unit.lower_endpoint().exact_zero() &&
+                           (unit.upper_endpoint() - Interval(1)).exact_zero();
         basis[d].resize(p.shape[d]);
         basis[d][0] = Interval(1);
-        const auto x =
-            intersection(Interval::hull(lo, hi) * Interval(2) - Interval(1), Interval::hull(-1, 1));
+        const auto x = intersection(unit * Interval(2) - Interval(1), Interval::hull(-1, 1));
         std::optional<Interval> angle;
         for (std::size_t k = 1; k < p.shape[d]; ++k) {
             if (!p.active[d][k])
                 continue;
-            if (lo == 0 && hi == 1)
+            if (whole)
                 basis[d][k] = Interval::hull(-1, 1);
-            else if (lo == hi && (lo == 0 || lo == 1))
-                basis[d][k] = Interval(lo == 1 || k % 2 == 0 ? 1 : -1);
-            else if (lo == .5 && hi == .5)
+            else if (left || right)
+                basis[d][k] = Interval(right || k % 2 == 0 ? 1 : -1);
+            else if (center)
                 basis[d][k] = Interval(k % 2 ? 0 : (k % 4 == 0 ? 1 : -1));
             else if (k == 1)
                 basis[d][k] = x;
@@ -116,6 +118,16 @@ std::expected<Interval, InputError> bound(const Prepared &p,
     if (!result.finite())
         return std::unexpected(InputError::Nonfinite);
     return result;
+}
+std::expected<Interval, InputError> bound(const Prepared &p,
+                                          std::span<const std::pair<double, double>> box) {
+    std::vector<Interval> retained;
+    for (const auto &[lo, hi] : box) {
+        if (!std::isfinite(lo) || !std::isfinite(hi) || lo > hi)
+            return std::unexpected(InputError::Cell);
+        retained.push_back(Interval::hull(lo, hi));
+    }
+    return bound(p, std::span<const Interval>(retained));
 }
 Interval choose(std::size_t n, std::size_t k) {
     if (k > n)
@@ -197,6 +209,45 @@ enclose_chebyshev(const ChebyshevPolynomial &polynomial,
     if (!p)
         return std::unexpected(p.error());
     return bound(*p, box);
+}
+std::expected<Interval, InputError>
+enclose_chebyshev_physical(const ChebyshevPolynomial &polynomial,
+                           std::span<const Interval> coordinates, std::optional<std::size_t> axis) {
+    auto prepared = prepare(polynomial, axis);
+    if (!prepared)
+        return std::unexpected(prepared.error());
+    if (coordinates.size() != polynomial.shape().size())
+        return std::unexpected(InputError::Shape);
+    for (const auto &coordinate : coordinates)
+        if (!coordinate.finite())
+            return std::unexpected(InputError::Cell);
+    std::vector<Interval> units;
+    bool partial_crosses_clamp = false;
+    for (std::size_t d = 0; d < coordinates.size(); ++d) {
+        const auto &x = coordinates[d];
+        const auto [a, b] = polynomial.domain()[d];
+        const Interval lo(a), hi(b);
+        const bool below = (x.upper_endpoint() - lo).strictly_negative();
+        const bool above = (x.lower_endpoint() - hi).strictly_positive();
+        if (axis == d && (below || above))
+            return Interval(0);
+        if (axis == d && ((x.lower_endpoint() - lo).strictly_negative() ||
+                          (x.upper_endpoint() - hi).strictly_positive()))
+            partial_crosses_clamp = true;
+        if ((x.upper_endpoint() - lo).nonpositive())
+            units.emplace_back(0);
+        else if ((x.lower_endpoint() - hi).nonnegative())
+            units.emplace_back(1);
+        else {
+            auto clamped = lo + positive_part(x - lo);
+            clamped = hi - positive_part(hi - clamped);
+            units.push_back(intersection((clamped - lo) / (hi - lo), Interval::hull(0, 1)));
+        }
+    }
+    auto result = bound(*prepared, std::span<const Interval>(units));
+    if (result && partial_crosses_clamp)
+        *result = hull(*result, Interval(0));
+    return result;
 }
 std::expected<BernsteinTensor, InputError>
 chebyshev_to_bernstein(const ChebyshevPolynomial &polynomial, std::optional<std::size_t> axis) {

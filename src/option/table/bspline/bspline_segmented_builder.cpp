@@ -177,11 +177,8 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     return std::move(result->surface);
 }
 
-std::expected<SegmentedPriceTableBuilder::BuildResult, PriceTableError>
-SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
-    // =====================================================================
-    // Validate inputs
-    // =====================================================================
+std::expected<void, PriceTableError>
+SegmentedPriceTableBuilder::validate_config(const Config& config) {
     if (!(std::isfinite(config.K_ref) && config.K_ref > 0.0)) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
@@ -217,6 +214,17 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
         !std::isfinite(config.dividends.dividend_yield)) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
+
+    return {};
+}
+
+std::expected<SegmentedPriceTableBuilder::BuildResult, PriceTableError>
+SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
+    // =====================================================================
+    // Validate inputs
+    // =====================================================================
+    auto valid = validate_config(config);
+    if (!valid) return std::unexpected(valid.error());
 
     const double T = config.maturity;
     const double K_ref = config.K_ref;

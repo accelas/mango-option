@@ -119,6 +119,9 @@ private:
         SurfaceBounds support_domain,
         IVGrid initial_grid);
 
+    [[nodiscard]] std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
+    build_adaptive_candidate(const AdaptiveGridParams& params) const;
+
     /// Assemble multi-K_ref surface from per-K_ref segmented surfaces.
     [[nodiscard]] std::expected<BSplineMultiKRefInner, PriceTableError>
     assemble(std::vector<BSplineSegmentedSurface> surfaces) const;

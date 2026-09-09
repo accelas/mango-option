@@ -18,6 +18,7 @@
 
 #include "mango/option/price_table_factory.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
+#include "mango/option/table/reference_selection.hpp"
 #include "mango/option/table/serialization/price_table_data.hpp"
 #include "mango/option/option_grid.hpp"
 
@@ -650,6 +651,24 @@ TEST(AnyPriceTableTest, PhysicalMoneynessEndpointsDoNotNeedToleranceWidening) {
     }
 }
 
+// The independently qualified ideal blend at S=K=103.7, sigma=.05,
+// tau=.5+1/365, r=.05, q=.02 misses price by .0294055 with only K90/K110
+// for a $3 payment due in one day. Explicit coverage alone is insufficient.
+TEST(AnyPriceTableTest, RejectsMeasuredInadequateExplicitReferences) {
+    auto config = bspline_4d_config();
+    config.grid.moneyness = {0.92, 0.97, 1.0, 1.08};
+    config.grid.vol = {0.05, 0.075, 0.09, 0.1};
+    config.grid.rate = {0.045, 0.047, 0.049, 0.05};
+    config.discrete_dividends = DiscreteDividendConfig{
+        .maturity = 1.0, .discrete_dividends = {{0.5, 3.0}},
+        .kref_config = {.K_refs = {90.0, 110.0}},
+        .strike_bounds = StrikeBounds{90.0, 110.0},
+    };
+    auto table = make_price_table(config);
+    EXPECT_FALSE(table.has_value())
+        << "a fixed reference set must satisfy measured approximation criteria";
+}
+
 TEST(AnyPriceTableTest, FactoryPreservesOriginalRatioEndpoint) {
     auto config = bspline_4d_config();
     config.dividend_yield = 0.0;
@@ -661,6 +680,44 @@ TEST(AnyPriceTableTest, FactoryPreservesOriginalRatioEndpoint) {
     EXPECT_TRUE(table->validate_pricing_params(p).has_value());
     p.spot = std::nextafter(10.0, 0.0);
     EXPECT_FALSE(table->validate_pricing_params(p).has_value());
+}
+
+TEST(AnyPriceTableTest, AdaptiveBackendsShareReferenceSelectionEvidence) {
+    auto config = bspline_4d_config();
+    config.dividend_yield = 0.0;
+    config.grid.moneyness = {0.95, 0.99, 1.0, 1.05};
+    config.grid.vol = {0.10, 0.13, 0.17, 0.20};
+    config.grid.rate = {0.03, 0.04, 0.05, 0.06};
+    config.discrete_dividends = DiscreteDividendConfig{
+        .maturity = 0.25, .discrete_dividends = {},
+        .strike_bounds = StrikeBounds{90.0, 110.0},
+    };
+    config.adaptive = AdaptiveGridParams{
+        .target_iv_error = 0.02, .max_iter = 1,
+        .min_moneyness_points = 10, .validation_samples = 8,
+    };
+    for (bool chebyshev : {false, true}) {
+        SCOPED_TRACE(chebyshev ? "Chebyshev" : "B-spline");
+        if (chebyshev) config.backend = ChebyshevBackend{};
+        else config.backend = BSplineBackend{};
+        auto table = make_price_table(config);
+        ASSERT_TRUE(table.has_value());
+        auto diagnostics = table->build_diagnostics();
+        ASSERT_TRUE(diagnostics.has_value());
+        ASSERT_NE(diagnostics->reference_selection, nullptr);
+        const auto& selected = *diagnostics->reference_selection;
+        EXPECT_DOUBLE_EQ(selected.refs.front(), 90.0);
+        EXPECT_DOUBLE_EQ(selected.refs.back(), 110.0);
+        ASSERT_LT(selected.picked_candidate, selected.candidates.size());
+        const auto& evidence = selected.candidates[selected.picked_candidate].metrics;
+        ASSERT_TRUE(evidence.has_value());
+        EXPECT_EQ(evidence->pde_solves, 0u)
+            << "cash-free reference homogeneity needs no extra PDE density work";
+        ASSERT_TRUE(evidence->ideal_blend.price.has_value());
+        EXPECT_EQ(evidence->ideal_blend.price->structurally_exact,
+                  evidence->ideal_blend.price->requested);
+        EXPECT_FALSE(evidence->ideal_blend.iv->max_error.has_value());
+    }
 }
 
 TEST(AnyPriceTableTest, ManualSegmentedBackendsPublishTheSameRequestedDomain) {

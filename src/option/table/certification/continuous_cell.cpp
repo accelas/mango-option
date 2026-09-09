@@ -484,4 +484,201 @@ PhysicalCellProof prove_dimensionless_bspline(const BSplineND<double, 3> &spline
         result.status = PriceProofStatus::Certified;
     return result;
 }
+
+namespace {
+bool valid_segmented_payload(const BSplineMultiKRefInner &inner, const SurfaceBounds &requested) {
+    const auto &refs = inner.split().k_refs();
+    if (refs.empty() || refs.size() != inner.num_pieces() || !requested.strike_bounds ||
+        !requested.strike_bounds->valid())
+        return false;
+    for (std::size_t i = 0; i < refs.size(); ++i) {
+        if (!std::isfinite(refs[i]) || refs[i] <= 0 || (i && !(refs[i - 1] < refs[i])))
+            return false;
+        const auto &member = inner.pieces()[i];
+        const auto &split = member.split();
+        const auto n = member.num_pieces();
+        if (!n || split.K_ref() != refs[i] || split.tau_start().size() != n ||
+            split.tau_end().size() != n || split.tau_min().size() != n ||
+            split.tau_max().size() != n)
+            return false;
+        for (std::size_t j = 0; j < n; ++j) {
+            const double a = split.tau_start()[j], b = split.tau_end()[j], lo = split.tau_min()[j],
+                         hi = split.tau_max()[j];
+            if (!std::isfinite(a) || !std::isfinite(b) || !std::isfinite(lo) ||
+                !std::isfinite(hi) || a < 0 || b <= a || lo < 0 || hi < lo ||
+                (j && a < split.tau_end()[j - 1]))
+                return false;
+            const auto &leaf = member.pieces()[j];
+            if (leaf.K_ref() != refs[i] || !leaf.interpolant().has_value())
+                return false;
+            const auto &spline = leaf.interpolant().get();
+            for (std::size_t d = 0; d < 4; ++d) {
+                const auto &grid = spline.grid(d);
+                for (std::size_t k = 0; k < grid.size(); ++k)
+                    if (!std::isfinite(grid[k]) || (k && !(grid[k - 1] < grid[k])))
+                        return false;
+                if (grid.front() != spline.knots(d).front() ||
+                    grid.back() != spline.knots(d).back())
+                    return false;
+            }
+        }
+    }
+    return requested.strike_bounds->min >= refs.front() &&
+           requested.strike_bounds->max <= refs.back();
+}
+struct SegmentedBounds {
+    PriceBounds price;
+    std::size_t cells = 0;
+    proof::StopReason reason = proof::StopReason::None;
+    bool empty = false;
+};
+SegmentedBounds segmented_bounds(const BSplineMultiKRefInner &inner, double strike,
+                                 const std::array<Interval, 4> &physical, std::size_t max_cells) {
+    SegmentedBounds result;
+    const auto bracket = inner.split().bracket(1, strike, 1, 1, 0);
+    std::array<Interval, 2> weights{Interval(1), Interval(0)};
+    if (bracket.count == 2) {
+        const auto &refs = inner.split().k_refs();
+        const Interval a(refs[bracket.entries[0].index]), b(refs[bracket.entries[1].index]);
+        weights[1] = intersection((Interval(strike) - a) / (b - a), Interval::hull(0, 1));
+        weights[0] = intersection(Interval(1) - weights[1], Interval::hull(0, 1));
+    }
+    std::vector<PriceBounds> members;
+    for (std::size_t member_index = 0; member_index < bracket.count; ++member_index) {
+        const auto &member = inner.pieces()[bracket.entries[member_index].index];
+        const auto &split = member.split();
+        std::optional<PriceBounds> combined;
+        for (std::size_t j = 0; j < member.num_pieces(); ++j) {
+            const auto time =
+                intersection(physical[1], Interval::hull(split.tau_start()[j], split.tau_end()[j]));
+            if (!time.finite())
+                continue;
+            auto local = time - Interval(split.tau_start()[j]);
+            const Interval lo(split.tau_min()[j]), hi(split.tau_max()[j]);
+            local = lo + positive_part(local - lo);
+            local = hi - positive_part(hi - local);
+            // Validated reference identities make both spot maps preserve
+            // S/K and cancel all reference-price normalization factors.
+            const std::array<Interval, 4> coordinates{physical[0], local, physical[2], physical[3]};
+            const auto &spline = member.pieces()[j].interpolant().get();
+            std::array<std::span<const double>, 4> knots;
+            for (std::size_t d = 0; d < 4; ++d)
+                knots[d] = spline.knots(d);
+            const std::array<std::size_t, 1> axis{2};
+            auto raw = proof::enclose_cubic_bspline_box(knots, spline.coefficients(), coordinates,
+                                                        axis, max_cells - result.cells);
+            result.cells += raw.cells;
+            if (raw.reason != proof::StopReason::None) {
+                result.reason = raw.reason;
+                return result;
+            }
+            auto price = zero_floor({raw.value, raw.partials[0]});
+            if (!price.finite()) {
+                result.reason = proof::StopReason::Arithmetic;
+                return result;
+            }
+            if (!combined)
+                combined = price;
+            else
+                combined = PriceBounds{hull(combined->value, price.value),
+                                       hull(combined->sigma_partial, price.sigma_partial)};
+        }
+        if (!combined) {
+            result.empty = true;
+            return result;
+        }
+        members.push_back(*combined);
+    }
+    result.price = weighted_sum(members, std::span<const Interval>(weights.data(), bracket.count));
+    return result;
+}
+} // namespace
+PhysicalCellProof prove_segmented_bspline(const BSplineMultiKRefInner &inner, OptionType type,
+                                          double dividend_yield, const SurfaceBounds &requested,
+                                          proof::ProofBudget budget) {
+    PhysicalCellProof result;
+    auto domain = requested_domain(requested);
+    if (!domain || !valid_segmented_payload(inner, requested) || !std::isfinite(dividend_yield) ||
+        dividend_yield < 0 || (type != OptionType::CALL && type != OptionType::PUT)) {
+        result.reason = proof::StopReason::Arithmetic;
+        return result;
+    }
+    std::vector<double> strikes{requested.strike_bounds->min, requested.strike_bounds->max};
+    for (double reference : inner.split().k_refs())
+        if (reference > strikes.front() && reference < strikes[1])
+            strikes.push_back(reference);
+    std::sort(strikes.begin(), strikes.end());
+    strikes.erase(std::unique(strikes.begin(), strikes.end()), strikes.end());
+    bool unresolved = false;
+    const auto depth_limit = std::min<std::size_t>(budget.max_depth, 52);
+    struct QueryNode {
+        Box unit;
+        std::size_t depth = 0;
+    };
+    for (double strike : strikes) {
+        // The normalized expression is affine in K within each reference
+        // bracket. Proving its domain/bracket endpoints covers all K inside.
+        std::vector<QueryNode> pending{{Box{{{0, 1}, {0, 1}, {0, 1}, {0, 1}}}}};
+        while (!pending.empty()) {
+            if (result.nodes == budget.max_nodes) {
+                result.reason = proof::StopReason::NodeBudget;
+                return result;
+            }
+            auto node = pending.back();
+            pending.pop_back();
+            ++result.nodes;
+            std::array<Interval, 4> lower, upper, bounds;
+            for (std::size_t d = 0; d < 4; ++d) {
+                lower[d] = coordinate((*domain)[d].first, (*domain)[d].second, node.unit[d].first);
+                upper[d] = coordinate((*domain)[d].first, (*domain)[d].second, node.unit[d].second);
+                bounds[d] = hull(lower[d], upper[d]);
+            }
+            auto total = segmented_bounds(inner, strike, bounds, budget.max_nodes - result.nodes);
+            result.nodes += total.cells;
+            if (total.reason == proof::StopReason::NodeBudget) {
+                result.reason = total.reason;
+                return result;
+            }
+            if (total.reason != proof::StopReason::None || !total.price.finite()) {
+                unresolved = true;
+                result.reason = proof::StopReason::Arithmetic;
+                continue;
+            }
+            if (total.empty || total.price.sigma_partial.nonnegative())
+                continue;
+            bool split_time = false;
+            if (total.price.sigma_partial.strictly_negative()) {
+                auto witness =
+                    reachable_witness(lower, upper, strike, type, dividend_yield, requested);
+                if (witness && inner.contains_maturity(witness->maturity)) {
+                    result.status = PriceProofStatus::NegativeWitness;
+                    result.reason = proof::StopReason::None;
+                    result.witness = std::move(witness);
+                    result.witness_vega_per_strike = total.price.sigma_partial;
+                    return result;
+                }
+                split_time = witness && !inner.contains_maturity(witness->maturity);
+            }
+            if (node.depth == depth_limit) {
+                unresolved = true;
+                result.reason = proof::StopReason::DepthBudget;
+                continue;
+            }
+            const std::array<std::size_t, 4> order{2, 1, 0, 3};
+            std::size_t choice = node.depth % 4;
+            while (((*domain)[order[choice]].second - (*domain)[order[choice]].first).exact_zero())
+                choice = (choice + 1) % 4;
+            const auto axis = split_time ? std::size_t{1} : order[choice];
+            auto right = node.unit;
+            const double mid = std::midpoint(node.unit[axis].first, node.unit[axis].second);
+            node.unit[axis].second = mid;
+            right[axis].first = mid;
+            pending.push_back({right, node.depth + 1});
+            pending.push_back({node.unit, node.depth + 1});
+        }
+    }
+    if (!unresolved)
+        result.status = PriceProofStatus::Certified;
+    return result;
+}
 } // namespace mango::detail::certification

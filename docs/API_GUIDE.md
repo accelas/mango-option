@@ -661,6 +661,21 @@ invalid sets fail before solving and are never repaired. Reference blending
 uses positive linear weights in absolute strike and maps each query spot to
 `S*K_ref/K`. Numerical support references do not widen the published domain.
 
+Manual and adaptive segmented builds use the same measured reference policy.
+Automatic references start with covering endpoints and an interior seed,
+then grow within `max_references` and `max_selection_rounds`. Fixed references
+are measured without replacement. A qualified failure witness can stop an
+inadequate candidate early; untested and oracle-unresolved rows remain distinct
+from filtered IV observations. Error and uncertainty budgets follow requested
+criteria, including the configured positive vega floor on adaptive builds.
+
+`AnyPriceTable::build_diagnostics()` includes immutable `reference_selection`
+evidence for segmented builds. Python exposes the same selection history;
+reference-only manual evidence leaves whole-fit accuracy fields as `None`.
+Its `iv_error_kind` is `price_vega_proxy`, not actual inverted-IV error.
+Typed manual Chebyshev callers can request `build_with_diagnostics()` to keep
+this evidence alongside the returned surface.
+
 The factory dispatches on two orthogonal variants:
 
 - **`backend`**: `BSplineBackend`, `ChebyshevBackend`, or `DimensionlessBackend`

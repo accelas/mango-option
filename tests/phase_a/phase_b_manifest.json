@@ -1,0 +1,54 @@
+{
+  "K_ref": 100,
+  "acceptance": "ALL original accuracy/Greek/refusal/proof requirements must hold; unresolved references and unqualified Greek criteria prohibit a final pass. No production repair or retuning.",
+  "actual_iv_target_decimal": 2e-05,
+  "external_research_proof_seconds": 180,
+  "fractions": [
+    0,
+    1e-08,
+    1e-07,
+    1e-06,
+    1e-05,
+    0.0001,
+    0.001
+  ],
+  "max_K_over_K_ref": 1.2,
+  "operation": "For every stored raw dollar EEP coefficient c at K_ref100 use binary64(c-delta); keep identical knots/grids/domain and existing max(0,EEP)+European reconstruction",
+  "price_target_quote": 0.01,
+  "proof_budget": {
+    "max_depth": 24,
+    "max_nodes": 4096
+  },
+  "queries_sha256": "599c4ea9d3fe91d465c3f7b0beaf408d65eb74431db343fd34a3fb202d3e9dbc",
+  "raw_dollar_shifts": [
+    0.0,
+    8.333333333333333e-11,
+    8.333333333333332e-10,
+    8.333333333333334e-09,
+    8.333333333333334e-08,
+    8.333333333333333e-07,
+    8.333333333333334e-06
+  ],
+  "reference_counts": {
+    "delta_qualified": 562,
+    "delta_unresolved": 210,
+    "gamma_qualified": 562,
+    "gamma_unresolved": 210,
+    "iv_filtered": 153,
+    "iv_measurable": 555,
+    "iv_unresolved": 64,
+    "price_qualified": 757,
+    "price_unresolved": 15,
+    "rho_qualified": 562,
+    "rho_unresolved": 210,
+    "theta_qualified": 562,
+    "theta_unresolved": 210
+  },
+  "reference_hash_manifest_sha256": "21c35e1d3450df687c6fbdcd4f5ce2afff5e43131c6ad89866d72b68bd476d9a",
+  "reference_strike_price_budget": 0.008333333333333333,
+  "required_K_max": 120,
+  "required_rows": 772,
+  "source_commit": "e9e10221",
+  "source_payload_sha256": "9d92387cf2e076db235121a4c9c15fffe06f7ebc10d2616578b2680123b5eec0",
+  "version": "459-phase-b-v1"
+}
