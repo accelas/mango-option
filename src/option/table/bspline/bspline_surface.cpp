@@ -6,14 +6,14 @@
 
 namespace mango {
 
-std::expected<BSplinePriceTable, std::string>
+std::expected<BSplinePriceTable, PriceTableError>
 make_bspline_surface(
     std::shared_ptr<const BSplineND<double, 4>> spline,
     double K_ref,
     double dividend_yield,
     OptionType type)
 {
-    if (!spline) return std::unexpected(std::string("null spline"));
+    if (!spline) return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
 
     SurfaceBounds bounds{
         .m_min = spline->grid(0).front(),
@@ -30,7 +30,7 @@ make_bspline_surface(
         std::move(spline), K_ref, dividend_yield, type, bounds);
 }
 
-std::expected<BSplinePriceTable, std::string>
+std::expected<BSplinePriceTable, PriceTableError>
 make_bspline_surface(
     std::shared_ptr<const BSplineND<double, 4>> spline,
     double K_ref,
@@ -38,8 +38,9 @@ make_bspline_surface(
     OptionType type,
     const SurfaceBounds& bounds)
 {
-    if (!spline) return std::unexpected(std::string("null spline"));
-    if (K_ref <= 0.0) return std::unexpected(std::string("invalid K_ref"));
+    if (!spline) return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    if (!std::isfinite(K_ref) || K_ref <= 0.0)
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
 
     SharedBSplineInterp<4> interp(spline);
     StandardTransform4D xform;
@@ -47,7 +48,7 @@ make_bspline_surface(
     BSplineTransformLeaf tleaf(std::move(interp), xform, K_ref);
     BSplineLeaf leaf(std::move(tleaf), eep);
 
-    return BSplinePriceTable(std::move(leaf), bounds, type, dividend_yield);
+    return BSplinePriceTable::create(leaf, bounds, type, dividend_yield);
 }
 
 } // namespace mango

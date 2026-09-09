@@ -7,6 +7,12 @@
 #include <memory>
 #include <limits>
 #include "mango/option/price_table_factory.hpp"
+#include "mango/option/table/serialization/from_data.hpp"
+#include "mango/option/table/serialization/to_data.hpp"
+#include "mango/option/table/bspline/bspline_3d_surface.hpp"
+#include "mango/option/table/chebyshev/chebyshev_3d_surface.hpp"
+#include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
+#include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 
 namespace {
 using namespace mango;
@@ -46,9 +52,155 @@ TEST(FinancialCertificationRedTest, ManualPublicationRejectsHiddenPhysicalVegaPo
         ASSERT_GT(raw.price(100,100,.105,after,.05),raw.price(100,100,.105,before,.05));
     }
     auto published=make_bspline_surface(spline,100,0,OptionType::PUT);
-    EXPECT_FALSE(published.has_value())
+    ASSERT_FALSE(published.has_value())
         << "Financial publication must prove physical sigma monotonicity, not accept a 17-point scan";
+    EXPECT_EQ(published.error().code, PriceTableErrorCode::NonMonotoneSurface);
 }
+TEST(FinancialCertificationRedTest, ManualPublicationRetainsACertifiedPositivePayload) {
+    const auto original = hidden_pocket_eep();
+    ASSERT_TRUE(original);
+    BSplineND<double, 4>::GridArray grids;
+    BSplineND<double, 4>::KnotArray knots;
+    for (std::size_t d = 0; d < 4; ++d) {
+        grids[d] = original->grid(d);
+        knots[d] = original->knots(d);
+    }
+    auto spline = BSplineND<double, 4>::create(
+        std::move(grids), std::move(knots), std::vector<double>(256, 0.0));
+    ASSERT_TRUE(spline);
+    auto published = make_bspline_surface(
+        std::make_shared<const BSplineND<double, 4>>(std::move(*spline)),
+        100.0, 0.0, OptionType::PUT);
+    ASSERT_TRUE(published);
+    EXPECT_EQ(published->proof_status(), PriceProofStatus::Certified);
+    EXPECT_GT(published->price(100, 100, .105, .200005, .05), 0.0);
+    EXPECT_GT(published->vega(100, 100, .105, .200005, .05), 0.0);
+}
+
+TEST(FinancialCertificationRedTest, LoadingReprovesTheStoredPhysicalPayload) {
+    const auto spline = hidden_pocket_eep();
+    ASSERT_TRUE(spline);
+    BSplineLeaf leaf(BSplineTransformLeaf(SharedBSplineInterp<4>(spline),
+        StandardTransform4D{}, 100.0), AnalyticalEEP(OptionType::PUT, 0.0));
+    const SurfaceBounds bounds{-.001, .001, .1, .11, .2, .20001, .04, .06};
+    // The numerical record can come from a historical/manual producer. Its
+    // current physical sigma shape must be proved again before publication.
+    const auto record = to_data(BSplinePriceTable(leaf, bounds, OptionType::PUT, 0.0));
+    auto loaded = from_data<BSplineLeaf>(record);
+    ASSERT_FALSE(loaded);
+    EXPECT_EQ(loaded.error().code, PriceTableErrorCode::NonMonotoneSurface);
+}
+
+TEST(FinancialCertificationRedTest, AllRepresentationsRecomputeEvidenceAndPreserveFlatPrices) {
+    auto check = []<class Inner>(const PriceTableData& record, bool segmented) {
+        auto loaded = from_data<Inner>(record);
+        ASSERT_TRUE(loaded) << static_cast<int>(loaded.error().code);
+        EXPECT_EQ(loaded->proof_status(), PriceProofStatus::Certified);
+        EXPECT_GT(loaded->proof_work(), 0u);
+        const double price = loaded->price(100, 100, .3, .25, .05);
+        EXPECT_TRUE(std::isfinite(price));
+        EXPECT_GT(price, 0.0);
+        if (segmented) {
+            EXPECT_DOUBLE_EQ(price, 10.0);
+            // Cubic basis differentiation may leave binary64 cancellation
+            // noise even when the stored polynomial is structurally flat.
+            EXPECT_NEAR(loaded->vega(100, 100, .3, .25, .05), 0.0, 1e-12);
+        }
+    };
+    for (bool modal : {false, true}) for (int variant = 0; variant < 3; ++variant) {
+        const bool dimensionless = variant == 1, segmented = variant == 2;
+        SCOPED_TRACE(::testing::Message() << "modal=" << modal << " variant=" << variant);
+        PriceTableData record;
+        record.surface_type = modal
+            ? (segmented ? surface_types::kChebyshev4DSegmented : dimensionless
+                ? surface_types::kChebyshev3DRaw : surface_types::kChebyshev4DRaw)
+            : (segmented ? surface_types::kBSpline4DSegmented : dimensionless
+                ? surface_types::kBSpline3D : surface_types::kBSpline4D);
+        record.option_type = OptionType::PUT;
+        record.dividend_yield = 0.0;
+        record.ratio_bounds = MoneynessBounds{.99, 1.01};
+        record.bounds_m_min = std::log(.99);
+        record.bounds_m_max = std::log(1.01);
+        record.bounds_tau_min = .2;
+        record.bounds_tau_max = record.maturity = .4;
+        record.bounds_sigma_min = .2;
+        record.bounds_sigma_max = .3;
+        record.bounds_rate_min = .04;
+        record.bounds_rate_max = .06;
+        if (segmented) {
+            record.strike_bounds = StrikeBounds{95, 105};
+            record.fixed_expiry = FixedExpiryMetadata{1, {}};
+        }
+        for (double reference : segmented ? std::vector<double>{80, 120}
+                                           : std::vector<double>{100}) {
+            PriceTableData::Segment segment;
+            segment.segment_id = static_cast<int32_t>(record.segments.size());
+            segment.K_ref = reference;
+            segment.tau_start = 0;
+            segment.tau_end = segment.tau_max = 1;
+            segment.tau_min = 0;
+            segment.ndim = dimensionless ? 3 : 4;
+            segment.interp_type = modal ? "chebyshev_modal" : "bspline";
+            segment.domain_lo = dimensionless ? std::vector<double>{-.02, .001, -2}
+                                              : std::vector<double>{-.02, 0, .1, .01};
+            segment.domain_hi = dimensionless ? std::vector<double>{.02, .2, 2}
+                                              : std::vector<double>{.02, 1, .4, .1};
+            segment.num_pts.assign(segment.ndim, modal ? 2 : 4);
+            std::size_t count = 1;
+            for (std::size_t d = 0; d < segment.num_pts.size(); ++d) {
+                count *= segment.num_pts[d];
+                if (modal) continue;
+                const double lo = segment.domain_lo[d], hi = segment.domain_hi[d];
+                segment.grids.push_back({lo, lo + (hi-lo)/3, lo + 2*(hi-lo)/3, hi});
+                segment.knots.push_back({lo,lo,lo,lo,hi,hi,hi,hi});
+            }
+            segment.values.assign(count, segmented && !modal ? .1 : 0.0);
+            if (segmented && modal) segment.values.front() = .1;
+            record.segments.push_back(std::move(segment));
+        }
+        if (modal) {
+            if (segmented) check.template operator()<ChebyshevMultiKRefInner>(record, true);
+            else if (dimensionless) check.template operator()<Chebyshev3DLeaf>(record, false);
+            else check.template operator()<ChebyshevLeaf>(record, false);
+        } else {
+            if (segmented) check.template operator()<BSplineMultiKRefInner>(record, true);
+            else if (dimensionless) check.template operator()<BSpline3DLeaf>(record, false);
+            else check.template operator()<BSplineLeaf>(record, false);
+        }
+    }
+}
+
+TEST(FinancialCertificationRedTest, ManualChebyshevNeverPublishesUnprovenNumerics) {
+    const ChebyshevTableConfig config{
+        .num_pts = {2, 2, 2, 2},
+        .domain = Domain<4>{{-.01, .1, .2, .04}, {.01, .11, .21, .05}},
+        .K_ref = 100,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0,
+    };
+    const auto result = build_chebyshev_table(config);
+    if (result) {
+        EXPECT_EQ(result->surface.proof_status(), PriceProofStatus::Certified);
+    } else {
+        // This is a construction-gate test, not a required-fit accuracy claim.
+        EXPECT_TRUE(result.error().code == PriceTableErrorCode::NonMonotoneSurface ||
+                    result.error().code == PriceTableErrorCode::CertificationIndeterminate);
+    }
+}
+
+TEST(FinancialCertificationRedTest, DimensionlessPublicationRequiresTheExactZeroYieldModel) {
+    IVSolverFactoryConfig config;
+    config.option_type = OptionType::PUT;
+    config.dividend_yield = 1e-13;
+    config.grid.moneyness = {.9, 1.0, 1.1, 1.2};
+    config.grid.vol = {.2, .21, .22, .23};
+    config.grid.rate = {.03, .04, .05, .06};
+    config.backend = DimensionlessBackend{.maturity = .5};
+    const auto result = make_price_table(config);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidDividend);
+}
+
 }
 
 TEST(FinancialCertificationRedTest, FactoryAdmitsTheRequestedRatioEndpointBeforeLogRoundtrip) {

@@ -1104,6 +1104,17 @@ cc_test(
 )
 
 cc_test(
+    name = "interpolated_iv_root_sensitivity_test",
+    size = "small",
+    srcs = ["interpolated_iv_root_sensitivity_test.cc"],
+    deps = [
+        "//src/option:interpolated_iv_solver",
+        "//src/option/table/serialization:from_data",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "batch_bracketing_test",
     size = "small",
     srcs = ["batch_bracketing_test.cc"],
@@ -2135,7 +2146,7 @@ cc_test(
 cc_test(
     name = "financial_certification_red_test",
     srcs = ["financial_certification_red_test.cc"],
-    deps = ["//src/option/table/bspline:bspline_surface", "//src/option:price_table_factory", "@googletest//:gtest_main"],
+    deps = ["//src/option/table/bspline:bspline_surface", "//src/option:price_table_factory", "//src/option/table/serialization:from_data", "//src/option/table/serialization:to_data", "@googletest//:gtest_main"],
     tags = ["manual"],
 )
 

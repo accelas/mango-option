@@ -55,6 +55,7 @@ const EEPFixture& GetEEPFixture() {
         };
 
         auto m_grid   = linspace(0.70, 1.40, 15);
+        for (double& m : m_grid) m = std::log(m);
         auto tau_grid = linspace(0.05, 2.50, 10);
         auto vol_grid = linspace(0.08, 0.50, 8);
         auto rate_grid = linspace(0.00, 0.12, 6);
@@ -100,6 +101,9 @@ struct GreekErrors {
     int count = 0;
 
     void record(double interp, double ref) {
+        if (!std::isfinite(interp) || !std::isfinite(ref)) {
+            throw std::runtime_error("Nonfinite Greek accuracy observation");
+        }
         double err = std::abs(interp - ref);
         max_err = std::max(max_err, err);
         sum_err += err;
@@ -173,49 +177,6 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
         }
     }
 
-    // EEP Greek helpers: inline the EEP decomposition formulas.
-    // The wrapper has price() but not delta/gamma/theta, so we compute
-    // those from the B-spline partials + European Greeks directly.
-    const auto& surf = *fix.spline;
-    const double K_ref = fix.K_ref;
-    const double q = fix.dividend_yield;
-    const OptionType type = fix.type;
-
-    auto make_european = [&](double S, double K, double tau_val,
-                             double sig, double r) {
-        return EuropeanOptionSolver(
-            OptionSpec{.spot = S, .strike = K, .maturity = tau_val,
-                       .rate = r, .dividend_yield = q,
-                       .option_type = type}, sig).solve().value();
-    };
-
-    auto eep_delta = [&](double S, double K, double tau_val,
-                         double sig, double r) -> double {
-        double x = std::log(S / K);
-        double dEdx = surf.partial(0, {x, tau_val, sig, r});
-        double d = (K / (K_ref * S)) * dEdx;
-        auto eu = make_european(S, K, tau_val, sig, r);
-        return d + eu.delta();
-    };
-
-    auto eep_gamma = [&](double S, double K, double tau_val,
-                         double sig, double r) -> double {
-        double x = std::log(S / K);
-        double dEdx = surf.partial(0, {x, tau_val, sig, r});
-        double d2Edx2 = surf.eval_second_partial(0, {x, tau_val, sig, r});
-        double g = (K / K_ref) * (d2Edx2 - dEdx) / (S * S);
-        auto eu = make_european(S, K, tau_val, sig, r);
-        return g + eu.gamma();
-    };
-
-    auto eep_theta = [&](double S, double K, double tau_val,
-                         double sig, double r) -> double {
-        double x = std::log(S / K);
-        double dtau = (K / K_ref) * surf.partial(1, {x, tau_val, sig, r});
-        auto eu = make_european(S, K, tau_val, sig, r);
-        return -dtau + eu.theta();
-    };
-
     // Benchmark loop: compute interpolated Greeks and accumulate errors
     GreekErrors price_err, delta_err, gamma_err, theta_err;
 
@@ -230,16 +191,23 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
             for (double tau : maturities) {
                 const auto& ref = refs[idx++];
 
-                double i_price = fix.wrapper.price(spot, K, tau, sigma, rate);
-                double i_delta = eep_delta(spot, K, tau, sigma, rate);
-                double i_gamma = eep_gamma(spot, K, tau, sigma, rate);
-                double i_theta = eep_theta(spot, K, tau, sigma, rate);
+                const double i_price = fix.wrapper.price(spot, K, tau, sigma, rate);
+                PricingParams params{OptionSpec{.spot = spot, .strike = K,
+                    .maturity = tau, .rate = rate, .dividend_yield = fix.dividend_yield,
+                    .option_type = fix.type}, sigma};
+                const auto delta = fix.wrapper.delta(params);
+                const auto gamma = fix.wrapper.gamma(params);
+                const auto theta = fix.wrapper.theta(params);
+                if (!delta || !gamma || !theta) {
+                    state.SkipWithError("Public table Greek query refused");
+                    return;
+                }
+                const double i_delta = *delta;
+                const double i_gamma = *gamma;
+                const double i_theta = *theta;
 
-                benchmark::DoNotOptimize(i_price);
-                benchmark::DoNotOptimize(i_delta);
-                benchmark::DoNotOptimize(i_gamma);
-                benchmark::DoNotOptimize(i_theta);
-
+                // The published error counters consume every result. No
+                // mutable optimization barrier belongs before measurement.
                 price_err.record(i_price, ref.price);
                 delta_err.record(i_delta, ref.delta);
                 gamma_err.record(i_gamma, ref.gamma);

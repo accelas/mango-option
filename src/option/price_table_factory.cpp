@@ -178,14 +178,14 @@ std::expected<BSplineMultiKRefInner, PriceTableError> build_multi_kref_manual(
     return build_multi_kref_surface(std::move(entries));
 }
 
-BSplineMultiKRefSurface wrap_multi_kref_surface(
+std::expected<BSplineMultiKRefSurface, PriceTableError> wrap_multi_kref_surface(
     BSplineMultiKRefInner surface,
     const SurfaceBounds& bounds,
     OptionType option_type,
     double dividend_yield, FixedExpiryMetadata fixed_expiry)
 {
-    return BSplineMultiKRefSurface(
-        std::move(surface), bounds, option_type, dividend_yield, std::move(fixed_expiry));
+    return BSplineMultiKRefSurface::create(
+        surface, bounds, option_type, dividend_yield, fixed_expiry);
 }
 
 /// Bounds for the manually-gridded segmented surface: the user's own grid
@@ -242,10 +242,19 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
         }
 
         // Publish the same requested physical domain used for validation.
+        auto table = wrap_multi_kref_surface(
+            std::move(result->surface), result->sample_bounds,
+            config.option_type, config.dividend_yield, model);
+        if (!table) {
+            auto error = table.error();
+            error.work = std::make_shared<const RefinementWork>(result->diagnostics.work);
+            if (result->diagnostics.reference_selection)
+                error.reference_selection = std::make_shared<const ReferenceSelectionHistory>(
+                    *result->diagnostics.reference_selection);
+            return std::unexpected(detail::to_validation_error(error));
+        }
         return BuiltTable<BSplineMultiKRefSurface>{
-            .table = wrap_multi_kref_surface(
-                std::move(result->surface), result->sample_bounds,
-                config.option_type, config.dividend_yield, model),
+            .table = std::move(*table),
             .diagnostics = std::move(result->diagnostics),
         };
     }
@@ -286,10 +295,18 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
     if (!selected) return std::unexpected(detail::to_validation_error(selected.error()));
     BuildDiagnostics diagnostics;
     diagnostics.reference_selection = std::move(selected->selection);
+    diagnostics.work = std::move(selected->work);
+    auto table = wrap_multi_kref_surface(std::move(selected->build), requested,
+        config.option_type, config.dividend_yield, model);
+    if (!table) {
+        auto error = table.error();
+        error.work = std::make_shared<const RefinementWork>(diagnostics.work);
+        error.reference_selection = std::make_shared<const ReferenceSelectionHistory>(
+            *diagnostics.reference_selection);
+        return std::unexpected(detail::to_validation_error(error));
+    }
     return BuiltTable<BSplineMultiKRefSurface>{
-        .table = wrap_multi_kref_surface(std::move(selected->build), requested,
-            config.option_type, config.dividend_yield, model),
-        .diagnostics = std::move(diagnostics),
+        .table = std::move(*table), .diagnostics = std::move(diagnostics),
     };
 }
 
@@ -325,8 +342,9 @@ build_bspline_continuous_table(const IVSolverFactoryConfig& config,
             std::move(result->spline), chain.spot, chain.dividend_yield,
             config.option_type, result->sample_bounds);
         if (!table.has_value()) {
-            return std::unexpected(detail::to_validation_error(
-                PriceTableError{PriceTableErrorCode::SurfaceBuildFailed, 0, 0}));
+            auto error = table.error();
+            error.work = std::make_shared<const RefinementWork>(result->diagnostics.work);
+            return std::unexpected(detail::to_validation_error(error));
         }
         return BuiltTable<BSplinePriceTable>{
             .table = std::move(*table),
@@ -373,8 +391,7 @@ build_bspline_continuous_table(const IVSolverFactoryConfig& config,
         table_result->spline, config.spot, config.dividend_yield,
         config.option_type, bounds);
     if (!table.has_value()) {
-        return std::unexpected(detail::to_validation_error(
-            PriceTableError{PriceTableErrorCode::SurfaceBuildFailed, 0, 0}));
+        return std::unexpected(detail::to_validation_error(table.error()));
     }
     return BuiltTable<BSplinePriceTable>{
         .table = std::move(*table),
@@ -662,9 +679,11 @@ build_dimensionless_bspline_table(const IVSolverFactoryConfig& config,
     AnalyticalEEP eep(config.option_type, 0.0);
     BSpline3DLeaf eep_leaf(std::move(leaf), std::move(eep));
 
-    return BSpline3DPriceTable(
-        std::move(eep_leaf), dimless_bounds(d, backend.maturity, extract_bounds(config.grid).ratios),
+    auto table = BSpline3DPriceTable::create(
+        eep_leaf, dimless_bounds(d, backend.maturity, extract_bounds(config.grid).ratios),
         config.option_type, 0.0);
+    if (!table) return std::unexpected(detail::to_validation_error(table.error()));
+    return std::move(*table);
 }
 
 std::expected<Chebyshev3DPriceTable, ValidationError>
@@ -717,15 +736,17 @@ build_dimensionless_chebyshev_table(const IVSolverFactoryConfig& config,
     AnalyticalEEP eep_fn(config.option_type, 0.0);
     Chebyshev3DLeaf eep_leaf(std::move(leaf), std::move(eep_fn));
 
-    return Chebyshev3DPriceTable(
-        std::move(eep_leaf), dimless_bounds(d, backend.maturity, extract_bounds(config.grid).ratios),
+    auto table = Chebyshev3DPriceTable::create(
+        eep_leaf, dimless_bounds(d, backend.maturity, extract_bounds(config.grid).ratios),
         config.option_type, 0.0);
+    if (!table) return std::unexpected(detail::to_validation_error(table.error()));
+    return std::move(*table);
 }
 
 std::expected<AnyPriceTable, ValidationError>
 build_dimensionless_table(const IVSolverFactoryConfig& config,
                           const DimensionlessBackend& backend) {
-    if (std::abs(config.dividend_yield) > 1e-12) {
+    if (config.dividend_yield != 0.0) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidDividend, config.dividend_yield});
     }

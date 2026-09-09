@@ -210,13 +210,21 @@ public:
     build_adaptive(const AdaptiveGridParams& params) const;
 
 private:
-    [[nodiscard]] std::expected<ChebyshevMultiKRefSurface, PriceTableError>
+    // Numerical candidates are not public price tables. Refinement/selection
+    // can measure them before the final retained payload is certified once.
+    struct AdaptiveCandidate {
+        ChebyshevMultiKRefInner surface;
+        std::vector<IterationStats> iterations;
+        BuildDiagnostics diagnostics;
+        SurfaceBounds sample_bounds;
+    };
+    [[nodiscard]] std::expected<ChebyshevMultiKRefInner, PriceTableError>
     build_candidate(std::array<size_t, 4> cc_levels) const;
-    [[nodiscard]] std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
+    [[nodiscard]] std::expected<AdaptiveCandidate, PriceTableError>
     build_adaptive_candidate(const AdaptiveGridParams& params) const;
 
     struct AssembleResult {
-        ChebyshevMultiKRefSurface surface;
+        ChebyshevMultiKRefInner surface;
         size_t pde_solves = 0;
     };
 
@@ -228,16 +236,13 @@ private:
         std::vector<double> seg_bounds,
         std::vector<bool> seg_is_gap);
 
-    /// Build all K_ref surfaces (includes per-K_ref PDE solves) and compose.
-    /// `bounds` is the published `SurfaceBounds` for the assembled surface:
-    /// `build()` passes the node/support domain, `build_adaptive()` passes
-    /// the user-facing sample domain (spec D2).
+    /// Build and compose raw K_ref numerics (includes per-K_ref PDE solves).
+    /// Published bounds/model and proof are attached only after selection.
     [[nodiscard]] std::expected<AssembleResult, PriceTableError>
     build_all_krefs(std::span<const double> m_nodes,
                     std::span<const double> tau_nodes,
                     std::span<const double> sigma_nodes,
-                    std::span<const double> rate_nodes,
-                    const SurfaceBounds& bounds) const;
+                    std::span<const double> rate_nodes) const;
 
     [[nodiscard]] std::vector<double> generate_tau_nodes(size_t tau_level) const;
 
