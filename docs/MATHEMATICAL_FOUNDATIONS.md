@@ -459,27 +459,27 @@ $$\Delta x_\text{target} = \sigma\sqrt{\varepsilon}, \qquad N_x = \left\lceil\fr
 
 Scaling $\Delta x$ with $\sigma$ keeps $N_x$ stable across volatilities: higher $\sigma$ widens the domain but proportionally coarsens the target spacing. The $\sqrt{\varepsilon}$ relationship means 10× better accuracy costs ~3.2× more points. $N_x$ is clamped to $[100, 1200]$.
 
-**Temporal resolution.** TR-BDF2 is unconditionally stable, so there is no CFL constraint. But second-order accuracy requires $\Delta t \sim O(\Delta x_\min)$. The time step couples to the finest spatial spacing:
+**Temporal resolution.** The estimator couples its time-step proposal to the smallest spacing in the actual generated grid:
 
-$$\Delta t = c_t\Delta x_\min, \qquad \text{where } \Delta x_\min \sim \Delta x_\text{avg}e^{-\alpha}$$
+$$\Delta t = c_t\min_i(x_{i+1}-x_i)$$
 
 $$N_t = \left\lceil T / \Delta t \right\rceil$$
 
-With $c_t = 0.75$ and $\alpha = 2.0$, this ensures temporal error doesn't dominate spatial error in the clustered region where gradients are steepest.
+The default coupling factor is $c_t=0.75$. Time-step caps and mandatory snapshot times then determine the actual schedule. This is a numerical recipe; price and IV accuracy still require independent validation.
 
 **Default parameters:**
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
 | $n_\sigma$ | 5.0 | Domain half-width in $\sigma\sqrt{T}$ units |
-| $\alpha$ | 2.0 | Sinh clustering strength (~7× center-to-edge ratio) |
+| $\alpha$ | $2\operatorname{asinh}(5/\sqrt{2})\approx3.95$ | Fixed default; centered edge/center spacing ratio tends to $\sqrt{13.5}\approx3.67$ |
 | $\varepsilon$ | $10^{-2}$ | Spatial truncation error target |
 | $c_t$ | 0.75 | Time-space coupling factor |
 | min_spatial_points | 100 | Lower bound on $N_x$ |
 | max_spatial_points | 1200 | Upper bound on $N_x$ |
 | max_time_steps | 5000 | Upper bound on $N_t$ |
 
-For a short-dated SPY option ($\sigma \approx 0.15$, $T \approx 0.09$), the defaults produce a $101 \times 150$ grid.
+Resolved counts depend on the option, required coverage and clustering. Inspect the returned spatial grid and time schedule rather than assuming one fixed default shape. Changing $n_\sigma$ does not retune the default alpha or replace an explicit alpha override.
 
 ---
 

@@ -160,7 +160,9 @@ TEST(GridSpecTest, CenteredSinhRetainsCoordinatesWhenScaleUnderflows) {
         const double tolerance = 8 * std::max(std::numeric_limits<double>::denorm_min(),
             std::numeric_limits<double>::epsilon() * std::abs(expected));
         EXPECT_NEAR(grid[i], expected, tolerance) << "i=" << i;
-        if (i > 0) EXPECT_GT(grid[i], grid[i - 1]);
+        if (i > 0) {
+            EXPECT_GT(grid[i], grid[i - 1]);
+        }
     }
 }
 
