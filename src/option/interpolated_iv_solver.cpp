@@ -216,6 +216,7 @@ struct AnyInterpIVSolver::Impl {
     /// Diagnostics from adaptive grid refinement (spec D7), propagated from
     /// the `AnyPriceTable` this solver was built from.
     std::optional<BuildDiagnostics> diagnostics;
+    std::shared_ptr<const AccuracyReport> accuracy_report;
 
     template <typename T>
     explicit Impl(T s, std::optional<BuildDiagnostics> diag = std::nullopt)
@@ -246,6 +247,15 @@ AnyInterpIVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
 std::optional<BuildDiagnostics> AnyInterpIVSolver::build_diagnostics() const {
     return impl_->diagnostics;
 }
+
+std::shared_ptr<const AccuracyReport> AnyInterpIVSolver::accuracy_report() const {
+    return impl_->accuracy_report;
+}
+
+void AnyInterpIVSolver::attach_accuracy_report(std::shared_ptr<const AccuracyReport> report) {
+    impl_->accuracy_report = std::move(report);
+}
+
 
 namespace {
 
