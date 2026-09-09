@@ -12,6 +12,7 @@
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_3d_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
+#include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 
 namespace {
 using namespace mango;
@@ -167,6 +168,37 @@ TEST(FinancialCertificationRedTest, AllRepresentationsRecomputeEvidenceAndPreser
             else check.template operator()<BSplineLeaf>(record, false);
         }
     }
+}
+
+TEST(FinancialCertificationRedTest, ManualChebyshevNeverPublishesUnprovenNumerics) {
+    const ChebyshevTableConfig config{
+        .num_pts = {2, 2, 2, 2},
+        .domain = Domain<4>{{-.01, .1, .2, .04}, {.01, .11, .21, .05}},
+        .K_ref = 100,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0,
+    };
+    const auto result = build_chebyshev_table(config);
+    if (result) {
+        EXPECT_EQ(result->surface.proof_status(), PriceProofStatus::Certified);
+    } else {
+        // This is a construction-gate test, not a required-fit accuracy claim.
+        EXPECT_TRUE(result.error().code == PriceTableErrorCode::NonMonotoneSurface ||
+                    result.error().code == PriceTableErrorCode::CertificationIndeterminate);
+    }
+}
+
+TEST(FinancialCertificationRedTest, DimensionlessPublicationRequiresTheExactZeroYieldModel) {
+    IVSolverFactoryConfig config;
+    config.option_type = OptionType::PUT;
+    config.dividend_yield = 1e-13;
+    config.grid.moneyness = {.9, 1.0, 1.1, 1.2};
+    config.grid.vol = {.2, .21, .22, .23};
+    config.grid.rate = {.03, .04, .05, .06};
+    config.backend = DimensionlessBackend{.maturity = .5};
+    const auto result = make_price_table(config);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidDividend);
 }
 
 }

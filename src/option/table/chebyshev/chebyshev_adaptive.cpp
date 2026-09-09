@@ -36,11 +36,6 @@ struct ChebyshevBuildConfig {
     double K_ref;
     OptionType option_type;
     double dividend_yield = 0.0;
-    /// Bounds advertised on every surface this callback builds: the
-    /// user-facing sample domain (spec D2), never the CC-extended node span.
-    /// The extension is interpolation *support* and was never measured, so it
-    /// must not be queryable.
-    SurfaceBounds published_bounds{};
 };
 
 using detail::ChebyshevRefinementState;
@@ -426,16 +421,16 @@ namespace {
 
 /// Create a BuildFn for the adaptive refinement loop that builds Chebyshev surfaces.
 /// Reuses PDE solutions across refinement iterations via ChebyshevPDECache.
-/// The last_surface side-channel captures the typed surface from each build.
+/// The last_leaf side-channel captures the typed surface from each build.
 static BuildFn make_chebyshev_build_fn(
     ChebyshevPDECache& cache,
     const ChebyshevBuildConfig& config,
-    std::shared_ptr<ChebyshevRawSurface>& last_surface)
+    std::shared_ptr<ChebyshevRawLeaf>& last_leaf)
 {
     // Track tau grid size to detect tau refinement (requires full re-solve)
     auto last_tau_size = std::make_shared<size_t>(0);
 
-    return [&cache, config, last_tau_size, &last_surface](
+    return [&cache, config, last_tau_size, &last_leaf](
         std::span<const double> m_nodes,
         std::span<const double> tau_nodes,
         std::span<const double> sigma_nodes,
@@ -556,14 +551,10 @@ static BuildFn make_chebyshev_build_fn(
         ChebyshevRawLeaf leaf(std::move(tleaf),
             AnalyticalEEP(config.option_type, config.dividend_yield));
 
-        // Published bounds are the measurement domain (spec D2/AC2), not the
-        // node span: the CC extension beyond the user's ranges is support the
-        // validation never sampled, and a query landing there used to get
-        // oscillating garbage with a healthy-looking vega.
-        auto shared = std::make_shared<ChebyshevRawSurface>(
-            std::move(leaf), config.published_bounds,
-            config.option_type, config.dividend_yield);
-        last_surface = shared;
+        // Keep only raw numerical data during exploration. Public metadata
+        // and certification belong to the final retained candidate below.
+        auto shared = std::make_shared<ChebyshevRawLeaf>(std::move(leaf));
+        last_leaf = shared;
 
         return SurfaceHandle{
             .price = [shared](double spot, double strike, double tau,
@@ -785,11 +776,10 @@ build_adaptive_chebyshev(
         .K_ref = chain.spot,
         .option_type = type,
         .dividend_yield = chain.dividend_yield,
-        .published_bounds = ctx.sample_bounds,
     };
 
-    std::shared_ptr<ChebyshevRawSurface> last_surface;
-    auto build_fn = make_chebyshev_build_fn(pde_cache, build_cfg, last_surface);
+    std::shared_ptr<ChebyshevRawLeaf> last_leaf;
+    auto build_fn = make_chebyshev_build_fn(pde_cache, build_cfg, last_leaf);
     auto refine_fn = detail::make_chebyshev_refine_fn(state);
     auto state_hooks = detail::make_chebyshev_state_hooks(state);
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
@@ -820,20 +810,27 @@ build_adaptive_chebyshev(
 
     // No extra build here: run_refinement guarantees the last surface it
     // built is the one whose grids it returns (it rebuilds when the retained
-    // candidate is not the last build), so the `last_surface` side channel
-    // already holds the typed ChebyshevRawSurface for `grids` (spec D9).
+    // candidate is not the last build), so the `last_leaf` side channel
+    // already holds the typed ChebyshevRawLeaf for `grids` (spec D9).
     //
     // The guard below asserts that loop invariant rather than a build failure:
     // run_refinement cannot succeed without having built the grids it returns,
     // so a null side channel would mean the invariant broke.  Reporting it
     // beats handing the caller a null surface.
-    if (!last_surface) {
+    if (!last_leaf) {
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::SurfaceBuildFailed});
     }
 
+    auto sealed = ChebyshevSurface::create(
+        *last_leaf, ctx.sample_bounds, type, chain.dividend_yield);
+    if (!sealed) {
+        auto error = sealed.error();
+        error.work = std::make_shared<const RefinementWork>(grids.diagnostics.work);
+        return std::unexpected(std::move(error));
+    }
     ChebyshevAdaptiveResult result;
-    result.surface = std::move(last_surface);
+    result.surface = std::make_shared<ChebyshevSurface>(std::move(*sealed));
     result.iterations = std::move(grids.iterations);
     result.achieved_max_error = grids.achieved_max_error;
     result.achieved_avg_error = grids.achieved_avg_error;
@@ -935,8 +932,7 @@ ChebyshevSegmentedBuilder::build_all_krefs(
     std::span<const double> m_nodes,
     std::span<const double> tau_nodes,
     std::span<const double> sigma_nodes,
-    std::span<const double> rate_nodes,
-    const SurfaceBounds& bounds) const
+    std::span<const double> rate_nodes) const
 {
     std::vector<ChebyshevTauSegmented> kref_surfaces;
     size_t total_pde_solves = 0;
@@ -954,13 +950,7 @@ ChebyshevSegmentedBuilder::build_all_krefs(
     ChebyshevMultiKRefInner inner(
         std::move(kref_surfaces), MultiKRefSplit(K_refs_));
 
-    return AssembleResult{
-        .surface = ChebyshevMultiKRefSurface(
-            std::move(inner), bounds,
-            config_.option_type, config_.dividend_yield,
-            make_fixed_expiry_metadata(config_.maturity, config_.discrete_dividends)),
-        .pde_solves = total_pde_solves,
-    };
+    return AssembleResult{.surface = std::move(inner), .pde_solves = total_pde_solves};
 }
 
 std::expected<ChebyshevMultiKRefSurface, PriceTableError>
@@ -981,16 +971,27 @@ ChebyshevSegmentedBuilder::build_with_diagnostics(std::array<size_t, 4> cc_level
             auto candidate = *this;
             candidate.K_refs_.assign(refs.begin(), refs.end());
             return candidate.build_candidate(cc_levels);
-        }, [](const ChebyshevMultiKRefSurface& surface, double s, double k, double t, double v, double r) {
+        }, [](const ChebyshevMultiKRefInner& surface, double s, double k, double t, double v, double r) {
             return surface.price(s, k, t, v, r);
         });
     if (!selected) return std::unexpected(selected.error());
     BuildDiagnostics diagnostics;
     diagnostics.reference_selection = std::move(selected->selection);
-    return ChebyshevSegmentedManualResult{std::move(selected->build), std::move(diagnostics)};
+    diagnostics.work = std::move(selected->work);
+    auto sealed = ChebyshevMultiKRefSurface::create(selected->build, sample_domain_,
+        config_.option_type, config_.dividend_yield,
+        make_fixed_expiry_metadata(config_.maturity, config_.discrete_dividends));
+    if (!sealed) {
+        auto error = sealed.error();
+        error.work = std::make_shared<const RefinementWork>(diagnostics.work);
+        error.reference_selection = std::make_shared<const ReferenceSelectionHistory>(
+            *diagnostics.reference_selection);
+        return std::unexpected(std::move(error));
+    }
+    return ChebyshevSegmentedManualResult{std::move(*sealed), std::move(diagnostics)};
 }
 
-std::expected<ChebyshevMultiKRefSurface, PriceTableError>
+std::expected<ChebyshevMultiKRefInner, PriceTableError>
 ChebyshevSegmentedBuilder::build_candidate(std::array<size_t, 4> cc_levels) const
 {
     if (!valid_manual_cc_levels(cc_levels)) {
@@ -1016,7 +1017,7 @@ ChebyshevSegmentedBuilder::build_candidate(std::array<size_t, 4> cc_levels) cons
     }
 
     auto assembled = build_all_krefs(
-        m_nodes, tau_nodes, sigma_nodes, rate_nodes, sample_domain_);
+        m_nodes, tau_nodes, sigma_nodes, rate_nodes);
     if (!assembled) return std::unexpected(assembled.error());
     return std::move(assembled->surface);
 }
@@ -1035,17 +1036,36 @@ ChebyshevSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) cons
             auto candidate = *this;
             candidate.K_refs_.assign(refs.begin(), refs.end());
             return candidate.build_adaptive_candidate(params);
-        }, [](const ChebyshevSegmentedAdaptiveResult& result, double s, double k, double t, double v, double r) {
+        }, [](const AdaptiveCandidate& result, double s, double k, double t, double v, double r) {
             return result.surface.price(s, k, t, v, r);
         }, 0.01, params.target_iv_error, params.vega_floor);
     if (!selected) return std::unexpected(selected.error());
     selected->build.diagnostics.reference_selection = std::move(selected->selection);
     selected->build.diagnostics.work = std::move(selected->work);
-    selected->build.total_pde_solves = selected->build.diagnostics.work.total_pde_attempts();
-    return std::move(selected->build);
+    auto& candidate = selected->build;
+    auto sealed = ChebyshevMultiKRefSurface::create(candidate.surface, candidate.sample_bounds,
+        config_.option_type, config_.dividend_yield,
+        make_fixed_expiry_metadata(config_.maturity, config_.discrete_dividends));
+    if (!sealed) {
+        auto error = sealed.error();
+        error.work = std::make_shared<const RefinementWork>(candidate.diagnostics.work);
+        error.reference_selection = std::make_shared<const ReferenceSelectionHistory>(
+            *candidate.diagnostics.reference_selection);
+        return std::unexpected(std::move(error));
+    }
+    return ChebyshevSegmentedAdaptiveResult{
+        .surface = std::move(*sealed),
+        .iterations = std::move(candidate.iterations),
+        .achieved_max_error = candidate.diagnostics.achieved_max_error,
+        .achieved_avg_error = candidate.diagnostics.achieved_avg_error,
+        .target_met = candidate.diagnostics.target_met,
+        .total_pde_solves = candidate.diagnostics.work.total_pde_attempts(),
+        .diagnostics = std::move(candidate.diagnostics),
+        .sample_bounds = candidate.sample_bounds,
+    };
 }
 
-std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
+std::expected<ChebyshevSegmentedBuilder::AdaptiveCandidate, PriceTableError>
 ChebyshevSegmentedBuilder::build_adaptive_candidate(
     const AdaptiveGridParams& params) const
 {
@@ -1128,7 +1148,7 @@ ChebyshevSegmentedBuilder::build_adaptive_candidate(
     // the user-facing sample domain (spec D2), not the CC-extended node
     // domain the grids actually span.
     auto surface = build_all_krefs(
-        grids.moneyness, grids.tau, grids.vol, grids.rate, sample_domain_);
+        grids.moneyness, grids.tau, grids.vol, grids.rate);
     work.tables.record(surface.has_value(), surface ? std::optional<PdeWork>(
         PdeWork{surface->pde_solves, surface->pde_solves, 0}) : std::nullopt);
     if (!surface) {
@@ -1197,13 +1217,9 @@ ChebyshevSegmentedBuilder::build_adaptive_candidate(
                               params.target_iv_error, params.vega_floor,
                               diagnostics);
 
-    return ChebyshevSegmentedAdaptiveResult{
+    return AdaptiveCandidate{
         .surface = std::move(surface->surface),
         .iterations = std::move(grids.iterations),
-        .achieved_max_error = final_score.max_error,
-        .achieved_avg_error = final_score.avg_error,
-        .target_met = diagnostics.target_met,
-        .total_pde_solves = work.total_pde_attempts(),
         .diagnostics = std::move(diagnostics),
         .sample_bounds = sample_domain_,
     };
