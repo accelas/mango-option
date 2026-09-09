@@ -77,6 +77,26 @@ bool valid_manual_cc_levels(const std::array<size_t, 4>& levels) {
 
 namespace detail {
 
+SurfaceBounds chebyshev_support_bounds(
+    const SurfaceBounds& domain, std::array<size_t, 4> cc_levels) {
+    const auto padding = [&](double lo, double hi, size_t axis) {
+        return spline_support_headroom(hi - lo, (size_t{1} << cc_levels[axis]) + 1);
+    };
+    const double hm = padding(domain.m_min, domain.m_max, 0);
+    const double ht = padding(domain.tau_min, domain.tau_max, 1);
+    const double hs = padding(domain.sigma_min, domain.sigma_max, 2);
+    const double hr = padding(domain.rate_min, domain.rate_max, 3);
+    auto bounds = domain;
+    bounds.m_min -= hm; bounds.m_max += hm;
+    bounds.tau_min = std::max(domain.tau_min - ht, std::min(1e-4, domain.tau_min));
+    bounds.tau_max += ht;
+    bounds.sigma_min = std::max(domain.sigma_min - hs, std::min(.01, domain.sigma_min));
+    bounds.sigma_max += hs;
+    bounds.rate_min = std::max(domain.rate_min - hr, std::min(-.05, domain.rate_min));
+    bounds.rate_max += hr;
+    return bounds;
+}
+
 std::vector<double> generate_segmented_tau_nodes(
     size_t tau_level,
     const std::vector<double>& seg_bounds,
@@ -724,32 +744,17 @@ build_adaptive_chebyshev(
     constexpr size_t kInitSigmaLevel = 2;  // 5 nodes
     constexpr size_t kInitRateLevel = 1;   // 3 nodes
 
-    // Frozen headroom computed from initial CC node counts
-    auto hfn = [](double lo, double hi, size_t n) {
-        return 3.0 * (hi - lo)
-             / static_cast<double>(std::max(n, size_t{4}) - 1);
-    };
-    double hm = hfn(ctx.bounds.m_min, ctx.bounds.m_max,
-                     (1u << kInitMLevel) + 1);
-    double ht = hfn(ctx.bounds.tau_min, ctx.bounds.tau_max,
-                     (1u << kInitTauLevel) + 1);
-    double hs = hfn(ctx.bounds.sigma_min, ctx.bounds.sigma_max,
-                     (1u << kInitSigmaLevel) + 1);
-    double hr = hfn(ctx.bounds.rate_min, ctx.bounds.rate_max,
-                     (1u << kInitRateLevel) + 1);
+    const auto support = detail::chebyshev_support_bounds(ctx.bounds,
+        {kInitMLevel, kInitTauLevel, kInitSigmaLevel, kInitRateLevel});
 
     ChebyshevRefinementState state{
         .m_level = kInitMLevel, .tau_level = kInitTauLevel,
         .sigma_level = kInitSigmaLevel, .rate_level = kInitRateLevel,
         .max_level = 7,
-        .m_lo = ctx.bounds.m_min - hm,
-        .m_hi = ctx.bounds.m_max + hm,
-        .tau_lo = std::max(ctx.bounds.tau_min - ht, 1e-4),
-        .tau_hi = ctx.bounds.tau_max + ht,
-        .sigma_lo = std::max(ctx.bounds.sigma_min - hs, 0.01),
-        .sigma_hi = ctx.bounds.sigma_max + hs,
-        .rate_lo = std::max(ctx.bounds.rate_min - hr, -0.05),
-        .rate_hi = ctx.bounds.rate_max + hr,
+        .m_lo = support.m_min, .m_hi = support.m_max,
+        .tau_lo = support.tau_min, .tau_hi = support.tau_max,
+        .sigma_lo = support.sigma_min, .sigma_hi = support.sigma_max,
+        .rate_lo = support.rate_min, .rate_hi = support.rate_max,
     };
 
     // Fit bounds = the domain the nodes actually supplied to the builder
@@ -904,21 +909,12 @@ ChebyshevSegmentedBuilder::ExtendedBounds
 ChebyshevSegmentedBuilder::compute_headroom(
     std::array<size_t, 4> cc_levels) const
 {
-    auto hfn = [](double lo, double hi, size_t n) {
-        return 3.0 * (hi - lo)
-             / static_cast<double>(std::max(n, size_t{4}) - 1);
-    };
-    double hm = hfn(domain_.m_min, domain_.m_max, (1u << cc_levels[0]) + 1);
-    double hs = hfn(domain_.sigma_min, domain_.sigma_max, (1u << cc_levels[2]) + 1);
-    double hr = hfn(domain_.rate_min, domain_.rate_max, (1u << cc_levels[3]) + 1);
-
+    const auto support = detail::chebyshev_support_bounds(domain_, cc_levels);
     return {
-        .m_lo = domain_.m_min - hm,
-        .m_hi = domain_.m_max + hm,
-        .sigma_lo = std::max(domain_.sigma_min - hs, 0.01),
-        .sigma_hi = domain_.sigma_max + hs,
-        .rate_lo = std::max(domain_.rate_min - hr, -0.05),
-        .rate_hi = domain_.rate_max + hr,
+        .m_lo = support.m_min, .m_hi = support.m_max,
+        .tau_lo = support.tau_min, .tau_hi = support.tau_max,
+        .sigma_lo = support.sigma_min, .sigma_hi = support.sigma_max,
+        .rate_lo = support.rate_min, .rate_hi = support.rate_max,
     };
 }
 
@@ -993,21 +989,12 @@ ChebyshevSegmentedBuilder::build_adaptive(
     constexpr std::array<size_t, 4> kInitLevels = {5, 3, 2, 1};
     auto ext = compute_headroom(kInitLevels);
 
-    // Tau headroom for refinement state
-    auto hfn = [](double lo, double hi, size_t n) {
-        return 3.0 * (hi - lo)
-             / static_cast<double>(std::max(n, size_t{4}) - 1);
-    };
-    double ht = hfn(domain_.tau_min, domain_.tau_max,
-                     (1u << kInitLevels[1]) + 1);
-
     ChebyshevRefinementState state{
         .m_level = kInitLevels[0], .tau_level = kInitLevels[1],
         .sigma_level = kInitLevels[2], .rate_level = kInitLevels[3],
         .max_level = 7,
         .m_lo = ext.m_lo, .m_hi = ext.m_hi,
-        .tau_lo = std::max(domain_.tau_min - ht, 1e-4),
-        .tau_hi = domain_.tau_max + ht,
+        .tau_lo = ext.tau_lo, .tau_hi = ext.tau_hi,
         .sigma_lo = ext.sigma_lo, .sigma_hi = ext.sigma_hi,
         .rate_lo = ext.rate_lo, .rate_hi = ext.rate_hi,
         .seg_boundaries = seg_bounds_,
