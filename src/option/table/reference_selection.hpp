@@ -48,6 +48,15 @@ struct ReferenceAccuracySummary {
     std::optional<ReferenceErrorSummary> iv;
 };
 
+/// Final-row empirical sequence methods, before per-channel budget/filter
+/// decisions. These counters do not represent actual-IV accuracy proofs.
+struct ReferenceQualificationPaths {
+    size_t residual_direct = 0;
+    size_t residual_component = 0;
+    size_t vega_direct = 0;
+    size_t vega_component = 0;
+};
+
 struct ReferenceCandidateMetrics {
     ReferenceCandidateDecision decision = ReferenceCandidateDecision::ReferenceUnqualified;
     /// Optional pursuit of extra reference headroom after Adequate. A passing
@@ -61,6 +70,7 @@ struct ReferenceCandidateMetrics {
     ReferenceAccuracySummary total;
     size_t pde_solves = 0;
     double elapsed_seconds = 0.0;
+    std::optional<ReferenceQualificationPaths> qualification_paths;
 };
 
 using ReferenceCandidateEvaluator = std::function<

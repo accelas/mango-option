@@ -7,6 +7,17 @@
 
 namespace mango {
 
+/// Optional research trace of an empirical mesh sequence. Callback execution
+/// is synchronous; production builders leave this observer empty.
+struct ReferenceSequenceTrace {
+    const char* quantity;
+    double spot, strike, reference_strike, tau, sigma, rate, bump;
+    size_t round;
+    std::array<double, 3> space, time, domain;
+    std::optional<double> direct_sequence_allowance;
+};
+using ReferenceSequenceObserver = std::function<void(const ReferenceSequenceTrace&)>;
+
 /// Cached direct-PDE evidence for reference approximation over one fixed
 /// physical query population. IV statistics are price/vega error proxies,
 /// never actual inverted-IV errors. This does not enforce whole-table publication.
@@ -16,7 +27,7 @@ public:
     create(const SegmentedAdaptiveConfig& config, const SurfaceBounds& requested,
            std::vector<std::pair<double, double>> admitted_times,
            double price_target = 0.01, double iv_target = 2e-5,
-           double vega_floor = 1e-4);
+           double vega_floor = 1e-4, ReferenceSequenceObserver observer = {});
 
     ReferenceStrikeEvaluator(ReferenceStrikeEvaluator&&) noexcept;
     ReferenceStrikeEvaluator& operator=(ReferenceStrikeEvaluator&&) noexcept;
