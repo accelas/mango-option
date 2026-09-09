@@ -41,10 +41,12 @@ public:
 
     /// Detach caller-owned numeric storage at financial-table publication.
     [[nodiscard]] SharedInterp immutable_snapshot() const {
+        if (!ptr_) return SharedInterp(nullptr);
         return SharedInterp(std::make_shared<const T>(*ptr_));
     }
 
     /// Access the underlying interpolant.
+    [[nodiscard]] bool has_value() const noexcept { return static_cast<bool>(ptr_); }
     [[nodiscard]] const T& get() const { return *ptr_; }
 
 private:

@@ -93,3 +93,41 @@ TEST(ProofChebyshevTest, RestrictedIntervalsFindDegree256OscillationWithoutBerns
     EXPECT_EQ(center->lower_bound(), 1);
     EXPECT_EQ(center->upper_bound(), 1);
 }
+
+TEST(ProofChebyshevTest, PhysicalModalBoundsIncludeClampedCoordinatesAndRetainedTinySigns) {
+    using namespace mango::detail;
+    using namespace mango::detail::proof;
+    auto polynomial = ChebyshevPolynomial::from_coefficients({3}, {{-1, 1}}, {0, 0, 1});
+    ASSERT_TRUE(polynomial);
+    const std::array<Interval, 1> edge{Interval::hull(-2, -1)};
+    auto value = enclose_chebyshev_physical(*polynomial, edge);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->lower_bound(), 1);
+    EXPECT_EQ(value->upper_bound(), 1);
+    auto derivative = enclose_chebyshev_physical(*polynomial, edge, 0);
+    ASSERT_TRUE(derivative);
+    EXPECT_TRUE(derivative->contains(-4));
+    EXPECT_TRUE(derivative->contains(0));
+    auto outside =
+        enclose_chebyshev_physical(*polynomial, std::array<Interval, 1>{Interval(-2)}, 0);
+    ASSERT_TRUE(outside);
+    EXPECT_TRUE(outside->exact_zero());
+    auto tiny = ChebyshevPolynomial::from_coefficients(
+        {2}, {{0, 4}}, {0, -std::numeric_limits<double>::denorm_min()});
+    ASSERT_TRUE(tiny);
+    auto small = enclose_chebyshev_physical(*tiny, std::array<Interval, 1>{Interval(1)}, 0);
+    ASSERT_TRUE(small);
+    EXPECT_TRUE(small->strictly_negative());
+    EXPECT_EQ(small->upper_bound(), 0);
+}
+
+TEST(ProofChebyshevTest, OutsidePartialDoesNotMaskInvalidOtherCoordinate) {
+    using namespace mango::detail;
+    using namespace mango::detail::proof;
+    auto polynomial =
+        ChebyshevPolynomial::from_coefficients({2, 2}, {{-1, 1}, {-1, 1}}, {1, 0, 0, 0});
+    ASSERT_TRUE(polynomial);
+    const std::array<Interval, 2> box{Interval(2),
+                                      Interval(std::numeric_limits<double>::quiet_NaN())};
+    EXPECT_FALSE(enclose_chebyshev_physical(*polynomial, box, 0));
+}

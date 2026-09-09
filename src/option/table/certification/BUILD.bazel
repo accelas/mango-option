@@ -22,7 +22,7 @@ cc_library(
     name = "continuous_cell",
     srcs = ["continuous_cell.cpp"],
     hdrs = ["continuous_cell.hpp"],
-    deps = [":certificate_status", ":physical_bounds", "//src/math/bspline:bspline_nd", "//src/math/proof:bspline_cell", "//src/math/proof:bspline_box", "//src/option/table:price_table"],
+    deps = [":certificate_status", ":physical_bounds", "//src/math/bspline:bspline_nd", "//src/math/proof:bspline_cell", "//src/math/proof:bspline_box", "//src/option/table:price_table", "//src/option/table/bspline:bspline_surface"],
     copts = ["-O3", "-fno-fast-math", "-ffp-contract=off"],
     visibility = ["//src:__subpackages__", "//tests:__subpackages__"],
     strip_include_prefix = "/src/option/table/certification",

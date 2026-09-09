@@ -12,6 +12,12 @@ std::expected<Interval, InputError>
 enclose_chebyshev(const ChebyshevPolynomial &polynomial,
                   std::span<const std::pair<double, double>> unit_box,
                   std::optional<std::size_t> derivative_axis = std::nullopt);
+/// Retained-MPFR physical-coordinate enclosure of the same modal evaluator,
+/// including constant extension and zero outside-axis partials.
+std::expected<Interval, InputError>
+enclose_chebyshev_physical(const ChebyshevPolynomial &polynomial,
+                           std::span<const Interval> coordinates,
+                           std::optional<std::size_t> derivative_axis = std::nullopt);
 std::expected<BernsteinTensor, InputError>
 chebyshev_to_bernstein(const ChebyshevPolynomial &polynomial,
                        std::optional<std::size_t> derivative_axis = std::nullopt);

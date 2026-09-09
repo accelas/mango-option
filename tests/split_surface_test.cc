@@ -256,3 +256,10 @@ TEST(SplitSurfaceTest, RequestedTimeBoundsDoNotAdmitMissingEdgeSegments) {
     EXPECT_TRUE(table.contains_maturity(.5));
     EXPECT_FALSE(table.contains_maturity(.9));
 }
+
+TEST(TauSegmentSplitTest, NumericalHeadroomCannotFillAnOmittedRoutingGap) {
+    TauSegmentSplit split({0.,.6},{.4,1.},{0.,0.},{.8,.4},100.);
+    EXPECT_TRUE(split.contains_maturity(.3));
+    EXPECT_FALSE(split.contains_maturity(.5));
+    EXPECT_TRUE(split.contains_maturity(.7));
+}
