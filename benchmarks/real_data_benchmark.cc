@@ -142,6 +142,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         fixture_ptr->K_ref = SPOT;  // Use real spot as reference
 
         std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
+        for (double& m : m_grid) m = std::log(m);
         std::vector<double> tau_grid = {0.01, 0.05, 0.1, 0.25, 0.5};  // Short maturities like real data
         std::vector<double> vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30};
         std::vector<double> rate_grid = {0.0, 0.02, 0.04, 0.06};
@@ -364,13 +365,13 @@ static void BM_RealData_PriceTableInterpolation(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
     // Query near real spot
-    const double moneyness = 1.0;  // ATM
+    const double log_moneyness = 0.0;  // log(S/K) at ATM
     constexpr double maturity = 0.1;
     constexpr double sigma = 0.20;
     const double rate = RISK_FREE_RATE;
 
     auto run_once = [&]() {
-        double price = surf.spline->eval({moneyness, maturity, sigma, rate});
+        double price = surf.spline->eval({log_moneyness, maturity, sigma, rate});
         benchmark::DoNotOptimize(price);
     };
 
@@ -387,11 +388,11 @@ static void BM_RealData_PriceTableInterpolation(benchmark::State& state) {
 BENCHMARK(BM_RealData_PriceTableInterpolation)
     ->MinTime(kMinBenchmarkTimeSec);
 
-// BM_RealData_PriceTableGreeks: Vega and gamma via finite differences
+// BM_RealData_PriceTableGreeks: Raw EEP partials via finite differences
 static void BM_RealData_PriceTableGreeks(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    const double moneyness = 1.0;
+    const double log_moneyness = 0.0;
     constexpr double maturity = 0.1;
     constexpr double sigma = 0.20;
     const double rate = RISK_FREE_RATE;
@@ -399,17 +400,17 @@ static void BM_RealData_PriceTableGreeks(benchmark::State& state) {
     constexpr double m_eps = 5e-3;
 
     auto run_once = [&]() {
-        const double base = surf.spline->eval({moneyness, maturity, sigma, rate});
-        const double price_up_sigma = surf.spline->eval({moneyness, maturity, sigma + sigma_eps, rate});
-        const double price_dn_sigma = surf.spline->eval({moneyness, maturity, sigma - sigma_eps, rate});
+        const double base = surf.spline->eval({log_moneyness, maturity, sigma, rate});
+        const double price_up_sigma = surf.spline->eval({log_moneyness, maturity, sigma + sigma_eps, rate});
+        const double price_dn_sigma = surf.spline->eval({log_moneyness, maturity, sigma - sigma_eps, rate});
         double vega = (price_up_sigma - price_dn_sigma) / (2.0 * sigma_eps);
 
-        const double price_up_m = surf.spline->eval({moneyness + m_eps, maturity, sigma, rate});
-        const double price_dn_m = surf.spline->eval({moneyness - m_eps, maturity, sigma, rate});
-        double gamma = (price_up_m - 2.0 * base + price_dn_m) / (m_eps * m_eps);
+        const double price_up_m = surf.spline->eval({log_moneyness + m_eps, maturity, sigma, rate});
+        const double price_dn_m = surf.spline->eval({log_moneyness - m_eps, maturity, sigma, rate});
+        double log_curvature = (price_up_m - 2.0 * base + price_dn_m) / (m_eps * m_eps);
 
         benchmark::DoNotOptimize(vega);
-        benchmark::DoNotOptimize(gamma);
+        benchmark::DoNotOptimize(log_curvature);
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
@@ -420,7 +421,7 @@ static void BM_RealData_PriceTableGreeks(benchmark::State& state) {
         run_once();
     }
 
-    state.SetLabel("Greeks (vega, gamma)");
+    state.SetLabel("Raw EEP sigma derivative and log-moneyness curvature");
 }
 BENCHMARK(BM_RealData_PriceTableGreeks)
     ->MinTime(kMinBenchmarkTimeSec);
@@ -700,7 +701,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
             }
         }
 
-        benchmark::DoNotOptimize(max_abs_error);
+        // Published counters already consume this measurement.
     }
 
     if (valid_count > 0) {
@@ -860,7 +861,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
                 valid_count++;
             }
         }
-        benchmark::DoNotOptimize(max_abs_error);
+        // Published counters already consume this measurement.
     }
 
     size_t n_pde_solves = table_result->n_pde_solves;
@@ -971,7 +972,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
                 valid_count++;
             }
         }
-        benchmark::DoNotOptimize(max_abs_error);
+        // Published counters already consume this measurement.
     }
 
     // Report grid sizes

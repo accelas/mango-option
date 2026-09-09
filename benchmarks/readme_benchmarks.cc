@@ -92,6 +92,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         fixture_ptr->K_ref = 100.0;
 
         std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
+        for (double& m : m_grid) m = std::log(m);
         std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
         std::vector<double> vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30};
         std::vector<double> rate_grid = {0.0, 0.025, 0.05, 0.10};
@@ -379,13 +380,13 @@ BENCHMARK(BM_README_IV_BSpline)->MinTime(kMinBenchmarkTimeSec);
 static void BM_README_PriceTableInterpolation(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
     const double spot = 103.5;
-    const double moneyness = spot / surf.K_ref;
+    const double log_moneyness = std::log(spot / surf.K_ref);
     const double maturity = 0.75;
     const double sigma = 0.22;
     const double rate = 0.02;
 
     auto run_once = [&]() {
-        double price = surf.spline->eval({moneyness, maturity, sigma, rate});
+        double price = surf.spline->eval({log_moneyness, maturity, sigma, rate});
         benchmark::DoNotOptimize(price);
     };
 
@@ -404,7 +405,7 @@ BENCHMARK(BM_README_PriceTableInterpolation)->MinTime(kMinBenchmarkTimeSec);
 static void BM_README_PriceTableGreeks(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
     const double spot = 103.5;
-    const double moneyness = spot / surf.K_ref;
+    const double log_moneyness = std::log(spot / surf.K_ref);
     const double maturity = 1.0;
     const double sigma = 0.20;
     const double rate = 0.05;
@@ -412,17 +413,17 @@ static void BM_README_PriceTableGreeks(benchmark::State& state) {
     const double m_eps = 5e-3;
 
     auto run_once = [&]() {
-        const double base = surf.spline->eval({moneyness, maturity, sigma, rate});
-        const double price_up_sigma = surf.spline->eval({moneyness, maturity, sigma + sigma_eps, rate});
-        const double price_dn_sigma = surf.spline->eval({moneyness, maturity, sigma - sigma_eps, rate});
+        const double base = surf.spline->eval({log_moneyness, maturity, sigma, rate});
+        const double price_up_sigma = surf.spline->eval({log_moneyness, maturity, sigma + sigma_eps, rate});
+        const double price_dn_sigma = surf.spline->eval({log_moneyness, maturity, sigma - sigma_eps, rate});
         double vega = (price_up_sigma - price_dn_sigma) / (2.0 * sigma_eps);
 
-        const double price_up_m = surf.spline->eval({moneyness + m_eps, maturity, sigma, rate});
-        const double price_dn_m = surf.spline->eval({moneyness - m_eps, maturity, sigma, rate});
-        double gamma = (price_up_m - 2.0 * base + price_dn_m) / (m_eps * m_eps);
+        const double price_up_m = surf.spline->eval({log_moneyness + m_eps, maturity, sigma, rate});
+        const double price_dn_m = surf.spline->eval({log_moneyness - m_eps, maturity, sigma, rate});
+        double log_curvature = (price_up_m - 2.0 * base + price_dn_m) / (m_eps * m_eps);
 
         benchmark::DoNotOptimize(vega);
-        benchmark::DoNotOptimize(gamma);
+        benchmark::DoNotOptimize(log_curvature);
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
@@ -433,7 +434,7 @@ static void BM_README_PriceTableGreeks(benchmark::State& state) {
         run_once();
     }
 
-    state.SetLabel("Greeks (vega, gamma)");
+    state.SetLabel("Raw EEP sigma derivative and log-moneyness curvature");
 }
 BENCHMARK(BM_README_PriceTableGreeks)->MinTime(kMinBenchmarkTimeSec);
 

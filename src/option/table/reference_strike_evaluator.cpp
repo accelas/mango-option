@@ -82,6 +82,13 @@ struct ReferenceStrikeEvaluator::Impl {
     SegmentedAdaptiveConfig config;
     SurfaceBounds bounds;
     std::vector<PhysicalQuery> queries;
+    // Actual rounded quote ratios, including S=m*K followed by S/K. The
+    // requested ratio endpoints alone need not contain every floating key.
+    std::vector<double> query_ratios;
+    struct SampledSolution {
+        double x_min, x_max;
+        std::vector<double> values;
+    };
     double price_target, iv_target, vega_floor;
     double full_u;
     ReferenceSequenceObserver observer;
@@ -89,7 +96,7 @@ struct ReferenceStrikeEvaluator::Impl {
     PdeWork provider_work;
     static constexpr size_t kSolveBudget = 8192;
     using SolveKey = std::tuple<double, double, double, double, size_t, size_t, double>;
-    std::map<SolveKey, std::shared_ptr<AmericanOptionResult>> solutions;
+    std::map<SolveKey, std::shared_ptr<const SampledSolution>> solutions;
     using PriceKey = std::tuple<double, double, double, double, double, size_t>;
     std::map<PriceKey, Observation> prices;
     std::map<std::vector<double>, ReferenceAccuracySummary> reference_witnesses;
@@ -105,7 +112,7 @@ struct ReferenceStrikeEvaluator::Impl {
                   query.rate, bump, round, space, time, domain, allowance});
     }
 
-    std::shared_ptr<AmericanOptionResult> solve(
+    std::shared_ptr<const SampledSolution> solve(
         double strike, double tau, double sigma, double rate,
         size_t nx, size_t nt, double u) {
         const SolveKey key{strike, tau, sigma, rate, nx, nt, u};
@@ -119,7 +126,7 @@ struct ReferenceStrikeEvaluator::Impl {
             config.discrete_dividends, config.maturity, tau);
         const double radius = 0.05 * std::sinh(u);
         auto grid = GridSpec<double>::sinh_spaced(-radius, radius, nx, 2.0 * u);
-        std::shared_ptr<AmericanOptionResult> result;
+        std::shared_ptr<SampledSolution> result;
         if (grid) {
             auto solver = AmericanOptionSolver::create(params, PDEGridSpec{PDEGridConfig{*grid, nt, {}}});
             if (solver) {
@@ -127,7 +134,21 @@ struct ReferenceStrikeEvaluator::Impl {
                 auto solved = solver->solve();
                 if (solved) {
                     ++provider_work.completed;
-                    result = std::make_shared<AmericanOptionResult>(std::move(*solved));
+                    const auto x = solved->grid()->x();
+                    result = std::make_shared<SampledSolution>(x.front(), x.back(),
+                        std::vector<double>{});
+                    result->values.reserve(query_ratios.size());
+                    for (const double ratio : query_ratios) {
+                        const double log_ratio = std::log(ratio);
+                        // Preserve sample()'s original bounds check and the
+                        // exact value_at(K*ratio) extraction, including its
+                        // multiplication/division rounding and price units.
+                        result->values.push_back(log_ratio > x.front() && log_ratio < x.back()
+                            ? solved->value_at(strike * ratio)
+                            : std::numeric_limits<double>::quiet_NaN());
+                    }
+                    // No later operation needs the PDE grid or its spline.
+                    // Retain only the frozen query values after this scope.
                 } else {
                     ++provider_work.failed;
                 }
@@ -148,9 +169,12 @@ struct ReferenceStrikeEvaluator::Impl {
         auto result = solve(local_k, query.tau, sigma, query.rate,
                             intervals * factor + 1, time_steps * factor, u);
         const double x = std::log(ratio);
-        if (!result || !(x > result->grid()->x().front() && x < result->grid()->x().back()))
+        if (!result || !(x > result->x_min && x < result->x_max))
             return std::numeric_limits<double>::quiet_NaN();
-        return scale * result->value_at(local_k * ratio);
+        const auto found = std::ranges::lower_bound(query_ratios, ratio);
+        if (found == query_ratios.end() || *found != ratio)
+            return std::numeric_limits<double>::quiet_NaN();
+        return scale * result->values[static_cast<size_t>(found - query_ratios.begin())];
     }
 
     Observation price(const PhysicalQuery& query, double strike, double sigma, size_t round) {
@@ -430,7 +454,11 @@ ReferenceStrikeEvaluator::create(const SegmentedAdaptiveConfig& config, const Su
         const auto& q = impl->queries[i];
         if (!domain.contains_quote(q.spot, q.strike) || !(q.tau > 0.0) || !(q.sigma > 0.0))
             return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig, 0, i});
+        impl->query_ratios.push_back(q.spot / q.strike);
     }
+    std::ranges::sort(impl->query_ratios);
+    const auto duplicates = std::ranges::unique(impl->query_ratios);
+    impl->query_ratios.erase(duplicates.begin(), duplicates.end());
     return ReferenceStrikeEvaluator(std::move(impl));
 }
 

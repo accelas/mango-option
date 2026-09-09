@@ -376,6 +376,10 @@ public:
     /// table was built manually or loaded from Parquet.
     [[nodiscard]] std::optional<BuildDiagnostics> build_diagnostics() const;
 
+    /// Same immutable final assessment owned by the source table, when present.
+    [[nodiscard]] std::shared_ptr<const AccuracyReport> accuracy_report() const;
+
+
     // Pimpl: move-only, defined in .cpp
     struct Impl;
     explicit AnyInterpIVSolver(std::unique_ptr<Impl> impl);
@@ -384,6 +388,8 @@ public:
     ~AnyInterpIVSolver();
 
 private:
+    friend class AnyPriceTable;
+    void attach_accuracy_report(std::shared_ptr<const AccuracyReport> report);
     std::unique_ptr<Impl> impl_;
 };
 
