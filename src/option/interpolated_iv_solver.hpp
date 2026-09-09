@@ -58,7 +58,10 @@ struct InterpolatedIVSolverConfig {
     /// threshold, the option has no usable sensitivity to volatility and IV
     /// is effectively undefined: returns VegaTooSmall immediately (~600 ns)
     /// instead of running a doomed Brent search.  A non-finite probe vega
-    /// returns NumericalInstability.  Set to 0 to disable.
+    /// returns NumericalInstability. Set to 0 to disable this pre-check.
+    /// Every returned root still requires finite positive vega and sufficient
+    /// sensitivity to resolve a representable price change at the solver's
+    /// volatility resolution. A positive threshold also applies at that root.
     double vega_threshold = 1e-4;
 
     /// Screen the solve bracket for multiple roots before inverting.
@@ -528,6 +531,14 @@ InterpolatedIVSolver<Surface>::create(
     const InterpolatedIVSolverConfig& config,
     std::optional<std::vector<Dividend>> build_dividends)
 {
+    if (!std::isfinite(config.tolerance) || config.tolerance <= 0.0) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidBounds, config.tolerance});
+    }
+    if (!std::isfinite(config.vega_threshold) || config.vega_threshold < 0.0) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidBounds, config.vega_threshold});
+    }
     // Use concept accessors for bounds extraction
     auto m_range = std::make_pair(surface.m_min(), surface.m_max());
     auto tau_range = std::make_pair(surface.tau_min(), surface.tau_max());
@@ -762,6 +773,48 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
         return eval_price(moneyness, query.maturity, sigma, rate_value, query.strike) - query.market_price;
     };
 
+    // Every success, including a screened endpoint, must be sensitive at the
+    // returned root. A healthy bracket probe cannot establish this property.
+    auto admit_root = [&](IVSuccess success) -> std::expected<IVSuccess, IVError> {
+        const double vega = surface_.vega(query.spot, query.strike,
+            query.maturity, success.implied_vol, rate_value);
+        if (!std::isfinite(vega)) {
+            return std::unexpected(IVError{
+                .code = IVErrorCode::NumericalInstability,
+                .iterations = success.iterations,
+                .final_error = vega,
+                .last_vol = success.implied_vol
+            });
+        }
+        // Brent currently uses tolerance for both price residual and sigma
+        // distance. At that sigma resolution, the local price response must
+        // reach at least one representable quote increment. This numerical
+        // admission is scale-dependent; it is not an IV accuracy estimate.
+        const double sigma_ulp = std::nextafter(success.implied_vol,
+            std::numeric_limits<double>::infinity()) - success.implied_vol;
+        const double sigma_resolution = std::min(sigma_max - sigma_min,
+            std::max(config_.tolerance, sigma_ulp));
+        const double price_ulp_down = query.market_price - std::nextafter(
+            query.market_price, 0.0);
+        const double price_ulp_up = std::nextafter(query.market_price,
+            std::numeric_limits<double>::infinity()) - query.market_price;
+        const double price_ulp = std::isfinite(price_ulp_up)
+            ? std::max(price_ulp_down, price_ulp_up) : price_ulp_down;
+        const double resolution_floor = price_ulp / sigma_resolution;
+        if (!(vega > 0.0) || vega < config_.vega_threshold ||
+            vega < resolution_floor) {
+            return std::unexpected(IVError{
+                .code = IVErrorCode::VegaTooSmall,
+                .iterations = success.iterations,
+                .final_error = vega,
+                .last_vol = success.implied_vol
+            });
+        }
+        success.vega = vega;
+        success.used_rate_approximation = rate_is_curve;
+        return success;
+    };
+
     // Bracket handed to Brent.  The multiple-root screen may narrow it to
     // the single scan interval that contains a sign change.
     double brent_lo = sigma_min;
@@ -783,8 +836,7 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
             return std::unexpected(*screen.refusal);
         }
         if (screen.boundary_root.has_value()) {
-            screen.boundary_root->used_rate_approximation = rate_is_curve;
-            return *screen.boundary_root;
+            return admit_root(*screen.boundary_root);
         }
         brent_lo = screen.lo;
         brent_hi = screen.hi;
@@ -848,13 +900,13 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
         }
     }
 
-    return IVSuccess{
+    return admit_root(IVSuccess{
         .implied_vol = result->root,
         .iterations = result->iterations,
         .final_error = result->final_error,
         .vega = std::nullopt,
         .used_rate_approximation = rate_is_curve
-    };
+    });
 }
 
 template <typename Surface>
