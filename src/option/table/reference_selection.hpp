@@ -2,6 +2,7 @@
 #pragma once
 
 #include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/refinement_work.hpp"
 #include "mango/support/error_types.hpp"
 #include <cstddef>
 #include <expected>
@@ -71,6 +72,9 @@ struct ReferenceCandidateMetrics {
     size_t pde_solves = 0;
     double elapsed_seconds = 0.0;
     std::optional<ReferenceQualificationPaths> qualification_paths;
+    /// Actual solve work when supplied by the numerical provider. The legacy
+    /// pde_solves counter may count requests rejected before solver creation.
+    std::optional<PdeWork> provider_work;
 };
 
 using ReferenceCandidateEvaluator = std::function<

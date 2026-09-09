@@ -5,10 +5,13 @@
 #include <vector>
 #include <optional>
 #include <variant>
+#include <memory>
 #include <expected>
 #include <ostream>
 
 namespace mango {
+
+struct RefinementWork;
 
 /// High-level solver error categories surfaced through expected results
 enum class SolverErrorCode {
@@ -221,6 +224,7 @@ struct PriceTableError {
     PriceTableErrorCode code;
     size_t axis_index;         ///< Axis index for grid errors (0-3 for 4D)
     size_t count;              ///< Count for size-related errors
+    std::shared_ptr<const RefinementWork> work;  ///< Present when a build spent tracked work
 
     PriceTableError(PriceTableErrorCode code,
                    size_t axis_index = 0,
