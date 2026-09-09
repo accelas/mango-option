@@ -67,6 +67,7 @@ struct ValidationError {
     ValidationErrorCode code;
     double value;  // The invalid value that was provided
     size_t index;  // Optional index for array/grid errors (0 if not applicable)
+    std::shared_ptr<const RefinementWork> work;  ///< Retained build work, when available
 
     ValidationError(ValidationErrorCode code,
                    double value = 0.0,
@@ -456,7 +457,9 @@ inline PriceTableError convert_to_price_table_error(const ValidationError& err) 
             code = PriceTableErrorCode::ValidationFailed;
             break;
     }
-    return PriceTableError{code, err.index, 0};
+    PriceTableError result{code, err.index, 0};
+    result.work = err.work;
+    return result;
 }
 
 // ============================================================================

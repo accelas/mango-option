@@ -3,7 +3,7 @@
 
 namespace mango::detail {
 
-ValidationError to_validation_error(const PriceTableError& error) {
+static ValidationError map_error_code(const PriceTableError& error) {
     switch (error.code) {
         case PriceTableErrorCode::NonPositiveValue:
             return ValidationError{ValidationErrorCode::InvalidBounds, 0.0,
@@ -39,6 +39,12 @@ ValidationError to_validation_error(const PriceTableError& error) {
     }
     // Unreachable: the switch is exhaustive (-Werror=switch enforces it).
     return ValidationError{ValidationErrorCode::PriceTableBuildFailed, 0.0, 0};
+}
+
+ValidationError to_validation_error(const PriceTableError& error) {
+    auto result = map_error_code(error);
+    result.work = error.work;
+    return result;
 }
 
 }  // namespace mango::detail
