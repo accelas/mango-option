@@ -23,6 +23,23 @@ execution resources, scripts and reports are retained at:
 
 - `/home/kai/work/mango-option/.cache/483-research/459-phase-a`
 - `/home/kai/work/mango-option/.cache/483-research/459-phase-b`
+- `/home/kai/work/mango-option/.cache/483-research/459-rate-audit`
+
+The subsequent fixed rate-seed panel supplies an optional fifth argument to
+`continuous_bspline build C0-CALL OUTPUT`: 4, 7, 13, or 25. Nested midpoint
+unions preserve all original rate sites; other factory inputs stay fixed.
+The worker records every returned axis node and checks rate-seed retention.
+Its declared inputs are in `rate_seeds_manifest.json` and
+`rate_seeds_opt_manifest.json`.
+
+An execution audit found mixed optimization in the original fastbuild runs:
+some PDE/factory targets explicitly use `-O3`, but construction/refinement
+targets did not. The new optimized panel rebuilds every 4/7/13/25 configuration
+with `-c opt`, including its baseline. Those records are at
+`/home/kai/work/mango-option/.cache/483-research/459-rate-seeds-opt`; earlier
+mixed-build results remain separately under `459-rate-seeds`. Do not compare
+an optimized candidate with the earlier baseline as a matched performance or
+accuracy selection experiment.
 
 Both workers are manual targets under `//tests/phase_a`. Their private proof
 dependency stays within its existing test visibility. Compile with `--jobs=4`,

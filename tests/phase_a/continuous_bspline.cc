@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <algorithm>
 
 using namespace mango;
 using Clock=std::chrono::steady_clock;
@@ -49,6 +50,8 @@ void metadata(const PriceTableData& data) {
             field("grid_"+std::to_string(d)+"_size",segment.grids[d].size());
             field("grid_"+std::to_string(d)+"_min",segment.grids[d].front());
             field("grid_"+std::to_string(d)+"_max",segment.grids[d].back());
+            for (size_t i=0;i<segment.grids[d].size();++i)
+                field("grid_"+std::to_string(d)+"_node_"+std::to_string(i),segment.grids[d][i]);
         }
     }
 }
@@ -86,7 +89,7 @@ void witness_evidence(AnyPriceTable& table, const PricingParams& p) {
 }
 
 int main(int argc,char** argv) {
-    if (argc!=4) return 2;
+    if (argc!=4 && argc!=5) return 2;
     const std::string mode=argv[1], id=argv[2];
     if (id!="C0-CALL" && id!="CS-PUT" && id!="C2-PUT" && id!="CS-CALL") return 2;
     std::cout << std::setprecision(17) << std::unitbuf;
@@ -94,11 +97,28 @@ int main(int argc,char** argv) {
     field("case",id); field("mode",mode); field("payload",path.string());
     auto started=Clock::now();
     if (mode=="build") {
-        auto table=make_price_table(configuration(id));
+        auto config=configuration(id);
+        const size_t rate_sites=argc==5 ? std::stoul(argv[4]) : 4;
+        if (rate_sites!=4 && rate_sites!=7 && rate_sites!=13 && rate_sites!=25) return 2;
+        if (rate_sites!=4 && id!="C0-CALL") return 2;
+        while (config.grid.rate.size()<rate_sites) {
+            auto expanded=config.grid.rate;
+            for (size_t i=1;i<config.grid.rate.size();++i)
+                expanded.push_back((config.grid.rate[i-1]+config.grid.rate[i])/2);
+            std::sort(expanded.begin(),expanded.end());
+            config.grid.rate=std::move(expanded);
+        }
+        field("rate_seed_count",config.grid.rate.size());
+        for (size_t i=0;i<config.grid.rate.size();++i) field("rate_seed_"+std::to_string(i),config.grid.rate[i]);
+        auto table=make_price_table(config);
         field("build_seconds",seconds(started));
         if (!table) { field("build_status","refused"); field("build_error",static_cast<int>(table.error().code)); return 3; }
         field("build_status","built");
-        metadata(table->to_data());
+        const auto data=table->to_data(); metadata(data);
+        const auto& returned_rates=data.segments.front().grids[3];
+        field("all_rate_seeds_retained",std::ranges::all_of(config.grid.rate,[&](double rate) {
+            return std::ranges::find(returned_rates,rate)!=returned_rates.end();
+        }));
         if (auto diagnostics=table->build_diagnostics()) {
             field("adaptive_target_met",diagnostics->target_met);
             field("adaptive_achieved_error",diagnostics->achieved_max_error);
