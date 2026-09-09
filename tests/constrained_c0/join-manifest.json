@@ -1,0 +1,455 @@
+{
+  "version": "459-rate-join-21-v1",
+  "population": "separate exploratory ledger, primary772 unchanged",
+  "rows": [
+    {
+      "id": "C0-JOIN-ATM-0",
+      "anchor": "ATM",
+      "spot": 100.0,
+      "strike": 100.0,
+      "maturity": 0.0821917808219178,
+      "volatility": 0.5,
+      "rate": -0.00625,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ATM-1",
+      "anchor": "ATM",
+      "spot": 100.0,
+      "strike": 100.0,
+      "maturity": 0.0821917808219178,
+      "volatility": 0.5,
+      "rate": -0.001,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ATM-2",
+      "anchor": "ATM",
+      "spot": 100.0,
+      "strike": 100.0,
+      "maturity": 0.0821917808219178,
+      "volatility": 0.5,
+      "rate": -0.0001,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ATM-3",
+      "anchor": "ATM",
+      "spot": 100.0,
+      "strike": 100.0,
+      "maturity": 0.0821917808219178,
+      "volatility": 0.5,
+      "rate": -1e-05,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ATM-4",
+      "anchor": "ATM",
+      "spot": 100.0,
+      "strike": 100.0,
+      "maturity": 0.0821917808219178,
+      "volatility": 0.5,
+      "rate": -1e-06,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ATM-5",
+      "anchor": "ATM",
+      "spot": 100.0,
+      "strike": 100.0,
+      "maturity": 0.0821917808219178,
+      "volatility": 0.5,
+      "rate": -1e-07,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ATM-6",
+      "anchor": "ATM",
+      "spot": 100.0,
+      "strike": 100.0,
+      "maturity": 0.0821917808219178,
+      "volatility": 0.5,
+      "rate": 0.0,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_LOW-0",
+      "anchor": "ITM_LOW",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.05,
+      "rate": -0.00625,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_LOW-1",
+      "anchor": "ITM_LOW",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.05,
+      "rate": -0.001,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_LOW-2",
+      "anchor": "ITM_LOW",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.05,
+      "rate": -0.0001,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_LOW-3",
+      "anchor": "ITM_LOW",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.05,
+      "rate": -1e-05,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_LOW-4",
+      "anchor": "ITM_LOW",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.05,
+      "rate": -1e-06,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_LOW-5",
+      "anchor": "ITM_LOW",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.05,
+      "rate": -1e-07,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_LOW-6",
+      "anchor": "ITM_LOW",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.05,
+      "rate": 0.0,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_MID-0",
+      "anchor": "ITM_MID",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.3,
+      "rate": -0.00625,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_MID-1",
+      "anchor": "ITM_MID",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.3,
+      "rate": -0.001,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_MID-2",
+      "anchor": "ITM_MID",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.3,
+      "rate": -0.0001,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_MID-3",
+      "anchor": "ITM_MID",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.3,
+      "rate": -1e-05,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_MID-4",
+      "anchor": "ITM_MID",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.3,
+      "rate": -1e-06,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_MID-5",
+      "anchor": "ITM_MID",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.3,
+      "rate": -1e-07,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    },
+    {
+      "id": "C0-JOIN-ITM_MID-6",
+      "anchor": "ITM_MID",
+      "spot": 130.0,
+      "strike": 100.0,
+      "maturity": 2.0,
+      "volatility": 0.3,
+      "rate": 0.0,
+      "dividend_yield": 0.0,
+      "option_type": "CALL",
+      "rolled_dividends": [],
+      "events": [],
+      "build_id": "C0-CALL",
+      "_ledger": "exploratory-rate-join",
+      "_manifest": "459-rate-join-21-v1",
+      "_build": {
+        "anchor_maturity": 2.0,
+        "anchored_dividends": []
+      }
+    }
+  ],
+  "reference": {
+    "worker_source": "056fa48f",
+    "driver_source": "523834a4",
+    "worker_sha256": "89a83a3f1a6b31975719e19993c6f51b43cd98fc70dd830d9324c99a7a26aac6",
+    "driver_sha256": "7f117652b761023139564b5ba19ffae839fa52152d5abbd9e846cad51d9f5042",
+    "rounds": 3,
+    "vega_bump_fraction": 0.04,
+    "price_budget": 0.001,
+    "iv_budget": 2e-06,
+    "quantlib": false,
+    "analytic_r0": true,
+    "workers": 2
+  },
+  "rho_diagnostic": {
+    "side": "negative-rate backward secants to r0",
+    "h": [
+      0.001,
+      0.0001,
+      1e-05,
+      1e-06,
+      1e-07
+    ],
+    "uncertainty": "sum of independent endpoint price uncertainties divided by h; explicitly not a central rho or automatic derivative qualification",
+    "truncation": "report successive slopes/convergence only, no new universal Greek tolerance",
+    "analytic_r0_rho": "right-side independently qualified reference only"
+  },
+  "execution_limit_seconds": 600,
+  "execution_limit_meaning": "bounded research measurement, unfinished if exceeded, not user ceiling",
+  "candidate_state": "no second candidate selected or constructed before results"
+}
