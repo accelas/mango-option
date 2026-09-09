@@ -100,3 +100,22 @@ cc_library(
     strip_include_prefix = "/src/option/table/chebyshev",
     include_prefix = "mango/option/table/chebyshev",
 )
+
+cc_library(
+    name = "modal_types",
+    hdrs = ["modal_types.hpp"],
+    deps = [
+        "//src/math/chebyshev:chebyshev_modal_interpolant",
+        "//src/option/table:transform_leaf",
+        "//src/option/table:eep_layer",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:split_surface",
+        "//src/option/table:tau_segment_split",
+        "//src/option/table:multi_kref_split",
+        "//src/option/table:standard_transform_4d",
+        "//src/option/table:dimensionless_transform_3d",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table/chebyshev",
+    include_prefix = "mango/option/table/chebyshev",
+)

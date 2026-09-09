@@ -501,3 +501,194 @@ TEST(PhysicalCellProofTest, ModalProofHandlesTheActual257By9By9By5ShapeWithinDec
     EXPECT_EQ(polynomial->num_pts(), shape);
     EXPECT_EQ(polynomial->polynomial().coefficients().size(), coefficients.size());
 }
+
+TEST(PhysicalCellProofTest, CertifiedCreationBindsProofToDetachedPayload) {
+    const SurfaceBounds b{-.001, .001, .99, 1.01, .19, .21, -.001, .001};
+    auto source = std::make_shared<BSplineND<double, 4>>(
+        bezier({2.1, 2.1 - .2 / 3, 2.1 - 2 * .2 / 3, 1.9}, b));
+    BSplineLeaf leaf(BSplineTransformLeaf(SharedBSplineInterp<4>(source), {}, 100),
+                     AnalyticalEEP(OptionType::PUT, 0));
+    auto table = BSplinePriceTable::create(leaf, b, OptionType::PUT, 0);
+    ASSERT_TRUE(table);
+    EXPECT_EQ(table->proof_status(), PriceProofStatus::Certified);
+    const double original = table->price(100, 100, 1, .2, 0);
+    *source = bezier({20, 20 - 2. / 3, 20 - 4. / 3, 18}, b);
+    EXPECT_EQ(table->proof_status(), PriceProofStatus::Certified);
+    EXPECT_EQ(table->price(100, 100, 1, .2, 0), original);
+    auto copied = *table;
+    EXPECT_EQ(&copied.inner(), &table->inner());
+}
+
+TEST(PhysicalCellProofTest, CertifiedCreationChecksTheActualAnalyticalModel) {
+    const SurfaceBounds b{-.001, .001, .99, 1.01, .19, .21, -.001, .001};
+    auto source = std::make_shared<const BSplineND<double, 4>>(
+        bezier({2.1, 2.1 - .2 / 3, 2.1 - 2 * .2 / 3, 1.9}, b));
+    BSplineLeaf leaf(BSplineTransformLeaf(SharedBSplineInterp<4>(source), {}, 100),
+                     AnalyticalEEP(OptionType::PUT, 1000));
+    ASSERT_LT(leaf.vega(100, 100, 1, .2, 0), 0);
+    auto forged_model = BSplinePriceTable::create(leaf, b, OptionType::PUT, 0);
+    ASSERT_FALSE(forged_model);
+    EXPECT_EQ(forged_model.error().code, PriceTableErrorCode::InvalidConfig);
+    auto actual_model = BSplinePriceTable::create(leaf, b, OptionType::PUT, 1000);
+    ASSERT_FALSE(actual_model);
+    EXPECT_EQ(actual_model.error().code, PriceTableErrorCode::NonMonotoneSurface);
+}
+
+TEST(PhysicalCellProofTest, FiniteInputsCannotCertifyAnOverflowingDoubleEuropeanEvaluator) {
+    const SurfaceBounds b{-.001, .001, 3, 4, 5e307, 1e308, .01, .03};
+    auto source = std::make_shared<const BSplineND<double, 4>>(bezier({0, 0, 0, 0}, b));
+    BSplineLeaf leaf(BSplineTransformLeaf(SharedBSplineInterp<4>(source), {}, 100),
+                     AnalyticalEEP(OptionType::PUT, 0));
+    ASSERT_FALSE(std::isfinite(leaf.price(100, 100, 4, 1e308, .02)));
+    auto table = BSplinePriceTable::create(leaf, b, OptionType::PUT, 0);
+    ASSERT_FALSE(table);
+    EXPECT_EQ(table.error().code, PriceTableErrorCode::CertificationIndeterminate);
+}
+
+TEST(PhysicalCellProofTest, CertifiedCreationAcceptsOnlyTheClosedRepresentedPayloadTypes) {
+    const SurfaceBounds b3{-.001, .001, .99, 1.01, .99, 1.01, .49, .51};
+    auto spline3 = std::make_shared<const BSplineND<double, 3>>(dimensionless_linear(0, 0, 0));
+    BSpline3DLeaf leaf3(BSpline3DTransformLeaf(SharedBSplineInterp<3>(spline3), {}, 100),
+                        AnalyticalEEP(OptionType::PUT, 0));
+    auto d3 = BSpline3DPriceTable::create(leaf3, b3, OptionType::PUT, 0);
+    ASSERT_TRUE(d3);
+    EXPECT_EQ(d3->proof_status(), PriceProofStatus::Certified);
+    const SurfaceBounds bs{-.01, .01, .1, .9, .15, .35, .04, .06, StrikeBounds{95, 105}};
+    const FixedExpiryMetadata fixed{1, {}};
+    auto segmented =
+        BSplineMultiKRefSurface::create(two_references(0, 0), bs, OptionType::PUT, 0, fixed);
+    ASSERT_TRUE(segmented);
+    EXPECT_EQ(segmented->proof_status(), PriceProofStatus::Certified);
+    Domain<4> dom4{{-.1, 0, .1, .01}, {.1, 1, .4, .1}};
+    auto interp4 = ChebyshevModalInterpolant<4>::build_from_coefficients(std::vector<double>(16),
+                                                                         dom4, {2, 2, 2, 2});
+    ASSERT_TRUE(interp4);
+    ChebyshevModalLeaf ml4(ChebyshevModalTransformLeaf(*interp4, {}, 100),
+                           AnalyticalEEP(OptionType::PUT, 0));
+    auto modal4 = PriceTable<ChebyshevModalLeaf>::create(ml4, bs, OptionType::PUT, 0);
+    ASSERT_TRUE(modal4);
+    Domain<3> dom3{{-.01, .4, -.1}, {.01, .6, .1}};
+    auto interp3 = ChebyshevModalInterpolant<3>::build_from_coefficients(std::vector<double>(8),
+                                                                         dom3, {2, 2, 2});
+    ASSERT_TRUE(interp3);
+    ChebyshevModal3DLeaf ml3(ChebyshevModal3DTransformLeaf(*interp3, {}, 100),
+                             AnalyticalEEP(OptionType::PUT, 0));
+    auto modal3 = PriceTable<ChebyshevModal3DLeaf>::create(ml3, b3, OptionType::PUT, 0);
+    ASSERT_TRUE(modal3);
+    std::vector<ChebyshevModalSegmentedSurface> members;
+    for (double reference : {80., 120.})
+        members.emplace_back(std::vector<ChebyshevModalSegmentedLeaf>{ChebyshevModalSegmentedLeaf(
+                                 *interp4, {}, reference)},
+                             TauSegmentSplit({0}, {1}, {0}, {1}, reference));
+    ChebyshevModalMultiKRefInner mi(std::move(members), MultiKRefSplit({80, 120}));
+    auto modal_split =
+        PriceTable<ChebyshevModalMultiKRefInner>::create(mi, bs, OptionType::PUT, 0, fixed);
+    ASSERT_TRUE(modal_split);
+    struct ClaimedCertificate {
+        PriceProofStatus proof_status() const { return PriceProofStatus::Certified; }
+    };
+    auto claim = PriceTable<ClaimedCertificate>::create({}, bs, OptionType::PUT, 0);
+    ASSERT_FALSE(claim);
+    EXPECT_EQ(claim.error().code, PriceTableErrorCode::UnsupportedRepresentation);
+}
+
+TEST(PhysicalCellProofTest, CheckedGreekRefusesAGenuinelyUnrepresentableDerivative) {
+    const SurfaceBounds b{-.01, .01, .1, 1, .1, .4, .01, .1};
+    auto source = std::make_shared<const BSplineND<double, 4>>(bezier({0, 0, 0, 0}, b));
+    BSplineLeaf leaf(BSplineTransformLeaf(SharedBSplineInterp<4>(source), {}, 100),
+                     AnalyticalEEP(OptionType::PUT, 0));
+    auto table = BSplinePriceTable::create(leaf, b, OptionType::PUT, 0);
+    ASSERT_TRUE(table);
+    PricingParams query(OptionSpec{.spot = 1e-320,
+                                   .strike = 1e-320,
+                                   .maturity = .5,
+                                   .rate = .05,
+                                   .option_type = OptionType::PUT},
+                        .2);
+    ASSERT_TRUE(table->contains_moneyness(query.spot, query.strike));
+    ASSERT_TRUE(std::isfinite(
+        table->price(query.spot, query.strike, query.maturity, query.volatility, .05)));
+    auto gamma = table->gamma(query);
+    ASSERT_FALSE(gamma);
+    EXPECT_EQ(gamma.error(), GreekError::NumericalFailure);
+}
+
+TEST(PhysicalCellProofTest, ZeroProofBudgetCannotProduceAnAdmissionToken) {
+    const SurfaceBounds b{-.01, .01, .1, 1, .1, .4, .01, .1};
+    auto source = std::make_shared<const BSplineND<double, 4>>(bezier({0, 0, 0, 0}, b));
+    BSplineLeaf leaf(BSplineTransformLeaf(SharedBSplineInterp<4>(source), {}, 100),
+                     AnalyticalEEP(OptionType::PUT, 0));
+    BSplinePriceTable legacy(leaf, b, OptionType::PUT, 0);
+    EXPECT_EQ(legacy.proof_status(), PriceProofStatus::NotRun);
+    auto exhausted = BSplinePriceTable::create(leaf, b, OptionType::PUT, 0, std::nullopt, {0, 24});
+    ASSERT_FALSE(exhausted);
+    EXPECT_EQ(exhausted.error().code, PriceTableErrorCode::CertificationIndeterminate);
+}
+
+TEST(PhysicalCellProofTest, FiniteSplineCoefficientsCannotCertifyOverflowingValueContraction) {
+    const SurfaceBounds b{-.01, .01, .1, 1, .1, .4, .01, .1};
+    const double large = std::numeric_limits<double>::max();
+    auto source =
+        std::make_shared<const BSplineND<double, 4>>(bezier({large, large, large, large}, b));
+    bool nonfinite = false;
+    for (int i = 1; i < 32 && !nonfinite; ++i) {
+        const double t = static_cast<double>(i) / 32;
+        nonfinite =
+            !std::isfinite(source->eval({-.01 + .02 * t, .1 + .9 * t, .1 + .3 * t, .01 + .09 * t}));
+    }
+    ASSERT_TRUE(nonfinite);
+    BSplineLeaf leaf(BSplineTransformLeaf(SharedBSplineInterp<4>(source), {}, 100),
+                     AnalyticalEEP(OptionType::PUT, 0));
+    auto table = BSplinePriceTable::create(leaf, b, OptionType::PUT, 0);
+    ASSERT_FALSE(table);
+    EXPECT_EQ(table.error().code, PriceTableErrorCode::CertificationIndeterminate);
+}
+
+TEST(PhysicalCellProofTest, CertifiedCreationRefusesAnUnrepresentableActiveReferenceQuote) {
+    Domain<4> domain{{std::log(1.5), 0, .1, .01}, {std::log(2.5), 1, .4, .1}};
+    auto polynomial = ChebyshevModalInterpolant<4>::build_from_coefficients(std::vector<double>(16),
+                                                                            domain, {2, 2, 2, 2});
+    ASSERT_TRUE(polynomial);
+    std::vector<ChebyshevModalSegmentedSurface> members;
+    for (double reference : {.1, 1e308})
+        members.emplace_back(std::vector<ChebyshevModalSegmentedLeaf>{ChebyshevModalSegmentedLeaf(
+                                 *polynomial, {}, reference)},
+                             TauSegmentSplit({0}, {1}, {0}, {1}, reference));
+    ChebyshevModalMultiKRefInner inner(std::move(members), MultiKRefSplit({.1, 1e308}));
+    ASSERT_FALSE(std::isfinite(inner.price(2, 1, .5, .2, .05)));
+    SurfaceBounds b{std::log(2.),       std::log(2.),         .1, .9, .1, .4, .01, .1,
+                    StrikeBounds{1, 1}, MoneynessBounds{2, 2}};
+    auto table = PriceTable<ChebyshevModalMultiKRefInner>::create(inner, b, OptionType::PUT, 0,
+                                                                  FixedExpiryMetadata{1, {}});
+    ASSERT_FALSE(table);
+    EXPECT_EQ(table.error().code, PriceTableErrorCode::CertificationIndeterminate);
+}
+
+TEST(PhysicalCellProofTest, ReferenceRepresentabilityGuardPreservesFiniteAndInactiveCases) {
+    Domain<4> domain{{-.1, 0, .1, .01}, {.1, 1, .4, .1}};
+    std::vector<double> coefficients(16);
+    coefficients[0] = .5;
+    auto polynomial =
+        ChebyshevModalInterpolant<4>::build_from_coefficients(coefficients, domain, {2, 2, 2, 2});
+    ASSERT_TRUE(polynomial);
+    std::vector<ChebyshevModalSegmentedSurface> members;
+    for (double reference : {.1, 1e308})
+        members.emplace_back(std::vector<ChebyshevModalSegmentedLeaf>{ChebyshevModalSegmentedLeaf(
+                                 *polynomial, {}, reference)},
+                             TauSegmentSplit({0}, {1}, {0}, {1}, reference));
+    ChebyshevModalMultiKRefInner inner(std::move(members), MultiKRefSplit({.1, 1e308}));
+    const FixedExpiryMetadata model{1, {}};
+    SurfaceBounds b{0, 0, .1, .9, .1, .4, .01, .1, StrikeBounds{.5, .5}, MoneynessBounds{1, 1}};
+    auto finite =
+        PriceTable<ChebyshevModalMultiKRefInner>::create(inner, b, OptionType::PUT, 0, model);
+    ASSERT_TRUE(finite);
+    EXPECT_DOUBLE_EQ(finite->price(.5, .5, .5, .2, .05), .25);
+    b.m_min = std::log(2.);
+    b.m_max = std::log(2.);
+    b.ratio_bounds = MoneynessBounds{2, 2};
+    b.strike_bounds = StrikeBounds{.1, .1};
+    auto inactive =
+        PriceTable<ChebyshevModalMultiKRefInner>::create(inner, b, OptionType::PUT, 0, model);
+    ASSERT_TRUE(inactive); // the unrepresentable upper reference map is never evaluated
+    EXPECT_TRUE(std::isfinite(inactive->price(.2, .1, .5, .2, .05)));
+}
