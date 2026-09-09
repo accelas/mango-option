@@ -579,10 +579,15 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     // Short positive maturity alone is not proof of unidentifiable IV.
     auto adaptive = build_adaptive_chebyshev_segmented(
         params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_FALSE(adaptive.has_value());
-    EXPECT_EQ(adaptive.error().code, PriceTableErrorCode::NoViableSurface)
-        << "the segments must build and be measured; a gap misclassification "
-           "would surface as a build error instead";
+    ASSERT_TRUE(adaptive.has_value()) << adaptive.error();
+    EXPECT_GT(adaptive->diagnostics.holdout_points_measured, 0u);
+    EXPECT_TRUE(std::isfinite(adaptive->achieved_max_error));
+    EXPECT_LE(adaptive->achieved_max_error, kViabilityBound);
+    EXPECT_DOUBLE_EQ(adaptive->surface.rate_min(), 0.05);
+    EXPECT_DOUBLE_EQ(adaptive->surface.rate_max(), 0.05);
+    EXPECT_FALSE(adaptive->surface.contains_maturity(0.01));
+    EXPECT_FALSE(std::isfinite(adaptive->surface.price(100.0, 100.0, 0.01, 0.20, 0.05)));
+    EXPECT_GT(adaptive->surface.price(100.0, 100.0, 0.012, 0.20, 0.05), 0.0);
 
     auto surface = build_chebyshev_segmented_manual(
         seg_config, {m_domain, v_domain, r_domain});
