@@ -9,6 +9,7 @@
 #include "mango/option/price_table_factory.hpp"
 #include "mango/option/table/serialization/from_data.hpp"
 #include "mango/option/table/serialization/to_data.hpp"
+#include "mango/option/table/serialization/extract_segments.hpp"
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_3d_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
@@ -85,7 +86,21 @@ TEST(FinancialCertificationRedTest, LoadingReprovesTheStoredPhysicalPayload) {
     const SurfaceBounds bounds{-.001, .001, .1, .11, .2, .20001, .04, .06};
     // The numerical record can come from a historical/manual producer. Its
     // current physical sigma shape must be proved again before publication.
-    const auto record = to_data(BSplinePriceTable(leaf, bounds, OptionType::PUT, 0.0));
+    PriceTableData record;
+    record.surface_type = surface_types::kBSpline4D;
+    record.option_type = OptionType::PUT;
+    record.dividend_yield = 0;
+    record.bounds_m_min = bounds.m_min;
+    record.bounds_m_max = bounds.m_max;
+    record.bounds_tau_min = bounds.tau_min;
+    record.bounds_tau_max = record.maturity = bounds.tau_max;
+    record.bounds_sigma_min = bounds.sigma_min;
+    record.bounds_sigma_max = bounds.sigma_max;
+    record.bounds_rate_min = bounds.rate_min;
+    record.bounds_rate_max = bounds.rate_max;
+    record.ratio_bounds = MoneynessBounds{std::exp(bounds.m_min), std::exp(bounds.m_max)};
+    extract_segments(leaf, record.segments, 100, 0, bounds.tau_max,
+        bounds.tau_min, bounds.tau_max);
     auto loaded = from_data<BSplineLeaf>(record);
     ASSERT_FALSE(loaded);
     EXPECT_EQ(loaded.error().code, PriceTableErrorCode::NonMonotoneSurface);
@@ -97,6 +112,27 @@ TEST(FinancialCertificationRedTest, AllRepresentationsRecomputeEvidenceAndPreser
         ASSERT_TRUE(loaded) << static_cast<int>(loaded.error().code);
         EXPECT_EQ(loaded->proof_status(), PriceProofStatus::Certified);
         EXPECT_GT(loaded->proof_work(), 0u);
+        using Table = PriceTable<Inner>;
+        auto iv = InterpolatedIVSolver<Table>::create(*loaded);
+        ASSERT_TRUE(iv);
+        auto original_handle = *loaded;
+        auto retained_handle = std::move(original_handle);
+        auto empty_iv = InterpolatedIVSolver<Table>::create(std::move(original_handle));
+        ASSERT_FALSE(empty_iv);
+        EXPECT_EQ(empty_iv.error().code, ValidationErrorCode::CertificationIndeterminate);
+        EXPECT_TRUE(InterpolatedIVSolver<Table>::create(std::move(retained_handle)));
+        if (!segmented) {
+            auto fixed = record;
+            fixed.bounds_m_min = fixed.bounds_m_max = 0;
+            fixed.ratio_bounds = MoneynessBounds{1, 1};
+            fixed.bounds_tau_min = fixed.bounds_tau_max = fixed.maturity = .3;
+            fixed.bounds_rate_min = fixed.bounds_rate_max = .05;
+            auto fixed_table = from_data<Inner>(fixed);
+            ASSERT_TRUE(fixed_table);
+            EXPECT_TRUE(InterpolatedIVSolver<Table>::create(*fixed_table));
+            EXPECT_FALSE(InterpolatedIVSolver<Table>::create(*fixed_table, {},
+                std::vector<Dividend>{{.1, 1.0}}));
+        }
         const double price = loaded->price(100, 100, .3, .25, .05);
         EXPECT_TRUE(std::isfinite(price));
         EXPECT_GT(price, 0.0);
@@ -201,6 +237,33 @@ TEST(FinancialCertificationRedTest, DimensionlessPublicationRequiresTheExactZero
     EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidDividend);
 }
 
+TEST(FinancialCertificationRedTest, DirectUncheckedPriceTableConstructionIsUnavailable) {
+    EXPECT_FALSE((std::is_constructible_v<BSplinePriceTable, const BSplineLeaf&,
+        const SurfaceBounds&, OptionType, double>));
+}
+
+struct ClaimedCertifiedCallback {
+    PriceProofStatus proof_status() const { return PriceProofStatus::Certified; }
+    double price(double, double, double, double sigma, double) const { return 10 + sigma; }
+    double vega(double, double, double, double, double) const { return 1; }
+    double m_min() const { return -.1; }
+    double m_max() const { return .1; }
+    double tau_min() const { return .1; }
+    double tau_max() const { return 1; }
+    double sigma_min() const { return .1; }
+    double sigma_max() const { return .5; }
+    double rate_min() const { return .01; }
+    double rate_max() const { return .1; }
+    OptionType option_type() const { return OptionType::PUT; }
+    double dividend_yield() const { return 0; }
+};
+
+TEST(FinancialCertificationRedTest, IVAdmissionDoesNotTrustACallbackCertificationClaim) {
+    auto solver = InterpolatedIVSolver<ClaimedCertifiedCallback>::create(ClaimedCertifiedCallback{});
+    ASSERT_FALSE(solver);
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::UnsupportedRepresentation);
+}
+
 }
 
 TEST(FinancialCertificationRedTest, FactoryAdmitsTheRequestedRatioEndpointBeforeLogRoundtrip) {
@@ -221,13 +284,8 @@ TEST(FinancialCertificationRedTest, FactoryAdmitsTheRequestedRatioEndpointBefore
 
 TEST(FinancialCertificationRedTest, QuoteRoundingCannotAdmitAnUnrelatedSubnormalRatio) {
     using namespace mango;
-    auto spline=hidden_pocket_eep();
-    ASSERT_TRUE(spline);
-    BSplineLeaf raw(BSplineTransformLeaf(SharedBSplineInterp<4>(spline),StandardTransform4D{},100),
-                    AnalyticalEEP(OptionType::PUT,0));
-    const SurfaceBounds bounds{-.5,.5,.1,.11,.2,.20001,.04,.06};
-    BSplinePriceTable table(std::move(raw),bounds,OptionType::PUT,0);
+    const MoneynessDomain domain({std::exp(-.5), std::exp(.5)});
     const double quantum=std::numeric_limits<double>::denorm_min();
     ASSERT_EQ(quantum/(2*quantum),.5);
-    EXPECT_FALSE(table.contains_moneyness(quantum,2*quantum));
+    EXPECT_FALSE(domain.contains_quote(quantum,2*quantum));
 }

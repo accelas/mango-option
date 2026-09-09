@@ -197,28 +197,15 @@ struct BracketScreen {
 template <typename Surface>
 class InterpolatedIVSolver {
 public:
-    /// Create solver from a PriceTable
+    /// Create a solver from a certified immutable library price table.
     ///
-    /// The surface must provide price(), vega(), and bounds accessors.
-    ///
-    /// @param surface Pre-built price surface
-    /// @param config Solver configuration
-    /// @param build_dividends Discrete dividend schedule the surface was
-    ///        built with. Defaults to std::nullopt ("unknown provenance"):
-    ///        the generic template cannot know whether a given Surface is
-    ///        dividend-aware, so a non-empty query schedule is accepted
-    ///        unverified. Pass an explicit schedule to opt into validation
-    ///        — including an empty vector to assert "built with no
-    ///        discrete dividends", which then rejects any non-empty query
-    ///        schedule with DiscreteDividendMismatch. A supplied schedule
-    ///        is canonicalized with the builder rules (sorted, same-date
-    ///        entries merged, entries at/after the surface's tau_max or
-    ///        with non-positive time/amount dropped) before storage, so
-    ///        callers need not pre-sort or pre-merge it themselves. The
-    ///        factory paths (make_interpolated_iv_solver,
-    ///        AnyPriceTable::make_iv_solver) pass provenance explicitly
-    ///        and are unaffected by this default.
-    /// @return IV solver or ValidationError
+    /// Only the six supported PriceTable representations and their library
+    /// shared-handle adapters are admitted. Callback claims are not evidence.
+    /// `build_dividends`, when supplied, is a consistency check against the
+    /// table's stored model; it cannot change that model. Continuous tables
+    /// have a known empty cash-dividend schedule. Segmented tables retain the
+    /// exact fixed-expiry anchor and canonical schedule used by their build.
+    /// @return IV solver or a typed representation/model/configuration error.
     static std::expected<InterpolatedIVSolver, ValidationError> create(
         Surface surface,
         const InterpolatedIVSolverConfig& config = {},
@@ -270,8 +257,8 @@ private:
     InterpolatedIVSolverConfig config_;
     OptionType option_type_;
     double dividend_yield_;
-    /// Discrete schedule the surface was built with. nullopt = unknown
-    /// (deserialized segmented tables) — schedule validation is skipped.
+    /// Canonical schedule retained by the immutable table model. Public
+    /// construction always resolves this, including known-empty continuous models.
     std::optional<std::vector<Dividend>> build_dividends_;
     double reference_maturity_;
 
@@ -456,11 +443,24 @@ public:
     [[nodiscard]] double rate_max() const noexcept { return table_.rate_max(); }
     [[nodiscard]] OptionType option_type() const noexcept { return table_.option_type(); }
     [[nodiscard]] double dividend_yield() const noexcept { return table_.dividend_yield(); }
+    [[nodiscard]] PriceProofStatus proof_status() const noexcept { return table_.proof_status(); }
 
 private:
     // Snapshot the immutable payload handle, not a caller-reassignable wrapper.
     Table table_;
 };
+
+// Closed library representations, not a callback's self-reported status.
+template <class Table>
+inline constexpr bool supported_price_table =
+    std::same_as<Table, BSplinePriceTable> || std::same_as<Table, BSpline3DPriceTable> ||
+    std::same_as<Table, BSplineMultiKRefSurface> || std::same_as<Table, ChebyshevSurface> ||
+    std::same_as<Table, Chebyshev3DPriceTable> || std::same_as<Table, ChebyshevMultiKRefSurface>;
+template <class Surface>
+struct SupportedIVSurface : std::bool_constant<supported_price_table<Surface>> {};
+template <class Table>
+struct SupportedIVSurface<SharedPriceTableSurface<Table>>
+    : std::bool_constant<supported_price_table<Table>> {};
 
 }  // namespace detail
 
@@ -531,72 +531,86 @@ InterpolatedIVSolver<Surface>::create(
     const InterpolatedIVSolverConfig& config,
     std::optional<std::vector<Dividend>> build_dividends)
 {
-    if (!std::isfinite(config.tolerance) || config.tolerance <= 0.0) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidBounds, config.tolerance});
-    }
-    if (!std::isfinite(config.vega_threshold) || config.vega_threshold < 0.0) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidBounds, config.vega_threshold});
-    }
-    // Use concept accessors for bounds extraction
-    auto m_range = std::make_pair(surface.m_min(), surface.m_max());
-    auto tau_range = std::make_pair(surface.tau_min(), surface.tau_max());
-    auto sigma_range = std::make_pair(surface.sigma_min(), surface.sigma_max());
-    auto r_range = std::make_pair(surface.rate_min(), surface.rate_max());
-
-    // Validate bounds
-    if (m_range.first >= m_range.second ||
-        tau_range.first >= tau_range.second ||
-        sigma_range.first >= sigma_range.second ||
-        r_range.first >= r_range.second) {
-        return std::unexpected(ValidationError(ValidationErrorCode::InvalidGridSize, 0.0));
-    }
-
-    auto option_type = surface.option_type();
-    auto dividend_yield = surface.dividend_yield();
-
-    double reference_maturity = tau_range.second;
-    if constexpr (requires { surface.fixed_expiry(); }) {
-        const auto& model = surface.fixed_expiry();
-        if (model) {
-            if (!model->valid(tau_range.second)) {
-                return std::unexpected(ValidationError{ValidationErrorCode::InvalidBounds});
-            }
-            reference_maturity = model->reference_maturity;
-            if (build_dividends) {
-                const auto supplied = filter_and_merge_dividends(*build_dividends, reference_maturity);
-                const bool same = supplied.size() == model->discrete_dividends.size()
-                    && std::equal(supplied.begin(), supplied.end(), model->discrete_dividends.begin(),
-                        [](const Dividend& a, const Dividend& b) {
-                            return a.calendar_time == b.calendar_time && a.amount == b.amount;
-                        });
-                if (!same) return std::unexpected(
-                    ValidationError{ValidationErrorCode::DiscreteDividendMismatch});
-            }
-            build_dividends = model->discrete_dividends;
-        } else if constexpr (requires { Surface::requires_fixed_expiry; }) {
-            if (Surface::requires_fixed_expiry) return std::unexpected(
-                ValidationError{ValidationErrorCode::InvalidBounds});
+    if constexpr (!detail::SupportedIVSurface<Surface>::value) {
+        return std::unexpected(ValidationError{ValidationErrorCode::UnsupportedRepresentation});
+    } else {
+        if (!std::isfinite(config.tolerance) || config.tolerance <= 0.0) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidBounds, config.tolerance});
         }
-    }
-    // Raw custom surfaces may still supply their own known schedule. A real
-    // price table's immutable model metadata always controls the anchor.
-    if (build_dividends) {
-        build_dividends = filter_and_merge_dividends(*build_dividends, reference_maturity);
-    }
+        if (!std::isfinite(config.vega_threshold) || config.vega_threshold < 0.0) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidBounds, config.vega_threshold});
+        }
+        if (surface.proof_status() != PriceProofStatus::Certified) {
+            return std::unexpected(ValidationError{ValidationErrorCode::CertificationIndeterminate});
+        }
+        // Read the bounds attached to this exact immutable proof payload.
+        auto m_range = std::make_pair(surface.m_min(), surface.m_max());
+        auto tau_range = std::make_pair(surface.tau_min(), surface.tau_max());
+        auto sigma_range = std::make_pair(surface.sigma_min(), surface.sigma_max());
+        auto r_range = std::make_pair(surface.rate_min(), surface.rate_max());
 
-    return InterpolatedIVSolver(
-        std::move(surface),
-        m_range,
-        tau_range,
-        sigma_range,
-        r_range,
-        option_type,
-        dividend_yield,
-        std::move(build_dividends),
-        reference_maturity,
-        config);
+        // Validate bounds
+        if (m_range.first > m_range.second ||
+            tau_range.first > tau_range.second ||
+            sigma_range.first >= sigma_range.second ||
+            r_range.first > r_range.second) {
+            return std::unexpected(ValidationError(ValidationErrorCode::InvalidGridSize, 0.0));
+        }
+
+        auto option_type = surface.option_type();
+        auto dividend_yield = surface.dividend_yield();
+
+        double reference_maturity = tau_range.second;
+        if constexpr (requires { surface.fixed_expiry(); }) {
+            const auto& model = surface.fixed_expiry();
+            if (model) {
+                if (!model->valid(tau_range.second)) {
+                    return std::unexpected(ValidationError{ValidationErrorCode::InvalidBounds});
+                }
+                reference_maturity = model->reference_maturity;
+                if (build_dividends) {
+                    const auto supplied = filter_and_merge_dividends(*build_dividends, reference_maturity);
+                    const bool same = supplied.size() == model->discrete_dividends.size()
+                        && std::equal(supplied.begin(), supplied.end(), model->discrete_dividends.begin(),
+                            [](const Dividend& a, const Dividend& b) {
+                                return a.calendar_time == b.calendar_time && a.amount == b.amount;
+                            });
+                    if (!same) return std::unexpected(
+                        ValidationError{ValidationErrorCode::DiscreteDividendMismatch});
+                }
+                build_dividends = model->discrete_dividends;
+            } else {
+                if constexpr (Surface::requires_fixed_expiry) {
+                    return std::unexpected(ValidationError{ValidationErrorCode::InvalidBounds});
+                }
+                // A continuous payload has known absence of discrete events.
+                // Caller provenance cannot change the retained numerical model.
+                if (build_dividends && !filter_and_merge_dividends(
+                        *build_dividends, reference_maturity).empty()) {
+                    return std::unexpected(ValidationError{ValidationErrorCode::DiscreteDividendMismatch});
+                }
+                build_dividends = std::vector<Dividend>{};
+            }
+        }
+        // The immutable table model controls both schedule and expiry anchor.
+        if (build_dividends) {
+            build_dividends = filter_and_merge_dividends(*build_dividends, reference_maturity);
+        }
+
+        return InterpolatedIVSolver(
+            std::move(surface),
+            m_range,
+            tau_range,
+            sigma_range,
+            r_range,
+            option_type,
+            dividend_yield,
+            std::move(build_dividends),
+            reference_maturity,
+            config);
+    }
 }
 
 template <typename Surface>
