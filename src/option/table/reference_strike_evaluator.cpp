@@ -80,7 +80,7 @@ struct ReferenceStrikeEvaluator::Impl {
     SegmentedAdaptiveConfig config;
     SurfaceBounds bounds;
     std::vector<PhysicalQuery> queries;
-    double price_target, iv_target;
+    double price_target, iv_target, vega_floor;
     double full_u;
     size_t solves = 0;
     static constexpr size_t kSolveBudget = 8192;
@@ -247,7 +247,8 @@ ReferenceStrikeEvaluator::~ReferenceStrikeEvaluator() = default;
 
 std::expected<ReferenceStrikeEvaluator, PriceTableError>
 ReferenceStrikeEvaluator::create(const SegmentedAdaptiveConfig& config, const SurfaceBounds& requested,
-    std::vector<std::pair<double, double>> admitted_times, double price_target, double iv_target) {
+    std::vector<std::pair<double, double>> admitted_times, double price_target, double iv_target,
+    double vega_floor) {
     const auto invalid = [] { return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig}); };
     const std::array endpoints{requested.m_min, requested.m_max, requested.tau_min, requested.tau_max,
         requested.sigma_min, requested.sigma_max, requested.rate_min, requested.rate_max};
@@ -258,7 +259,8 @@ ReferenceStrikeEvaluator::create(const SegmentedAdaptiveConfig& config, const Su
         !std::isfinite(config.dividend_yield) ||
         !make_fixed_expiry_metadata(config.maturity, config.discrete_dividends).valid(requested.tau_max) ||
         !requested.strike_bounds || !requested.strike_bounds->valid() || admitted_times.empty() ||
-        !std::isfinite(price_target) || price_target <= 0.0 || !std::isfinite(iv_target) || iv_target <= 0.0)
+        !std::isfinite(price_target) || price_target <= 0.0 || !std::isfinite(iv_target) || iv_target <= 0.0 ||
+        !std::isfinite(vega_floor) || vega_floor <= 0.0)
         return invalid();
     const MoneynessBounds ratios = requested.ratio_bounds.value_or(
         MoneynessBounds{std::exp(requested.m_min), std::exp(requested.m_max)});
@@ -269,6 +271,7 @@ ReferenceStrikeEvaluator::create(const SegmentedAdaptiveConfig& config, const Su
     impl->bounds = requested;
     impl->price_target = price_target;
     impl->iv_target = iv_target;
+    impl->vega_floor = vega_floor;
     const double reach = std::max(std::abs(requested.m_min), std::abs(requested.m_max))
         + 5.0 * 1.04 * requested.sigma_max * std::sqrt(config.maturity)
         + (std::max(std::abs(requested.rate_min), std::abs(requested.rate_max))
@@ -365,8 +368,8 @@ ReferenceStrikeEvaluator::evaluate(std::span<const double> refs, const SurfaceHa
     const bool has_prior_witness = prior_witness != impl_->reference_witnesses.end();
     bool rejected_composed_rescue = false;
     AccuracyAccumulator ideal, fit, total;
-    const double price_allowance = std::min(0.001, 0.1 * impl_->price_target);
-    const double iv_allowance = std::min(2e-6, 0.1 * impl_->iv_target);
+    const double price_allowance = 0.1 * impl_->price_target;
+    const double iv_allowance = 0.1 * impl_->iv_target;
     for (size_t point = 0; point < impl_->queries.size(); ++point) {
         const auto& query = impl_->queries[point];
         const auto bracket = split.bracket(query.spot, query.strike, query.tau, query.sigma, query.rate);
@@ -414,17 +417,20 @@ ReferenceStrikeEvaluator::evaluate(std::span<const double> refs, const SurfaceHa
                 if (price_ambiguous && round == 0) continue;
                 break;
             }
-            if ((time_value - *direct.allowance) / query.strike < 1e-4) continue;
+            const bool time_value_measurable =
+                (time_value - *direct.allowance) / query.strike >= 1e-4;
+            // The filter is TV-small OR vega-small. TV ambiguity alone must
+            // not prevent an independently qualified small-vega decision.
             sensitivity = impl_->vega(query, round);
             if (!sensitivity.allowance || !std::isfinite(sensitivity.value)) continue;
             const double low = sensitivity.value - *sensitivity.allowance;
             const double high = sensitivity.value + *sensitivity.allowance;
-            if (std::max(std::abs(low), std::abs(high)) < 1e-4) {
+            if (std::max(std::abs(low), std::abs(high)) < impl_->vega_floor) {
                 iv_filtered = true;
                 if (price_ambiguous && round == 0) continue;
                 break;
             }
-            if (low > 1e-4) {
+            if (time_value_measurable && low > impl_->vega_floor) {
                 iv_qualified = true;
                 // Actual composed evidence has its own direct-oracle budget;
                 // an unresolved ideal residual must not block a valid rescue.

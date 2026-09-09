@@ -25,6 +25,7 @@
 #include "mango/option/table/parquet/parquet_io.hpp"
 #include "mango/option/table/serialization/from_data.hpp"
 #include "mango/option/table/serialization/to_data.hpp"
+#include "mango/option/table/reference_selection_builder.hpp"
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
 
 #include <algorithm>
@@ -253,18 +254,41 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
         .discrete_dividends = divs.discrete_dividends,
     };
 
-    auto surface = build_multi_kref_manual(
-        config.option_type, dividends,
-        log_grid, divs.maturity, divs.kref_config, *strikes);
-    if (!surface.has_value()) {
-        return std::unexpected(detail::to_validation_error(surface.error()));
-    }
+    const SegmentedPriceTableBuilder::Config manual_config{
+        .K_ref = strikes->min, .option_type = config.option_type, .dividends = dividends,
+        .grid = log_grid, .maturity = divs.maturity, .tau_points_per_segment = 5,
+    };
+    auto valid_grid = SegmentedPriceTableBuilder::validate_config(manual_config);
+    if (!valid_grid) return std::unexpected(detail::to_validation_error(valid_grid.error()));
+    auto valid_times = SegmentedPriceTableBuilder::make_tau_grid(manual_config);
+    if (!valid_times) return std::unexpected(detail::to_validation_error(valid_times.error()));
 
+    const SurfaceBounds requested = manual_segmented_bounds(b, divs.maturity, *strikes);
+    const SegmentedAdaptiveConfig seg_config{
+        .spot = config.spot, .option_type = config.option_type,
+        .dividend_yield = config.dividend_yield, .discrete_dividends = divs.discrete_dividends,
+        .maturity = divs.maturity, .kref_config = divs.kref_config,
+        .strike_bounds = *strikes, .ratio_bounds = requested.ratio_bounds,
+    };
+    const auto segments = compute_segment_boundaries(divs.discrete_dividends, divs.maturity, 0.0, divs.maturity);
+    const auto split = make_tau_split_from_segments(segments.bounds, segments.is_gap, strikes->min);
+    auto selected = detail::build_with_reference_selection(seg_config, requested,
+        admitted_maturity_intervals(split, 0.0, divs.maturity),
+        [&](std::span<const double> refs) {
+            auto fixed = divs.kref_config;
+            fixed.K_refs.assign(refs.begin(), refs.end());
+            return build_multi_kref_manual(config.option_type, dividends, log_grid,
+                                           divs.maturity, fixed, *strikes);
+        }, [](const BSplineMultiKRefInner& surface, double s, double k, double t, double v, double r) {
+            return surface.price(s, k, t, v, r);
+        });
+    if (!selected) return std::unexpected(detail::to_validation_error(selected.error()));
+    BuildDiagnostics diagnostics;
+    diagnostics.reference_selection = std::move(selected->selection);
     return BuiltTable<BSplineMultiKRefSurface>{
-        .table = wrap_multi_kref_surface(
-            std::move(*surface), manual_segmented_bounds(b, divs.maturity, *strikes),
+        .table = wrap_multi_kref_surface(std::move(selected->build), requested,
             config.option_type, config.dividend_yield, model),
-        .diagnostics = std::nullopt,
+        .diagnostics = std::move(diagnostics),
     };
 }
 
@@ -422,13 +446,13 @@ build_chebyshev_segmented_table(const IVSolverFactoryConfig& config,
         };
     }
 
-    auto surface = build_chebyshev_segmented_manual(seg_config, log_grid);
-    if (!surface.has_value()) {
-        return std::unexpected(detail::to_validation_error(surface.error()));
-    }
+    auto builder = ChebyshevSegmentedBuilder::create(seg_config, log_grid);
+    if (!builder) return std::unexpected(detail::to_validation_error(builder.error()));
+    auto result = builder->build_with_diagnostics();
+    if (!result) return std::unexpected(detail::to_validation_error(result.error()));
     return BuiltTable<ChebyshevMultiKRefSurface>{
-        .table = std::move(*surface),
-        .diagnostics = std::nullopt,
+        .table = std::move(result->surface),
+        .diagnostics = std::move(result->diagnostics),
     };
 }
 

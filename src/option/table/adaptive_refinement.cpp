@@ -960,19 +960,8 @@ SeededGrids seed_refinement_grids(const AdaptiveGridParams& params,
     return g;
 }
 
-std::expected<RefinementResult, PriceTableError> run_refinement(
-    const AdaptiveGridParams& params,
-    BuildFn build_fn,
-    RefineFn refine_fn,
-    const RefinementContext& ctx,
-    const PrepareRefsFn& prepare_refs,
-    const ScoreErrorFn& score,
-    const InitialGrids& initial_grids,
-    const RefineStateHooks& hooks)
-{
-    // ---------------------------------------------------------------------
-    // 1. Parameter validation (spec D3)
-    // ---------------------------------------------------------------------
+std::expected<void, PriceTableError> validate_refinement_request(
+    const AdaptiveGridParams& params, const RefinementContext& ctx) {
     const auto invalid_config = [] {
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::InvalidConfig});
@@ -1015,6 +1004,31 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             return invalid_config();
         }
     }
+
+    return {};
+}
+
+std::expected<RefinementResult, PriceTableError> run_refinement(
+    const AdaptiveGridParams& params,
+    BuildFn build_fn,
+    RefineFn refine_fn,
+    const RefinementContext& ctx,
+    const PrepareRefsFn& prepare_refs,
+    const ScoreErrorFn& score,
+    const InitialGrids& initial_grids,
+    const RefineStateHooks& hooks)
+{
+    // ---------------------------------------------------------------------
+    // 1. Parameter validation (spec D3)
+    // ---------------------------------------------------------------------
+    auto valid = validate_refinement_request(params, ctx);
+    if (!valid) return std::unexpected(valid.error());
+    const std::array<std::pair<double, double>, 4> sample_axis_bounds = {{
+        {ctx.sample_bounds.m_min, ctx.sample_bounds.m_max},
+        {ctx.sample_bounds.tau_min, ctx.sample_bounds.tau_max},
+        {ctx.sample_bounds.sigma_min, ctx.sample_bounds.sigma_max},
+        {ctx.sample_bounds.rate_min, ctx.sample_bounds.rate_max}
+    }};
 
     auto seeded = seed_refinement_grids(params, ctx, initial_grids);
     std::vector<double> moneyness_grid = std::move(seeded.moneyness);

@@ -20,13 +20,14 @@ template <class Build, class Price>
 auto build_with_reference_selection(
     const SegmentedAdaptiveConfig& config, const SurfaceBounds& requested,
     std::vector<std::pair<double, double>> admitted_times,
-    Build&& build, Price&& price, double price_target = 0.01, double iv_target = 2e-5)
+    Build&& build, Price&& price, double price_target = 0.01, double iv_target = 2e-5,
+    double vega_floor = 1e-4)
     -> std::expected<ReferenceSelectedBuild<
         typename std::invoke_result_t<Build, std::span<const double>>::value_type>, PriceTableError>
 {
     using Built = typename std::invoke_result_t<Build, std::span<const double>>::value_type;
     auto evaluator = ReferenceStrikeEvaluator::create(
-        config, requested, std::move(admitted_times), price_target, iv_target);
+        config, requested, std::move(admitted_times), price_target, iv_target, vega_floor);
     if (!evaluator) return std::unexpected(evaluator.error());
     std::optional<Built> candidate;
     std::vector<double> candidate_refs;

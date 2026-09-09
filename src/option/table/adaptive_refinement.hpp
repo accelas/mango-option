@@ -58,6 +58,10 @@ struct RefinementContext {
     std::optional<std::vector<std::pair<double, double>>> maturity_intervals = std::nullopt;
 };
 
+/// Shared cheap checks before reference preparation or numerical builds.
+[[nodiscard]] std::expected<void, PriceTableError> validate_refinement_request(
+    const AdaptiveGridParams& params, const RefinementContext& ctx);
+
 /// Absolute holdout-error ceiling above which a candidate surface is treated
 /// as garbage and never returned (spec D5).  2,000 bps of IV: an operational
 /// garbage detector, deliberately independent of `target_iv_error`.

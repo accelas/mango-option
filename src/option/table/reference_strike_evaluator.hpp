@@ -15,7 +15,8 @@ public:
     [[nodiscard]] static std::expected<ReferenceStrikeEvaluator, PriceTableError>
     create(const SegmentedAdaptiveConfig& config, const SurfaceBounds& requested,
            std::vector<std::pair<double, double>> admitted_times,
-           double price_target = 0.01, double iv_target = 2e-5);
+           double price_target = 0.01, double iv_target = 2e-5,
+           double vega_floor = 1e-4);
 
     ReferenceStrikeEvaluator(ReferenceStrikeEvaluator&&) noexcept;
     ReferenceStrikeEvaluator& operator=(ReferenceStrikeEvaluator&&) noexcept;

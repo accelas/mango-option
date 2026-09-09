@@ -95,6 +95,9 @@ public:
     static std::expected<BuildResult, PriceTableError>
     build_with_diagnostics(const Config& config);
 
+    /// Validate manual axes and numerical controls without solving the PDE.
+    static std::expected<void, PriceTableError> validate_config(const Config& config);
+
     /// Resolve exact physical sampling coordinates without solving the PDE.
     /// Shared by adaptive seeding and construction; preserves event ownership.
     static std::expected<std::vector<double>, PriceTableError>
