@@ -20,7 +20,8 @@
  * // Step 1: Define option surface grid (from market data)
  * auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0).value();
  * auto [builder, axes] = PriceTableBuilder::from_vectors(
- *     {0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2},  // moneyness
+ *     {std::log(0.8), std::log(0.9), std::log(0.95), 0.0,
+ *      std::log(1.05), std::log(1.1), std::log(1.2)},  // log(S/K)
  *     {0.1, 0.25, 0.5, 1.0, 2.0},              // maturity
  *     {0.15, 0.20, 0.25, 0.30, 0.40},          // volatility
  *     {0.02, 0.03, 0.04, 0.05},                // rate
@@ -71,7 +72,8 @@ namespace {
 
 /// Market-representative grid configuration
 struct MarketGrid {
-    std::vector<double> moneyness;     // S/K ratios
+    std::vector<double> moneyness;     // S/K ratios for physical observations
+    std::vector<double> log_moneyness; // log(S/K) for the numerical builder
     std::vector<double> maturities;    // Years
     std::vector<double> volatilities;  // Annual vols
     std::vector<double> rates;         // Risk-free rates
@@ -96,6 +98,8 @@ MarketGrid generate_market_grid() {
         1.00,                                  // ATM
         1.01, 1.03, 1.05, 1.07, 1.10, 1.15   // ITM puts
     };
+
+    for (double ratio : grid.moneyness) grid.log_moneyness.push_back(std::log(ratio));
 
     // Maturities: weekly to 2 years
     grid.maturities = {
@@ -188,7 +192,7 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
         auto grid_spec = grid_spec_result.value();
 
         auto builder_axes_result = PriceTableBuilder::from_vectors(
-            grid.moneyness,
+            grid.log_moneyness,
             grid.maturities,
             grid.volatilities,
             grid.rates,
@@ -241,7 +245,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     auto grid_spec = grid_spec_result.value();
 
     auto builder_axes_result = PriceTableBuilder::from_vectors(
-        grid.moneyness,
+        grid.log_moneyness,
         grid.maturities,
         grid.volatilities,
         grid.rates,
@@ -327,7 +331,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
         }
 
         benchmark::DoNotOptimize(converged);
-        benchmark::DoNotOptimize(total_error);
+        // Published counters already consume this measurement.
     }
 
     // Report statistics
@@ -361,7 +365,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         auto grid_spec = grid_spec_result.value();
 
         auto builder_axes_result = PriceTableBuilder::from_vectors(
-            grid.moneyness,
+            grid.log_moneyness,
             grid.maturities,
             grid.volatilities,
             grid.rates,
