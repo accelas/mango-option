@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
+#include "mango/option/table/reference_selection_builder.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
@@ -580,7 +581,33 @@ BSplineSegmentedBuilder::assemble(std::vector<BSplineSegmentedSurface> surfaces)
 }
 
 std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
-BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
+BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const {
+    const auto regime = compute_segment_boundaries(config_.discrete_dividends,
+        config_.maturity, 0.0, config_.maturity);
+    const auto split = make_tau_split_from_segments(regime.bounds, regime.is_gap, K_refs_.front());
+    auto times = admitted_maturity_intervals(split, sample_domain_.tau_min, sample_domain_.tau_max);
+    const RefinementContext context{.spot = config_.spot, .dividend_yield = config_.dividend_yield,
+        .option_type = config_.option_type, .bounds = sample_domain_, .sample_bounds = sample_domain_,
+        .maturity_intervals = times};
+    auto valid = validate_refinement_request(params, context);
+    if (!valid) return std::unexpected(valid.error());
+    auto selected = detail::build_with_reference_selection(config_, sample_domain_, std::move(times),
+        [&](std::span<const double> refs) {
+            auto candidate = *this;
+            candidate.K_refs_.assign(refs.begin(), refs.end());
+            return candidate.build_adaptive_candidate(params);
+        }, [](const BSplineSegmentedAdaptiveResult& result, double s, double k, double t, double v, double r) {
+            return result.surface.price(s, k, t, v, r);
+        }, 0.01, params.target_iv_error, params.vega_floor);
+    if (!selected) return std::unexpected(selected.error());
+    selected->build.diagnostics.reference_selection = std::move(selected->selection);
+    for (const auto& candidate : selected->build.diagnostics.reference_selection->candidates)
+        if (candidate.metrics) selected->build.total_pde_solves += candidate.metrics->pde_solves;
+    return std::move(selected->build);
+}
+
+std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
+BSplineSegmentedBuilder::build_adaptive_candidate(const AdaptiveGridParams& params) const
 {
     const auto regime = compute_segment_boundaries(config_.discrete_dividends,
         config_.maturity, 0.0, config_.maturity);

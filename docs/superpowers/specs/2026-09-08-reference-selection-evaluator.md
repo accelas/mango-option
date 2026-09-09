@@ -1,8 +1,12 @@
 # Reference-strike evaluator checkpoint
 
-This checkpoint adds a shared build-time evaluator and adapter. Public pricing
-routes are not connected to them yet. The selector is a reference-approximation
-policy; whole-table strict/best-effort publication remains a separate gate.
+Manual and adaptive segmented builders for both B-spline and Chebyshev use
+one shared build-time evaluator and selection adapter. Reference/domain,
+manual-axis, timeline and adaptive controls are validated before reference work;
+explicit references retain their exact values,
+and explicit Chebyshev levels remain constraints. The selector governs
+reference approximation; whole-table strict/best-effort publication remains
+a separate gate.
 
 The evaluator compares direct fixed-expiry contracts with the positive,
 linear-in-strike blend evaluated at `S_i=S*K_i/K`. It records ideal blending,
@@ -30,10 +34,10 @@ Direct references use independent space, time, and domain ladders with seven
 unique solves, at most 2,049 spatial points/2,048 nominal time steps in the
 first round and one 4,097/4,096 retry. Domain extensions retain interior sinh
 coordinates. The private evaluator ceiling is 8,192 solves, including failed
-attempts; exhausting it leaves explicit incomplete evidence. Price allowances
-must resolve 0.001 quote units or one tenth of a tighter requested target.
-Proxy allowances similarly resolve 2e-6 decimal volatility or one tenth of a
-tighter target. TV/K below 1e-4 or qualified small vega filters only the IV
+attempts; exhausting it leaves explicit incomplete evidence. Price and proxy allowances resolve one tenth of the actual requested
+targets: 0.001 quote units and 2e-6 decimal volatility at defaults. Looser
+custom targets do not silently inherit stricter default reference budgets.
+The configured positive vega floor is retained. TV/K below 1e-4 or qualified small vega filters only the IV
 channel. These are empirical convergence checks, not uniform mathematical
 error bounds.
 
@@ -64,6 +68,10 @@ sequences would be unjustified.
 
 The module tests cover structural identities without fabricated IV evidence
 and an independently reproduced roughly three-cent sparse-reference error.
-The public factory RED and a draft measured manual adapter are preserved in
-the owner's work in progress. Remaining work includes complete public routing,
-measured ordinary-case density/cost, and final fixture/binding alignment.
+The public sparse-reference factory RED now refuses through qualified ideal
+and composed error witnesses. Both adaptive routes retain reference-selection
+evidence, and the unchanged 258-query manual Chebyshev cohort remains green.
+Manual build evidence distinguishes unmeasured fit accuracy from structural
+reference identities; Python labels the IV channel as a price/vega proxy and
+preserves absent statistics. Remaining work includes measured ordinary-case
+density/cost and legacy fixture alignment.

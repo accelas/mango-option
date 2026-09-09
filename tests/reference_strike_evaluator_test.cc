@@ -54,6 +54,35 @@ TEST(ReferenceStrikeEvaluatorTest, ExactReferenceIdentityNeedsNoDensityOracle) {
     EXPECT_FALSE(result->ideal_blend.iv->max_error.has_value());
 }
 
+// With zero carry and a deeply ITM put, a one-cent future cash payment
+// supplies TV exactly at the 1e-4*K threshold while vega is negligible.
+// TV ambiguity must not prevent the independent vega branch of the OR filter.
+TEST(ReferenceStrikeEvaluatorTest, SmallVegaFiltersDespiteTimeValueThresholdStraddle) {
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0, .option_type = OptionType::PUT, .dividend_yield = 0.0,
+        .discrete_dividends = {{0.005, 0.01}}, .maturity = 0.01,
+        .kref_config = {.K_refs = {90.0, 110.0}},
+        .strike_bounds = StrikeBounds{100.0, 100.0},
+    };
+    SurfaceBounds bounds{
+        .m_min = std::log(0.899), .m_max = std::log(0.9),
+        .tau_min = 0.0, .tau_max = 0.01, .sigma_min = 0.05, .sigma_max = 0.05,
+        .rate_min = 0.0, .rate_max = 0.0,
+        .strike_bounds = StrikeBounds{100.0, 100.0},
+        .ratio_bounds = MoneynessBounds{0.899, 0.9},
+    };
+    auto evaluator = ReferenceStrikeEvaluator::create(config, bounds,
+        {{0.0, 0.0045}, {0.0055, 0.01}});
+    ASSERT_TRUE(evaluator.has_value());
+    auto result = evaluator->evaluate(config.kref_config.K_refs);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->decision, ReferenceCandidateDecision::IvUnmeasured);
+    ASSERT_TRUE(result->ideal_blend.iv.has_value());
+    EXPECT_GT(result->ideal_blend.iv->filtered, 0u);
+    EXPECT_EQ(result->ideal_blend.iv->unresolved, 0u);
+    EXPECT_FALSE(result->ideal_blend.iv->max_error.has_value());
+}
+
 // Independent controlled-FDE audit at K=S97.1 finds a roughly .030552
 // quote-unit residual for K90/K110. This exceeds the .01 price criterion
 // without relying on an unqualified or filtered IV observation.

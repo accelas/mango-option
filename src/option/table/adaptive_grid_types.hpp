@@ -37,10 +37,10 @@ struct IVGrid {
 
 /// Configuration for adaptive grid refinement
 ///
-/// Defaults match the High accuracy profile (2 bps target).
+/// Defaults match the High accuracy profile (0.2 absolute-IV bp target).
 /// See PriceTableGridProfile::High in price_table_grid_estimator.hpp.
 struct AdaptiveGridParams {
-    /// Target IV error in absolute terms (default: 2 bps = 2e-5, High profile)
+    /// Target IV error in decimal volatility (default: 0.2 bp = 2e-5, High profile)
     double target_iv_error = 2e-5;
 
     /// Maximum refinement iterations (default: 8)

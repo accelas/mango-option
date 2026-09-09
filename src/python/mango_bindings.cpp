@@ -21,6 +21,7 @@
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/reference_selection.hpp"
 #include "mango/option/yield_curve.hpp"
 #include "mango/option/american_option_batch.hpp"
 
@@ -264,9 +265,74 @@ void validate_price_table_params_or_raise(const mango::AnyPriceTable& table,
     }
 }
 
+py::object reference_error_to_py(const std::optional<mango::ReferenceErrorSummary>& value) {
+    if (!value) return py::none();
+    py::dict out;
+    out["requested"] = value->requested;
+    out["measured"] = value->measured;
+    out["filtered"] = value->filtered;
+    out["unresolved"] = value->unresolved;
+    out["refused"] = value->refused;
+    out["structurally_exact"] = value->structurally_exact;
+    out["untested"] = value->untested;
+    out["max_error"] = py::cast(value->max_error);
+    out["rms_error"] = py::cast(value->rms_error);
+    out["max_uncertainty"] = py::cast(value->max_uncertainty);
+    return out;
+}
+
+py::dict reference_accuracy_to_py(const mango::ReferenceAccuracySummary& value) {
+    py::dict out;
+    out["price"] = reference_error_to_py(value.price);
+    out["iv"] = reference_error_to_py(value.iv);
+    return out;
+}
+
+py::dict reference_selection_to_py(const mango::ReferenceSelectionResult& value) {
+    constexpr std::array decisions{"adequate", "refine_references", "threshold_ambiguous",
+        "reference_unqualified", "iv_unmeasured", "fit_limited"};
+    constexpr std::array stops{"adequate", "fit_limited", "invalid_config", "invalid_metrics",
+        "explicit_references_inadequate", "reference_limit", "round_limit", "no_representable_refinement",
+        "threshold_ambiguous", "reference_unqualified", "iv_unmeasured", "evaluator_failed"};
+    auto name = [](auto code, const auto& names) {
+        const size_t index = static_cast<size_t>(code);
+        return index < names.size() ? names[index] : "unknown";
+    };
+    py::dict out;
+    out["reference_strikes"] = value.refs;
+    out["picked_candidate"] = value.picked_candidate;
+    out["stop_reason"] = name(value.stop_reason, stops);
+    out["iv_error_kind"] = "price_vega_proxy";
+    py::list candidates;
+    for (const auto& candidate : value.candidates) {
+        py::dict row;
+        row["reference_strikes"] = candidate.refs;
+        if (candidate.metrics) {
+            const auto& m = *candidate.metrics;
+            row["decision"] = name(m.decision, decisions);
+            row["total_target_met"] = py::cast(m.total_target_met);
+            row["ideal_blend"] = reference_accuracy_to_py(m.ideal_blend);
+            row["fit"] = reference_accuracy_to_py(m.fit);
+            row["total"] = reference_accuracy_to_py(m.total);
+            row["pde_solves"] = m.pde_solves;
+            row["elapsed_seconds"] = m.elapsed_seconds;
+        }
+        if (candidate.evaluator_error) {
+            py::dict error;
+            error["code"] = static_cast<int>(candidate.evaluator_error->code);
+            error["axis_index"] = candidate.evaluator_error->axis_index;
+            error["count"] = candidate.evaluator_error->count;
+            row["evaluator_error"] = std::move(error);
+        }
+        candidates.append(std::move(row));
+    }
+    out["candidates"] = std::move(candidates);
+    return out;
+}
+
 /// Convert adaptive-build diagnostics (spec D7) to a Python dict, or None
-/// when the table/solver wasn't built adaptively (manual build, Parquet
-/// load).
+/// when no build evidence was retained (continuous manual build or load).
+/// Segmented manual builds can carry reference-only evidence.
 py::object build_diagnostics_to_pyobject(
     const std::optional<mango::BuildDiagnostics>& diagnostics) {
     if (!diagnostics.has_value()) {
@@ -288,6 +354,14 @@ py::object build_diagnostics_to_pyobject(
     result["monotonicity_points_invalid"] = d.monotonicity_points_invalid;
     result["worst_vega_slope"] = d.worst_vega_slope;
     result["n_iterations"] = d.iterations.size();
+    if (d.reference_selection) {
+        result["reference_selection"] = reference_selection_to_py(*d.reference_selection);
+        if (d.iterations.empty() && d.total_iterations == 0) {
+            result["target_met"] = py::none();
+            result["achieved_max_error"] = py::none();
+            result["achieved_avg_error"] = py::none();
+        }
+    }
     return result;
 }
 

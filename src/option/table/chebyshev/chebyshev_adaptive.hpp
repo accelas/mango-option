@@ -174,6 +174,12 @@ struct ChebyshevSegmentedAdaptiveResult {
     SurfaceBounds sample_bounds{};
 };
 
+/// Manual result with reference-selection evidence; fixed levels stay exact.
+struct ChebyshevSegmentedManualResult {
+    ChebyshevMultiKRefSurface surface;
+    BuildDiagnostics diagnostics;
+};
+
 /// Builder for segmented Chebyshev surfaces (discrete dividends, multi-K_ref).
 ///
 /// Performs shared setup (K_ref resolution, domain expansion, segment boundaries)
@@ -191,11 +197,19 @@ public:
     [[nodiscard]] std::expected<ChebyshevMultiKRefSurface, PriceTableError>
     build(std::array<size_t, 4> cc_levels = {8, 4, 2, 2}) const;
 
+    [[nodiscard]] std::expected<ChebyshevSegmentedManualResult, PriceTableError>
+    build_with_diagnostics(std::array<size_t, 4> cc_levels = {8, 4, 2, 2}) const;
+
     /// Build with adaptive grid refinement.
     [[nodiscard]] std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
     build_adaptive(const AdaptiveGridParams& params) const;
 
 private:
+    [[nodiscard]] std::expected<ChebyshevMultiKRefSurface, PriceTableError>
+    build_candidate(std::array<size_t, 4> cc_levels) const;
+    [[nodiscard]] std::expected<ChebyshevSegmentedAdaptiveResult, PriceTableError>
+    build_adaptive_candidate(const AdaptiveGridParams& params) const;
+
     struct AssembleResult {
         ChebyshevMultiKRefSurface surface;
         size_t pde_solves = 0;

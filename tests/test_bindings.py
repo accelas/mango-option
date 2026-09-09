@@ -396,6 +396,17 @@ def test_segmented_domain_and_reference_controls():
     assert table.strike_bounds.max == 110.0
     assert table.fixed_expiry.reference_maturity == 1.0
     assert table.fixed_expiry.discrete_dividends == []
+    diagnostics = table.build_diagnostics
+    assert diagnostics["target_met"] is None
+    assert diagnostics["achieved_max_error"] is None
+    selection = diagnostics["reference_selection"]
+    assert selection["reference_strikes"] == [85.0, 100.0, 115.0]
+    assert selection["iv_error_kind"] == "price_vega_proxy"
+    evidence = selection["candidates"][selection["picked_candidate"]]
+    assert evidence["pde_solves"] == 0
+    assert evidence["ideal_blend"]["iv"]["measured"] == 0
+    assert evidence["ideal_blend"]["iv"]["max_error"] is None
+    assert evidence["total_target_met"] is None
     p = make_pricing_params()
     p.spot = p.strike = 120.0
     try:
