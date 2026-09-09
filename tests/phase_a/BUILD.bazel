@@ -1,5 +1,20 @@
 # SPDX-License-Identifier: MIT
 cc_binary(
+    name = "rate_audit",
+    srcs = ["rate_audit.cc"],
+    deps = [
+        "//src/option:price_table_factory",
+        "//src/option:american_option",
+        "//src/option:grid_spec_types",
+        "//src/option/table/bspline:bspline_surface",
+        "//src/option/table/serialization:from_data",
+    ],
+    copts = ["-O3", "-fopenmp"],
+    linkopts = ["-fopenmp"],
+    tags = ["manual"],
+)
+
+cc_binary(
     name = "continuous_bspline",
     srcs = ["continuous_bspline.cc"],
     deps = [
