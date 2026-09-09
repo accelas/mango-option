@@ -376,11 +376,11 @@ GridBuffer<T> GridSpec<T>::generate() const {
             const T offset = static_cast<T>(i) - half_count;
             const T u = step != T(0) ? offset * step
                 : concentration * (offset / intervals);
-            // Retain the finite ratio form when only its scale overflows,
+            // Retain the ratio form when its scale overflows or underflows,
             // and the linear limit if halving a tiny concentration underflows.
             const T displacement = half_sinh == T(0)
                 ? half_width * (offset / half_count)
-                : std::isfinite(scale) ? scale * std::sinh(u)
+                : std::isnormal(scale) ? scale * std::sinh(u)
                 : half_width * (std::sinh(u) / half_sinh);
             points.push_back(midpoint + displacement);
         }
