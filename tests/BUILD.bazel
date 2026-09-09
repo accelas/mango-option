@@ -2254,3 +2254,13 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "accuracy_population_test",
+    size = "small",
+    srcs = ["accuracy_population_test.cc"],
+    deps = [
+        "//src/option/table/accuracy:population",
+        "@googletest//:gtest_main",
+    ],
+)
