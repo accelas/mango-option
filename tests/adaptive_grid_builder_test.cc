@@ -574,6 +574,59 @@ TEST(ResolveKRefsTest, ExplicitCeilingNeverTruncatesTheRequestedSet) {
 // Tests for expand_segmented_domain
 // ===========================================================================
 
+// Support widening must be an enclosure, including requests below numerical
+// padding floors. These assertions do not prescribe a padding formula.
+TEST(ExpandSegmentedDomainTest, PreservesRequestedEndpointsBelowPaddingFloors) {
+    for (double sigma_min : {0.005, 1e-8}) {
+        IVGrid domain{.moneyness = to_log_m({0.001, 0.005, 0.02}),
+            .vol = {sigma_min, 0.02}, .rate = {-0.10, -0.06}};
+        auto support = expand_segmented_domain(domain, .25, 0.0, {{.1, 2.0}}, 100.0);
+        ASSERT_TRUE(support);
+        EXPECT_LE(support->m_min, domain.moneyness.front());
+        EXPECT_GE(support->m_max, domain.moneyness.back());
+        EXPECT_GT(support->sigma_min, 0.0);
+        EXPECT_LE(support->sigma_min, domain.vol.front());
+        EXPECT_GE(support->sigma_max, domain.vol.back());
+        EXPECT_LE(support->rate_min, domain.rate.front());
+        EXPECT_GE(support->rate_max, domain.rate.back());
+    }
+}
+
+TEST(ChebyshevSupportBounds, PaddingContainsEveryRequestedEndpoint) {
+    for (double tau_min : {0.0, 1e-7, .1}) {
+        for (double sigma_min : {1e-8, .005, .1}) {
+            const SurfaceBounds requested{-7.0, -4.0, tau_min, .25,
+                sigma_min, .3, -.1, -.06};
+            const auto support = detail::chebyshev_support_bounds(requested, {5, 3, 2, 1});
+            EXPECT_LE(support.m_min, requested.m_min);
+            EXPECT_GE(support.m_max, requested.m_max);
+            EXPECT_LE(support.tau_min, requested.tau_min);
+            EXPECT_GE(support.tau_max, requested.tau_max);
+            EXPECT_GE(support.tau_min, 0.0);
+            EXPECT_LE(support.sigma_min, requested.sigma_min);
+            EXPECT_GE(support.sigma_max, requested.sigma_max);
+            EXPECT_GT(support.sigma_min, 0.0);
+            EXPECT_LE(support.rate_min, requested.rate_min);
+            EXPECT_GE(support.rate_max, requested.rate_max);
+        }
+    }
+}
+
+TEST(ExpandSegmentedDomainTest, InvalidVolatilityIsNotRepairedByPadding) {
+    for (double sigma : {0.0, -.01, std::numeric_limits<double>::infinity(),
+                         std::numeric_limits<double>::quiet_NaN()}) {
+        IVGrid domain{.moneyness = {-.1, .1}, .vol = {sigma, .2}, .rate = {-.1, -.06}};
+        auto support = expand_segmented_domain(domain, .25, 0.0, {}, 100.0);
+        EXPECT_FALSE(support);
+        if (!support) EXPECT_EQ(support.error().code, PriceTableErrorCode::InvalidConfig);
+        SegmentedAdaptiveConfig config{.spot = 100.0, .option_type = OptionType::PUT,
+            .dividend_yield = 0.0, .maturity = .25,
+            .kref_config = {.K_refs = {100.0}}, .strike_bounds = StrikeBounds{100.0, 100.0}};
+        EXPECT_FALSE(BSplineSegmentedBuilder::create(config, domain));
+        EXPECT_FALSE(ChebyshevSegmentedBuilder::create(config, domain));
+    }
+}
+
 TEST(ExpandSegmentedDomainTest, NoDividends) {
     IVGrid domain{
         .moneyness = to_log_m({0.8, 1.0, 1.2}),
