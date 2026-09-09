@@ -41,7 +41,9 @@ struct PriceTableData {
         double K_ref = 0.0;
         double tau_start = 0.0, tau_end = 0.0;
         double tau_min = 0.0, tau_max = 0.0;
-        std::string interp_type;  // "bspline" or "chebyshev"
+        // "bspline": spline coefficients; "chebyshev": nodal values;
+        // "chebyshev_modal": actual modal coefficients (no half factors).
+        std::string interp_type;
         size_t ndim = 4;
 
         std::vector<double> domain_lo, domain_hi;
