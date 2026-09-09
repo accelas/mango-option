@@ -2,6 +2,7 @@
 #pragma once
 
 #include "mango/option/table/split_surface.hpp"
+#include "mango/option/table/quote_scale.hpp"
 #include <cmath>
 #include <tuple>
 #include <vector>
@@ -50,7 +51,7 @@ public:
     [[nodiscard]] std::tuple<double, double, double, double, double>
     to_local(size_t i, double spot, double strike,
              double tau, double sigma, double rate) const noexcept {
-        return {spot * spot_scale(i, strike), k_refs_[i], tau, sigma, rate};
+        return {detail::scale_quote(spot, k_refs_[i], strike), k_refs_[i], tau, sigma, rate};
     }
 
     /// Linear spot-map Jacobian; weights depend on K, not on S.

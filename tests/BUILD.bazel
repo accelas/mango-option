@@ -1,5 +1,18 @@
 # SPDX-License-Identifier: MIT
 cc_test(
+    name = "finite_scale_composition_test",
+    size = "small",
+    srcs = ["finite_scale_composition_test.cc"],
+    deps = [
+        "//src/option/table:transform_leaf",
+        "//src/option/table:standard_transform_4d",
+        "//src/option/table:analytical_eep",
+        "//src/option/table:multi_kref_split",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "accuracy_collector_test",
     size = "small",
     srcs = ["accuracy_collector_test.cc"],
