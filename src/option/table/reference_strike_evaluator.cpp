@@ -82,7 +82,8 @@ struct ReferenceStrikeEvaluator::Impl {
     std::vector<PhysicalQuery> queries;
     double price_target, iv_target, vega_floor;
     double full_u;
-    size_t solves = 0;
+    size_t solves = 0;  // Request budget, including rejected solver construction.
+    PdeWork provider_work;
     static constexpr size_t kSolveBudget = 8192;
     using SolveKey = std::tuple<double, double, double, double, size_t, size_t, double>;
     std::map<SolveKey, std::shared_ptr<AmericanOptionResult>> solutions;
@@ -108,8 +109,14 @@ struct ReferenceStrikeEvaluator::Impl {
         if (grid) {
             auto solver = AmericanOptionSolver::create(params, PDEGridSpec{PDEGridConfig{*grid, nt, {}}});
             if (solver) {
+                ++provider_work.attempted;
                 auto solved = solver->solve();
-                if (solved) result = std::make_shared<AmericanOptionResult>(std::move(*solved));
+                if (solved) {
+                    ++provider_work.completed;
+                    result = std::make_shared<AmericanOptionResult>(std::move(*solved));
+                } else {
+                    ++provider_work.failed;
+                }
             }
         }
         solutions.emplace(key, result);
@@ -355,13 +362,18 @@ ReferenceStrikeEvaluator::create(const SegmentedAdaptiveConfig& config, const Su
 
 std::expected<ReferenceCandidateMetrics, PriceTableError>
 ReferenceStrikeEvaluator::evaluate(std::span<const double> refs, const SurfaceHandle* fitted) {
+    const auto rejected_before_solving = [](PriceTableError error) {
+        error.work = std::make_shared<const RefinementWork>();
+        return std::unexpected(std::move(error));
+    };
     auto validated = validate_k_ref_values(refs, impl_->config.kref_config.max_references);
-    if (!validated) return std::unexpected(validated.error());
+    if (!validated) return rejected_before_solving(validated.error());
     if (validated->front() > impl_->bounds.strike_bounds->min ||
         validated->back() < impl_->bounds.strike_bounds->max)
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        return rejected_before_solving(PriceTableError{PriceTableErrorCode::InvalidConfig});
     const auto started = std::chrono::steady_clock::now();
     const size_t starting_solves = impl_->solves;
+    const auto starting_work = impl_->provider_work;
     ReferenceCandidateMetrics metrics;
     const MultiKRefSplit split(*validated);
     const auto prior_witness = impl_->reference_witnesses.find(*validated);
@@ -544,6 +556,10 @@ ReferenceStrikeEvaluator::evaluate(std::span<const double> refs, const SurfaceHa
     if (!fitted && metrics.decision == ReferenceCandidateDecision::RefineReferences)
         impl_->reference_witnesses[*validated] = metrics.ideal_blend;
     metrics.pde_solves = impl_->solves - starting_solves;
+    metrics.provider_work = PdeWork{
+        .attempted = impl_->provider_work.attempted - starting_work.attempted,
+        .completed = impl_->provider_work.completed - starting_work.completed,
+        .failed = impl_->provider_work.failed - starting_work.failed};
     metrics.elapsed_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     return metrics;
 }
