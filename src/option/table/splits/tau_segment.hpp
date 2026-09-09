@@ -74,6 +74,10 @@ public:
         if (tau < tau_start_.front() || tau > tau_end_.back()) return false;
         const auto br = bracket(0.0, 0.0, tau, 0.0, 0.0);
         const size_t i = br.entries[0].index;
+        // bracket() has an unchecked numerical fallback. Support headroom
+        // in that fallback leaf cannot turn an omitted routing span into an
+        // admitted maturity.
+        if (tau < tau_start_[i] || tau > tau_end_[i]) return false;
         const double local = tau - tau_start_[i];
         return local >= tau_min_[i] && local <= tau_max_[i];
     }
