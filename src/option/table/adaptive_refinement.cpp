@@ -1006,13 +1006,10 @@ std::expected<void, PriceTableError> validate_refinement_request(
 
     // Singleton axes are sampled at their one requested coordinate. They
     // need numerical fit support, but have no requested interval to refine.
-    std::array<bool, 4> fixed_axes{};
-    for (size_t d = 0; d < sample_axis_bounds.size(); ++d) {
-        const auto [lo, hi] = sample_axis_bounds[d];
+    for (const auto& [lo, hi] : sample_axis_bounds) {
         if (!std::isfinite(lo) || !std::isfinite(hi) || hi < lo) {
             return invalid_config();
         }
-        fixed_axes[d] = hi == lo;
     }
 
     return {};
@@ -1039,6 +1036,10 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         {ctx.sample_bounds.sigma_min, ctx.sample_bounds.sigma_max},
         {ctx.sample_bounds.rate_min, ctx.sample_bounds.rate_max}
     }};
+    std::array<bool, 4> fixed_axes{};
+    for (size_t d = 0; d < sample_axis_bounds.size(); ++d) {
+        fixed_axes[d] = sample_axis_bounds[d].first == sample_axis_bounds[d].second;
+    }
 
     auto seeded = seed_refinement_grids(params, ctx, initial_grids);
     std::vector<double> moneyness_grid = std::move(seeded.moneyness);
