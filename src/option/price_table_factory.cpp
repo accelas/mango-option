@@ -324,8 +324,7 @@ build_bspline_continuous_table(const IVSolverFactoryConfig& config,
             std::move(result->spline), chain.spot, chain.dividend_yield,
             config.option_type, result->sample_bounds);
         if (!table.has_value()) {
-            return std::unexpected(detail::to_validation_error(
-                PriceTableError{PriceTableErrorCode::SurfaceBuildFailed, 0, 0}));
+            return std::unexpected(detail::to_validation_error(table.error()));
         }
         return BuiltTable<BSplinePriceTable>{
             .table = std::move(*table),
@@ -372,8 +371,7 @@ build_bspline_continuous_table(const IVSolverFactoryConfig& config,
         table_result->spline, config.spot, config.dividend_yield,
         config.option_type, bounds);
     if (!table.has_value()) {
-        return std::unexpected(detail::to_validation_error(
-            PriceTableError{PriceTableErrorCode::SurfaceBuildFailed, 0, 0}));
+        return std::unexpected(detail::to_validation_error(table.error()));
     }
     return BuiltTable<BSplinePriceTable>{
         .table = std::move(*table),

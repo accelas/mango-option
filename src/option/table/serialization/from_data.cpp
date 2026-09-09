@@ -80,7 +80,7 @@ from_data<BSplineLeaf>(const PriceTableData& data) {
     auto bounds = bounds_from_data(data);
     if (!bounds) return std::unexpected(bounds.error());
 
-    return PriceTable<BSplineLeaf>(
+    return PriceTable<BSplineLeaf>::create(
         std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
@@ -128,7 +128,7 @@ from_data<BSplineMultiKRefInner>(const PriceTableData& data) {
     auto bounds = bounds_from_data(data);
     if (!bounds) return std::unexpected(bounds.error());
 
-    return PriceTable<BSplineMultiKRefInner>(
+    return PriceTable<BSplineMultiKRefInner>::create(
         std::move(inner), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
@@ -159,7 +159,7 @@ from_data<ChebyshevLeaf>(const PriceTableData& data) {
     auto bounds = bounds_from_data(data);
     if (!bounds) return std::unexpected(bounds.error());
 
-    return PriceTable<ChebyshevLeaf>(
+    return PriceTable<ChebyshevLeaf>::create(
         std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
@@ -207,7 +207,7 @@ from_data<ChebyshevMultiKRefInner>(const PriceTableData& data) {
     auto bounds = bounds_from_data(data);
     if (!bounds) return std::unexpected(bounds.error());
 
-    return PriceTable<ChebyshevMultiKRefInner>(
+    return PriceTable<ChebyshevMultiKRefInner>::create(
         std::move(inner), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
@@ -236,7 +236,7 @@ from_data<BSpline3DLeaf>(const PriceTableData& data) {
     auto bounds = bounds_from_data(data);
     if (!bounds) return std::unexpected(bounds.error());
 
-    return PriceTable<BSpline3DLeaf>(
+    return PriceTable<BSpline3DLeaf>::create(
         std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 
@@ -267,7 +267,7 @@ from_data<Chebyshev3DLeaf>(const PriceTableData& data) {
     auto bounds = bounds_from_data(data);
     if (!bounds) return std::unexpected(bounds.error());
 
-    return PriceTable<Chebyshev3DLeaf>(
+    return PriceTable<Chebyshev3DLeaf>::create(
         std::move(eep_leaf), *bounds, data.option_type, data.dividend_yield, data.fixed_expiry);
 }
 

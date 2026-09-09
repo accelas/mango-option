@@ -94,13 +94,15 @@ using BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>;
 /// Create a BSplinePriceTable from a pre-built EEP B-spline.
 /// K_ref and dividend_yield are passed explicitly.
 /// The spline must contain EEP data (built with eep_decompose).
+/// Freezes and certifies the final physical price. A rigorous negative
+/// witness and failure to prove within the budget have distinct typed errors.
 ///
 /// Published bounds are derived from the spline's own knot span.  For a
 /// surface built with support headroom beyond its measured/sample domain
 /// (adaptive builds, spec D2), use the overload below with explicit bounds
 /// instead -- deriving from knots here would publish the unmeasured
 /// headroom band as queryable.
-[[nodiscard]] std::expected<BSplinePriceTable, std::string>
+[[nodiscard]] std::expected<BSplinePriceTable, PriceTableError>
 make_bspline_surface(
     std::shared_ptr<const BSplineND<double, 4>> spline,
     double K_ref,
@@ -109,7 +111,7 @@ make_bspline_surface(
 
 /// Same as above, but with the published `SurfaceBounds` supplied explicitly
 /// instead of derived from the spline's knot span.
-[[nodiscard]] std::expected<BSplinePriceTable, std::string>
+[[nodiscard]] std::expected<BSplinePriceTable, PriceTableError>
 make_bspline_surface(
     std::shared_ptr<const BSplineND<double, 4>> spline,
     double K_ref,
