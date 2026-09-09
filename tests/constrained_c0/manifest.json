@@ -1,0 +1,92 @@
+{
+  "name": "C0-private-cubic-zero-trace-v1",
+  "declared_before_sampling": true,
+  "source": "a314992073150623a9e7490cac365df6f26654ca",
+  "baseline_payload_sha256": "9d92387cf2e076db235121a4c9c15fffe06f7ebc10d2616578b2680123b5eec0",
+  "reference_snapshot": "459-phase-b/references; unchanged772",
+  "domain": {
+    "ratio": [
+      0.7,
+      1.3
+    ],
+    "tau": [
+      0.019178082191780823,
+      2
+    ],
+    "sigma": [
+      0.05,
+      0.5
+    ],
+    "rate": [
+      -0.05,
+      0.1
+    ],
+    "strike": [
+      80,
+      120
+    ]
+  },
+  "model": {
+    "type": "CALL",
+    "q": 0,
+    "cash_dividends": [],
+    "K_ref": 100
+  },
+  "sample_axes": {
+    "x_tau_sigma": "exact stored baseline grids",
+    "negative_rates": [
+      -0.05,
+      -0.0375,
+      -0.025,
+      -0.0125
+    ],
+    "pde": "corrected PriceTableBuilder solve_batch GridAccuracyParams{}, same default as public factory",
+    "repair_failed_samples": false
+  },
+  "fit": {
+    "block": "10 coefficients per existing x,tau site, sigma basis times two free rate coefficients",
+    "objective": "unweighted squared raw-dollar EEP sample error",
+    "rate_grid_metadata": [
+      -0.05,
+      -0.0375,
+      -0.025,
+      0,
+      0.05,
+      0.1
+    ],
+    "rate_knots": [
+      -0.05,
+      -0.05,
+      -0.05,
+      -0.05,
+      0,
+      0,
+      0.1,
+      0.1,
+      0.1,
+      0.1
+    ],
+    "rate_coefficients": "[B,C,0,0,0,0], other-axis fits preserve all zero planes",
+    "cuts": "sigma sites+midpoints times negative rates+zero+midpoints,81 per block; final European+EEP sigma derivative >=0 even when floor inactive",
+    "intrinsic_floor": false,
+    "active_set_iterations": 100,
+    "numeric_solver_tolerance": 1e-10,
+    "no_certificate_from_cut_grid": true,
+    "adaptive_extra_rounds": 0
+  },
+  "limits": {
+    "build_seconds": 600,
+    "proof_and_query_seconds": 180,
+    "proof_nodes": 4096,
+    "proof_depth": 24,
+    "original_max_iter": 8,
+    "original_max_points_per_axis": 160,
+    "candidate_count": 1
+  },
+  "targets": {
+    "price_quote": 0.01,
+    "actual_iv_decimal": 2e-05,
+    "Greek_criteria": "unchanged applicable frozen references, side qualification retained"
+  },
+  "stopping": "retain every failure; no enlarged grid/cuts/solver search after candidate outcome; timed-out work unfinished"
+}

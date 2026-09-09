@@ -2222,3 +2222,8 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+exports_files(
+    ["price_table_builder_test_access.hpp"],
+    visibility = ["//tests/constrained_c0:__pkg__"],
+)
