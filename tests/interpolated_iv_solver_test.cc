@@ -23,8 +23,9 @@ namespace {
 
 // Exact affine-volatility prices isolate model provenance from fitting.
 struct LinearVolatilityPrice {
-    double price(double, double strike, double, double sigma, double) const { return strike * sigma; }
-    double vega(double, double strike, double, double, double) const { return strike; }
+    double scale = 1.0;
+    double price(double, double strike, double, double sigma, double) const { return scale * strike * sigma; }
+    double vega(double, double strike, double, double, double) const { return scale * strike; }
 };
 
 TEST(InterpolatedIVModelMetadata, UsesModelAnchorAndRejectsContradictoryOverrides) {
@@ -52,6 +53,89 @@ TEST(InterpolatedIVModelMetadata, UsesModelAnchorAndRejectsContradictoryOverride
     if (!contradiction) {
         EXPECT_EQ(contradiction.error().code, ValidationErrorCode::DiscreteDividendMismatch);
     }
+}
+
+// Regression: a const shared pointer can still alias a caller-owned mutable
+// spline. Publication must detach the numerical payload before it is queried.
+TEST(PriceTablePublication, MutableSplineAliasCannotChangePublishedPrices) {
+    using Spline = BSplineND<double, 4>;
+    const Spline::GridArray grids{{{-0.2, -0.1, 0.1, 0.2},
+        {0.1, 0.3, 0.6, 1.0}, {0.1, 0.2, 0.3, 0.4}, {0.01, 0.03, 0.05, 0.07}}};
+    Spline::KnotArray knots;
+    for (size_t axis = 0; axis < 4; ++axis) knots[axis] = clamped_knots_cubic(grids[axis]);
+    auto original = Spline::create(grids, knots, std::vector<double>(256, 2.0));
+    auto replacement = Spline::create(grids, knots, std::vector<double>(256, 9.0));
+    ASSERT_TRUE(original); ASSERT_TRUE(replacement);
+    auto mutable_spline = std::make_shared<Spline>(std::move(*original));
+    auto table = make_bspline_surface(mutable_spline, 100.0, 0.0, OptionType::PUT);
+    ASSERT_TRUE(table);
+    const double published = table->price(100.0, 100.0, 0.5, 0.2, 0.05);
+    const auto copy = *table;
+    *mutable_spline = std::move(*replacement);
+    EXPECT_DOUBLE_EQ(table->price(100.0, 100.0, 0.5, 0.2, 0.05), published);
+    EXPECT_DOUBLE_EQ(copy.price(100.0, 100.0, 0.5, 0.2, 0.05), published);
+}
+
+TEST(PriceTablePublication, WrapperReassignmentCannotChangeExistingIvSolver) {
+    using Table = PriceTable<LinearVolatilityPrice>;
+    using View = detail::SharedPriceTableSurface<Table>;
+    const SurfaceBounds bounds{-.2, .2, .1, 1.0, .1, .4, .01, .1};
+    auto owner = std::make_shared<Table>(LinearVolatilityPrice{}, bounds, OptionType::PUT, 0.0);
+    auto solver = InterpolatedIVSolver<View>::create(View(owner));
+    ASSERT_TRUE(solver);
+    IVQuery query(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = .25,
+        .rate = .05, .option_type = OptionType::PUT}, 20.0);
+    auto original = solver->solve(query);
+    ASSERT_TRUE(original);
+    EXPECT_NEAR(original->implied_vol, .2, 1e-10);
+
+    *owner = Table(LinearVolatilityPrice{2.0}, bounds, OptionType::PUT, 0.0);
+    auto retained_price = solver->solve(query);
+    ASSERT_TRUE(retained_price);
+    EXPECT_NEAR(retained_price->implied_vol, .2, 1e-10);
+
+    auto changed = bounds;
+    changed.tau_min = .5;
+    changed.strike_bounds = StrikeBounds{150.0, 200.0};
+    *owner = Table({}, changed, OptionType::CALL, 0.03);
+    auto retained = solver->solve(query);
+    ASSERT_TRUE(retained) << static_cast<int>(retained.error().code);
+    EXPECT_NEAR(retained->implied_vol, .2, 1e-10);
+}
+
+TEST(PriceTablePublication, NestedReferenceAndTimePiecesDetachMutableSpline) {
+    using Spline = BSplineND<double, 4>;
+    const Spline::GridArray grids{{{-0.2, -0.1, 0.1, 0.2},
+        {0.1, 0.3, 0.6, 1.0}, {0.1, 0.2, 0.3, 0.4}, {0.01, 0.03, 0.05, 0.07}}};
+    Spline::KnotArray knots;
+    for (size_t axis = 0; axis < 4; ++axis) knots[axis] = clamped_knots_cubic(grids[axis]);
+    auto original = Spline::create(grids, knots, std::vector<double>(256, .02));
+    auto replacement = Spline::create(grids, knots, std::vector<double>(256, .09));
+    ASSERT_TRUE(original); ASSERT_TRUE(replacement);
+    auto mutable_spline = std::make_shared<Spline>(std::move(*original));
+    BSplineSegmentedLeaf leaf(SharedBSplineInterp<4>(mutable_spline), StandardTransform4D{}, 100.0);
+    BSplineSegmentedSurface segmented({leaf}, TauSegmentSplit({0.0}, {1.0}, {.1}, {1.0}, 100.0));
+    BSplineMultiKRefInner inner({segmented}, MultiKRefSplit({100.0}));
+    SurfaceBounds bounds{-.2, .2, .1, 1.0, .1, .4, .01, .07};
+    bounds.strike_bounds = StrikeBounds{100.0, 100.0};
+    BSplineMultiKRefSurface table(std::move(inner), bounds, OptionType::PUT, 0.0,
+        FixedExpiryMetadata{1.0, {}});
+    EXPECT_NEAR(table.price(100.0, 100.0, .5, .2, .05), 2.0, 1e-12);
+    *mutable_spline = std::move(*replacement);
+    EXPECT_NEAR(table.price(100.0, 100.0, .5, .2, .05), 2.0, 1e-12);
+    EXPECT_TRUE(table.contains_maturity(.5));
+    EXPECT_FALSE(table.contains_maturity(.05));
+}
+
+TEST(PriceTablePublication, MovedModelStorageCannotChangePublishedSchedule) {
+    using Table = PriceTable<LinearVolatilityPrice>;
+    const SurfaceBounds bounds{-.2, .2, .1, 1.0, .1, .4, .01, .1};
+    std::optional<FixedExpiryMetadata> model = FixedExpiryMetadata{1.0, {{.5, 2.0}}};
+    auto* retained_dividend = model->discrete_dividends.data();
+    Table table({}, bounds, OptionType::PUT, 0.0, std::move(model));
+    retained_dividend->amount = 9.0;
+    ASSERT_TRUE(table.fixed_expiry());
+    EXPECT_DOUBLE_EQ(table.fixed_expiry()->discrete_dividends.front().amount, 2.0);
 }
 
 /// Test fixture that creates a proper EEP price surface for IV solving

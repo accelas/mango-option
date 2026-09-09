@@ -74,7 +74,16 @@ public:
         return *leaf_gamma + european_gamma;
     }
 
+    [[nodiscard]] EEPLayer immutable_snapshot() const {
+        if constexpr (requires { leaf_.immutable_snapshot(); }) {
+            return EEPLayer(leaf_.immutable_snapshot(), eep_);
+        } else {
+            return EEPLayer(leaf_, eep_);
+        }
+    }
+
     [[nodiscard]] const Leaf& leaf() const noexcept { return leaf_; }
+    [[nodiscard]] const EEP& eep() const noexcept { return eep_; }
     [[nodiscard]] auto& interpolant() const noexcept { return leaf_.interpolant(); }
     [[nodiscard]] double K_ref() const noexcept { return leaf_.K_ref(); }
 
