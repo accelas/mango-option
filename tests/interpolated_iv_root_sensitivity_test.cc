@@ -177,4 +177,65 @@ TEST(IVRootSensitivityTest, RejectsInvalidSensitivityConfiguration) {
         EXPECT_FALSE(InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(*table, config));
     }
 }
+TEST(IVBracketTest, ExplicitHighVolatilityBracketHasNoHiddenPriceBasedCap) {
+    auto table = certified_curve({8, 1, 0, 0}, 128, 8.125);
+    ASSERT_TRUE(table);
+    InterpolatedIVSolverConfig config;
+    config.sigma_max = 8.125;
+    auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(*table, config);
+    ASSERT_TRUE(solver);
+    auto result = solver->solve(root_query());
+    ASSERT_TRUE(result);
+    EXPECT_NEAR(result->implied_vol, 4.125, 1e-6);
+
+    auto defaults = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(*table);
+    ASSERT_TRUE(defaults);
+    auto outside_default = defaults->solve(root_query());
+    ASSERT_FALSE(outside_default);
+    EXPECT_EQ(outside_default.error().code, IVErrorCode::BracketingFailed);
+}
+
+TEST(IVBracketTest, DisjointCallerAndTableBoundsRefuseInsteadOfWidening) {
+    auto table = certified_curve({8, 1, 0, 0});
+    ASSERT_TRUE(table);
+    InterpolatedIVSolverConfig config;
+    config.sigma_min = 1;
+    config.sigma_max = 2;
+    auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(*table, config);
+    ASSERT_FALSE(solver);
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::InvalidBounds);
+}
+
+TEST(IVBracketTest, CallerBoundsRestrictTheCertifiedDomain) {
+    auto table = certified_curve({8, 1, 0, 0});
+    ASSERT_TRUE(table);
+    InterpolatedIVSolverConfig config;
+    config.sigma_min = .2;
+    config.sigma_max = .3;
+    auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(*table, config);
+    ASSERT_TRUE(solver);
+    auto inside = solver->solve(root_query(7.5));
+    ASSERT_TRUE(inside);
+    EXPECT_NEAR(inside->implied_vol, .25, 1e-6);
+    auto outside = solver->solve(root_query(8));
+    ASSERT_FALSE(outside);
+    EXPECT_EQ(outside.error().code, IVErrorCode::BracketingFailed);
+}
+
+TEST(IVBracketTest, ConfiguredVolatilityBoundsMustBeFinitePositiveAndOrdered) {
+    auto table = certified_curve({8, 1, 0, 0});
+    ASSERT_TRUE(table);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    for (auto [lo, hi] : std::array<std::pair<double, double>, 7>{
+             {{0, .5}, {-.1, .5}, {.5, .5}, {.6, .5}, {nan, .5}, {.1, nan}, {.1, inf}}}) {
+        InterpolatedIVSolverConfig config;
+        config.sigma_min = lo;
+        config.sigma_max = hi;
+        auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(*table, config);
+        ASSERT_FALSE(solver);
+        EXPECT_EQ(solver.error().code, ValidationErrorCode::InvalidBounds);
+    }
+}
+
 }  // namespace

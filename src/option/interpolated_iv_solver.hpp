@@ -119,6 +119,9 @@ public:
     /// @return BatchIVResult with individual results and failure count
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const noexcept;
 
+    [[nodiscard]] PriceProofStatus proof_status() const noexcept { return surface_.proof_status(); }
+    [[nodiscard]] std::size_t proof_work() const noexcept { return surface_.proof_work(); }
+
 private:
     /// Private constructor (use create() factory method)
     InterpolatedIVSolver(
@@ -187,8 +190,6 @@ private:
     /// Validate query parameters
     std::optional<ValidationError> validate_query(const IVQuery& query) const;
 
-    /// Determine adaptive volatility bounds based on intrinsic value
-    std::pair<double, double> adaptive_bounds(const IVQuery& query) const;
 };
 
 // =====================================================================
@@ -270,6 +271,9 @@ public:
 
     /// Same immutable final assessment owned by the source table, when present.
     [[nodiscard]] std::shared_ptr<const AccuracyReport> accuracy_report() const;
+    /// Current mathematical evidence from the exact retained numerical payload.
+    [[nodiscard]] PriceProofStatus proof_status() const noexcept;
+    [[nodiscard]] std::size_t proof_work() const noexcept;
 
 
     // Pimpl: move-only, defined in .cpp
@@ -342,6 +346,7 @@ public:
     [[nodiscard]] OptionType option_type() const noexcept { return table_.option_type(); }
     [[nodiscard]] double dividend_yield() const noexcept { return table_.dividend_yield(); }
     [[nodiscard]] PriceProofStatus proof_status() const noexcept { return table_.proof_status(); }
+    [[nodiscard]] std::size_t proof_work() const noexcept { return table_.proof_work(); }
 
 private:
     // Snapshot the immutable payload handle, not a caller-reassignable wrapper.
@@ -440,6 +445,10 @@ InterpolatedIVSolver<Surface>::create(
             return std::unexpected(ValidationError{
                 ValidationErrorCode::InvalidBounds, config.vega_threshold});
         }
+        if (!std::isfinite(config.sigma_min) || !std::isfinite(config.sigma_max) ||
+            config.sigma_min <= 0 || config.sigma_max <= config.sigma_min) {
+            return std::unexpected(ValidationError{ValidationErrorCode::InvalidBounds});
+        }
         if (surface.proof_status() != PriceProofStatus::Certified) {
             return std::unexpected(ValidationError{ValidationErrorCode::CertificationIndeterminate});
         }
@@ -455,6 +464,14 @@ InterpolatedIVSolver<Surface>::create(
             sigma_range.first >= sigma_range.second ||
             r_range.first > r_range.second) {
             return std::unexpected(ValidationError(ValidationErrorCode::InvalidGridSize, 0.0));
+        }
+
+        // The solve interval is exactly the caller/table intersection.
+        // No query-dependent cap or fallback can silently replace it.
+        sigma_range.first = std::max(sigma_range.first, config.sigma_min);
+        sigma_range.second = std::min(sigma_range.second, config.sigma_max);
+        if (!(sigma_range.first < sigma_range.second)) {
+            return std::unexpected(ValidationError{ValidationErrorCode::InvalidBounds});
         }
 
         auto option_type = surface.option_type();
@@ -581,36 +598,6 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
 }
 
 template <typename Surface>
-std::pair<double, double>
-InterpolatedIVSolver<Surface>::adaptive_bounds(const IVQuery& query) const
-{
-    double intrinsic = intrinsic_value(query.spot, query.strike, query.option_type);
-
-    // Analyze time value to set adaptive bounds
-    const double time_value = query.market_price - intrinsic;
-    const double time_value_pct = time_value / query.market_price;
-
-    double sigma_upper;
-    if (time_value_pct > 0.5) {
-        sigma_upper = 3.0;  // 300%
-    } else if (time_value_pct > 0.2) {
-        sigma_upper = 2.0;  // 200%
-    } else {
-        sigma_upper = 1.5;  // 150%
-    }
-
-    double sigma_min = std::max(config_.sigma_min, sigma_range_.first);
-    double sigma_max = std::min({sigma_upper, config_.sigma_max, sigma_range_.second});
-
-    if (sigma_min >= sigma_max) {
-        sigma_min = sigma_range_.first;
-        sigma_max = sigma_range_.second;
-    }
-
-    return {sigma_min, sigma_max};
-}
-
-template <typename Surface>
 std::expected<IVSuccess, IVError>
 InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
 {
@@ -623,8 +610,8 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
 
     const double moneyness = query.spot / query.strike;
 
-    // Get adaptive bounds
-    auto [sigma_min, sigma_max] = adaptive_bounds(query);
+    // Frozen intersection of configured and certified volatility domains.
+    const auto [sigma_min, sigma_max] = sigma_range_;
 
     // Check if query is within surface bounds
     if (!is_in_bounds(query, sigma_min) || !is_in_bounds(query, sigma_max)) {
