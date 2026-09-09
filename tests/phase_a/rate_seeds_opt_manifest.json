@@ -1,0 +1,174 @@
+{
+  "adaptive": {
+    "lhs_seed": 42,
+    "max_failure_rate": 0.5,
+    "max_iter": 8,
+    "max_points_per_dim": 160,
+    "min_moneyness_points": 60,
+    "refinement_factor": 1.3,
+    "target_iv_error": 2e-05,
+    "validation_samples": 64,
+    "vega_floor": 0.0001
+  },
+  "baseline_factory_inputs": {
+    "maturity": [
+      0.019178082191780823,
+      0.1,
+      0.5,
+      1,
+      2
+    ],
+    "moneyness": [
+      0.7,
+      0.8,
+      0.9,
+      1,
+      1.1,
+      1.2,
+      1.3
+    ],
+    "rate": [
+      -0.05,
+      0,
+      0.05,
+      0.1
+    ],
+    "vol": [
+      0.05,
+      0.1,
+      0.2,
+      0.3,
+      0.5
+    ]
+  },
+  "build_mode": "-c opt",
+  "comparison": "Rebuild and measure ALL4/7/13/25 with same optimized build. Historical fastbuild/mixed-O3 measurements are separate, not the performance/accuracy selection baseline.",
+  "dividend_yield": 0,
+  "historical_baseline_payload_sha256": "9d92387cf2e076db235121a4c9c15fffe06f7ebc10d2616578b2680123b5eec0",
+  "limits_semantics": "Research execution and proof trial limits only. Timeouts are unfinished measurements; proof exhaustion is Indeterminate. No adaptation/acceptance limits are raised. Stop after this finite panel.",
+  "model_domain": {
+    "maturity": [
+      0.019178082191780823,
+      2.0
+    ],
+    "moneyness": [
+      0.7,
+      1.3
+    ],
+    "rate": [
+      -0.05,
+      0.1
+    ],
+    "strike": [
+      80.0,
+      120.0
+    ],
+    "volatility": [
+      0.05,
+      0.5
+    ]
+  },
+  "option_type": "CALL",
+  "proof_budget": {
+    "max_depth": 24,
+    "max_nodes": 4096
+  },
+  "queries_sha256": "599c4ea9d3fe91d465c3f7b0beaf408d65eb74431db343fd34a3fb202d3e9dbc",
+  "reference_counts": {
+    "delta_qualified": 562,
+    "delta_unresolved": 210,
+    "gamma_qualified": 562,
+    "gamma_unresolved": 210,
+    "iv_filtered": 153,
+    "iv_measurable": 555,
+    "iv_unresolved": 64,
+    "price_qualified": 757,
+    "price_unresolved": 15,
+    "rho_qualified": 562,
+    "rho_unresolved": 210,
+    "theta_qualified": 562,
+    "theta_unresolved": 210
+  },
+  "reference_hash_manifest_sha256": "21c35e1d3450df687c6fbdcd4f5ce2afff5e43131c6ad89866d72b68bd476d9a",
+  "reference_snapshot_manifest_sha256": "64bb62ec62e99b50f7df3ec1d8c8e7dd0eaa2581594fa488b793b80c53e12320",
+  "required_rows": 772,
+  "research_execution_seconds": {
+    "build": 600,
+    "proof_and_queries": 180
+  },
+  "source_commit": "e9e10221",
+  "source_research_head": "290c0785 plus rate-seed harness",
+  "spot": 100,
+  "trials": [
+    {
+      "rate_seed_count": 4,
+      "rates": [
+        -0.05,
+        0,
+        0.05,
+        0.1
+      ]
+    },
+    {
+      "rate_seed_count": 7,
+      "rates": [
+        -0.05,
+        -0.025,
+        0,
+        0.025,
+        0.05,
+        0.07500000000000001,
+        0.1
+      ]
+    },
+    {
+      "rate_seed_count": 13,
+      "rates": [
+        -0.05,
+        -0.037500000000000006,
+        -0.025,
+        -0.0125,
+        0,
+        0.0125,
+        0.025,
+        0.037500000000000006,
+        0.05,
+        0.0625,
+        0.07500000000000001,
+        0.08750000000000001,
+        0.1
+      ]
+    },
+    {
+      "rate_seed_count": 25,
+      "rates": [
+        -0.05,
+        -0.043750000000000004,
+        -0.037500000000000006,
+        -0.03125,
+        -0.025,
+        -0.018750000000000003,
+        -0.0125,
+        -0.00625,
+        0,
+        0.00625,
+        0.0125,
+        0.018750000000000003,
+        0.025,
+        0.03125,
+        0.037500000000000006,
+        0.043750000000000004,
+        0.05,
+        0.05625,
+        0.0625,
+        0.06875,
+        0.07500000000000001,
+        0.08125000000000002,
+        0.08750000000000001,
+        0.09375,
+        0.1
+      ]
+    }
+  ],
+  "version": "459-rate-seeds-opt-v1"
+}
