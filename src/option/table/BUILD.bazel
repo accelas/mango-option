@@ -118,10 +118,20 @@ cc_library(
 )
 
 cc_library(
+    name = "surface_bounds",
+    hdrs = ["surface_bounds.hpp"],
+    deps = [":strike_bounds", ":moneyness_bounds"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
+)
+
+cc_library(
     name = "price_table",
     hdrs = ["price_table.hpp"],
     deps = [
         ":greek_types",
+        ":surface_bounds",
         ":strike_bounds",
         ":moneyness_bounds",
         ":fixed_expiry",

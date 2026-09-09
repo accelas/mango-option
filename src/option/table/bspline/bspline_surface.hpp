@@ -3,6 +3,7 @@
 
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/price_table.hpp"
+#include "mango/option/table/bspline/bspline_types.hpp"
 #include "mango/option/table/transform_leaf.hpp"
 #include "mango/option/table/eep/eep_layer.hpp"
 #include "mango/option/table/eep/analytical_eep.hpp"
@@ -86,36 +87,9 @@ struct PriceTableAxesND {
 /// Convenience alias for the common 4D case.
 using PriceTableAxes = PriceTableAxesND<kPriceTableDim>;
 
-/// Backward-compatible alias: SharedBSplineInterp<N> is SharedInterp
-/// specialized for BSplineND.  See shared_interp.hpp for the generic adapter.
-template <size_t N>
-using SharedBSplineInterp = SharedInterp<BSplineND<double, N>, N>;
-
-// ===========================================================================
-// B-spline type aliases — concept-based layered architecture
-// ===========================================================================
-
-/// Base transform leaf (coords + interpolation + K/K_ref scaling)
-using BSplineTransformLeaf = TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>;
-
-/// Leaf adapter for standard (EEP) surfaces
-using BSplineLeaf = EEPLayer<BSplineTransformLeaf, AnalyticalEEP>;
-
-/// Standard B-spline price table
+/// Standard and segmented financial B-spline tables.
 using BSplinePriceTable = PriceTable<BSplineLeaf>;
-
-/// Leaf adapter for segmented surfaces (no EEP decomposition)
-using BSplineSegmentedLeaf = TransformLeaf<SharedBSplineInterp<4>, StandardTransform4D>;
-
-/// Tau-segmented surface
-using BSplineSegmentedSurface = SplitSurface<BSplineSegmentedLeaf, TauSegmentSplit>;
-
-/// Multi-K_ref surface (outer split over K_refs of segmented inner)
-using BSplineMultiKRefInner = SplitSurface<BSplineSegmentedSurface, MultiKRefSplit>;
-
-/// Multi-K_ref price table
 using BSplineMultiKRefSurface = PriceTable<BSplineMultiKRefInner>;
-
 
 /// Create a BSplinePriceTable from a pre-built EEP B-spline.
 /// K_ref and dividend_yield are passed explicitly.

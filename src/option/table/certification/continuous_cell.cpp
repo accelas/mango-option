@@ -2,12 +2,18 @@
 #include "mango/option/table/certification/continuous_cell.hpp"
 #include "mango/math/proof/bspline_box.hpp"
 #include "mango/math/proof/bspline_cell.hpp"
+#include "mango/math/proof/chebyshev.hpp"
 #include "mango/option/table/certification/physical_bounds.hpp"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <numeric>
+#include <type_traits>
 namespace mango::detail::certification {
 namespace {
+bool finite_shape_bounds(const PriceBounds &bounds, bool singleton_sigma) {
+    return bounds.value.finite() && (singleton_sigma || bounds.sigma_partial.finite());
+}
 using Box = std::array<std::pair<double, double>, 4>;
 using PhysicalBox = std::array<std::pair<Interval, Interval>, 4>;
 struct Node {
@@ -42,6 +48,10 @@ std::optional<PricingParams> reachable_witness(const std::array<Interval, 4> &lo
                                                const std::array<Interval, 4> &upper, double strike,
                                                OptionType type, double q,
                                                const SurfaceBounds &requested) {
+    // A point sigma domain has no pair of admitted volatilities on which
+    // nondecrease can fail, regardless of an extension derivative's sign.
+    if (!(requested.sigma_min < requested.sigma_max))
+        return std::nullopt;
     std::array<double, 4> p;
     for (std::size_t d = 0; d < 4; ++d)
         p[d] = std::midpoint(lower[d].lower_bound(), upper[d].upper_bound());
@@ -80,6 +90,7 @@ static PhysicalCellProof prove_patch(proof::BernsteinTensor value,
                                      double dividend_yield, const SurfaceBounds &requested,
                                      proof::ProofBudget budget) {
     PhysicalCellProof result;
+    const bool singleton_sigma = (physical[2].second - physical[2].first).exact_zero();
     std::vector<Node> pending;
     pending.push_back(
         {std::move(value), std::move(derivative), Box{{{0, 1}, {0, 1}, {0, 1}, {0, 1}}}});
@@ -102,12 +113,12 @@ static PhysicalCellProof prove_patch(proof::BernsteinTensor value,
         const auto total = continuous_eep({node.value.bounds(), node.derivative.bounds()},
                                           {exp(bounds[0]), bounds[1], bounds[2], bounds[3]},
                                           reference_strike, type, dividend_yield);
-        if (!total.finite()) {
+        if (!finite_shape_bounds(total, singleton_sigma)) {
             unresolved = true;
             result.reason = proof::StopReason::Arithmetic;
             continue;
         }
-        if (total.sigma_partial.nonnegative())
+        if (singleton_sigma || total.sigma_partial.nonnegative())
             continue;
         if (total.sigma_partial.strictly_negative()) {
             auto witness =
@@ -265,7 +276,7 @@ std::optional<PhysicalBox> requested_domain(const SurfaceBounds &requested) {
     if (!ratio.valid() || !std::isfinite(requested.tau_min) || !std::isfinite(requested.tau_max) ||
         requested.tau_min < 0 || requested.tau_max <= 0 || requested.tau_max < requested.tau_min ||
         !std::isfinite(requested.sigma_min) || !std::isfinite(requested.sigma_max) ||
-        requested.sigma_min <= 0 || requested.sigma_max <= requested.sigma_min ||
+        requested.sigma_min <= 0 || requested.sigma_max < requested.sigma_min ||
         !std::isfinite(requested.rate_min) || !std::isfinite(requested.rate_max) ||
         requested.rate_max < requested.rate_min) {
         return std::nullopt;
@@ -385,6 +396,7 @@ PhysicalCellProof prove_dimensionless_bspline(const BSplineND<double, 3> &spline
         result.reason = proof::StopReason::Arithmetic;
         return result;
     }
+    const bool singleton_sigma = ((*domain)[2].second - (*domain)[2].first).exact_zero();
     std::array<std::span<const double>, 3> knots;
     for (std::size_t d = 0; d < 3; ++d) {
         knots[d] = spline.knots(d);
@@ -441,12 +453,12 @@ PhysicalCellProof prove_dimensionless_bspline(const BSplineND<double, 3> &spline
         const auto total = dimensionless_eep(raw.value, raw.partials[0], raw.partials[1],
                                              {exp(bounds[0]), bounds[1], bounds[2], bounds[3]},
                                              reference_strike, type);
-        if (!total.finite()) {
+        if (!finite_shape_bounds(total, singleton_sigma)) {
             unresolved = true;
             result.reason = proof::StopReason::Arithmetic;
             continue;
         }
-        if (total.sigma_partial.nonnegative())
+        if (singleton_sigma || total.sigma_partial.nonnegative())
             continue;
         if (total.sigma_partial.strictly_negative()) {
             auto witness = reachable_witness(lower, upper, reference_strike, type, 0, requested);
@@ -486,7 +498,8 @@ PhysicalCellProof prove_dimensionless_bspline(const BSplineND<double, 3> &spline
 }
 
 namespace {
-bool valid_segmented_payload(const BSplineMultiKRefInner &inner, const SurfaceBounds &requested) {
+template <typename Inner>
+bool valid_segmented_payload(const Inner &inner, const SurfaceBounds &requested) {
     const auto &refs = inner.split().k_refs();
     if (refs.empty() || refs.size() != inner.num_pieces() || !requested.strike_bounds ||
         !requested.strike_bounds->valid())
@@ -509,16 +522,27 @@ bool valid_segmented_payload(const BSplineMultiKRefInner &inner, const SurfaceBo
                 (j && a < split.tau_end()[j - 1]))
                 return false;
             const auto &leaf = member.pieces()[j];
-            if (leaf.K_ref() != refs[i] || !leaf.interpolant().has_value())
+            if (leaf.K_ref() != refs[i])
                 return false;
-            const auto &spline = leaf.interpolant().get();
-            for (std::size_t d = 0; d < 4; ++d) {
-                const auto &grid = spline.grid(d);
-                for (std::size_t k = 0; k < grid.size(); ++k)
-                    if (!std::isfinite(grid[k]) || (k && !(grid[k - 1] < grid[k])))
+            const auto &interp = leaf.interpolant();
+            if constexpr (std::is_same_v<std::remove_cvref_t<decltype(interp)>,
+                                         SharedBSplineInterp<4>>) {
+                if (!interp.has_value())
+                    return false;
+                const auto &spline = interp.get();
+                for (std::size_t d = 0; d < 4; ++d) {
+                    const auto &grid = spline.grid(d);
+                    for (std::size_t k = 0; k < grid.size(); ++k)
+                        if (!std::isfinite(grid[k]) || (k && !(grid[k - 1] < grid[k])))
+                            return false;
+                    if (grid.front() != spline.knots(d).front() ||
+                        grid.back() != spline.knots(d).back())
                         return false;
-                if (grid.front() != spline.knots(d).front() ||
-                    grid.back() != spline.knots(d).back())
+                }
+            } else {
+                static_assert(std::is_same_v<std::remove_cvref_t<decltype(interp)>,
+                                             ChebyshevModalInterpolant<4>>);
+                if (interp.polynomial().shape().size() != 4)
                     return false;
             }
         }
@@ -532,7 +556,11 @@ struct SegmentedBounds {
     proof::StopReason reason = proof::StopReason::None;
     bool empty = false;
 };
-SegmentedBounds segmented_bounds(const BSplineMultiKRefInner &inner, double strike,
+proof::BSplineBoxEnclosure enclose_modal(const ChebyshevPolynomial &polynomial,
+                                         std::span<const Interval> coordinates,
+                                         std::span<const std::size_t> axes, std::size_t max_work);
+template <typename Inner>
+SegmentedBounds segmented_bounds(const Inner &inner, double strike,
                                  const std::array<Interval, 4> &physical, std::size_t max_cells) {
     SegmentedBounds result;
     const auto bracket = inner.split().bracket(1, strike, 1, 1, 0);
@@ -560,13 +588,23 @@ SegmentedBounds segmented_bounds(const BSplineMultiKRefInner &inner, double stri
             // Validated reference identities make both spot maps preserve
             // S/K and cancel all reference-price normalization factors.
             const std::array<Interval, 4> coordinates{physical[0], local, physical[2], physical[3]};
-            const auto &spline = member.pieces()[j].interpolant().get();
-            std::array<std::span<const double>, 4> knots;
-            for (std::size_t d = 0; d < 4; ++d)
-                knots[d] = spline.knots(d);
+            const auto &interp = member.pieces()[j].interpolant();
             const std::array<std::size_t, 1> axis{2};
-            auto raw = proof::enclose_cubic_bspline_box(knots, spline.coefficients(), coordinates,
-                                                        axis, max_cells - result.cells);
+            proof::BSplineBoxEnclosure raw;
+            if constexpr (std::is_same_v<std::remove_cvref_t<decltype(interp)>,
+                                         SharedBSplineInterp<4>>) {
+                const auto &spline = interp.get();
+                std::array<std::span<const double>, 4> knots;
+                for (std::size_t d = 0; d < 4; ++d)
+                    knots[d] = spline.knots(d);
+                raw = proof::enclose_cubic_bspline_box(knots, spline.coefficients(), coordinates,
+                                                       axis, max_cells - result.cells);
+            } else {
+                static_assert(std::is_same_v<std::remove_cvref_t<decltype(interp)>,
+                                             ChebyshevModalInterpolant<4>>);
+                raw =
+                    enclose_modal(interp.polynomial(), coordinates, axis, max_cells - result.cells);
+            }
             result.cells += raw.cells;
             if (raw.reason != proof::StopReason::None) {
                 result.reason = raw.reason;
@@ -603,6 +641,7 @@ PhysicalCellProof prove_segmented_bspline(const BSplineMultiKRefInner &inner, Op
         result.reason = proof::StopReason::Arithmetic;
         return result;
     }
+    const bool singleton_sigma = ((*domain)[2].second - (*domain)[2].first).exact_zero();
     std::vector<double> strikes{requested.strike_bounds->min, requested.strike_bounds->max};
     for (double reference : inner.split().k_refs())
         if (reference > strikes.front() && reference < strikes[1])
@@ -639,12 +678,13 @@ PhysicalCellProof prove_segmented_bspline(const BSplineMultiKRefInner &inner, Op
                 result.reason = total.reason;
                 return result;
             }
-            if (total.reason != proof::StopReason::None || !total.price.finite()) {
+            if (total.reason != proof::StopReason::None ||
+                !finite_shape_bounds(total.price, singleton_sigma)) {
                 unresolved = true;
                 result.reason = proof::StopReason::Arithmetic;
                 continue;
             }
-            if (total.empty || total.price.sigma_partial.nonnegative())
+            if (total.empty || singleton_sigma || total.price.sigma_partial.nonnegative())
                 continue;
             bool split_time = false;
             if (total.price.sigma_partial.strictly_negative()) {
@@ -675,6 +715,251 @@ PhysicalCellProof prove_segmented_bspline(const BSplineMultiKRefInner &inner, Op
             right[axis].first = mid;
             pending.push_back({right, node.depth + 1});
             pending.push_back({node.unit, node.depth + 1});
+        }
+    }
+    if (!unresolved)
+        result.status = PriceProofStatus::Certified;
+    return result;
+}
+
+namespace {
+struct ExpressionBounds {
+    PriceBounds price;
+    std::optional<std::size_t> axis_hint;
+    std::size_t work = 0;
+    proof::StopReason reason = proof::StopReason::None;
+    bool empty = false;
+};
+using ExpressionBounder =
+    std::function<ExpressionBounds(const std::array<Interval, 4> &, std::size_t)>;
+using QueryAdmitter = std::function<bool(const PricingParams &)>;
+PhysicalCellProof prove_expression_boxes(const PhysicalBox &domain, double strike, OptionType type,
+                                         double q, const SurfaceBounds &requested,
+                                         proof::ProofBudget budget,
+                                         const ExpressionBounder &enclose,
+                                         const QueryAdmitter &admit = {}) {
+    PhysicalCellProof result;
+    const bool singleton_sigma = (domain[2].second - domain[2].first).exact_zero();
+    struct QueryNode {
+        Box unit;
+        std::size_t depth = 0;
+    };
+    std::vector<QueryNode> pending{{Box{{{0, 1}, {0, 1}, {0, 1}, {0, 1}}}}};
+    const auto depth_limit = std::min<std::size_t>(budget.max_depth, 52);
+    bool unresolved = false;
+    while (!pending.empty()) {
+        if (result.nodes == budget.max_nodes) {
+            result.reason = proof::StopReason::NodeBudget;
+            return result;
+        }
+        auto node = pending.back();
+        pending.pop_back();
+        ++result.nodes;
+        std::array<Interval, 4> lower, upper, bounds;
+        for (std::size_t d = 0; d < 4; ++d) {
+            lower[d] = coordinate(domain[d].first, domain[d].second, node.unit[d].first);
+            upper[d] = coordinate(domain[d].first, domain[d].second, node.unit[d].second);
+            bounds[d] = hull(lower[d], upper[d]);
+        }
+        auto total = enclose(bounds, budget.max_nodes - result.nodes);
+        if (total.work > budget.max_nodes - result.nodes) {
+            result.reason = proof::StopReason::Arithmetic;
+            return result;
+        }
+        result.nodes += total.work;
+        if (total.reason == proof::StopReason::NodeBudget) {
+            result.reason = total.reason;
+            return result;
+        }
+        if (total.reason != proof::StopReason::None ||
+            !finite_shape_bounds(total.price, singleton_sigma)) {
+            unresolved = true;
+            result.reason = proof::StopReason::Arithmetic;
+            continue;
+        }
+        if (total.empty || singleton_sigma || total.price.sigma_partial.nonnegative())
+            continue;
+        bool split_time = false;
+        if (total.price.sigma_partial.strictly_negative()) {
+            auto witness = reachable_witness(lower, upper, strike, type, q, requested);
+            if (witness && (!admit || admit(*witness))) {
+                result.status = PriceProofStatus::NegativeWitness;
+                result.reason = proof::StopReason::None;
+                result.witness = std::move(witness);
+                result.witness_vega_per_strike = total.price.sigma_partial;
+                return result;
+            }
+            split_time = witness && admit && !admit(*witness);
+        }
+        if (node.depth == depth_limit) {
+            unresolved = true;
+            result.reason = proof::StopReason::DepthBudget;
+            continue;
+        }
+        const std::array<std::size_t, 4> order{2, 1, 0, 3};
+        std::size_t choice = node.depth % 4;
+        while ((domain[order[choice]].second - domain[order[choice]].first).exact_zero())
+            choice = (choice + 1) % 4;
+        const auto axis = split_time ? std::size_t{1} : total.axis_hint.value_or(order[choice]);
+        auto right = node.unit;
+        const double mid = std::midpoint(node.unit[axis].first, node.unit[axis].second);
+        node.unit[axis].second = mid;
+        right[axis].first = mid;
+        pending.push_back({right, node.depth + 1});
+        pending.push_back({node.unit, node.depth + 1});
+    }
+    if (!unresolved)
+        result.status = PriceProofStatus::Certified;
+    return result;
+}
+proof::BSplineBoxEnclosure enclose_modal(const ChebyshevPolynomial &polynomial,
+                                         std::span<const Interval> coordinates,
+                                         std::span<const std::size_t> axes, std::size_t max_work) {
+    proof::BSplineBoxEnclosure result;
+    if (max_work < 1 + axes.size()) {
+        result.reason = proof::StopReason::NodeBudget;
+        return result;
+    }
+    auto value = proof::enclose_chebyshev_physical(polynomial, coordinates);
+    ++result.cells;
+    if (!value)
+        return result;
+    result.value = *value;
+    for (auto axis : axes) {
+        auto partial = proof::enclose_chebyshev_physical(polynomial, coordinates, axis);
+        ++result.cells;
+        if (!partial)
+            return result;
+        result.partials.push_back(*partial);
+    }
+    result.reason = proof::StopReason::None;
+    return result;
+}
+} // namespace
+PhysicalCellProof prove_continuous_chebyshev(const ChebyshevPolynomial &polynomial,
+                                             double reference_strike, OptionType type,
+                                             double dividend_yield, const SurfaceBounds &requested,
+                                             proof::ProofBudget budget) {
+    auto domain = requested_domain(requested);
+    if (!domain || polynomial.shape().size() != 4 || !std::isfinite(reference_strike) ||
+        reference_strike <= 0) {
+        PhysicalCellProof result;
+        result.reason = proof::StopReason::Arithmetic;
+        return result;
+    }
+    const bool sigma_only = [&] {
+        for (std::size_t i = 0; i < polynomial.coefficients().size(); ++i) {
+            if (polynomial.coefficients()[i] == 0)
+                continue;
+            auto index = i;
+            for (std::size_t d = 4; d > 0; --d) {
+                const auto mode = index % polynomial.shape()[d - 1];
+                index /= polynomial.shape()[d - 1];
+                if (d - 1 != 2 && mode != 0)
+                    return false;
+            }
+        }
+        return true;
+    }();
+    return prove_expression_boxes(
+        *domain, reference_strike, type, dividend_yield, requested, budget,
+        [&](const std::array<Interval, 4> &box, std::size_t remaining) {
+            const std::array<std::size_t, 1> axes{2};
+            auto raw = enclose_modal(polynomial, box, axes, remaining);
+            ExpressionBounds result;
+            result.work = raw.cells;
+            result.reason = raw.reason;
+            if (raw.reason == proof::StopReason::None) {
+                const QuoteBox quote{exp(box[0]), box[1], box[2], box[3]};
+                result.price = continuous_eep({raw.value, raw.partials[0]}, quote, reference_strike,
+                                              type, dividend_yield);
+                if (sigma_only && !result.price.sigma_partial.nonnegative() &&
+                    !result.price.sigma_partial.strictly_negative()) {
+                    const auto eu = european(quote, type, dividend_yield);
+                    const double raw_width =
+                        (raw.partials[0].upper_bound() - raw.partials[0].lower_bound()) /
+                        reference_strike;
+                    const double eu_width =
+                        eu.sigma_partial.upper_bound() - eu.sigma_partial.lower_bound();
+                    // Work-order hint only: exact zero modes establish that
+                    // the raw polynomial varies only with sigma. Switch back
+                    // to physical subdivision once analytic uncertainty dominates.
+                    if (raw_width > eu_width || (raw.value.contains(0) && !raw.value.exact_zero()))
+                        result.axis_hint = 2;
+                }
+            }
+            return result;
+        });
+}
+
+PhysicalCellProof prove_dimensionless_chebyshev(const ChebyshevPolynomial &polynomial,
+                                                double reference_strike, OptionType type,
+                                                const SurfaceBounds &requested,
+                                                proof::ProofBudget budget) {
+    auto domain = requested_domain(requested);
+    if (!domain || polynomial.shape().size() != 3 || requested.rate_min <= 0 ||
+        !std::isfinite(reference_strike) || reference_strike <= 0) {
+        PhysicalCellProof result;
+        result.reason = proof::StopReason::Arithmetic;
+        return result;
+    }
+    return prove_expression_boxes(
+        *domain, reference_strike, type, 0, requested, budget,
+        [&](const std::array<Interval, 4> &box, std::size_t remaining) {
+            const auto sigma_squared = square(box[2]);
+            const std::array<Interval, 3> coordinates{box[0], sigma_squared * box[1] / Interval(2),
+                                                      log(Interval(2) * box[3] / sigma_squared)};
+            const std::array<std::size_t, 2> axes{1, 2};
+            auto raw = enclose_modal(polynomial, coordinates, axes, remaining);
+            ExpressionBounds result;
+            result.work = raw.cells;
+            result.reason = raw.reason;
+            if (raw.reason == proof::StopReason::None)
+                result.price = dimensionless_eep(raw.value, raw.partials[0], raw.partials[1],
+                                                 {exp(box[0]), box[1], box[2], box[3]},
+                                                 reference_strike, type);
+            return result;
+        });
+}
+
+PhysicalCellProof prove_segmented_chebyshev(const ModalMultiKRefInner &inner, OptionType type,
+                                            double dividend_yield, const SurfaceBounds &requested,
+                                            proof::ProofBudget budget) {
+    PhysicalCellProof result;
+    auto domain = requested_domain(requested);
+    if (!domain || !valid_segmented_payload(inner, requested) || !std::isfinite(dividend_yield) ||
+        dividend_yield < 0 || (type != OptionType::CALL && type != OptionType::PUT)) {
+        result.reason = proof::StopReason::Arithmetic;
+        return result;
+    }
+    std::vector<double> strikes{requested.strike_bounds->min, requested.strike_bounds->max};
+    for (double reference : inner.split().k_refs())
+        if (reference > strikes.front() && reference < strikes[1])
+            strikes.push_back(reference);
+    std::sort(strikes.begin(), strikes.end());
+    strikes.erase(std::unique(strikes.begin(), strikes.end()), strikes.end());
+    bool unresolved = false;
+    for (double strike : strikes) {
+        auto endpoint = prove_expression_boxes(
+            *domain, strike, type, dividend_yield, requested,
+            {budget.max_nodes - result.nodes, budget.max_depth},
+            [&](const std::array<Interval, 4> &box, std::size_t remaining) {
+                auto bound = segmented_bounds(inner, strike, box, remaining);
+                ExpressionBounds result;
+                result.price = bound.price;
+                result.work = bound.cells;
+                result.reason = bound.reason;
+                result.empty = bound.empty;
+                return result;
+            },
+            [&](const PricingParams &p) { return inner.contains_maturity(p.maturity); });
+        endpoint.nodes += result.nodes;
+        if (endpoint.status == PriceProofStatus::NegativeWitness)
+            return endpoint;
+        result.nodes = endpoint.nodes;
+        if (endpoint.status != PriceProofStatus::Certified) {
+            unresolved = true;
+            result.reason = endpoint.reason;
         }
     }
     if (!unresolved)
