@@ -213,3 +213,22 @@ TEST(AccuracyAcceptanceTest, OnlyAffirmativePrerequisiteStatusesPermitAdmission)
 
 } // namespace
 } // namespace mango::detail::accuracy
+
+TEST(AccuracyAcceptanceTest, MissingRequestedIvPrecedesOnlyUnknownViability) {
+    using namespace mango;
+    using namespace mango::detail::accuracy;
+    ReferenceAccuracySummary evidence;
+    evidence.price=ReferenceErrorSummary{.requested=2,.measured=2,
+        .max_error=.005,.rms_error=.005,.max_uncertainty=0.};
+    evidence.iv=ReferenceErrorSummary{.requested=2,.filtered=2};
+    const auto unknown=assess_request(evidence,
+        {Viability::Unassessed,PriceProofStatus::Certified},AccuracyRequest{},IvMetricKind::AbsoluteIvError);
+    EXPECT_EQ(unknown.decision(),Decision::IvUnmeasured);
+    EXPECT_EQ(unknown.prerequisites().viability,Viability::Unassessed);
+    EXPECT_EQ(unknown.evidence().iv->filtered,2u);
+    EXPECT_FALSE(unknown.evidence().iv->max_error);
+    EXPECT_EQ(assess_request(evidence,{Viability::Failed,PriceProofStatus::Certified},
+        AccuracyRequest{},IvMetricKind::AbsoluteIvError).decision(),Decision::ViabilityFailed);
+    EXPECT_EQ(assess_request(evidence,{Viability::Unassessed,PriceProofStatus::NegativeWitness},
+        AccuracyRequest{},IvMetricKind::AbsoluteIvError).decision(),Decision::CertificateViolated);
+}

@@ -56,9 +56,8 @@ Assessment assess(const ReferenceAccuracySummary& evidence, Prerequisites prereq
     auto decision=price_met==true && (!targets.iv || iv_met==true)
         ? Decision::Accepted : policy==Policy::BestEffort
             ? Decision::AcceptedBestEffort : Decision::TargetsMissed;
-    if (prerequisites.viability!=Viability::Passed) {
-        decision=prerequisites.viability==Viability::Failed
-            ? Decision::ViabilityFailed : Decision::ViabilityUnassessed;
+    if (prerequisites.viability==Viability::Failed) {
+        decision=Decision::ViabilityFailed;
     } else if (prerequisites.certificate!=PriceProofStatus::Certified) {
         decision=prerequisites.certificate==PriceProofStatus::NegativeWitness
             ? Decision::CertificateViolated : prerequisites.certificate==PriceProofStatus::NotRun
@@ -69,6 +68,7 @@ Assessment assess(const ReferenceAccuracySummary& evidence, Prerequisites prereq
     else if (targets.iv && incomplete(evidence.iv)) decision=Decision::IncompleteIvEvidence;
     else if (targets.iv && (!evidence.iv || evidence.iv->measured==0)) decision=Decision::IvUnmeasured;
     else if (targets.iv && iv_metric_kind!=IvMetricKind::AbsoluteIvError) decision=Decision::IvMetricNotActual;
+    else if (prerequisites.viability!=Viability::Passed) decision=Decision::ViabilityUnassessed;
     return {evidence, prerequisites, AccuracyRequest{targets.price, targets.iv, policy}, decision, price_met, iv_met, iv_metric_kind};
 }
 

@@ -100,6 +100,21 @@ TEST(AccuracyFinalCandidateTest, MissingSensitivityAndModelMismatchCannotInventV
     EXPECT_NE(wrong_model.assessment.decision(),Decision::AcceptedBestEffort);
 }
 
+TEST(AccuracyFinalCandidateTest, BestEffortRetainsTheIndependentHardGuard) {
+    const SurfaceBounds b{-.01,.01,.99,1.01,.18,.22,-.001,.001};
+    const auto table=certified_call(b,10.);
+    auto row=call_reference();
+    row.iv_applicable=false;
+    const AccuracyRequest request{.max_price_error=.01,.max_iv_error=std::nullopt,
+        .policy=AccuracyPolicy::BestEffort};
+    const auto result=collect_final_candidate(table,std::vector{row},request);
+    EXPECT_EQ(result.assessment.decision(),Decision::ViabilityFailed);
+    EXPECT_EQ(result.assessment.prerequisites().certificate,PriceProofStatus::Certified);
+    EXPECT_EQ(result.assessment.evidence().price->measured,1u);
+    EXPECT_EQ(result.assessment.price_target_met(),false);
+    EXPECT_FALSE(result.assessment.evidence().iv->max_error);
+}
+
 struct ForgedSurface {
     PriceProofStatus proof_status() const { return PriceProofStatus::Certified; }
 };
