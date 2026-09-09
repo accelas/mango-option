@@ -41,6 +41,15 @@ cc_library(
 
 # Explicit opt-in polynomial preparation; no financial factory dispatch yet.
 cc_library(
+    name = "chebyshev_modal_interpolant",
+    hdrs = ["chebyshev_modal_interpolant.hpp"],
+    deps = [":chebyshev_interpolant", ":chebyshev_polynomial", "//src/support:error_types"],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/math/chebyshev",
+    include_prefix = "mango/math/chebyshev",
+)
+
+cc_library(
     name = "chebyshev_polynomial",
     srcs = ["chebyshev_polynomial.cpp"],
     hdrs = ["chebyshev_polynomial.hpp"],

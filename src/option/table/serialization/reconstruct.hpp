@@ -13,6 +13,7 @@
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
 #include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/math/chebyshev/chebyshev_interpolant.hpp"
+#include "mango/math/chebyshev/chebyshev_modal_interpolant.hpp"
 #include "mango/math/chebyshev/raw_tensor.hpp"
 #include "mango/support/error_types.hpp"
 
@@ -131,6 +132,32 @@ make_chebyshev(const PriceTableData::Segment& seg) {
 }
 
 // ============================================================================
+// Modal restoration has its own representation guard. In particular, an old
+// "chebyshev" nodal payload must never be interpreted as modal coefficients.
+template <size_t N>
+[[nodiscard]] std::expected<ChebyshevModalInterpolant<N>, PriceTableError>
+make_chebyshev_modal(const PriceTableData::Segment& seg) {
+    if (seg.interp_type != "chebyshev_modal" || seg.ndim != N ||
+        seg.domain_lo.size() != N || seg.domain_hi.size() != N || seg.num_pts.size() != N ||
+        !seg.grids.empty() || !seg.knots.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+    Domain<N> domain;
+    std::array<size_t, N> num_pts;
+    for (size_t d = 0; d < N; ++d) {
+        if (seg.num_pts[d] < 2) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+        domain.lo[d] = seg.domain_lo[d];
+        domain.hi[d] = seg.domain_hi[d];
+        num_pts[d] = static_cast<size_t>(seg.num_pts[d]);
+    }
+    auto interp = ChebyshevModalInterpolant<N>::build_from_coefficients(seg.values, domain, num_pts);
+    if (!interp) return std::unexpected(convert_to_price_table_error(interp.error()));
+    return std::move(*interp);
+}
+
+// ============================================================================
 // Level 2: Leaf construction
 // ============================================================================
 
@@ -165,6 +192,19 @@ template <size_t N, typename Xform>
     if (!interp) return std::unexpected(interp.error());
     return TransformLeaf<ChebyshevInterpolant<N, RawTensor<N>>, Xform>(
         std::move(*interp), Xform{}, seg.K_ref);
+}
+
+// ============================================================================
+/// Reconstruct only an explicitly tagged modal leaf, preserving its polynomial.
+template <size_t N, typename Xform>
+[[nodiscard]] auto reconstruct_chebyshev_modal_leaf(const PriceTableData::Segment& seg)
+    -> std::expected<TransformLeaf<ChebyshevModalInterpolant<N>, Xform>, PriceTableError> {
+    if (!std::isfinite(seg.K_ref) || seg.K_ref <= 0.0) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+    auto interp = make_chebyshev_modal<N>(seg);
+    if (!interp) return std::unexpected(interp.error());
+    return TransformLeaf<ChebyshevModalInterpolant<N>, Xform>(std::move(*interp), Xform{}, seg.K_ref);
 }
 
 // ============================================================================

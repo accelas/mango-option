@@ -2062,6 +2062,38 @@ cc_test(
 )
 
 cc_test(
+    name = "chebyshev_modal_interpolant_test",
+    srcs = ["chebyshev_modal_interpolant_test.cc"],
+    deps = ["//src/math/chebyshev:chebyshev_modal_interpolant", "//src/math/chebyshev:chebyshev_nodes", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "chebyshev_modal_persistence_test",
+    srcs = ["chebyshev_modal_persistence_test.cc"],
+    deps = [
+        "//src/math/chebyshev:chebyshev_modal_interpolant",
+        "//src/option/table/serialization:to_data",
+        "//src/option/table/serialization:from_data",
+        "//src/option/table:standard_transform_4d",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "chebyshev_modal_parquet_test",
+    srcs = ["chebyshev_modal_parquet_test.cc"],
+    tags = ["manual"],  # Requires system Arrow/Parquet libraries.
+    deps = [
+        "//src/math/chebyshev:chebyshev_modal_interpolant",
+        "//src/option/table/serialization:to_data",
+        "//src/option/table/serialization:from_data",
+        "//src/option/table/parquet:parquet_io",
+        "//src/option/table:standard_transform_4d",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "proof_chebyshev_test",
     srcs = ["proof_chebyshev_test.cc"],
     deps = ["//src/math/proof:chebyshev", "@googletest//:gtest_main"],
