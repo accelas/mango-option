@@ -696,7 +696,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
 
         auto validate_fn = make_validate_fn(
             config_.dividend_yield, config_.option_type,
-            config_.discrete_dividends);
+            config_.discrete_dividends, config_.maturity);
 
         // The probe's references live on the probe's own problem.  A query
         // (S, K) reaches the surface as scale * probe(S/scale, K_ref) with
@@ -787,7 +787,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
 
     auto final_validate_fn = make_validate_fn(
         config_.dividend_yield, config_.option_type,
-        config_.discrete_dividends);
+        config_.discrete_dividends, config_.maturity);
     auto final_prepare_refs_fn = make_fd_vega_refs_fn(params, final_validate_fn);
     auto final_score_fn = make_iv_score_fn(params, config_.option_type);
 

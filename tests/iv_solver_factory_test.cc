@@ -507,7 +507,7 @@ TEST(IVSolverFactoryDividendValidation, DirectCreateCanonicalizesUnsortedSchedul
     IVQuery query;
     query.spot = 100.0;
     query.strike = 100.0;
-    query.maturity = 1.0;  // comfortably above 0.5, within [0.25, 2.0]
+    query.maturity = 2.0;  // the fixed-expiry anchor, within [0.25, 2.0]
     query.rate = RateSpec{0.04};
     query.option_type = OptionType::PUT;
     query.market_price = 6.0;

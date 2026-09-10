@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include <cmath>
+#include "mango/option/american_option.hpp"
+#include "mango/math/chebyshev/chebyshev_nodes.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/chebyshev/chebyshev_pde_cache.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 
@@ -109,4 +112,99 @@ TEST(ChebyshevPDECacheTest, EmptyRealSegmentFailsExtraction) {
         m, tau, sigma, rate);
     ASSERT_FALSE(leaves.has_value());
     EXPECT_EQ(leaves.error().code, mango::PriceTableErrorCode::ExtractionFailed);
+}
+
+// Regression #485: the leaf and the router must use the same time origin.
+// Bug: The leaf and temporal router used different local time origins.
+TEST(ChebyshevPDECacheTest, SegmentedRoutingPreservesLabelledTime) {
+    ChebyshevPDECache cache;
+    std::vector<double> m = {-0.2, 0.2}, tau = {0.01, 0.4995, 0.5005, 1.0};
+    std::vector<double> sigmas = {0.1, 0.2}, rates = {0.03, 0.05};
+    std::vector<double> bounds = {0.01, 0.4995, 0.5005, 1.0};
+    std::vector<bool> gaps = {false, true, false};
+    for (double sigma : sigmas) for (double rate : rates) {
+        for (size_t j = 0; j < tau.size(); ++j) {
+            std::vector<double> x = {-0.3, 0.0, 0.3};
+            std::vector<double> values(3, tau[j]);
+            cache.store_slice(sigma, rate, j, x, values);
+        }
+    }
+    auto leaves = detail::build_segment_leaves(cache, 100.0, bounds, gaps,
+        false, m, tau, sigmas, rates);
+    ASSERT_TRUE(leaves.has_value());
+    ChebyshevTauSegmented surface(std::move(*leaves),
+        make_tau_split_from_segments(bounds, gaps, 100.0));
+    EXPECT_NEAR(surface.price(100.0, 100.0, 0.7, 0.15, 0.04), 70.0, 1e-11);
+    // An omitted event neighborhood cannot silently become another time.
+    EXPECT_FALSE(std::isfinite(surface.price(100.0, 100.0, 0.5, 0.15, 0.04)));
+    PriceTable<ChebyshevTauSegmented> table(std::move(surface),
+        SurfaceBounds{-0.2, 0.2, 0.01, 1.0, 0.1, 0.2, 0.03, 0.05},
+        OptionType::PUT, 0.0);
+    EXPECT_FALSE(table.contains_maturity(0.5));
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+        .maturity = 0.5, .rate = 0.04, .option_type = OptionType::PUT}, 0.15);
+    auto gamma = table.gamma(p);
+    ASSERT_FALSE(gamma.has_value());
+    EXPECT_EQ(gamma.error(), GreekError::OutOfDomain);
+    auto solver = InterpolatedIVSolver<PriceTable<ChebyshevTauSegmented>>::create(
+        std::move(table));
+    ASSERT_TRUE(solver.has_value());
+    IVQuery query(static_cast<const OptionSpec&>(p), 5.0);
+    auto iv = solver->solve(query);
+    ASSERT_FALSE(iv.has_value());
+    EXPECT_EQ(iv.error().code, IVErrorCode::InvalidGridConfig);
+}
+
+TEST(ChebyshevPDECacheTest, RejectsEventInsideUnsplittableLeaf) {
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0, .option_type = OptionType::PUT,
+        .discrete_dividends = {{0.9895, 1.0}}, .maturity = 1.0,
+        .kref_config = {.K_refs = {100.0}}};
+    IVGrid domain{.moneyness = {-0.2, 0.0, 0.2},
+        .vol = {0.1, 0.2}, .rate = {0.03, 0.05}};
+    // Backward event .0105 is too close to the published lower bound .01
+    // for this topology's inset. Dropping the split would cross the jump.
+    auto builder = ChebyshevSegmentedBuilder::create(config, domain);
+    ASSERT_FALSE(builder.has_value());
+    EXPECT_EQ(builder.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+// Regression #485: a sample without a real segment owner cannot be relabelled
+// as a segment-zero row, changing the apparent CGL cardinality of both leaves.
+// Bug: An unowned tau sample was silently relabelled as a segment-zero row.
+TEST(ChebyshevPDECacheTest, RejectsUnmatchedSampleInsteadOfChangingItsOwner) {
+    ChebyshevPDECache cache;
+    std::vector<double> m = {-0.2, 0.2}, tau = {0.1, 0.4, 0.5, 0.6, 1.0};
+    std::vector<double> sigma = {0.1, 0.2}, rate = {0.03, 0.05};
+    for (double s : sigma) for (double r : rate) {
+        for (size_t j = 0; j < tau.size(); ++j) {
+            std::vector<double> x = {-0.3, 0.0, 0.3}, values(3, tau[j]);
+            cache.store_slice(s, r, j, x, values);
+        }
+    }
+    auto leaves = detail::build_segment_leaves(cache, 100.0,
+        {0.1, 0.4, 0.6, 1.0}, {false, true, false}, false, m, tau, sigma, rate);
+    ASSERT_FALSE(leaves.has_value());
+    EXPECT_EQ(leaves.error().code, PriceTableErrorCode::ExtractionFailed);
+}
+
+// Bug: Rounded CGL endpoints moved outside their owning segment.
+TEST(ChebyshevPDECacheTest, GeneratedSegmentNodesKeepTheirCardinality) {
+    ChebyshevPDECache cache;
+    const std::vector<double> bounds = {0.01, 0.1495, 0.1505, 0.25};
+    std::vector<double> tau = cc_level_nodes(3, bounds[0], bounds[1]);
+    auto later = cc_level_nodes(3, bounds[2], bounds[3]);
+    tau.insert(tau.end(), later.begin(), later.end());
+    const std::vector<double> m = {-0.2, 0.2}, sigma = {0.1, 0.2}, rate = {0.03, 0.05};
+    for (double s : sigma) for (double r : rate) {
+        for (size_t j = 0; j < tau.size(); ++j) {
+            std::vector<double> x = {-0.3, 0.0, 0.3}, values(3, tau[j]);
+            cache.store_slice(s, r, j, x, values);
+        }
+    }
+    auto leaves = detail::build_segment_leaves(cache, 100.0,
+        bounds, {false, true, false}, false, m, tau, sigma, rate);
+    ASSERT_TRUE(leaves.has_value());
+    ASSERT_EQ(leaves->size(), 2u);
+    for (const auto& leaf : *leaves) EXPECT_EQ(leaf.interpolant().num_pts()[1], 9u);
 }

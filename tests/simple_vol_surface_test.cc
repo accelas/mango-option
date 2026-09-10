@@ -199,7 +199,8 @@ TEST(VolSurfaceDividendTest, ContinuousSolverRejectsDiscreteChain) {
     }
 }
 
-// Happy path: a segmented solver built with the SAME schedule accepts the
+// Happy path: the caller selects a table for this expiry, anchored at the
+// same valuation time and dividend schedule. It accepts the
 // queries and recovers the known vol.
 //
 // Uses the default auto K_ref grid (not an explicit sparse list): sparse
@@ -223,7 +224,7 @@ TEST(VolSurfaceDividendTest, SegmentedSolverRecoversKnownVol) {
         },
         .backend = mango::BSplineBackend{},
         .discrete_dividends = mango::DiscreteDividendConfig{
-            .maturity = 1.0,
+            .maturity = compute_tau(val, chain.expiries.front().expiry),
             .discrete_dividends = solver_divs,
             // default K_ref config (auto, log-spaced)
         },
