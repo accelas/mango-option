@@ -324,7 +324,10 @@ double price = wrapper.price(spot, strike, tau, sigma, rate);
 | **Gamma** | B-spline ∂²EEP/∂m² + analytical European gamma | Good: O(h²) analytical second derivative |
 | **Rho** | B-spline ∂EEP/∂r + analytical European rho | Good: same as delta |
 
-Gamma uses the analytical B-spline second derivative with a log-moneyness chain rule correction: gamma = (g″(x) − g′(x)) / S². For Chebyshev surfaces, gamma uses central FD instead.
+Gamma uses the analytical B-spline second derivative with a log-moneyness chain rule correction: gamma = (g″(x) − g′(x)) / S². Chebyshev surfaces also use analytical derivatives of the stored polynomial.
+This applies to all Chebyshev tables. At domain endpoints the derivatives use
+the interior limit; outside a differentiated coordinate they are zero, matching
+the clamped value extension.
 
 **Querying Greeks:**
 

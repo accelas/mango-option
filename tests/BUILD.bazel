@@ -580,6 +580,17 @@ cc_test(
 )
 
 cc_test(
+    name = "american_option_accuracy_test",
+    size = "medium",
+    srcs = ["american_option_accuracy_test.cc"],
+    tags = ["slow"],
+    deps = [
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "american_option_result_test",
     size = "small",
     srcs = ["american_option_result_test.cc"],
@@ -1574,6 +1585,7 @@ cc_test(
     size = "small",
     srcs = ["option_spec_test.cc"],
     deps = [
+        "//src/option:european_option",
         "//src/option:option_spec",
         "@googletest//:gtest_main",
     ],

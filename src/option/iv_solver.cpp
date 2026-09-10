@@ -127,6 +127,11 @@ IVSolver::validate_query(const IVQuery& query) const {
         return std::unexpected(validation_error_to_iv_error(validation.error()));
     }
 
+    auto rate_validation = validate_pde_rate(query.rate, query.maturity);
+    if (!rate_validation) {
+        return std::unexpected(validation_error_to_iv_error(rate_validation.error()));
+    }
+
     return std::monostate{};
 }
 

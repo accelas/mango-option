@@ -876,11 +876,13 @@ This follows from $\partial x / \partial S = 1/S$ and $\partial^2 x / \partial S
 
 **Analytical (B-spline interpolants).** B-spline interpolants provide `eval_second_partial(axis, coords)` for exact $\partial^2 V / \partial x^2$. The derivative of a cubic B-spline is a quadratic B-spline — computed analytically in $O(n)$ per evaluation.
 
-**Finite difference (Chebyshev interpolants).** When analytical second partials are unavailable, central differences are used:
-
-$$\frac{\partial^2 V}{\partial x^2} \approx \frac{V(x+h) - 2V(x) + V(x-h)}{h^2}$$
-
-with $h = 10^{-4}$ in log-moneyness.
+**Analytical (Chebyshev interpolants).** The nodal differentiation matrix
+produces the derivative of the stored polynomial. Applying it twice gives
+`eval_second_partial`; no finite-difference step is selected. Endpoint values
+are interior derivative limits. Outside the differentiated coordinate the
+value is extended constantly, so its first and second derivatives are zero.
+This convention applies to every Chebyshev table. The generic finite-difference
+fallback in `TransformLeaf` is only used by interpolants without second partials.
 
 ### EEP Decomposition for Greeks
 

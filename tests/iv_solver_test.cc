@@ -8,6 +8,26 @@
 
 using namespace mango;
 
+// Regression: a valid market bound must not admit an unsupported PDE curve.
+// Bug: IV validation skipped the rate-domain guard used by direct pricing,
+// so a sign-changing curve failed inside root finding instead of validation.
+TEST(IVSolverRateValidationTest, RejectsUnsupportedCurveBeforeRootFinding) {
+    auto curve = YieldCurve::from_points({
+        {0.0, 0.0}, {1.0, 0.1}, {2.0, 0.0}});
+    ASSERT_TRUE(curve);
+    IVQuery query(OptionSpec{
+        .spot = 1.0, .strike = 100.0, .maturity = 2.0,
+        .rate = *curve, .option_type = OptionType::PUT}, 109.0);
+    ASSERT_TRUE(validate_iv_query(query)); // Financial bound remains valid.
+    auto result = IVSolver{IVSolverConfig{}}.solve(query);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code,
+              validation_error_to_iv_error(ValidationError{
+                  ValidationErrorCode::InvalidRate}).code);
+    EXPECT_EQ(result.error().iterations, 0u);
+    EXPECT_FALSE(result.error().last_vol.has_value());
+}
+
 class IVSolverTest : public ::testing::Test {
 protected:
     void SetUp() override {

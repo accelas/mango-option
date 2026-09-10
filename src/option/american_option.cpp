@@ -129,15 +129,16 @@ TemporalEventCallback make_dividend_event(
 
 /// Initialize discrete dividend events on a solver.
 /// Builds a cubic spline for solution interpolation and registers temporal events
-/// at each dividend time. The intrinsic_fallback is the normalized payoff value
-/// used when the shifted spot falls below the grid (1.0 for puts, 0.0 for calls).
+/// at each dividend time. The intrinsic_fallback is the normalized payoff at
+/// zero spot (1.0 for puts, 0.0 for calls). At negative rates, waiting to
+/// expiry increases this value by the remaining discount factor.
 ///
 /// `n_events_applied`, when non-null, is incremented AFTER each dividend jump
 /// fires (spec B3): `process_temporal_events` re-applies boundary conditions
 /// immediately after the callback returns, so bumping the counter first makes
 /// the right-BC evaluator see the pre-dividend side rather than re-deriving
-/// phase from the (ambiguous, at t == tau_j) event time alone. Puts have no
-/// phase-aware boundary and pass nullptr.
+/// phase from the (ambiguous, at t == tau_j) event time alone. The put left
+/// boundary uses the same counter for its dividend-adjusted continuation.
 template<typename Solver>
 void init_dividend_events(Solver& solver, const PricingParams& params,
                           std::shared_ptr<Grid<double>> grid,
@@ -154,9 +155,12 @@ void init_dividend_events(Solver& solver, const PricingParams& params,
     [[maybe_unused]] auto err = dividend_spline.build(
         x, std::span<const double>(scratch.data(), x.size()));
 
+    const auto forward_discount = make_forward_discount_fn(params.rate, params.maturity);
     for (const auto& div : divs) {
         double tau = params.maturity - div.calendar_time;
-        auto jump = make_dividend_event(div.amount, params.strike, intrinsic_fallback,
+        const double fallback = intrinsic_fallback == 0.0 ? 0.0
+            : intrinsic_fallback * std::max(1.0, forward_discount(tau));
+        auto jump = make_dividend_event(div.amount, params.strike, fallback,
                                         &dividend_spline);
         solver.add_temporal_event(tau,
             [jump = std::move(jump), n_events_applied]
@@ -215,12 +219,28 @@ public:
     /// final memory location (e.g. after placement into a std::variant) because
     /// the event callbacks capture &dividend_spline_.
     void init_dividends() {
-        init_dividend_events(*this, params_, grid_, workspace_local_, 1.0, dividend_spline_);
+        init_dividend_events(*this, params_, grid_, workspace_local_, 1.0,
+                             dividend_spline_, &n_events_applied_);
     }
 
     struct LeftBCFunction {
-        double operator()(double /*t*/, double x) const {
-            return log_put_payoff(x);
+        std::function<double(double)> forward_discount;
+        double dividend_yield;
+        std::vector<double> dividend_prefix;
+        const size_t* n_events_applied;
+
+        double operator()(double t, double x) const {
+            // In the left tail the put payoff is affine. Waiting to expiry
+            // is worth DF(t) - (S/K)*exp(-q*t), and dominates immediate
+            // exercise for the supported nonpositive-rate regime.
+            const double df = forward_discount(t);
+            // Cash dividends can exhaust the stock value. Prefixes are
+            // ordered as the backward solver crosses ex-dates; the event
+            // counter distinguishes the two sides of the same instant.
+            const double terminal_stock = std::max(0.0,
+                std::exp(x - dividend_yield * t)
+                - df * dividend_prefix[*n_events_applied]);
+            return std::max(log_put_payoff(x), df - terminal_stock);
         }
     };
 
@@ -230,8 +250,18 @@ public:
         }
     };
 
-    static DirichletBC<LeftBCFunction> create_left_bc() {
-        return DirichletBC(LeftBCFunction{});
+    DirichletBC<LeftBCFunction> create_left_bc() const {
+        auto discount = make_forward_discount_fn(params_.rate, params_.maturity);
+        auto divs = filter_and_merge_dividends(params_.discrete_dividends, params_.maturity);
+        std::vector<double> prefix{0.0};
+        for (auto it = divs.rbegin(); it != divs.rend(); ++it) {
+            const double tau = params_.maturity - it->calendar_time;
+            prefix.push_back(prefix.back() + it->amount / params_.strike
+                * std::exp(-params_.dividend_yield * tau) / discount(tau));
+        }
+        return DirichletBC(LeftBCFunction{
+            std::move(discount), params_.dividend_yield,
+            std::move(prefix), &n_events_applied_});
     }
 
     static DirichletBC<RightBCFunction> create_right_bc() {
@@ -254,6 +284,7 @@ public:
     DirichletBC<RightBCFunction> right_bc_;
     SpatialOpType spatial_op_;
     CubicSpline<double> dividend_spline_;
+    size_t n_events_applied_ = 0;
 };
 
 // ============================================================================
@@ -387,84 +418,6 @@ public:
 
 using AmericanSolverVariant = std::variant<AmericanPutSolver, AmericanCallSolver>;
 
-// Brennan-Schwartz is a one-pass LCP solve.  The Il'in-fitted spatial
-// operator guarantees the required off-diagonal signs, but two assumptions
-// still have to be enforced at the American-option boundary:
-//
-//  * 1 + w*r(t) > 0 for every implicit stage (diagonal dominance); and
-//  * the exercise set is one-sided.  With q >= 0 (enforced by
-//    validate_pricing_params), a rate term structure of one sign has the
-//    standard one-sided/empty exercise topology.  A curve which crosses zero
-//    is not covered: time-inhomogeneous negative-rate models can develop a
-//    floating exercise interval with two boundaries.
-//
-// Every TR-BDF2/Rannacher implicit coefficient is at most dt/2, and dt <= T,
-// so r > -2/T is a conservative grid/config-independent dominance bound.
-std::optional<ValidationError> validate_projected_lcp_domain(
-    const PricingParams& params)
-{
-    const double min_admissible_rate = -2.0 / params.maturity;
-    // Do not admit a value merely because it rounded one ULP above the
-    // theoretical open boundary.  At the worst permitted stage weight that
-    // can still round 1 + w*r to zero.  Keep a small, scale-aware FP margin.
-    const double dominance_margin = 64.0 * std::numeric_limits<double>::epsilon() *
-        std::max(1.0, std::abs(min_admissible_rate));
-    const double min_rate_with_margin = min_admissible_rate + dominance_margin;
-
-    if (const auto* scalar_rate = std::get_if<double>(&params.rate)) {
-        if (*scalar_rate <= min_rate_with_margin) {
-            return ValidationError{ValidationErrorCode::InvalidRate, *scalar_rate};
-        }
-        return std::nullopt;
-    }
-
-    const auto& curve = std::get<YieldCurve>(params.rate);
-    const auto points = curve.points();
-    if (points.size() < 2) {
-        // The default-constructed empty curve evaluates to the safe zero rate.
-        return std::nullopt;
-    }
-
-    double min_rate = std::numeric_limits<double>::infinity();
-    double max_rate = -std::numeric_limits<double>::infinity();
-    size_t min_rate_segment = 0;
-    for (size_t i = 0; i + 1 < points.size(); ++i) {
-        if (points[i].tenor >= params.maturity) break;
-        const double dt = points[i + 1].tenor - points[i].tenor;
-        const double rate = -(points[i + 1].log_discount - points[i].log_discount) / dt;
-        if (!std::isfinite(rate)) {
-            return ValidationError{ValidationErrorCode::InvalidRate, rate, i};
-        }
-        if (rate < min_rate) {
-            min_rate = rate;
-            min_rate_segment = i;
-        }
-        max_rate = std::max(max_rate, rate);
-    }
-
-    if (min_rate == std::numeric_limits<double>::infinity()) {
-        return std::nullopt;
-    }
-    if (min_rate <= min_rate_with_margin) {
-        return ValidationError{
-            ValidationErrorCode::InvalidRate, min_rate, min_rate_segment};
-    }
-    // Log-discount interpolation can manufacture a few ULPs of rate around a
-    // mathematically flat zero segment.  Classify those as zero; rejecting a
-    // curve requires a sign change large enough to be numerically meaningful.
-    const double zero_rate_scale = std::max(
-        {1.0 / params.maturity, std::abs(min_rate), std::abs(max_rate)});
-    const double zero_rate_tol = 64.0 * std::numeric_limits<double>::epsilon() *
-        zero_rate_scale;
-    if (min_rate < -zero_rate_tol && max_rate > zero_rate_tol) {
-        // Sign-changing forward rates are the reachable vanilla-input route
-        // to a floating/non-edge-touching exercise interval.  The oriented
-        // one-pass solver has no exact sweep for that topology.
-        return ValidationError{
-            ValidationErrorCode::InvalidRate, min_rate, min_rate_segment};
-    }
-    return std::nullopt;
-}
 
 }  // anonymous namespace
 
@@ -482,8 +435,8 @@ AmericanOptionSolver::create(
     if (!validation) {
         return std::unexpected(validation.error());
     }
-    if (auto lcp_validation = validate_projected_lcp_domain(params)) {
-        return std::unexpected(*lcp_validation);
+    if (auto lcp_validation = validate_pde_rate(params.rate, params.maturity); !lcp_validation) {
+        return std::unexpected(lcp_validation.error());
     }
 
     auto grid_config = resolve_grid(params, grid);

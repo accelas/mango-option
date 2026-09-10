@@ -57,17 +57,12 @@ The generic adapter `SharedInterp<T, N>` (in `table/shared_interp.hpp`) wraps `s
 
 B-spline surfaces use `SharedBSplineInterp<N>`, a convenience alias for `SharedInterp<BSplineND<double, N>, N>`. The other implementation is `ChebyshevInterpolant<N, RawTensor<N>>` (barycentric interpolation on Chebyshev-Gauss-Lobatto nodes).
 
-Why a concept instead of a base class? The two interpolants have fundamentally different capabilities. B-splines provide analytical second derivatives (`eval_second_partial`); Chebyshev does not. A base class would either leave the method unimplemented (runtime error) or force a least-common-denominator interface. A concept lets `TransformLeaf` detect the capability at compile time:
-
-```cpp
-if constexpr (requires { interp_.eval_second_partial(size_t{0}, coords); }) {
-    return interp_.eval_second_partial(0, coords);  // B-spline: O(n) analytical
-} else {
-    return (f(x+h) - 2*f(x) + f(x-h)) / (h*h);    // Chebyshev: 3 evaluations
-}
-```
-
-This matters for gamma accuracy: analytical second derivatives are O(h²) from the B-spline order reduction, while FD second derivatives compound two O(h²) first-derivative errors.
+Both B-spline and Chebyshev interpolants provide analytical second partials.
+`TransformLeaf` detects `eval_second_partial` at compile time; its finite-difference
+fallback remains available for other interpolants that only implement first partials.
+Chebyshev derivatives differentiate the stored interpolating polynomial. At an
+endpoint they use its interior limit; outside the differentiated axis they are
+zero, matching the constant extension used by `eval`. Other axes are clamped.
 
 ### Layer 1: TransformLeaf
 
@@ -181,9 +176,11 @@ Gamma breaks this pattern because it requires a second derivative. For x = ln(S/
 d²V/dS² = (d²V/dx² - dV/dx) / S²
 ```
 
-The second term (subtracting dV/dx) comes from d²x/dS² = -1/S². This means gamma needs `eval_second_partial` — a method that B-spline interpolants have (the derivative of a cubic B-spline is a quadratic B-spline, computed analytically) but Chebyshev interpolants do not.
-
-Rather than requiring all interpolants to provide second derivatives, `TransformLeaf` uses a compile-time `if constexpr` branch to select the computation method. B-spline gets the analytical path; Chebyshev gets central FD with h = 1e-4 in log-moneyness. The FD fallback costs three interpolant evaluations instead of one, but it is only invoked for Chebyshev surfaces.
+The second term (subtracting dV/dx) comes from d²x/dS² = -1/S².
+Both supported interpolants supply `eval_second_partial` for this formula.
+Chebyshev gamma uses analytical polynomial derivatives for every table, including
+existing manual, adaptive, and reconstructed surfaces. This avoids a finite-difference
+stencil crossing a clamped endpoint and introducing artificial curvature.
 
 This is why `gamma()` is a separate method on every layer rather than being routed through the generic `greek(Greek, params)` path used by delta, vega, theta, and rho.
 

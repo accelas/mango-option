@@ -183,6 +183,59 @@ TEST(ChebyshevTensorTest, PartialDerivatives3D) {
         << "Partial w.r.t. z";
 }
 
+// Regression: central differences through clamped eval() halve endpoint
+// slopes, and also bias queries within one stencil step of the boundary.
+// Bug: Central stencils crossed the clamped polynomial domain.
+TEST(ChebyshevTensorTest, MathReviewLinearPartialsAtAndNearDomainEdges) {
+    const Domain<4> domain{
+        .lo = {-1.0, 0.1, 0.1, 0.01},
+        .hi = {1.0, 1.0, 0.5, 0.1}};
+    auto linear = [](std::array<double, 4> c) {
+        return c[0] + 2.0 * c[1] - 3.0 * c[2] + 0.5 * c[3];
+    };
+    auto interp = ChebyshevTensor<4>::build(linear, domain, {4, 4, 4, 4});
+    ASSERT_TRUE(interp.has_value());
+    const std::array<double, 4> slopes{1.0, 2.0, -3.0, 0.5};
+
+    for (size_t axis = 0; axis < slopes.size(); ++axis) {
+        SCOPED_TRACE(axis);
+        for (double fraction : {0.0, 2.5e-7, 0.5, 1.0 - 2.5e-7, 1.0}) {
+            SCOPED_TRACE(fraction);
+            std::array<double, 4> coords{0.0, 0.5, 0.3, 0.05};
+            coords[axis] = domain.lo[axis]
+                + fraction * (domain.hi[axis] - domain.lo[axis]);
+            ASSERT_NEAR(interp->eval(coords), linear(coords), 1e-12);
+            EXPECT_NEAR(interp->partial(axis, coords), slopes[axis], 1e-6);
+        }
+    }
+}
+
+// Regression: polynomial derivatives remain accurate next to CGL nodes.
+// Bug: Finite differences introduced cancellation and endpoint bias.
+TEST(ChebyshevTensorTest, CubicDerivativesAtAndNextToNodes) {
+    auto interp = ChebyshevTensor<1>::build(
+        [](std::array<double, 1> c) {
+            const double x = c[0];
+            return 1.0 + x + x * x + x * x * x;
+        }, Domain<1>{.lo = {-1.0}, .hi = {2.0}}, {33});
+    ASSERT_TRUE(interp.has_value());
+    auto queries = chebyshev_nodes(33, -1.0, 2.0);
+    queries.push_back(0.123);
+    for (double node : queries) {
+        for (double x : {node, std::nextafter(node, 0.5)}) {
+            SCOPED_TRACE(x);
+            EXPECT_NEAR(interp->partial(0, {x}), 1.0 + 2.0*x + 3.0*x*x, 1e-8);
+            EXPECT_NEAR(interp->eval_second_partial(0, {x}), 2.0 + 6.0*x, 1e-7);
+        }
+    }
+    for (double x : {-1.1, 2.1}) {
+        EXPECT_DOUBLE_EQ(interp->partial(0, {x}), 0.0);
+        EXPECT_DOUBLE_EQ(interp->eval_second_partial(0, {x}), 0.0);
+    }
+    EXPECT_TRUE(std::isnan(interp->partial(0, {std::nan("")})));
+    EXPECT_TRUE(std::isnan(interp->eval_second_partial(0, {std::nan("")})));
+}
+
 TEST(ChebyshevTensorTest, DomainClamping) {
     // f(x,y,z) = x + y + z on [0,1]^3
     // Out-of-bounds queries should be clamped to the boundary.

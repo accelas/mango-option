@@ -295,4 +295,10 @@ struct PricingParams : OptionSpec {
  */
 std::expected<void, ValidationError> validate_pricing_params(const PricingParams& params);
 
+/// Validate rates for the one-pass American PDE solver. The maturity must
+/// already be positive and finite. Shared by direct pricing and FDM IV;
+/// financial quote bounds alone do not establish PDE admissibility.
+std::expected<void, ValidationError> validate_pde_rate(
+    const RateSpec& rate, double maturity);
+
 } // namespace mango
