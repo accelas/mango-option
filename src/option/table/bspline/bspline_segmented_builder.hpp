@@ -13,24 +13,6 @@
 namespace mango {
 
 // ===========================================================================
-// Segmented surface assembly
-// ===========================================================================
-
-struct BSplineSegmentConfig {
-    std::shared_ptr<const BSplineND<double, 4>> spline;
-    double tau_start;
-    double tau_end;
-};
-
-struct BSplineSegmentedConfig {
-    std::vector<BSplineSegmentConfig> segments;
-    double K_ref;
-};
-
-[[nodiscard]] std::expected<BSplineSegmentedSurface, PriceTableError>
-build_segmented_surface(BSplineSegmentedConfig config);
-
-// ===========================================================================
 // Multi-K_ref surface assembly
 // ===========================================================================
 
@@ -42,10 +24,9 @@ struct BSplineMultiKRefEntry {
 [[nodiscard]] std::expected<BSplineMultiKRefInner, PriceTableError>
 build_multi_kref_surface(std::vector<BSplineMultiKRefEntry> entries);
 
-/// Orchestrates backward-chained construction of a SegmentedSurface for a
-/// single K_ref.  Splits maturity at discrete dividend dates. All segments use
-/// NormalizedPrice mode (V/K_ref). The last segment uses payoff IC; earlier
-/// segments chain from the previous segment's surface.
+/// Builds a single-reference segmented surface from raw fixed-expiry PDE
+/// snapshots. All leaves store V/K_ref; fitted values never feed a PDE solve.
+/// Event neighborhoods without both calendar sides are explicitly excluded.
 class SegmentedPriceTableBuilder {
 public:
     struct Config {
@@ -72,38 +53,33 @@ public:
         int tau_points_min = 4;   ///< B-spline minimum
         int tau_points_max = 30;  ///< Cap for very wide segments
 
-        /// PDE grid accuracy for each segment's PDE solve.
+        /// PDE grid accuracy for the fixed-expiry solve cohort.
         /// Default GridAccuracyParams{} gives ~100 spatial points.
         GridAccuracyParams pde_accuracy = {};
     };
+
+    /// Counts describe requested (tau, sigma, rate) spatial rows, including
+    /// the analytic payoff row. Missing rows are refused before fitting.
+    struct BuildResult {
+        BSplineSegmentedSurface surface;
+        size_t pde_solves;
+        size_t sample_rows;
+        size_t sample_points;
+        size_t tau_point_cap_hits;
+    };
+
+    static std::expected<BuildResult, PriceTableError>
+    build_with_diagnostics(const Config& config);
 
     /// Build a SegmentedSurface from the given configuration.
     ///
     /// Algorithm:
     ///   1. Filter dividends outside (0, T), sort, compute segment boundaries in τ.
     ///   2. Expand moneyness grid downward to accommodate spot adjustment.
-    ///   3. Build last segment (closest to expiry) with payoff IC.
-    ///   4. Build earlier segments backward with chained IC.
+    ///   3. Solve each (sigma, rate) end to end with exact mandatory samples.
+    ///   4. Fit temporal regimes from raw snapshots, refusing missing rows.
     ///   5. Assemble into SegmentedSurface.
     static std::expected<BSplineSegmentedSurface, PriceTableError> build(const Config& config);
-
-private:
-    /// Build a single segment of the segmented price surface.
-    ///
-    /// For segment 0 (closest to expiry), uses payoff IC.
-    /// For later segments, chains from the previous segment's surface
-    /// with a dividend-adjusted initial condition.
-    ///
-    /// On success, updates @p prev_spline to the newly built segment's spline.
-    static std::expected<BSplineSegmentConfig, PriceTableError>
-    build_segment(
-        size_t seg_idx,
-        const std::vector<double>& boundaries,
-        const Config& config,
-        const std::vector<double>& expanded_log_m_grid,
-        double K_ref,
-        const std::vector<Dividend>& dividends,
-        std::shared_ptr<const BSplineND<double, 4>>& prev_spline);
 };
 
 }  // namespace mango

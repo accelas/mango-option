@@ -158,22 +158,37 @@ TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
     EXPECT_LT(result->implied_vol, 3.0);
 }
 
-// The documented limitation, pinned: the *same* config on `BSplineBackend`
-// does not build.  This is why the documentation recommends `ChebyshevBackend`
-// for adaptive discrete-dividend surfaces.
-//
-// Re-measured after #485 with the fixed-expiry oracle: still NoViableSurface.
-// The old 15,500 bps value used a different oracle and is no longer a valid
-// accuracy claim. Failed builds currently expose the typed refusal without
-// candidate error diagnostics. Revisit after #488/#458/#460.
-TEST(IVSolverFactorySegmented, DocumentedConfigOnBSplineBackendRefuses) {
+// Regression: the documented raw-sampling configuration reports its achieved
+// accuracy and prices independently generated market quotes.
+// Bug: A re-recorded error figure tested reproducibility of the implementation
+// rather than the returned surface's numerical behavior.
+TEST(IVSolverFactorySegmented, DocumentedBSplineConfigReportsAccuracyAndSolves) {
     auto config = documented_adaptive_dividend_config();
     config.backend = BSplineBackend{.maturity_grid = {0.1, 0.25, 0.5, 1.0}};
-
     auto solver = make_interpolated_iv_solver(config);
-    ASSERT_FALSE(solver.has_value())
-        << "the documented B-spline configuration must retain honest refusal";
-    EXPECT_EQ(solver.error().code, ValidationErrorCode::NoViableSurface);
+    ASSERT_TRUE(solver) << static_cast<int>(solver.error().code);
+    auto diagnostics = solver->build_diagnostics();
+    ASSERT_TRUE(diagnostics);
+    EXPECT_EQ(diagnostics->target_met,
+              diagnostics->achieved_max_error <= config.adaptive->target_iv_error);
+    EXPECT_EQ(diagnostics->holdout_points_measured, 64u);
+    EXPECT_EQ(diagnostics->holdout_points_invalid, 0u);
+    EXPECT_LE(diagnostics->achieved_max_error, 0.20); // Existing viability contract.
+    EXPECT_GT(diagnostics->sample_rows, 0u);
+    EXPECT_GE(diagnostics->sample_points, 4 * diagnostics->sample_rows);
+
+    // Independent FDM quote: do not generate the market price from the table.
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+        .rate = 0.05, .dividend_yield = config.dividend_yield,
+        .option_type = OptionType::PUT}, 0.20);
+    p.discrete_dividends = config.discrete_dividends->discrete_dividends;
+    auto reference = solve_american_option(p);
+    ASSERT_TRUE(reference);
+    IVQuery query(static_cast<const OptionSpec&>(p), reference->value());
+    query.discrete_dividends = p.discrete_dividends;
+    auto result = solver->solve(query);
+    ASSERT_TRUE(result);
+    EXPECT_NEAR(result->implied_vol, p.volatility, 0.01);
 }
 
 // ---------------------------------------------------------------------------

@@ -741,22 +741,13 @@ mango::IVSolverFactoryConfig config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
-**Use `ChebyshevBackend` for adaptive discrete-dividend surfaces.** The
-B-spline segmented adaptive path currently refuses realistic dividend
-configs — this one included — with `NoViableSurface` under complete
-measurement. The corrected fixed-expiry oracle still produces a refusal;
-the earlier 15,500 bps figure used a superseded oracle and is retired.
-Pending the MultiKRefSplit blend and segmented-fit follow-ups, Chebyshev is
-the supported backend for this shape. On 2026-09-06 it measured 74.4 bps
-maximum absolute IV error over 64 measured points, with zero invalid points.
-This passes the 2,000 bps viability bound but exceeds the requested 10 bps
-target. The current builder can return viable results above its requested
-target; inspect `build_diagnostics().target_met`.
-Both facts are pinned:
-`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig` for the
-Chebyshev config, and
-`IVSolverFactorySegmented.DocumentedConfigOnBSplineBackendRefuses` for the
-B-spline refusal.
+The B-spline segmented path uses raw fixed-expiry PDE snapshots. Fitted
+surfaces do not feed later PDE solves. Adaptive construction can return its
+best available surface before reaching the requested accuracy; inspect
+`build_diagnostics()->target_met` and `achieved_max_error` for the returned
+surface. The tests `DocumentedAdaptiveDiscreteDividendConfig` and
+`DocumentedBSplineConfigReportsAccuracyAndSolves` exercise the documented
+Chebyshev and B-spline configurations, including independent PDE-to-IV queries.
 
 **The moneyness grid and the K_refs must agree.** The assembled surface routes
 a query to the K_refs bracketing its strike and blends their prices linearly
@@ -1285,3 +1276,9 @@ its value as `solve_batch`'s `custom_grid`.
 - **Interpolation Framework:** [INTERPOLATION_FRAMEWORK.md](INTERPOLATION_FRAMEWORK.md)
 - **Mathematical Foundations:** [MATHEMATICAL_FOUNDATIONS.md](MATHEMATICAL_FOUNDATIONS.md)
 - **USDT Tracing:** [TRACING.md](TRACING.md)
+
+Segmented B-spline adaptive build diagnostics include `sample_rows`,
+`sample_points`, and `tau_point_cap_hits`. These count successful raw sampling
+builds across refinement probes and final/retry assemblies. The Python
+`build_diagnostics()` dictionary exposes the same fields. The direct
+`build_with_diagnostics()` result reports the counts for its single build.

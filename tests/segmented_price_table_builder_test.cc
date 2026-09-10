@@ -20,6 +20,66 @@ std::vector<double> log_m_grid(std::initializer_list<double> moneyness) {
 
 }  // namespace
 
+// Regression #488: a post-dividend backward-time segment must contain raw
+// end-to-end PDE samples, rather than evolution of a fitted initial state.
+
+TEST(SegmentedPriceTableBuilderTest, DiagnosticsCountRawRowsAndSingleExpirySolves) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::PUT,
+        .dividends = {.discrete_dividends = {{0.25, 1.0}, {0.5, 1.0}}},
+        .grid = {.moneyness = {-0.2, -0.1, 0.0, 0.1, 0.2},
+                 .vol = {0.1, 0.15, 0.2, 0.3},
+                 .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 1.0,
+        .tau_target_dt = 0.01, .tau_points_min = 4, .tau_points_max = 4,
+    };
+    auto result = SegmentedPriceTableBuilder::build_with_diagnostics(config);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_EQ(result->pde_solves, 16u);  // independent of the three segments
+    EXPECT_EQ(result->sample_rows, 3u * 4u * 16u);
+    EXPECT_EQ(result->tau_point_cap_hits, 3u);
+    EXPECT_EQ(result->surface.num_pieces(), 3u);
+    EXPECT_FALSE(result->surface.contains_maturity(0.5));
+    EXPECT_FALSE(result->surface.contains_maturity(0.75));
+    EXPECT_TRUE(result->surface.contains_maturity(0.8));
+}
+
+TEST(SegmentedPriceTableBuilderTest, RejectsUnsortedSampleAxesBeforeSolving) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::PUT,
+        .grid = {.moneyness = {-0.2, -0.1, 0.0, 0.1, 0.2},
+                 .vol = {0.15, 0.1, 0.2, 0.3},
+                 .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 1.0,
+    };
+    auto result = SegmentedPriceTableBuilder::build(config);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::GridNotSorted);
+    EXPECT_EQ(result.error().axis_index, 2u);
+}
+
+// A five-node grid on [0,.002] ends at .0015 after the event inset, which
+// used to duplicate its fourth node. These are generated nodes: keep their
+// requested count and place them inside the actual supported interval.
+TEST(SegmentedPriceTableBuilderTest, NarrowRegimesRetainDistinctRequestedRows) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::PUT,
+        .dividends = {.discrete_dividends = {{0.008, 1.0}}},
+        .grid = {.moneyness = {-0.2, -0.1, 0.0, 0.1, 0.2},
+                 .vol = {0.1, 0.15, 0.2, 0.3},
+                 .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 0.01,
+    };
+    auto result = SegmentedPriceTableBuilder::build_with_diagnostics(config);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_EQ(result->sample_rows, 2u * 5u * 16u);
+    EXPECT_EQ(result->pde_solves, 16u);
+    EXPECT_TRUE(result->surface.contains_maturity(0.001));
+    EXPECT_FALSE(result->surface.contains_maturity(0.002));
+    EXPECT_TRUE(result->surface.contains_maturity(0.003));
+}
+
+
 TEST(SegmentedPriceTableBuilderTest, BuildWithOneDividend) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = 100.0,
@@ -254,4 +314,21 @@ TEST(SegmentedPriceTableBuilderTest, LongMaturityMultiDividendEdgeBiasControlled
 
     EXPECT_LT(abs_error, 0.25)
         << "Interpolated chained-segment price drifted too far from FD reference";
+}
+
+// Regression: invalid point ceilings must fail before estimating the PDE grid.
+// Bug: Raw sampling called std::clamp with a lower bound above its upper bound.
+TEST(SegmentedPriceTableBuilderTest, RejectsInconsistentPdePointBounds) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::PUT,
+        .dividends = {.discrete_dividends = {{0.5, 1.0}}},
+        .grid = {.moneyness = {-0.2, -0.1, 0.1, 0.2},
+                 .vol = {0.1, 0.15, 0.2, 0.3}, .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 1.0,
+    };
+    config.pde_accuracy.min_spatial_points = 30;
+    config.pde_accuracy.max_spatial_points = 20;
+    auto result = SegmentedPriceTableBuilder::build_with_diagnostics(config);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }

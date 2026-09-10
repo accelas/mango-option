@@ -271,22 +271,13 @@ mango::IVSolverFactoryConfig config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
-**Use `ChebyshevBackend` for adaptive discrete-dividend surfaces.** The
-B-spline segmented adaptive path currently refuses realistic dividend configs
-— including this one — with `NoViableSurface` under complete measurement: its
-multi-K_ref fit degrades badly at low vol on the tau segments after a
-dividend, and denser grids make it worse rather than better. Pending the
-MultiKRefSplit blend and segmented-fit follow-ups, Chebyshev is the supported
-backend here; the corrected fixed-expiry oracle measures 74.4 bps maximum
-absolute IV error on 64 measured points (2026-09-06), against the 2,000 bps
-viability bound. This remains above the requested 10 bps target; strict
-target admission is a later #483 gate.
-
-Omit `kref_config` to let the builder pick log-spaced K_refs around the spot.
-This exact config is pinned by
-`IVSolverFactorySegmented.DocumentedAdaptiveDiscreteDividendConfig`, and the
-B-spline refusal by
-`IVSolverFactorySegmented.DocumentedConfigOnBSplineBackendRefuses`.
+Segmented B-spline construction uses raw snapshots from one fixed-expiry PDE
+solve per reference strike, volatility, and rate. Adaptive builds can return
+the best available surface before reaching the requested accuracy: inspect
+`build_diagnostics()->target_met` and the achieved error. See the
+[API guide](docs/API_GUIDE.md) for reference-strike configuration and dividend
+neighborhood admission. The documented B-spline configuration is exercised by
+`IVSolverFactorySegmented.DocumentedBSplineConfigReportsAccuracyAndSolves`.
 
 **Pattern 5: Probe-Based FDM IV Solver (Simple API)**
 ```cpp
