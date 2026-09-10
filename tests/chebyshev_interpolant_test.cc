@@ -185,6 +185,7 @@ TEST(ChebyshevTensorTest, PartialDerivatives3D) {
 
 // Regression: central differences through clamped eval() halve endpoint
 // slopes, and also bias queries within one stencil step of the boundary.
+// Bug: Central stencils crossed the clamped polynomial domain.
 TEST(ChebyshevTensorTest, MathReviewLinearPartialsAtAndNearDomainEdges) {
     const Domain<4> domain{
         .lo = {-1.0, 0.1, 0.1, 0.01},
@@ -209,6 +210,8 @@ TEST(ChebyshevTensorTest, MathReviewLinearPartialsAtAndNearDomainEdges) {
     }
 }
 
+// Regression: polynomial derivatives remain accurate next to CGL nodes.
+// Bug: Finite differences introduced cancellation and endpoint bias.
 TEST(ChebyshevTensorTest, CubicDerivativesAtAndNextToNodes) {
     auto interp = ChebyshevTensor<1>::build(
         [](std::array<double, 1> c) {

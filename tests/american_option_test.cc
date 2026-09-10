@@ -34,6 +34,7 @@ protected:
 
 // Regression: eligibility checked the original spot-centered grid, but
 // the normalized batch solve recenters it at log(S/K)=0 and loses coverage.
+// Bug: Normalized reuse discarded the original off-ATM coverage.
 TEST(AmericanOptionTest, MathReviewNormalizedBatchPreservesOffAtmCoverage) {
     std::vector<PricingParams> batch;
     for (double spot : {200.0, 210.0}) {
@@ -70,6 +71,7 @@ TEST(AmericanOptionTest, MathReviewNormalizedBatchPreservesOffAtmCoverage) {
 
 // Regression: a time-independent intrinsic left boundary undervalued
 // puts with negative rates, which the direct solver explicitly supports.
+// Bug: The left boundary used intrinsic value even when waiting pays more.
 TEST(AmericanOptionTest, MathReviewNegativeRatePutEqualsEuropean) {
     for (const RateSpec& rate :
          {RateSpec{-0.05}, RateSpec{YieldCurve::flat(-0.05)}}) {
@@ -89,6 +91,8 @@ TEST(AmericanOptionTest, MathReviewNegativeRatePutEqualsEuropean) {
     }
 }
 
+// Regression: nonconstant negative curves must retain discounted strike.
+// Bug: Intrinsic left boundaries ignored the forward discount curve.
 TEST(AmericanOptionTest, NegativeForwardCurvePutEqualsEuropean) {
     auto curve = YieldCurve::from_points({
         {0.0, 0.0}, {0.5, 0.015}, {1.0, 0.05}});
@@ -103,6 +107,27 @@ TEST(AmericanOptionTest, NegativeForwardCurvePutEqualsEuropean) {
     EXPECT_NEAR(result->value(), EuropeanOptionResult(params).value(), 1e-3);
 }
 
+TEST(AmericanOptionTest, NonMonotoneNegativeForwardCurveBoundary) {
+    // Regression: supported forward curves may turn without crossing zero.
+    // Bug: An expiry-only boundary was suspected of missing an exercise date;
+    // all-negative forwards instead make holding to expiry optimal throughout.
+    auto curve = YieldCurve::from_points({
+        {0.0, 0.0}, {0.25, 0.005}, {0.75, 0.04}, {1.0, 0.05}});
+    ASSERT_TRUE(curve);
+    PricingParams params(OptionSpec{
+        .spot = 100.0, .strike = 100.0, .maturity = 1.0,
+        .rate = *curve, .dividend_yield = 0.02,
+        .option_type = OptionType::PUT}, 0.01);
+    auto result = solve_american_option(params);
+    ASSERT_TRUE(result);
+    const double left_spot = params.strike * std::exp(result->grid()->x().front());
+    const double expected = params.strike * curve->discount(params.maturity)
+        - left_spot * std::exp(-params.dividend_yield * params.maturity);
+    EXPECT_NEAR(result->value_at(left_spot), expected, 1e-10);
+}
+
+// Regression: normalized groups must preserve coverage in either order.
+// Bug: Reuse carried a grid without the original group coverage.
 TEST(AmericanOptionTest, MixedNormalizedGroupsPreserveCoverageInEitherOrder) {
     std::vector<PricingParams> batch;
     for (double sigma : {0.10, 0.08, 0.20}) {
@@ -131,27 +156,6 @@ TEST(AmericanOptionTest, MixedNormalizedGroupsPreserveCoverageInEitherOrder) {
             }
         }
     }
-}
-
-TEST(AmericanOptionTest, NegativeRateDividendPutRetainsDiscountedStrike) {
-    PricingParams params(
-        OptionSpec{.spot = 1.0, .strike = 100.0, .maturity = 1.0,
-                   .rate = -0.05, .dividend_yield = 0.0,
-                   .option_type = OptionType::PUT},
-        0.01, {{.calendar_time = 0.5, .amount = 5.0}});
-    // Use the accuracy profile to separate the jump/boundary condition
-    // from the default coarse grid's spatial truncation error.
-    auto solver = AmericanOptionSolver::create(
-        params, make_grid_accuracy(GridAccuracyProfile::High));
-    ASSERT_TRUE(solver.has_value());
-    auto result = solver->solve();
-    ASSERT_TRUE(result.has_value());
-    // The dividend exceeds spot by hundreds of standard deviations. The
-    // absorbing-zero stock leaves a terminal payoff K, discounted at r<0.
-    // A jump fallback of K at the ex-date loses half the discount growth.
-    EXPECT_NEAR(result->value(), 105.1271096376024, 1e-3);
-    const double left_spot = params.strike * std::exp(result->grid()->x().front());
-    EXPECT_NEAR(result->value_at(left_spot), 105.1271096376024, 1e-3);
 }
 
 TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {

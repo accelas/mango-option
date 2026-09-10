@@ -215,7 +215,7 @@ The EEP surface is smoother (the discontinuity lies in the European component, w
 P_American = (K/K_ref) · EEP_interp(x, τ, σ, r) + P_European(S, K, τ, σ, r, q)
 ```
 
-Greeks follow the same decomposition: each Greek is the sum of the interpolated EEP Greek (computed via chain rule through the coordinate transform) and the closed-form European Greek. Gamma uses analytical B-spline second derivatives (not FD), giving O(h^2) accuracy. For Chebyshev surfaces, gamma falls back to central FD.
+Greeks follow the same decomposition: each Greek is the sum of the interpolated EEP Greek (computed via chain rule through the coordinate transform) and the closed-form European Greek. Gamma uses analytical B-spline second derivatives (not FD), giving O(h^2) accuracy. Chebyshev gamma also uses analytical polynomial second derivatives, with interior limits at domain endpoints and zero derivatives outside the differentiated coordinate.
 
 The `PriceTable` exposes `delta()`, `gamma()`, `theta()`, and `rho()` alongside `price()` and `vega()`. All Greek methods return `std::expected<double, GreekError>`. Deep OTM (zero EEP), the leaf's Greek short-circuits to exactly zero before any interpolation derivatives — the leaf evaluates the raw EEP once and returns `0.0` when it is non-positive — so `EEPLayer`'s sum degenerates to the analytical European Greek at the cost of a single interpolant evaluation.
 

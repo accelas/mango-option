@@ -134,6 +134,7 @@ TEST(IVQueryValidationTest, ArbitragePutExceedsStrike) {
 
 // Regression: K is not an upper price bound for an American put when
 // negative rates make the discounted strike exceed K.
+// Bug: The put upper bound assumed the discount factor never exceeds one.
 TEST(IVQueryValidationTest, MathReviewNegativeRatePutAboveStrikeIsValid) {
     for (const RateSpec& rate :
          {RateSpec{-0.05}, RateSpec{YieldCurve::flat(-0.05)}}) {
@@ -157,6 +158,8 @@ TEST(IVQueryValidationTest, MathReviewNegativeRatePutAboveStrikeIsValid) {
     }
 }
 
+// Regression: the put price bound includes all admitted exercise dates.
+// Bug: An expiry-only discount can miss an interior discount maximum.
 TEST(IVQueryValidationTest, PutBoundIncludesIntermediateExerciseDates) {
     // Discount grows to exp(0.1) at t=1, returns to 1 at expiry, and grows
     // again after expiry. Only stopping dates within this contract count.

@@ -16,6 +16,7 @@ static_assert(SurfaceInterpolant<ChebyshevInterpolant<4, RawTensor<4>>, 4>);
 
 // Regression: the leaf's central second-difference fallback evaluated
 // outside the Chebyshev domain, where clamping creates artificial curvature.
+// Bug: Gamma used a central stencil across the constant extension.
 TEST(ChebyshevSurfaceTest, MathReviewGammaAtAndNearMoneynessEdges) {
     const Domain<4> domain{
         .lo = {-1.0, 0.1, 0.1, 0.01},
