@@ -1481,6 +1481,19 @@ cc_test(
 )
 
 cc_test(
+    name = "segmented_sampling_accuracy_test",
+    size = "large",
+    shard_count = 2,
+    srcs = ["segmented_sampling_accuracy_test.cc"],
+    tags = ["slow"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "segmented_price_table_builder_test",
     size = "medium",
     srcs = ["segmented_price_table_builder_test.cc"],

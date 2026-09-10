@@ -147,23 +147,33 @@ namespace {
 // Segmented surface helpers
 // ============================================================================
 
+void record_sampling(BuildDiagnostics& diagnostics,
+                     const SegmentedPriceTableBuilder::BuildResult& result) {
+    diagnostics.sample_rows += result.sample_rows;
+    diagnostics.sample_points += result.sample_points;
+    diagnostics.tau_point_cap_hits += result.tau_point_cap_hits;
+}
+
 /// Build a SegmentedSurface for each K_ref in the list.
 /// Takes a Config template with K_ref set per iteration.
 std::expected<std::vector<BSplineSegmentedSurface>, PriceTableError>
 build_segmented_surfaces(
     SegmentedPriceTableBuilder::Config base_config,
-    const std::vector<double>& ref_values)
+    const std::vector<double>& ref_values,
+    size_t& total_pde_solves, BuildDiagnostics& diagnostics)
 {
     std::vector<BSplineSegmentedSurface> surfaces;
     surfaces.reserve(ref_values.size());
 
     for (double ref : ref_values) {
         base_config.K_ref = ref;
-        auto surface = SegmentedPriceTableBuilder::build(base_config);
-        if (!surface.has_value()) {
-            return std::unexpected(surface.error());
+        auto result = SegmentedPriceTableBuilder::build_with_diagnostics(base_config);
+        if (!result.has_value()) {
+            return std::unexpected(result.error());
         }
-        surfaces.push_back(std::move(*surface));
+        total_pde_solves += result->pde_solves;
+        record_sampling(diagnostics, *result);
+        surfaces.push_back(std::move(result->surface));
     }
 
     return surfaces;
@@ -605,6 +615,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     initial_grids.rate = initial_grid_.rate;
 
     // 2. Run adaptive refinement per probe, measured over its own band
+    BuildDiagnostics diagnostics;
     std::vector<RefinementResult> probe_results;
     for (double probe_ref : probes) {
         // Measurement domain for this probe: the user's tau/vol/rate ranges,
@@ -656,7 +667,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             continue;
         }
 
-        BuildFn build_fn = [this, probe_ref](
+        BuildFn build_fn = [this, probe_ref, &diagnostics](
             std::span<const double> m_grid,
             std::span<const double> tau_grid,
             std::span<const double> v_grid,
@@ -669,9 +680,10 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             std::vector<double> r_vec(r_grid.begin(), r_grid.end());
             auto seg_cfg = make_seg_config(config_, m_vec, v_vec, r_vec, tau_pts);
             seg_cfg.K_ref = probe_ref;
-            auto surface = SegmentedPriceTableBuilder::build(seg_cfg);
-            if (!surface) return std::unexpected(surface.error());
-            auto shared = std::make_shared<BSplineSegmentedSurface>(std::move(*surface));
+            auto result = SegmentedPriceTableBuilder::build_with_diagnostics(seg_cfg);
+            if (!result) return std::unexpected(result.error());
+            record_sampling(diagnostics, *result);
+            auto shared = std::make_shared<BSplineSegmentedSurface>(std::move(result->surface));
             return SurfaceHandle{
                 // A probe surface is a single-K_ref object: TauSegmentSplit
                 // *discards* the query strike and prices at K_ref, so calling
@@ -690,7 +702,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
                     return scale * shared->price(spot / scale, probe_ref,
                                                  tau, sigma, rate);
                 },
-                .pde_solves = 0
+                .pde_solves = result->pde_solves
             };
         };
 
@@ -763,7 +775,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     int max_tau_pts = gsz.tau_points;
 
     auto seg_template = make_seg_config(config_, final_m, final_v, final_r, max_tau_pts);
-    auto seg_surfaces = build_segmented_surfaces(seg_template, K_refs_);
+    auto seg_surfaces = build_segmented_surfaces(seg_template, K_refs_, total_pde, diagnostics);
     if (!seg_surfaces) return std::unexpected(seg_surfaces.error());
 
     // 5. Assemble multi-K_ref surface
@@ -842,7 +854,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         auto retry_r = linspace(fit_domain.rate_min, fit_domain.rate_max, bumped_r);
 
         auto retry_template = make_seg_config(config_, retry_m, retry_v, retry_r, bumped_tau);
-        auto retry_segs = build_segmented_surfaces(retry_template, K_refs_);
+        auto retry_segs = build_segmented_surfaces(retry_template, K_refs_, total_pde, diagnostics);
         if (retry_segs) {
             auto assembled = assemble(std::move(*retry_segs));
             if (assembled) {
@@ -869,7 +881,6 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     BSplineMultiKRefInner picked_surface =
         use_retry ? std::move(*retry_surface) : std::move(*surface);
 
-    BuildDiagnostics diagnostics;
     diagnostics.target_met =
         final_score.measured > 0 &&
         final_score.max_error <= params.target_iv_error;

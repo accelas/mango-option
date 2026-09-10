@@ -119,6 +119,12 @@ struct BuildDiagnostics {
     /// (TV/K or vega floor), where the IV-error metric is undefined; a build
     /// with `holdout_points_measured == 0` is refused, never certified.
     size_t holdout_points_measured = 0;
+    /// Rows/points from successful segmented sampling builds, including payoff
+    /// rows, refinement probes, and final/retry assemblies. Other backends leave zero.
+    size_t sample_rows = 0;
+    size_t sample_points = 0;
+    /// Sum of temporal segments whose requested density hit its point cap.
+    size_t tau_point_cap_hits = 0;
     size_t monotonicity_violations = 0;
     size_t monotonicity_points_invalid = 0;
     double worst_vega_slope = 0.0;

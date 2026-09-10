@@ -274,6 +274,9 @@ py::object build_diagnostics_to_pyobject(
     }
     const auto& d = *diagnostics;
     py::dict result;
+    result["sample_rows"] = d.sample_rows;
+    result["sample_points"] = d.sample_points;
+    result["tau_point_cap_hits"] = d.tau_point_cap_hits;
     result["target_met"] = d.target_met;
     result["achieved_max_error"] = d.achieved_max_error;
     result["achieved_avg_error"] = d.achieved_avg_error;
