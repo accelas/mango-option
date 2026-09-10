@@ -180,6 +180,15 @@ backend.chebyshev_pts = [5, 5, 4]
 config.backend = backend
 ```
 
+Manual segmented Chebyshev defaults use 257 moneyness nodes and 5 rate nodes.
+A matched single-reference, two-segment measurement with the corrected grid
+policy used about 904 KiB of stored values, versus 70 KiB before. Price queries
+increased from about 6.8 to 49.5 microseconds; builds changed from about 52 to
+20 seconds. These single-run figures depend on the domain and hardware.
+The larger default met the tested one-cent price budget; two cheaper level
+choices missed it. Continuous and adaptive settings are unchanged. See
+[manual default measurements](MATHEMATICAL_FOUNDATIONS.md#manual-chebyshev-defaults).
+
 #### Discrete Dividends
 
 ```python

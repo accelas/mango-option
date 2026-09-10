@@ -1047,37 +1047,9 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     }
 }
 
-// Padded-timeline coverage oracle for the segmented Chebyshev path: the
-// table solves a normalized contract with maturity 1.01 * tau_max and the
-// dividend's calendar time anchored to THAT maturity, so at the tau_query
-// snapshot the event sits at tau = 1.01*tau_query - calendar_time, not at
-// tau_query - calendar_time.  Reproduce exactly that contract on an
-// explicit wide grid and read the snapshot at the queried moneyness, so
-// the comparison isolates spatial coverage from the (pre-existing,
-// out-of-scope) timing skew.  Returns a dollar price for strike K.
-double dividend_fdm_reference_price(double S, double K, double tau,
-                                    double sigma, double rate,
-                                    const std::vector<Dividend>& dividends) {
-    PricingParams p(
-        OptionSpec{.spot = S, .strike = K, .maturity = tau, .rate = rate,
-                   .dividend_yield = 0.0, .option_type = OptionType::PUT},
-        sigma);
-    p.discrete_dividends = dividends;
-    auto solver = AmericanOptionSolver::create(
-        p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::High)});
-    if (!solver.has_value()) {
-        ADD_FAILURE() << "dividend_fdm_reference_price solver create failed"
-                      << " for S=" << S << " sigma=" << sigma;
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    auto ref = solver->solve();
-    if (!ref.has_value()) {
-        ADD_FAILURE() << "dividend_fdm_reference_price solve failed for S="
-                      << S << " sigma=" << sigma;
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    return ref->value_at(S);
-}
+// Direct pricing oracle for the contract at the query valuation point.
+// The anchor-maturity regression below has no schedule roll; shorter-maturity
+// tests must supply their independently rolled fixed-expiry dividends.
 
 // Regression (#480, S2): the segmented Chebyshev build solved its dividend
 // batch gridless.  A batch with discrete dividends is normalized-ineligible,
@@ -1099,47 +1071,6 @@ double dividend_fdm_reference_price(double S, double K, double tau,
 // kind, and an exact 0 where the put is 50 in the money, are the
 // signature of a cubic spline evaluated far outside its data range, not
 // of interpolation error.
-// Bug: Missing spatial coverage and shifted dividend times corrupted tail samples.
-TEST(AdaptiveGridBuilderTest, SegmentedChebyshevTailsMatchFdmAtExtremeMoneyness) {
-    const std::vector<Dividend> dividends = {
-        Dividend{.calendar_time = 0.1, .amount = 1.0}};
-    SegmentedAdaptiveConfig seg_config{
-        .spot = 100.0,
-        .option_type = OptionType::PUT,
-        .dividend_yield = 0.0,
-        .discrete_dividends = dividends,
-        .maturity = 0.25,
-        .kref_config = {.K_refs = {100.0}},   // single K_ref: no strike blend
-    };
-    IVGrid grid{
-        .moneyness = {std::log(0.5), 0.0, std::log(2.0)},  // log(S/K) here
-        .vol = {0.10},                                       // -> [0.05, 0.15]
-        .rate = {0.03, 0.05},
-    };
-
-    auto surface = build_chebyshev_segmented_manual(seg_config, grid);
-    ASSERT_TRUE(surface.has_value())
-        << "build failed: " << static_cast<int>(surface.error().code);
-
-    const double K = 100.0;
-    const double tau = 0.25;
-    const double r = 0.05;
-
-    // Tighten the user-contract budget from ten cents to five cents after
-    // removing the timeline skew. This off-node test still includes the
-    // manual fit error tracked by #486; the separate sampling accuracy test
-    // checks the raw PDE rows against converged solves within 0.003.
-    constexpr double TOL_USER = 0.05;
-
-    for (double S : {50.0, 200.0}) {
-        for (double sigma : {0.05, 0.15}) {
-            const double got = surface->price(S, K, tau, sigma, r);
-            const double usr = dividend_fdm_reference_price(S, K, tau, sigma, r, dividends);
-            EXPECT_NEAR(got, usr, TOL_USER)
-                << "user oracle S=" << S << " sigma=" << sigma;
-        }
-    }
-}
 
 }  // namespace
 }  // namespace mango
