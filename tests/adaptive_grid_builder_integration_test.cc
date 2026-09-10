@@ -52,7 +52,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, ConvergesToTarget) {
     EXPECT_NE(result->spline, nullptr);
 }
 
-TEST_F(AdaptiveGridBuilderIntegrationTest, RefinementIncreasesGridSize) {
+TEST_F(AdaptiveGridBuilderIntegrationTest, RefinementAttemptsLargerGrid) {
     auto chain = make_test_chain();
 
     AdaptiveGridParams params;
@@ -67,21 +67,19 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, RefinementIncreasesGridSize) {
 
     ASSERT_TRUE(result.has_value());
 
-    // With 3 iterations and tight target, grid should have grown
-    if (result->iterations.size() >= 2) {
-        auto& first = result->iterations.front();
-        auto& last = result->iterations.back();
-
-        // At least one dimension should have grown
-        bool any_grew = false;
+    // Refinement inserts sites into attempted candidates. Backtracking may
+    // retain the seed when its measured error is lower, so the retained grid
+    // need not be larger. Every attempt must preserve the seed's density.
+    ASSERT_GE(result->iterations.size(), 2u);
+    const auto& first = result->iterations.front();
+    bool any_grew = false;
+    for (const auto& candidate : result->iterations) {
         for (size_t d = 0; d < 4; ++d) {
-            if (last.grid_sizes[d] > first.grid_sizes[d]) {
-                any_grew = true;
-                break;
-            }
+            EXPECT_GE(candidate.grid_sizes[d], first.grid_sizes[d]);
+            any_grew |= candidate.grid_sizes[d] > first.grid_sizes[d];
         }
-        EXPECT_TRUE(any_grew) << "Grid should refine when target not met";
     }
+    EXPECT_TRUE(any_grew) << "A tight target must attempt a denser candidate";
 }
 
 TEST_F(AdaptiveGridBuilderIntegrationTest, HandlesImpossibleTarget) {

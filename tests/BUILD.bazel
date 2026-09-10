@@ -580,17 +580,6 @@ cc_test(
 )
 
 cc_test(
-    name = "american_option_accuracy_test",
-    size = "medium",
-    srcs = ["american_option_accuracy_test.cc"],
-    tags = ["slow"],
-    deps = [
-        "//src/option:american_option",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "american_option_result_test",
     size = "small",
     srcs = ["american_option_result_test.cc"],
@@ -642,8 +631,10 @@ cc_test(
 cc_test(
     name = "bspline_collocation_1d_test",
     srcs = ["bspline_collocation_1d_test.cc"],
+    data = ["data/bspline_458_dividend_axis.txt"],
     deps = [
         "//src/math/bspline:bspline_collocation",
+        "//src/math/bspline:bspline_nd",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -1198,6 +1189,8 @@ cc_test(
     size = "small",
     srcs = ["adaptive_refinement_unit_test.cc"],
     deps = [
+        "//src/math/bspline:bspline_collocation",
+        "//src/math/bspline:bspline_nd",
         "//src/option:american_option",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:adaptive_metrics",
@@ -1481,19 +1474,6 @@ cc_test(
 )
 
 cc_test(
-    name = "segmented_sampling_accuracy_test",
-    size = "large",
-    shard_count = 2,
-    srcs = ["segmented_sampling_accuracy_test.cc"],
-    tags = ["slow"],
-    deps = [
-        "//src/option:american_option",
-        "//src/option/table/bspline:bspline_segmented_builder",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "segmented_price_table_builder_test",
     size = "medium",
     srcs = ["segmented_price_table_builder_test.cc"],
@@ -1708,18 +1688,6 @@ cc_test(
         "//src/option/table:split_surface",
         "//src/option/table:tau_segment_split",
         "//src/option/table:multi_kref_split",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "chebyshev_sampling_accuracy_test",
-    size = "large",
-    srcs = ["chebyshev_sampling_accuracy_test.cc"],
-    tags = ["slow"],
-    deps = [
-        "//src/option:american_option",
-        "//src/option/table/chebyshev:chebyshev_adaptive",
         "@googletest//:gtest_main",
     ],
 )
@@ -2008,6 +1976,45 @@ cc_test(
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:european_option",
         "//src/option/table/chebyshev:chebyshev_adaptive",
+        "@googletest//:gtest_main",
+    ],
+)
+
+
+cc_test(
+    name = "american_option_accuracy_test",
+    size = "medium",
+    srcs = ["american_option_accuracy_test.cc"],
+    tags = ["slow"],
+    deps = [
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+
+cc_test(
+    name = "chebyshev_sampling_accuracy_test",
+    size = "large",
+    srcs = ["chebyshev_sampling_accuracy_test.cc"],
+    tags = ["slow"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "@googletest//:gtest_main",
+    ],
+)
+
+
+cc_test(
+    name = "segmented_sampling_accuracy_test",
+    size = "large",
+    shard_count = 3,
+    srcs = ["segmented_sampling_accuracy_test.cc"],
+    tags = ["slow"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option/table/bspline:bspline_segmented_builder",
         "@googletest//:gtest_main",
     ],
 )

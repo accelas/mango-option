@@ -20,7 +20,7 @@
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include <algorithm>
-#include <iostream>
+#include <string>
 
 namespace mango {
 namespace {
@@ -34,9 +34,9 @@ std::vector<double> to_log_m(std::initializer_list<double> sk) {
 }
 
 
-// Same low-budget configuration as the public factory refusal pin: raw
-// samples expose a short-tau fit error of .845046 after two iterations.
-TEST(AdaptiveGridBuilderTest, RawSamplesRefuseInadequateShortTauFit) {
+// The same low-budget configuration as the factory regression. #488's raw
+// samples previously exposed .845046 IV fit error; #458 makes the fit viable.
+TEST(AdaptiveGridBuilderTest, StableFittingReportsShortTauBestEffortAccuracy) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;  // 50 bps — relaxed for test speed
     params.max_iter = 2;
@@ -56,8 +56,43 @@ TEST(AdaptiveGridBuilderTest, RawSamplesRefuseInadequateShortTauFit) {
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_EQ(result->target_met, result->achieved_max_error <= params.target_iv_error);
+    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    EXPECT_EQ(result->diagnostics.holdout_points_measured, 15u);
+    EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
+    const double at_reference = result->surface.price(100.0, 100.0, 0.75, 0.20, 0.05);
+    const double between_references = result->surface.price(100.0, 97.5, 0.75, 0.20, 0.05);
+    EXPECT_GT(at_reference, 0.0);
+    EXPECT_GT(between_references, 0.0);
+    EXPECT_TRUE(std::isfinite(at_reference));
+    EXPECT_TRUE(std::isfinite(between_references));
+    EXPECT_LT(between_references, at_reference);
+
+    // At this fixed-expiry valuation point the payment has already occurred.
+    // Price remains meaningful even if this deep-ITM put has negligible vega.
+    PricingParams p(OptionSpec{.spot = 100.0, .strike = 105.0,
+        .maturity = 0.0522771, .rate = 0.05, .dividend_yield = 0.02,
+        .option_type = OptionType::PUT}, 0.1);
+    auto high = AmericanOptionSolver::create(
+        p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::High)});
+    auto ultra = AmericanOptionSolver::create(
+        p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::Ultra)});
+    ASSERT_TRUE(high.has_value());
+    ASSERT_TRUE(ultra.has_value());
+    auto reference = high->solve();
+    auto converged = ultra->solve();
+    ASSERT_TRUE(reference.has_value());
+    ASSERT_TRUE(converged.has_value());
+    ASSERT_NEAR(reference->value(), converged->value(), 0.001);
+    // This intentionally two-iteration fixture uses a five-cent coarse-fit
+    // regression budget. The separate raw-sampling cohort checks PDE rows
+    // within 0.003; successful construction is not a one-cent accuracy claim.
+    const double price_error = std::abs(
+        result->surface.price(100.0, 105.0, p.maturity, 0.1, 0.05)
+        - converged->value());
+    EXPECT_LE(price_error, 0.05);
+    RecordProperty("short_tau_price_error", std::to_string(price_error));
 }
 
 // ===========================================================================
@@ -859,4 +894,3 @@ TEST(AdaptiveRegressionTest, Q0BifurcationRetainedAndScreened) {
 
 }  // namespace
 }  // namespace mango
-

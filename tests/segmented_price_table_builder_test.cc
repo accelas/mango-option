@@ -9,6 +9,10 @@ using namespace mango;
 
 namespace {
 
+// #458: use #488's raw end-to-end snapshots while increasing the real
+// moneyness data sites through the former collocation failure region.
+
+
 std::vector<double> log_m_grid(std::initializer_list<double> moneyness) {
     std::vector<double> out;
     out.reserve(moneyness.size());
@@ -22,6 +26,7 @@ std::vector<double> log_m_grid(std::initializer_list<double> moneyness) {
 
 // Regression #488: a post-dividend backward-time segment must contain raw
 // end-to-end PDE samples, rather than evolution of a fitted initial state.
+
 
 TEST(SegmentedPriceTableBuilderTest, DiagnosticsCountRawRowsAndSingleExpirySolves) {
     SegmentedPriceTableBuilder::Config config{
@@ -78,6 +83,7 @@ TEST(SegmentedPriceTableBuilderTest, NarrowRegimesRetainDistinctRequestedRows) {
     EXPECT_FALSE(result->surface.contains_maturity(0.002));
     EXPECT_TRUE(result->surface.contains_maturity(0.003));
 }
+
 
 
 TEST(SegmentedPriceTableBuilderTest, BuildWithOneDividend) {
