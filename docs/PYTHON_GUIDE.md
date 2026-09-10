@@ -349,9 +349,9 @@ config.solver_config.detect_multiple_roots = True   # default
 
 **`build_diagnostics`** is a read-only property on both `PriceTable` and
 `InterpolatedIVSolver`. It is `None` for a manually-gridded table, a table
-loaded from Parquet, and the factory paths that ignore `adaptive`
-(`DimensionlessBackend` and the continuous `ChebyshevBackend`). Otherwise it is
-a dict describing the surface that was actually returned:
+loaded from Parquet, and `DimensionlessBackend`, which ignores `adaptive`.
+For continuous and segmented adaptive builds on either Chebyshev or B-spline,
+it is a dict describing the surface that was actually returned:
 
 ```python
 table = mo.make_price_table(config)

@@ -300,11 +300,12 @@ result under a safety contract, not just a stopping rule:
   `AnyPriceTable` / `AnyInterpIVSolver` (Python: the `build_diagnostics`
   property on `PriceTable` / `InterpolatedIVSolver`). Diagnostics never
   enter serialization (`to_data()` / Parquet); `nullopt` is reported by a
-  manually-built table, a Parquet-loaded table, and the two factory paths
-  that ignore `.adaptive` — `DimensionlessBackend` and the continuous
-  (non-segmented) `ChebyshevBackend`. `.adaptive` is honored by the
-  continuous B-spline path and by both segmented (discrete-dividend) paths,
-  B-spline and Chebyshev.
+  manually-built table, a Parquet-loaded table, and `DimensionlessBackend`,
+  which ignores `.adaptive`. Both continuous and segmented (discrete-dividend)
+  B-spline and Chebyshev paths honor `.adaptive`. Continuous Chebyshev passes
+  the requested domain and adaptive controls to its existing adaptive builder;
+  its returned surface publishes measured sample bounds, excluding support
+  headroom. Manual `num_pts` does not limit adaptive CC levels.
 
 This closes the failure mode where an adaptive build silently returned a
 degraded final iteration whose error, measured honestly against the user

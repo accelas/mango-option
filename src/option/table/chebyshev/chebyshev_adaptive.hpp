@@ -111,9 +111,8 @@ struct ChebyshevAdaptiveResult {
     size_t total_pde_solves = 0;
 
     /// Build diagnostics (spec D7) and the user-facing measurement domain
-    /// (spec D2).  Not consumed by the factory today (the continuous
-    /// Chebyshev factory path always uses the fixed builder), exposed for
-    /// direct callers of `build_adaptive_chebyshev`.
+    /// (spec D2). The surface publishes these sample bounds; the factory
+    /// propagates its diagnostics to both price-table and IV-solver handles.
     BuildDiagnostics diagnostics;
     SurfaceBounds sample_bounds{};
 };
@@ -122,10 +121,13 @@ struct ChebyshevAdaptiveResult {
 ///
 /// Uses CGL nodes for moneyness/tau and Clenshaw-Curtis levels for sigma/rate.
 /// EEP decomposition is applied for better interpolation accuracy.
+/// Optional maturity bounds constrain measurement/publication while the
+/// interpolant may retain numerical support outside that interval.
 [[nodiscard]] std::expected<ChebyshevAdaptiveResult, PriceTableError>
 build_adaptive_chebyshev(const AdaptiveGridParams& params,
                          const OptionGrid& chain,
-                         OptionType type = OptionType::PUT);
+                         OptionType type = OptionType::PUT,
+                         std::optional<std::pair<double, double>> maturity_bounds = std::nullopt);
 
 /// Per-K_ref typed pieces for assembling a ChebyshevMultiKRefSurface.
 struct ChebyshevSegmentedPieces {

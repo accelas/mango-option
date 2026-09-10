@@ -308,7 +308,9 @@ struct BSplineBackend {
 /// Chebyshev tensor interpolation backend
 struct ChebyshevBackend {
     double maturity = 2.0;                             ///< Domain upper bound for tau
-    std::array<size_t, 4> num_pts = {16, 12, 12, 8};  ///< CGL nodes per axis
+    /// CGL nodes per axis for manual continuous builds only. Adaptive builds
+    /// choose their CC levels using AdaptiveGridParams.
+    std::array<size_t, 4> num_pts = {16, 12, 12, 8};
 };
 
 /// Dimensionless 3D interpolation backend

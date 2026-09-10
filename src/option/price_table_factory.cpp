@@ -281,20 +281,26 @@ build_bspline_segmented_table(const IVSolverFactoryConfig& config,
     };
 }
 
+OptionGrid make_adaptive_chain(const IVSolverFactoryConfig& config,
+                               std::vector<double> maturities) {
+    OptionGrid chain;
+    chain.spot = config.spot;
+    chain.dividend_yield = config.dividend_yield;
+    chain.strikes.reserve(config.grid.moneyness.size());
+    for (double m : config.grid.moneyness) {
+        chain.strikes.push_back(config.spot / m);
+    }
+    chain.maturities = std::move(maturities);
+    chain.implied_vols = config.grid.vol;
+    chain.rates = config.grid.rate;
+    return chain;
+}
+
 std::expected<BuiltTable<BSplinePriceTable>, ValidationError>
 build_bspline_continuous_table(const IVSolverFactoryConfig& config,
                                const BSplineBackend& backend) {
     if (config.adaptive.has_value()) {
-        OptionGrid chain;
-        chain.spot = config.spot;
-        chain.dividend_yield = config.dividend_yield;
-        chain.strikes.reserve(config.grid.moneyness.size());
-        for (double m : config.grid.moneyness) {
-            chain.strikes.push_back(config.spot / m);
-        }
-        chain.maturities = backend.maturity_grid;
-        chain.implied_vols = config.grid.vol;
-        chain.rates = config.grid.rate;
+        auto chain = make_adaptive_chain(config, backend.maturity_grid);
 
         auto result = build_adaptive_bspline(
             *config.adaptive, chain,
@@ -427,9 +433,26 @@ build_chebyshev_segmented_table(const IVSolverFactoryConfig& config,
     };
 }
 
-std::expected<ChebyshevSurface, ValidationError>
+std::expected<BuiltTable<ChebyshevSurface>, ValidationError>
 build_chebyshev_continuous_table(const IVSolverFactoryConfig& config,
                                  const ChebyshevBackend& backend) {
+    if (config.adaptive.has_value()) {
+        auto chain = make_adaptive_chain(config, {std::min(0.01, backend.maturity * 0.5), backend.maturity});
+
+        auto result = build_adaptive_chebyshev(
+            *config.adaptive, chain, config.option_type,
+            std::pair{chain.maturities.front(), chain.maturities.back()});
+        if (!result.has_value()) {
+            return std::unexpected(detail::to_validation_error(result.error()));
+        }
+        // The adaptive builder publishes its measured sample bounds on the
+        // returned surface, excluding the numerical support headroom.
+        return BuiltTable<ChebyshevSurface>{
+            .table = std::move(*result->surface),
+            .diagnostics = std::move(result->diagnostics),
+        };
+    }
+
     const auto b = extract_bounds(config.grid);
 
     ChebyshevTableConfig cheb_config{
@@ -448,7 +471,10 @@ build_chebyshev_continuous_table(const IVSolverFactoryConfig& config,
     if (!result.has_value()) {
         return std::unexpected(detail::to_validation_error(result.error()));
     }
-    return std::move(result->surface);
+    return BuiltTable<ChebyshevSurface>{
+        .table = std::move(result->surface),
+        .diagnostics = std::nullopt,
+    };
 }
 
 std::expected<AnyPriceTable, ValidationError>
@@ -468,11 +494,13 @@ build_chebyshev_table(const IVSolverFactoryConfig& config,
             std::move(built->diagnostics));
     }
 
-    auto table = build_chebyshev_continuous_table(config, backend);
-    if (!table.has_value()) {
-        return std::unexpected(table.error());
+    auto built = build_chebyshev_continuous_table(config, backend);
+    if (!built.has_value()) {
+        return std::unexpected(built.error());
     }
-    return make_any_price_table(std::move(*table), std::vector<Dividend>{});
+    return make_any_price_table(
+        std::move(built->table), std::vector<Dividend>{},
+        std::move(built->diagnostics));
 }
 
 struct DimlessDomain {
