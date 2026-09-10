@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -53,11 +54,70 @@ TEST(LogMoneynessRange, ReachIsMeasuredFromX0) {
     EXPECT_DOUBLE_EQ(r.reach_from(2.0), 2.5);    // outside: to the far endpoint
 }
 
+// Regression (#487): rounding a capped even grid up allocated 5001 points.
+TEST(EstimatePdeGrid, OddAdjustmentStaysInsideSpatialCeiling) {
+    GridAccuracyParams acc = make_grid_accuracy(GridAccuracyProfile::Ultra);
+    acc.log_moneyness_coverage = LogMoneynessRange{-1.1, 1.1};
+    const auto [grid, time] = estimate_pde_grid(put(0.01, 1.0), acc).value();
+    EXPECT_LE(grid.n_points(), 5000u);
+    EXPECT_EQ(grid.n_points() % 2, 1u);
+    EXPECT_GE(grid.n_points(), acc.min_spatial_points);
+    EXPECT_LT(grid.x_min(), -1.1);
+    EXPECT_GT(grid.x_max(), 1.1);
+}
+
+// An odd grid must exist inside the caller's closed point-count interval.
+TEST(EstimatePdeGrid, RejectsInconsistentSpatialBounds) {
+    for (auto bounds : {std::pair{101u, 100u}, std::pair{100u, 100u},
+                        std::pair{0u, 2u}}) {
+        GridAccuracyParams acc;
+        acc.min_spatial_points = bounds.first;
+        acc.max_spatial_points = bounds.second;
+        auto single = estimate_pde_grid(put(0.2, 1.0), acc);
+        ASSERT_FALSE(single);
+        EXPECT_EQ(single.error().code, ValidationErrorCode::InvalidGridSize);
+        const std::vector<PricingParams> batch{put(0.2, 1.0)};
+        EXPECT_FALSE(estimate_batch_pde_grid(batch, acc));
+        EXPECT_FALSE(estimate_batch_pde_grid_config(batch, acc));
+        EXPECT_FALSE(estimate_batch_pde_grid({}, acc));
+    }
+}
+
+TEST(EstimateBatchPdeGrid, SpatialCeilingIncludesEmptyAndSharedEstimates) {
+    GridAccuracyParams acc;
+    acc.min_spatial_points = 3;
+    acc.max_spatial_points = 100;
+    acc.tol = 1e-8;
+    for (const auto& batch : {std::vector<PricingParams>{},
+                              std::vector{put(0.01, 1.0), put(0.4, 1.0)}}) {
+        const auto grid = estimate_batch_pde_grid_config(batch, acc).value().grid_spec;
+        EXPECT_LE(grid.n_points(), 100u);
+        EXPECT_EQ(grid.n_points() % 2, 1u);
+    }
+}
+
+TEST(EstimatePdeGrid, CoveragePreservesExplicitClusteringStrength) {
+    GridAccuracyParams acc;
+    acc.alpha = 2.5;
+    acc.log_moneyness_coverage = LogMoneynessRange{-1.0, 1.0};
+    const auto [grid, time] = estimate_pde_grid(put(0.05, 0.5), acc).value();
+    ASSERT_FALSE(grid.clusters().empty());
+    for (const auto& cluster : grid.clusters()) EXPECT_DOUBLE_EQ(cluster.alpha, 2.5);
+}
+
+TEST(EstimatePdeGrid, LowerBoundMayBeBelowTheMinimumUsableGrid) {
+    GridAccuracyParams acc;
+    acc.min_spatial_points = 0;
+    acc.max_spatial_points = 3;
+    const auto [grid, time] = estimate_pde_grid(put(0.2, 1.0), acc).value();
+    EXPECT_EQ(grid.n_points(), 3u);
+}
+
 // D11 rule on a single normalized contract: edge = max(1.1*reach, reach + 3s).
 TEST(EstimatePdeGrid, SingleContractCoversWithItsOwnSigmaSqrtT) {
     GridAccuracyParams acc;
     acc.log_moneyness_coverage = LogMoneynessRange{-0.5, 0.5};
-    auto [grid, td] = estimate_pde_grid(put(0.20, 0.25), acc);   // s = 0.1
+    auto [grid, td] = estimate_pde_grid(put(0.20, 0.25), acc).value();   // s = 0.1
     EXPECT_NEAR(grid.x_min(), -(0.5 + 3.0 * 0.1), 1e-9);
     EXPECT_NEAR(grid.x_max(),  (0.5 + 3.0 * 0.1), 1e-9);
 }
@@ -67,7 +127,7 @@ TEST(EstimatePdeGrid, SingleContractCoversWithItsOwnSigmaSqrtT) {
 TEST(EstimatePdeGrid, OffTheMoneyContractStillCoversTheAbsoluteRange) {
     GridAccuracyParams acc;
     acc.log_moneyness_coverage = LogMoneynessRange{-0.5, 0.5};
-    auto [grid, td] = estimate_pde_grid(put(0.20, 0.25, /*spot=*/120.0), acc);  // s = 0.1
+    auto [grid, td] = estimate_pde_grid(put(0.20, 0.25, /*spot=*/120.0), acc).value();  // s = 0.1
     EXPECT_LE(grid.x_min(), -0.8 + 1e-9);
     EXPECT_GE(grid.x_max(),  0.8 - 1e-9);
 }
@@ -76,7 +136,7 @@ TEST(EstimatePdeGrid, ClearanceIsConfigurable) {
     GridAccuracyParams acc;
     acc.log_moneyness_coverage = LogMoneynessRange{-0.5, 0.5};
     acc.coverage_clearance_sigmas = 6.0;
-    auto [grid, td] = estimate_pde_grid(put(0.20, 0.25), acc);   // s = 0.1
+    auto [grid, td] = estimate_pde_grid(put(0.20, 0.25), acc).value();   // s = 0.1
     EXPECT_NEAR(grid.x_min(), -(0.5 + 6.0 * 0.1), 1e-9);
 }
 
@@ -84,8 +144,8 @@ TEST(EstimatePdeGrid, CoverageInsideNSigmaDomainLeavesGridUnchanged) {
     GridAccuracyParams plain;
     GridAccuracyParams covered = plain;
     covered.log_moneyness_coverage = LogMoneynessRange{-0.51, 0.51};   // 0.51/0.5 + 3 = 4.02 < 5
-    expect_same_grid(estimate_pde_grid(put(0.50, 1.0), plain),
-                     estimate_pde_grid(put(0.50, 1.0), covered));
+    expect_same_grid(estimate_pde_grid(put(0.50, 1.0), plain).value(),
+                     estimate_pde_grid(put(0.50, 1.0), covered).value());
 }
 
 // Non-finite input never reaches the grid arithmetic: a NaN or infinite
@@ -95,20 +155,20 @@ TEST(EstimatePdeGrid, NonFiniteInputDisablesCoverageAndNegativeClearanceIsZero) 
     const double nan = std::numeric_limits<double>::quiet_NaN();
     const double inf = std::numeric_limits<double>::infinity();
     GridAccuracyParams plain;
-    const auto reference = estimate_pde_grid(put(0.20, 0.25), plain);
+    const auto reference = estimate_pde_grid(put(0.20, 0.25), plain).value();
     for (double bad : {nan, inf, -inf}) {
         GridAccuracyParams endpoint = plain;
         endpoint.log_moneyness_coverage = LogMoneynessRange{bad, 0.5};
-        expect_same_grid(estimate_pde_grid(put(0.20, 0.25), endpoint), reference);
+        expect_same_grid(estimate_pde_grid(put(0.20, 0.25), endpoint).value(), reference);
         GridAccuracyParams clearance = plain;
         clearance.log_moneyness_coverage = LogMoneynessRange{-2.0, 2.0};
         clearance.coverage_clearance_sigmas = bad;
-        expect_same_grid(estimate_pde_grid(put(0.20, 0.25), clearance), reference);
+        expect_same_grid(estimate_pde_grid(put(0.20, 0.25), clearance).value(), reference);
     }
     GridAccuracyParams neg;
     neg.log_moneyness_coverage = LogMoneynessRange{-2.0, 2.0};
     neg.coverage_clearance_sigmas = -4.0;
-    auto [g3, t3] = estimate_pde_grid(put(0.20, 0.25), neg);
+    auto [g3, t3] = estimate_pde_grid(put(0.20, 0.25), neg).value();
     EXPECT_NEAR(g3.x_min(), -(2.0 * 1.1), 1e-9);   // the 10% floor alone
 }
 
@@ -131,7 +191,7 @@ TEST(EstimateBatchPdeGrid, HeterogeneousX0BatchCoversTheAbsoluteRange) {
                                         put(0.10, 0.25, /*spot=*/60.0)};
     GridAccuracyParams acc;
     acc.log_moneyness_coverage = LogMoneynessRange{-0.3, 0.9};
-    auto [grid, td] = estimate_batch_pde_grid(batch, acc);
+    auto [grid, td] = estimate_batch_pde_grid(batch, acc).value();
     EXPECT_LE(grid.x_min(), -0.9 + 1e-9);
     EXPECT_GE(grid.x_max(),  1.5 - 1e-9);
 
@@ -152,12 +212,12 @@ TEST(EstimateBatchPdeGrid, CoverageEdgeIsReachPlusThreeSigmaMaxSqrtT) {
     acc.log_moneyness_coverage = LogMoneynessRange{-0.51, 0.51};
     const double s = 0.20 * std::sqrt(0.1);
     const double expected_edge = std::max(0.51 * 1.1, 0.51 + 3.0 * s);   // ~0.700
-    auto [grid, td] = estimate_batch_pde_grid(batch, acc);
+    auto [grid, td] = estimate_batch_pde_grid(batch, acc).value();
     EXPECT_NEAR(grid.x_min(), -expected_edge, 1e-9);
     EXPECT_NEAR(grid.x_max(),  expected_edge, 1e-9);
     GridAccuracyParams manual;
     manual.n_sigma = std::max(manual.n_sigma, expected_edge / s);
-    auto [grid2, td2] = estimate_batch_pde_grid(batch, manual);
+    auto [grid2, td2] = estimate_batch_pde_grid(batch, manual).value();
     EXPECT_DOUBLE_EQ(grid.x_min(), grid2.x_min());
     EXPECT_EQ(grid.n_points(), grid2.n_points());
     EXPECT_EQ(td.n_steps(), td2.n_steps());
@@ -167,17 +227,17 @@ TEST(EstimateBatchPdeGridConfig, WrapsTheSharedGrid) {
     std::vector<PricingParams> batch = {put(0.10, 0.1), put(0.20, 0.1)};
     GridAccuracyParams acc;
     acc.log_moneyness_coverage = LogMoneynessRange{-0.51, 0.51};
-    auto [grid, td] = estimate_batch_pde_grid(batch, acc);
-    auto config = estimate_batch_pde_grid_config(batch, acc);
+    auto [grid, td] = estimate_batch_pde_grid(batch, acc).value();
+    auto config = estimate_batch_pde_grid_config(batch, acc).value();
     EXPECT_DOUBLE_EQ(config.grid_spec.x_min(), grid.x_min());
     EXPECT_EQ(config.n_time, td.n_steps());
     EXPECT_TRUE(config.mandatory_times.empty());
 }
 
 // Exact goldens recorded from the retired covering-grid helper on the
-// parent revision (its identity test proved the fold reproduces them bit
-// for bit), so the fold cannot drift now that the helper is deleted.
-TEST(EstimateBatchPdeGrid, GoldensMatchTheRetiredHelper) {
+// parent revision. Bounds stay fixed; spatial counts obey the ceiling.
+// The dividend time count reflects the corrected asymmetric grid map.
+TEST(EstimateBatchPdeGrid, CoverageGoldensWithCorrectedSpacing) {
     // (a) clamp-binding Ultra chain batch (T2-like): sigma nodes over
     //     [0.01, 0.225] at T = 0.694375, coverage [-1.0881, 1.0881].
     {
@@ -185,10 +245,10 @@ TEST(EstimateBatchPdeGrid, GoldensMatchTheRetiredHelper) {
                                             put(0.225, 0.694375)};
         GridAccuracyParams acc = make_grid_accuracy(GridAccuracyProfile::Ultra);
         acc.log_moneyness_coverage = LogMoneynessRange{-1.0881, 1.0881};
-        auto [grid, td] = estimate_batch_pde_grid(batch, acc);
+        auto [grid, td] = estimate_batch_pde_grid(batch, acc).value();
         EXPECT_DOUBLE_EQ(grid.x_min(), -1.6505718742968398);
         EXPECT_DOUBLE_EQ(grid.x_max(), 1.6505718742968398);
-        EXPECT_EQ(grid.n_points(), 5001u);
+        EXPECT_EQ(grid.n_points(), 4999u);
         EXPECT_EQ(td.n_steps(), 20000u);
     }
     // (b) dividend batch: sigma {0.05, 0.15}, T = 0.2525, one dividend
@@ -200,11 +260,14 @@ TEST(EstimateBatchPdeGrid, GoldensMatchTheRetiredHelper) {
         }
         GridAccuracyParams acc = make_grid_accuracy(GridAccuracyProfile::Ultra);
         acc.log_moneyness_coverage = LogMoneynessRange{-0.8452, 0.8250};
-        auto [grid, td] = estimate_batch_pde_grid(batch, acc);
+        auto [grid, td] = estimate_batch_pde_grid(batch, acc).value();
         EXPECT_DOUBLE_EQ(grid.x_min(), -1.1009491447542108);
         EXPECT_DOUBLE_EQ(grid.x_max(), 1.0713222014752199);
-        EXPECT_EQ(grid.n_points(), 5001u);
-        EXPECT_EQ(td.n_steps(), 20001u);
+        EXPECT_EQ(grid.n_points(), 4999u);
+        // Corrected spacing must avoid exhausting the time-step budget on
+        // this modest domain. Its exact count is a measurement, not a golden.
+        EXPECT_GT(td.n_steps(), 0u);
+        EXPECT_LT(td.n_steps(), acc.max_time_steps);
     }
 }
 

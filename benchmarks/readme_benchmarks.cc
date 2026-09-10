@@ -184,7 +184,7 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
         0.20);
 
     // Use automatic grid estimation
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params).value();
     size_t n = grid_spec.n_points();
 
     auto run_once = [&]() {
@@ -346,7 +346,7 @@ static void BM_README_IV_FDM(benchmark::State& state) {
             .maturity = query.maturity, .rate = query.rate,
             .dividend_yield = query.dividend_yield, .option_type = query.option_type},
         0.20);  // Typical IV ~20%
-    auto [grid_spec, time_domain] = estimate_pde_grid(sample_params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(sample_params).value();
 
     auto run_once = [&]() {
         auto result = solver.solve(query);
@@ -457,7 +457,7 @@ static void BM_README_NormalizedChain(benchmark::State& state) {
     }
 
     // Get shared grid dimensions
-    auto [grid_spec, time_domain] = estimate_batch_pde_grid(params);
+    auto [grid_spec, time_domain] = estimate_batch_pde_grid(params).value();
     const size_t n_options = params.size();
 
     for (auto _ : state) {

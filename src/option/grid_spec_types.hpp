@@ -3,6 +3,7 @@
 #include "mango/pde/core/grid.hpp"
 #include "mango/option/option_spec.hpp"
 #include <cmath>
+#include <expected>
 #include <optional>
 #include <span>
 #include <variant>
@@ -45,8 +46,9 @@ struct GridAccuracyParams {
     /// in regions where the solution equals the boundary value.
     double n_sigma = 5.0;
 
-    /// Sinh clustering strength (default: equidistribution-optimal for n_sigma)
-    /// α = 2 · arcsinh(n_σ / √2) ≈ 3.95 for n_sigma=5.0
+    /// Explicit sinh clustering strength. The fixed default is optimal for
+    /// n_sigma=5: alpha = 2*asinh(5/sqrt(2)) ~= 3.95. Changing n_sigma or
+    /// folding coverage does not retune alpha or reinterpret an override.
     double alpha = optimal_sinh_alpha(5.0);
 
     /// Target spatial truncation error (default: 1e-2 for ~1e-3 price accuracy)
@@ -61,7 +63,8 @@ struct GridAccuracyParams {
     /// Minimum spatial grid points (default: 100)
     size_t min_spatial_points = 100;
 
-    /// Maximum spatial grid points (default: 1200)
+    /// Strict maximum spatial grid points (default: 1200). The estimator
+    /// chooses an odd count inside [min_spatial_points, max_spatial_points].
     size_t max_spatial_points = 1200;
 
     /// Maximum time steps (default: 5000)
@@ -100,20 +103,25 @@ using PDEGridSpec = std::variant<PDEGridConfig, GridAccuracyParams>;
 
 GridAccuracyParams make_grid_accuracy(GridAccuracyProfile profile);
 
+/// Validate that the point-count interval contains a usable odd grid.
+std::expected<void, ValidationError> validate_grid_accuracy(const GridAccuracyParams& accuracy);
+
 /// Estimate grid specification from option parameters.
-std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
+/// Returns a typed validation error for inconsistent grid controls.
+std::expected<std::pair<GridSpec<double>, TimeDomain>, ValidationError> estimate_pde_grid(
     const PricingParams& params,
     const GridAccuracyParams& accuracy = GridAccuracyParams{});
 
 /// Compute global grid for batch processing.
-std::pair<GridSpec<double>, TimeDomain> estimate_batch_pde_grid(
+/// Returns a typed validation error for inconsistent grid controls.
+std::expected<std::pair<GridSpec<double>, TimeDomain>, ValidationError> estimate_batch_pde_grid(
     std::span<const PricingParams> params,
     const GridAccuracyParams& accuracy = GridAccuracyParams{});
 
 /// The grid estimate_batch_pde_grid would use for `batch`, as a concrete
 /// PDEGridConfig for solve_batch's custom_grid (mandatory_times empty: the
 /// batch solver rebuilds per-contract dividend times itself).
-PDEGridConfig estimate_batch_pde_grid_config(
+std::expected<PDEGridConfig, ValidationError> estimate_batch_pde_grid_config(
     std::span<const PricingParams> batch,
     const GridAccuracyParams& accuracy = GridAccuracyParams{});
 

@@ -57,54 +57,13 @@ double IVSolver::objective_function(const IVQuery& query, double volatility) con
     option_params.option_type = query.option_type;
     option_params.discrete_dividends = query.discrete_dividends;
 
-    // Resolve grid from config_.grid (GridAccuracyParams or PDEGridConfig)
-    GridSpec<double> grid_spec = GridSpec<double>::uniform(0.0, 1.0, 10).value();  // Will be replaced
-    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, query.maturity, 100);
-
-    std::visit([&](const auto& grid_variant) {
-        using T = std::decay_t<decltype(grid_variant)>;
-        if constexpr (std::is_same_v<T, GridAccuracyParams>) {
-            auto [auto_grid, auto_td] = estimate_pde_grid(option_params, grid_variant);
-            grid_spec = auto_grid;
-            time_domain = auto_td;
-        } else if constexpr (std::is_same_v<T, PDEGridConfig>) {
-            grid_spec = grid_variant.grid_spec;
-            if (grid_variant.mandatory_times.empty()) {
-                time_domain = TimeDomain::from_n_steps(0.0, query.maturity, grid_variant.n_time);
-            } else {
-                time_domain = TimeDomain::with_mandatory_points(0.0, query.maturity,
-                    query.maturity / static_cast<double>(grid_variant.n_time),
-                    grid_variant.mandatory_times);
-            }
-        }
-    }, config_.grid);
-
-    // Collect mandatory tau values for discrete dividends
-    std::vector<double> mandatory_tau;
-    for (const auto& div : option_params.discrete_dividends) {
-        double tau = option_params.maturity - div.calendar_time;
-        if (tau > 0.0 && tau < option_params.maturity) {
-            mandatory_tau.push_back(tau);
-        }
-    }
-
-    // Create solver with auto-managed workspace — the auto API handles
-    // the thread_local buffer internally, preserving the grow-only strategy
-    auto explicit_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), std::move(mandatory_tau)};
-
-    auto solver_result = AmericanOptionSolver::create(
-        option_params, PDEGridSpec{explicit_grid});
-    if (!solver_result) {
+    auto solver = AmericanOptionSolver::create(option_params, config_.grid);
+    if (!solver) {
         last_solver_error_ = SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            .iterations = 0
-        };
+            .code = SolverErrorCode::InvalidConfiguration, .iterations = 0};
         return std::numeric_limits<double>::quiet_NaN();
     }
-    auto& solver = solver_result.value();
-
-    // Surface always collected for value_at()
-    auto price_result = solver.solve();
+    auto price_result = solver->solve();
 
     if (!price_result) {
         last_solver_error_ = price_result.error();
@@ -127,6 +86,13 @@ IVSolver::validate_query(const IVQuery& query) const {
         return std::unexpected(validation_error_to_iv_error(validation.error()));
     }
 
+    if (const auto* accuracy = std::get_if<GridAccuracyParams>(&config_.grid)) {
+        auto valid = validate_grid_accuracy(*accuracy);
+        if (!valid) return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .final_error = valid.error().value,
+            .last_vol = std::nullopt});
+    }
     auto rate_validation = validate_pde_rate(query.rate, query.maturity);
     if (!rate_validation) {
         return std::unexpected(validation_error_to_iv_error(rate_validation.error()));

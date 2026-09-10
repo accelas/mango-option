@@ -57,10 +57,12 @@ solve_dimensionless_pde(
 
         std::vector<PricingParams> batch = {params};
         // One shared grid for the whole batch.
-        auto batch_result = batch_solver.solve_batch(
+        auto estimate = estimate_batch_pde_grid_config(
+                std::span<const PricingParams>(batch), accuracy);
+        if (!estimate) return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+            auto batch_result = batch_solver.solve_batch(
             batch, true, nullptr,
-            estimate_batch_pde_grid_config(
-                std::span<const PricingParams>(batch), accuracy));
+            *estimate);
         ++n_pde_solves;
 
         if (batch_result.failed_count > 0 || !batch_result.results[0].has_value()) {

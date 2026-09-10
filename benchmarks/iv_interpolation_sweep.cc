@@ -70,7 +70,7 @@ static std::vector<double> solve_reference_prices(const GridAccuracyParams& accu
                 .option_type = OptionType::PUT},
             kTrueVol);
 
-        auto [grid_spec, time_domain] = estimate_pde_grid(params, accuracy);
+        auto [grid_spec, time_domain] = estimate_pde_grid(params, accuracy).value();
         auto solver = AmericanOptionSolver::create(
             params,
             PDEGridConfig{.grid_spec = grid_spec, .n_time = time_domain.n_steps()});

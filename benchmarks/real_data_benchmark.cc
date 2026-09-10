@@ -180,7 +180,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 static void BM_RealData_AmericanSingle(benchmark::State& state) {
     auto params = make_params(ATM_PUT);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params).value();
     size_t n = grid_spec.n_points();
 
     auto run_once = [&]() {

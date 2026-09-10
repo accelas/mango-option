@@ -320,7 +320,9 @@ SegmentedPriceTableBuilder::build_segment(
     auto batch_params = builder.make_batch(axes);
 
     // 2. Estimate PDE grid (same as builder.build() would)
-    auto [est_grid, est_td] = builder.estimate_pde_grid(batch_params, axes);
+    auto estimate = builder.estimate_pde_grid(batch_params, axes);
+    if (!estimate) return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    auto& [est_grid, est_td] = *estimate;
     PDEGridSpec custom_grid = PDEGridConfig{est_grid, est_td.n_steps(), {}};
 
     // 3. Create batch solver with snapshot times

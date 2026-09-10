@@ -62,7 +62,7 @@ int main() {
             OptionSpec{.spot = spot, .strike = tc.strike, .maturity = tc.maturity,
                 .rate = rate, .dividend_yield = div_yield, .option_type = OptionType::PUT},
             tc.vol_true);
-        auto [gs, td] = estimate_pde_grid(params, make_grid_accuracy(GridAccuracyProfile::High));
+        auto [gs, td] = estimate_pde_grid(params, make_grid_accuracy(GridAccuracyProfile::High)).value();
         auto solver = AmericanOptionSolver::create(params,
             PDEGridConfig{gs, td.n_steps(), {}}).value();
         auto result = solver.solve();

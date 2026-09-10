@@ -9,6 +9,45 @@ namespace {
 
 using Access = testing::PriceTableBuilderAccess<4>;
 
+TEST(PriceTableBuilderTest, RejectsImpossibleSpatialBounds) {
+    GridAccuracyParams accuracy;
+    accuracy.min_spatial_points = accuracy.max_spatial_points = 100;
+    auto setup = PriceTableBuilder::from_vectors(
+        {-0.2, -0.1, 0.0, 0.1}, {0.25, 0.5, 0.75, 1.0},
+        {0.15, 0.2, 0.25, 0.3}, {0.02, 0.03, 0.04, 0.05},
+        100.0, accuracy, OptionType::PUT);
+    ASSERT_FALSE(setup.has_value());
+    EXPECT_EQ(setup.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+// Regression (#487): width-six grids were silently replaced by estimated
+// sinh grids. The table's raw sample must equal direct pricing on the user's
+// exact grid, independently of later B-spline approximation.
+TEST(PriceTableBuilderTest, ExplicitWideGridIsUsedVerbatim) {
+    for (auto type : {OptionType::PUT, OptionType::CALL}) {
+        PDEGridConfig grid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 200};
+        auto setup = PriceTableBuilder::from_vectors(
+            {-0.2, -0.1, 0.0, 0.1}, {0.25, 0.5, 0.75, 1.0},
+            {0.15, 0.2, 0.25, 0.3}, {0.02, 0.03, 0.04, 0.05},
+            100.0, grid, type, 0.02);
+        ASSERT_TRUE(setup.has_value());
+        PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0,
+            .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02,
+            .option_type = type}, 0.2);
+        auto solver = AmericanOptionSolver::create(params, grid);
+        ASSERT_TRUE(solver.has_value());
+        auto direct = solver->solve();
+        ASSERT_TRUE(direct.has_value());
+        double sample = -1.0;
+        auto& [builder, axes] = *setup;
+        auto result = builder.build(axes, [&](PriceTensor& tensor, const PriceTableAxes&) {
+            sample = tensor.view[2, 3, 1, 3];
+        });
+        ASSERT_TRUE(result.has_value());
+        EXPECT_NEAR(sample, direct->value() / 100.0, 1e-12);
+    }
+}
+
 // Smoke test: Verify build() pipeline works with minimal grid
 // Uses small grid (4×4×4×4 minimum for B-spline, auto-estimated spatial/time)
 TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {

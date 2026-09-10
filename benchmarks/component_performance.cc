@@ -271,7 +271,7 @@ BENCHMARK(BM_ImpliedVol_BSplineSurface);
 static void BM_AmericanPut_GridResolution(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20};
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params).value();
 
     double total_time_ns = 0.0;
     size_t iterations = 0;

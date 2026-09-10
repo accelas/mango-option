@@ -90,6 +90,17 @@ GridAccuracyParams fold_coverage(GridAccuracyParams accuracy,
 
 }  // namespace
 
+std::expected<void, ValidationError> validate_grid_accuracy(const GridAccuracyParams& accuracy) {
+    const size_t minimum = std::max(size_t{3}, accuracy.min_spatial_points);
+    if (accuracy.max_spatial_points < minimum ||
+        (accuracy.max_spatial_points % 2 == 0 &&
+         accuracy.max_spatial_points == minimum)) {
+        return std::unexpected(ValidationError{ValidationErrorCode::InvalidGridSize,
+            static_cast<double>(accuracy.max_spatial_points)});
+    }
+    return {};
+}
+
 GridAccuracyParams make_grid_accuracy(GridAccuracyProfile profile) {
     GridAccuracyParams params;
     switch (profile) {
@@ -121,10 +132,13 @@ GridAccuracyParams make_grid_accuracy(GridAccuracyProfile profile) {
     return params;
 }
 
-std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
+std::expected<std::pair<GridSpec<double>, TimeDomain>, ValidationError> estimate_pde_grid(
     const PricingParams& params,
     const GridAccuracyParams& accuracy)
 {
+    if (auto valid = validate_grid_accuracy(accuracy); !valid) {
+        return std::unexpected(valid.error());
+    }
     // Fold any log-moneyness coverage requirement into n_sigma using this
     // contract's own diffusion length, then estimate as before.
     const GridAccuracyParams acc = fold_coverage(
@@ -141,10 +155,12 @@ std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
     // Spatial resolution (target truncation error)
     double dx_target = params.volatility * std::sqrt(acc.tol);
     size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
-    Nx = std::clamp(Nx, acc.min_spatial_points, acc.max_spatial_points);
+    Nx = std::clamp(Nx, std::max(size_t{3}, acc.min_spatial_points), acc.max_spatial_points);
 
     // Ensure odd number of points (for centered stencils)
-    if (Nx % 2 == 0) Nx++;
+    if (Nx % 2 == 0) {
+        Nx = Nx < acc.max_spatial_points ? Nx + 1 : Nx - 1;
+    }
 
     // Widen grid for dividend shift: spline evaluates at x'=ln(exp(x)-D/K)
     // Only consider dividends strictly within (0, T) — same filter as mandatory tau
@@ -180,7 +196,8 @@ std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
     // The old formula dx_min = dx_avg·exp(-α) was an approximation that became
     // wildly pessimistic at high α (e.g., α≈4 gave ~7x more time steps than needed).
     // TR-BDF2 is L-stable so CFL is for accuracy, not stability.
-    auto grid_buf = grid_spec.value().generate();
+    if (!grid_spec) return std::unexpected(grid_spec.error());
+    auto grid_buf = grid_spec->generate();
     auto pts = grid_buf.view().span();
     double dx_min = pts[1] - pts[0];
     for (size_t i = 2; i < pts.size(); ++i) {
@@ -207,18 +224,27 @@ std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
         ? TimeDomain::from_n_steps(0.0, params.maturity, Nt)
         : TimeDomain::with_mandatory_points(0.0, params.maturity, dt_capped, mandatory_tau);
 
-    return {grid_spec.value(), time_domain};
+    if (!grid_spec) return std::unexpected(grid_spec.error());
+    return std::make_pair(*grid_spec, time_domain);
 }
 
-std::pair<GridSpec<double>, TimeDomain> estimate_batch_pde_grid(
+std::expected<std::pair<GridSpec<double>, TimeDomain>, ValidationError> estimate_batch_pde_grid(
     std::span<const PricingParams> params,
     const GridAccuracyParams& accuracy)
 {
+    if (auto valid = validate_grid_accuracy(accuracy); !valid) {
+        return std::unexpected(valid.error());
+    }
     if (params.empty()) {
+        // Return a valid grid within the caller's spatial budget.
+        size_t n = std::clamp(size_t{101}, std::max(size_t{3}, accuracy.min_spatial_points),
+                              accuracy.max_spatial_points);
+        if (n % 2 == 0) n = n < accuracy.max_spatial_points ? n + 1 : n - 1;
         // Return minimal valid sinh grid for empty batch
-        auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, accuracy.alpha);
+        auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, n, accuracy.alpha);
         TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 100);
-        return {grid_spec.value(), time_domain};
+        if (!grid_spec) return std::unexpected(grid_spec.error());
+    return std::make_pair(*grid_spec, time_domain);
     }
 
     // One n_sigma for the whole batch: the largest sigma*sqrt(T) sets the
@@ -233,7 +259,9 @@ std::pair<GridSpec<double>, TimeDomain> estimate_batch_pde_grid(
 
     // Estimate grid for each option and take union/maximum
     for (const auto& p : params) {
-        auto [grid_spec, time_domain] = estimate_pde_grid(p, acc);
+        auto estimate = estimate_pde_grid(p, acc);
+        if (!estimate) return std::unexpected(estimate.error());
+        auto& [grid_spec, time_domain] = *estimate;
         global_x_min = std::min(global_x_min, grid_spec.x_min());
         global_x_max = std::max(global_x_max, grid_spec.x_max());
         global_Nx = std::max(global_Nx, grid_spec.n_points());
@@ -270,14 +298,17 @@ std::pair<GridSpec<double>, TimeDomain> estimate_batch_pde_grid(
         ? TimeDomain::from_n_steps(0.0, max_maturity, global_Nt)
         : TimeDomain::with_mandatory_points(0.0, max_maturity, dt_capped, all_mandatory_tau);
 
-    return {grid_spec.value(), time_domain};
+    if (!grid_spec) return std::unexpected(grid_spec.error());
+    return std::make_pair(*grid_spec, time_domain);
 }
 
-PDEGridConfig estimate_batch_pde_grid_config(
+std::expected<PDEGridConfig, ValidationError> estimate_batch_pde_grid_config(
     std::span<const PricingParams> batch,
     const GridAccuracyParams& accuracy)
 {
-    auto [grid_spec, time_domain] = estimate_batch_pde_grid(batch, accuracy);
+    auto estimate = estimate_batch_pde_grid(batch, accuracy);
+    if (!estimate) return std::unexpected(estimate.error());
+    auto& [grid_spec, time_domain] = *estimate;
     return PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
 }
 

@@ -392,14 +392,25 @@ The workhorse grid for option pricing. A hyperbolic sine transformation concentr
 
 $$\xi_i = -1 + \frac{2i}{n-1} \qquad \text{(uniform in } [-1, 1]\text{)}$$
 
-$$x_i = x_c + \frac{\Delta x}{\alpha}\sinh(\alpha\xi_i) \qquad \text{(sinh-spaced in } x\text{)}$$
+$$x_i = x_c + h\,\frac{\sinh(\alpha\xi_i/2)}{\sinh(\alpha/2)}$$
 
-where $x_c$ is the center (typically $0$ = ATM), $\Delta x$ is the half-width, and $\alpha$ controls the concentration. With $\alpha = 2$:
+Here $x_c$ is the midpoint of the supplied bounds, $h$ is their half-width,
+and $\alpha$ is the API concentration parameter. The ratio of edge to center
+spacing tends to $\cosh(\alpha/2)$ as the grid is refined (about 1.54 for
+$\alpha=2$).
 
-- Spacing near center: $\Delta x_\min \sim (\Delta x / n)e^{-\alpha}$ — about 7× finer than uniform
-- Spacing at boundaries: $\Delta x_\max \sim (\Delta x / n)e^{\alpha}$ — about 7× coarser than uniform
+The implementation forms the centered integer-index offset before multiplying
+by the transformed step. It then adds the scaled sinh displacement to the
+midpoint. This preserves small coordinates near zero without subtracting
+large endpoint terms. The supplied endpoints are assigned exactly. Centered
+single-cluster multi-sinh grids share this implementation; asymmetric maps
+retain their endpoint-normalized parameterization.
 
-This puts resolution where it matters (near the strike) and saves points where it doesn't (far tails). The spacing varies smoothly and monotonically, so the non-uniform finite difference weights remain well-conditioned.
+Controlled domain ladders can therefore retain accurate common interior
+coordinates. Independently rounded input bounds and concentrations need not
+produce universally bit-identical nodes. Reference error qualification still
+checks spatial, temporal and domain sequences with its existing uncertainty
+criteria.
 
 ### Multi-Sinh Grids
 
@@ -425,27 +436,27 @@ $$\Delta x_\text{target} = \sigma\sqrt{\varepsilon}, \qquad N_x = \left\lceil\fr
 
 Scaling $\Delta x$ with $\sigma$ keeps $N_x$ stable across volatilities: higher $\sigma$ widens the domain but proportionally coarsens the target spacing. The $\sqrt{\varepsilon}$ relationship means 10× better accuracy costs ~3.2× more points. $N_x$ is clamped to $[100, 1200]$.
 
-**Temporal resolution.** TR-BDF2 is unconditionally stable, so there is no CFL constraint. But second-order accuracy requires $\Delta t \sim O(\Delta x_\min)$. The time step couples to the finest spatial spacing:
+**Temporal resolution.** The estimator couples its time-step proposal to the smallest spacing in the actual generated grid:
 
-$$\Delta t = c_t\Delta x_\min, \qquad \text{where } \Delta x_\min \sim \Delta x_\text{avg}e^{-\alpha}$$
+$$\Delta t = c_t\min_i(x_{i+1}-x_i)$$
 
 $$N_t = \left\lceil T / \Delta t \right\rceil$$
 
-With $c_t = 0.75$ and $\alpha = 2.0$, this ensures temporal error doesn't dominate spatial error in the clustered region where gradients are steepest.
+The default coupling factor is $c_t=0.75$. Time-step caps and mandatory snapshot times then determine the actual schedule. This is a numerical recipe; price and IV accuracy still require independent validation.
 
 **Default parameters:**
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
 | $n_\sigma$ | 5.0 | Domain half-width in $\sigma\sqrt{T}$ units |
-| $\alpha$ | 2.0 | Sinh clustering strength (~7× center-to-edge ratio) |
+| $\alpha$ | $2\operatorname{asinh}(5/\sqrt{2})\approx3.95$ | Fixed default; centered edge/center spacing ratio tends to $\sqrt{13.5}\approx3.67$ |
 | $\varepsilon$ | $10^{-2}$ | Spatial truncation error target |
 | $c_t$ | 0.75 | Time-space coupling factor |
 | min_spatial_points | 100 | Lower bound on $N_x$ |
 | max_spatial_points | 1200 | Upper bound on $N_x$ |
 | max_time_steps | 5000 | Upper bound on $N_t$ |
 
-For a short-dated SPY option ($\sigma \approx 0.15$, $T \approx 0.09$), the defaults produce a $101 \times 150$ grid.
+Resolved counts depend on the option, required coverage and clustering. Inspect the returned spatial grid and time schedule rather than assuming one fixed default shape. Changing $n_\sigma$ does not retune the default alpha or replace an explicit alpha override.
 
 ---
 

@@ -32,7 +32,7 @@ class CustomGridTest : public ::testing::Test {
 
 TEST_F(CustomGridTest, AutoEstimatedGrid) {
     auto params = make_atm_put();
-    auto [grid_spec, time_domain] = mango::estimate_pde_grid(params);
+    auto [grid_spec, time_domain] = mango::estimate_pde_grid(params).value();
 
     EXPECT_GT(grid_spec.n_points(), 0u);
     EXPECT_GT(time_domain.n_steps(), 0u);
@@ -110,7 +110,7 @@ TEST_F(CustomGridTest, FastAccuracyParams) {
         .max_time_steps = 500
     };
 
-    auto [grid, time_domain] = mango::estimate_pde_grid(params, fast_accuracy);
+    auto [grid, time_domain] = mango::estimate_pde_grid(params, fast_accuracy).value();
     EXPECT_GE(grid.n_points(), 100u);
     EXPECT_LE(grid.n_points(), 200u);
 
@@ -134,7 +134,7 @@ TEST_F(CustomGridTest, HighAccuracyParams) {
         .max_time_steps = 5000
     };
 
-    auto [grid, time_domain] = mango::estimate_pde_grid(params, high_accuracy);
+    auto [grid, time_domain] = mango::estimate_pde_grid(params, high_accuracy).value();
     EXPECT_GE(grid.n_points(), 300u);
 
     // Pass the estimated grid config to the solver

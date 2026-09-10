@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
+#include <tuple>
 
 TEST(GridSpecTest, UniformGridGeneration) {
     auto result = mango::GridSpec<>::uniform(0.0, 1.0, 11);
@@ -45,6 +46,124 @@ TEST(GridSpecTest, SinhSpacedGridGeneration) {
     EXPECT_DOUBLE_EQ(grid[0], 0.0);
     EXPECT_DOUBLE_EQ(grid[10], 1.0);
     EXPECT_DOUBLE_EQ(grid[5], 0.5);  // Center point should be at midpoint
+}
+
+// Centered sinh maps must retain the relative accuracy of small coordinates.
+// Endpoint subtraction used to lose thousands of ULPs near the strike node.
+TEST(GridSpecTest, CenteredSinhPreservesSmallCoordinates) {
+    constexpr size_t n = 4097;
+    constexpr double radius = 7.0;
+    for (double alpha : {2.0, 11.273496669594308, 20.0}) {
+        auto spec = mango::GridSpec<>::sinh_spaced(-radius, radius, n, alpha);
+        ASSERT_TRUE(spec.has_value());
+        auto grid = spec->generate();
+        auto multi_spec = mango::GridSpec<>::multi_sinh_spaced(-radius, radius, n,
+            {{.center_x = 0.0, .alpha = alpha, .weight = 1.0}});
+        ASSERT_TRUE(multi_spec.has_value());
+        auto multi = multi_spec->generate();
+        EXPECT_EQ(grid[0], -radius);
+        EXPECT_EQ(grid[n - 1], radius);
+        EXPECT_EQ(grid[n / 2], 0.0);
+        EXPECT_EQ(multi[0], -radius);
+        EXPECT_EQ(multi[n - 1], radius);
+        for (size_t offset : {1u, 2u, 5u, 32u, 512u}) {
+            const size_t i = n / 2 + offset;
+            const long double eta = static_cast<long double>(i) / (n - 1);
+            const long double exact = static_cast<long double>(radius)
+                * std::sinh(static_cast<long double>(alpha) * (eta - 0.5L))
+                / std::sinh(static_cast<long double>(alpha) / 2.0L);
+            const double expected = static_cast<double>(exact);
+            const double tolerance = 8 * std::numeric_limits<double>::epsilon()
+                * std::abs(expected);
+            EXPECT_NEAR(grid[i], expected, tolerance) << "alpha=" << alpha << " offset=" << offset;
+            EXPECT_EQ(grid[i], -grid[n - 1 - i]);
+            EXPECT_EQ(multi[i], grid[i]);
+            EXPECT_EQ(multi[i], -multi[n - 1 - i]);
+        }
+    }
+}
+
+// These are the actual ordinary-reference domain ladders. This checks the
+// concrete shared coordinates, not universal bit-identical nesting for all
+// independently rounded caller bounds and concentrations.
+TEST(GridSpecTest, CenteredSinhNestedDomainInteriorStaysStable) {
+    constexpr double u = 5.636748334797154;
+    for (size_t factor : {1u, 2u}) {
+        auto outer_spec = mango::GridSpec<>::sinh_spaced(
+            -0.05 * std::sinh(u), 0.05 * std::sinh(u), 2048 * factor + 1, 2 * u);
+        ASSERT_TRUE(outer_spec.has_value());
+        auto outer = outer_spec->generate();
+        for (const auto& [fraction, intervals] :
+             {std::pair{0.75, 1536u}, std::pair{0.875, 1792u}}) {
+            const double inner_u = fraction * u;
+            const double radius = 0.05 * std::sinh(inner_u);
+            auto inner_spec = mango::GridSpec<>::sinh_spaced(
+                -radius, radius, intervals * factor + 1, 2 * inner_u);
+            ASSERT_TRUE(inner_spec.has_value());
+            auto inner = inner_spec->generate();
+            const size_t offset = (outer.size() - inner.size()) / 2;
+            for (size_t i = 0; i < inner.size(); ++i) {
+                const double expected = outer[i + offset];
+                if (std::abs(expected) >= 0.2) continue;
+                EXPECT_NEAR(inner[i], expected,
+                    8 * std::numeric_limits<double>::epsilon() * std::abs(expected))
+                    << "factor=" << factor << " fraction=" << fraction << " i=" << i;
+            }
+        }
+    }
+}
+
+TEST(GridSpecTest, CenteredSinhRetainsEndpointsAndFiniteRatio) {
+    // The quotient scale overflows for this concentration and radius, while
+    // every coordinate of the mathematical ratio remains representable.
+    for (const auto& [lo, hi, alpha] : {
+             std::tuple{-1.0e100, 1.0e100, 1.0e-300},
+             std::tuple{-1.1, 1.0, 2.0}, std::tuple{0.1, 0.9, 20.0}}) {
+        auto spec = mango::GridSpec<>::sinh_spaced(lo, hi, 256, alpha);
+        ASSERT_TRUE(spec.has_value());
+        auto grid = spec->generate();
+        EXPECT_EQ(grid[0], lo);
+        EXPECT_EQ(grid[grid.size() - 1], hi);
+        for (size_t i = 1; i < grid.size(); ++i) {
+            EXPECT_TRUE(std::isfinite(grid[i]));
+            EXPECT_GT(grid[i], grid[i - 1]);
+        }
+        const long double midpoint = (static_cast<long double>(lo) + hi) / 2;
+        const long double half_width = (static_cast<long double>(hi) - lo) / 2;
+        for (size_t i : {1u, 126u, 127u, 128u, 254u}) {
+            const long double argument = static_cast<long double>(alpha)
+                * (static_cast<long double>(i) / 255 - 0.5L);
+            const long double displacement = half_width * std::sinh(argument)
+                / std::sinh(static_cast<long double>(alpha) / 2);
+            EXPECT_NEAR(grid[i], static_cast<double>(midpoint + displacement),
+                8 * std::numeric_limits<double>::epsilon()
+                    * static_cast<double>(std::abs(midpoint) + std::abs(displacement)));
+        }
+    }
+}
+
+// A finite scale can still lose information by underflowing before sinh
+// restores the final coordinate's magnitude. The ratio map avoids that loss.
+TEST(GridSpecTest, CenteredSinhRetainsCoordinatesWhenScaleUnderflows) {
+    constexpr double radius = 1.0e-300;
+    constexpr double alpha = 120.0;
+    constexpr size_t n = 9;
+    auto spec = mango::GridSpec<>::sinh_spaced(-radius, radius, n, alpha);
+    ASSERT_TRUE(spec.has_value());
+    auto grid = spec->generate();
+    for (size_t i = 0; i < n; ++i) {
+        const long double argument = static_cast<long double>(alpha)
+            * (static_cast<long double>(i) / (n - 1) - 0.5L);
+        const long double exact = static_cast<long double>(radius)
+            * std::sinh(argument) / std::sinh(static_cast<long double>(alpha) / 2);
+        const double expected = static_cast<double>(exact);
+        const double tolerance = 8 * std::max(std::numeric_limits<double>::denorm_min(),
+            std::numeric_limits<double>::epsilon() * std::abs(expected));
+        EXPECT_NEAR(grid[i], expected, tolerance) << "i=" << i;
+        if (i > 0) {
+            EXPECT_GT(grid[i], grid[i - 1]);
+        }
+    }
 }
 
 TEST(GridViewTest, ViewFromBuffer) {
@@ -199,6 +318,45 @@ TEST(GridSpecTest, MultiSinhSingleClusterMatchesSinhSpaced) {
         EXPECT_NEAR(multi_grid[i], sinh_grid[i], 1e-14)
             << "Mismatch at index " << i;
     }
+}
+
+TEST(GridSpecTest, MultiSinhOffCenterDoesNotClusterAtBoundary) {
+    // A dividend can widen one side of the PDE domain. The requested strike
+    // cluster must still have finer spacing than either outer boundary.
+    // Clipping an unnormalized sinh map used to manufacture tiny edge cells.
+    for (const auto& bounds : {std::pair{-1.1, 1.0}, std::pair{-1.0, 1.1},
+                              std::pair{-3.0, 1.0}, std::pair{-1.0, 3.0}}) {
+        SCOPED_TRACE(bounds.first);
+        auto spec = mango::GridSpec<>::multi_sinh_spaced(
+            bounds.first, bounds.second, 101,
+            {{.center_x = 0.0, .alpha = 4.0, .weight = 1.0}});
+        ASSERT_TRUE(spec.has_value());
+        auto grid = spec->generate();
+        size_t hi = 1;
+        while (grid[hi] < 0.0) ++hi;
+        const double strike_spacing = grid[hi] - grid[hi - 1];
+        EXPECT_GT(grid[1] - grid[0], strike_spacing);
+        EXPECT_GT(grid[100] - grid[99], strike_spacing);
+        EXPECT_DOUBLE_EQ(grid[0], bounds.first);
+        EXPECT_DOUBLE_EQ(grid[100], bounds.second);
+    }
+}
+
+TEST(GridSpecTest, MultiSinhDuplicateClustersKeepTheSameMap) {
+    auto single = mango::GridSpec<>::multi_sinh_spaced(-1.1, 1.0, 101,
+        {{.center_x = 0.0, .alpha = 4.0, .weight = 1.0}});
+    auto duplicate = mango::GridSpec<>::multi_sinh_spaced(-1.1, 1.0, 101,
+        {{.center_x = 0.0, .alpha = 4.0, .weight = 0.25},
+         {.center_x = 0.0, .alpha = 4.0, .weight = 0.75}}, false);
+    ASSERT_TRUE(single.has_value());
+    ASSERT_TRUE(duplicate.has_value());
+    auto expected = single->generate();
+    auto actual = duplicate->generate();
+    double max_difference = 0.0;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        max_difference = std::max(max_difference, std::abs(actual[i] - expected[i]));
+    }
+    EXPECT_LT(max_difference, 1e-14);
 }
 
 TEST(GridSpecTest, MultiSinhMergedClusterPreservesLocation) {
@@ -728,9 +886,36 @@ TEST(GridSpecTest, MultiSinhSingleOffCenterPreserved) {
     if (idx_far > 0 && idx_far < 50) {
         double spacing_far = grid[idx_far + 1] - grid[idx_far];
         double spacing_near = grid[idx_center + 1] - grid[idx_center];
-        // Off-center grids with monotonicity enforcement have reduced contrast,
-        // but spacing far should still be coarser than spacing near the center
+        // Spacing far from the requested center should be coarser.
         EXPECT_GT(spacing_far, spacing_near * 0.9)
             << "Spacing should be coarser far from requested center";
+    }
+}
+
+// Regression: off-center and weighted sinh maps retain their linear limit.
+// Bug: The intermediate scale overflowed for subnormal alpha, yielding NaNs.
+TEST(SinhMapLimitsTest, TinyAlphaProducesFiniteOrderedNodes) {
+    for (double alpha : {std::numeric_limits<double>::denorm_min(), 1e-200, 1e-10}) {
+        auto spec = mango::GridSpec<double>::multi_sinh_spaced(-2.0, 3.0, 11,
+            {{.center_x = -1.0, .alpha = alpha, .weight = 1.0},
+             {.center_x = 2.0, .alpha = alpha, .weight = 2.0}}, false);
+        ASSERT_TRUE(spec);
+        auto grid = spec->generate();
+        for (size_t i = 0; i < grid.size(); ++i) {
+            EXPECT_TRUE(std::isfinite(grid[i]));
+            EXPECT_NEAR(grid[i], -2.0 + 0.5 * i, 1e-12);
+            if (i) { EXPECT_GT(grid[i], grid[i - 1]); }
+        }
+    }
+}
+
+// Regression: an unrepresentable sinh parameter must fail before generation.
+// Bug: Hyperbolic-function overflow was admitted and produced NaN coordinates.
+TEST(SinhMapLimitsTest, RejectsUnrepresentableConcentration) {
+    for (double alpha : {1e6, std::numeric_limits<double>::infinity(),
+                         std::numeric_limits<double>::quiet_NaN()}) {
+        EXPECT_FALSE(mango::GridSpec<double>::sinh_spaced(-2.0, 3.0, 11, alpha));
+        EXPECT_FALSE(mango::GridSpec<double>::multi_sinh_spaced(-2.0, 3.0, 11,
+            {{.center_x = -1.0, .alpha = alpha, .weight = 1.0}}));
     }
 }
