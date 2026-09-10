@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
+#include "mango/math/bspline/bspline_collocation.hpp"
+#include "mango/math/bspline/bspline_nd.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/adaptive_metrics.hpp"
@@ -1305,4 +1307,37 @@ TEST(MakeValidateFnTest, FixedExpiryRollsCalendarInsteadOfChangingExpiry) {
     auto before = validate(100.0, 100.0, 0.750001, 0.2, 0.05);
     ASSERT_TRUE(before.has_value());
     EXPECT_GT(*before - *fixed, 1.0);
+}
+
+// Regression: actual adaptive insertions can cross the former 160-site cliff.
+// Bug: Proportional knot placement lost cubic reproduction as sites grew.
+TEST(BSplineRefineFnTest, InsertionCrossesFormerCollocationCliff) {
+    std::vector<double> m(159), tau{0.1, 0.4, 0.7, 1.0},
+        vol{0.1, 0.2, 0.3, 0.4}, rate{0.01, 0.03, 0.05, 0.07};
+    for (size_t i = 0; i < m.size(); ++i) {
+        m[i] = std::expm1(8.0 * i / (m.size() - 1)) / std::expm1(8.0);
+    }
+    const auto original = m;
+    mango::AdaptiveGridParams params;
+    params.max_points_per_dim = 161;
+    params.refinement_factor = 1.1;
+    auto refine = mango::make_bspline_refine_fn(params);
+    auto changed = refine(0, {}, m, tau, vol, rate);
+    ASSERT_TRUE(changed.changed);
+    ASSERT_EQ(m.size(), 161u);
+    EXPECT_TRUE(std::includes(m.begin(), m.end(), original.begin(), original.end()));
+    auto polynomial = [](double x) { return 1 + x - 2*x*x + x*x*x; };
+    std::vector<double> values;
+    for (double x : m) values.push_back(polynomial(x));
+    auto fitter = mango::BSplineCollocation1D<double>::create(m);
+    ASSERT_TRUE(fitter);
+    auto fit = fitter->fit(values);
+    ASSERT_TRUE(fit) << fit.error();
+    auto spline = mango::BSplineND<double, 1>::create(
+        {m}, {mango::clamped_knots_cubic(m)}, std::move(fit->coefficients));
+    ASSERT_TRUE(spline);
+    for (size_t i = 1; i < m.size(); ++i) {
+        const double mid = (m[i-1] + m[i]) / 2;
+        EXPECT_NEAR(spline->eval({mid}), polynomial(mid), 1e-9);
+    }
 }

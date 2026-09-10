@@ -5,8 +5,43 @@
 
 using namespace mango;
 
-// Regression: raw segmented samples must retain direct PDE price accuracy.
-// Bug: Fitted initial conditions contaminated subsequent temporal segments.
+// Regression: raw sampling and adaptive densities preserve price accuracy.
+// Bug: Chained fitted states and unstable collocation corrupted later segments.
+TEST(SegmentedPriceTableBuilderTest, RawDividendSamplesCrossFormerFittingCliff) {
+    // Existing dividend/support expansion produces 118,160,188,281 actual
+    // sites from these explicit requested grids; no data sites are moved.
+    for (size_t n : {50u, 68u, 80u, 120u}) {
+        SCOPED_TRACE(n);
+        std::vector<double> log_m(n);
+        for (size_t i = 0; i < n; ++i) {
+            log_m[i] = std::log(0.92) + (std::log(1.08)-std::log(0.92))*i/(n-1);
+        }
+        SegmentedPriceTableBuilder::Config config{
+            .K_ref = 100.0, .option_type = OptionType::PUT,
+            .dividends = {.dividend_yield = 0.01,
+                          .discrete_dividends = {{0.25, 1.5}, {0.5, 1.5}}},
+            .grid = {.moneyness = log_m, .vol = {0.1, 0.15, 0.2, 0.3},
+                     .rate = {0.02, 0.03, 0.05, 0.07}},
+            .maturity = 1.0,
+            .tau_points_per_segment = 8,
+            .pde_accuracy = make_grid_accuracy(GridAccuracyProfile::High),
+        };
+        auto surface = SegmentedPriceTableBuilder::build(config);
+        ASSERT_TRUE(surface.has_value()) << surface.error();
+        PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+            .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.01,
+            .option_type = OptionType::PUT}, 0.1);
+        p.discrete_dividends = config.dividends.discrete_dividends;
+        auto solver = AmericanOptionSolver::create(
+            p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::Ultra)});
+        ASSERT_TRUE(solver.has_value());
+        auto reference = solver->solve();
+        ASSERT_TRUE(reference.has_value());
+        EXPECT_NEAR(surface->price(100.0, 100.0, 1.0, 0.1, 0.05),
+                    reference->value(), 0.003);
+    }
+}
+
 TEST(SegmentedPriceTableBuilderTest, LowVolatilityFixedExpiryMatchesDirectSolve) {
     std::vector<double> x;
     for (int i = -10; i <= 10; ++i) x.push_back(0.05 * i);
@@ -93,7 +128,17 @@ TEST(SegmentedPriceTableBuilderTest, RawCallAndPutPricesAndGreeksShareTheSameSur
             const double up = price(100 + hs, tau, 0.2, 0.05);
             const double down = price(100 - hs, tau, 0.2, 0.05);
             EXPECT_NEAR(*delta, (up - down) / (2 * hs), 1e-7);
-            EXPECT_NEAR(*gamma, (up - 2 * mid + down) / (hs * hs), 1e-7);
+            // At a cubic knot the third derivative can jump, giving this
+            // central second difference an O(h) term. Cancel that term at
+            // two successive scales; preserve the existing Greek tolerance.
+            const auto gamma_fd = [&](double step) {
+                return (price(100 + step, tau, 0.2, 0.05) - 2 * mid
+                      + price(100 - step, tau, 0.2, 0.05)) / (step * step);
+            };
+            const double gamma_ref = 2 * gamma_fd(hs / 2) - gamma_fd(hs);
+            const double gamma_finer = 2 * gamma_fd(hs / 4) - gamma_fd(hs / 2);
+            ASSERT_NEAR(gamma_ref, gamma_finer, 1e-7);
+            EXPECT_NEAR(*gamma, gamma_finer, 1e-7);
             EXPECT_NEAR(surface->vega(100, 100, tau, 0.2, 0.05),
                 (price(100, tau, 0.2 + h, 0.05) - price(100, tau, 0.2 - h, 0.05)) / (2 * h), 1e-6);
             EXPECT_NEAR(*theta,
