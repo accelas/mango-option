@@ -3,6 +3,7 @@
 
 #include "mango/option/table/split_surface.hpp"
 #include <algorithm>
+#include <cmath>
 #include <tuple>
 #include <vector>
 
@@ -66,6 +67,16 @@ public:
     }
 
     [[nodiscard]] const std::vector<double>& tau_start() const noexcept { return tau_start_; }
+    /// Whether this time has a sample-supported representation. The enclosing
+    /// price table owns outer bounds; this check detects internal omitted gaps.
+    [[nodiscard]] bool contains_maturity(double tau) const noexcept {
+        if (tau_start_.empty() || !std::isfinite(tau)) return false;
+        if (tau < tau_start_.front() || tau > tau_end_.back()) return true;
+        const auto br = bracket(0.0, 0.0, tau, 0.0, 0.0);
+        const size_t i = br.entries[0].index;
+        const double local = tau - tau_start_[i];
+        return local >= tau_min_[i] && local <= tau_max_[i];
+    }
     [[nodiscard]] const std::vector<double>& tau_end() const noexcept { return tau_end_; }
     [[nodiscard]] const std::vector<double>& tau_min() const noexcept { return tau_min_; }
     [[nodiscard]] const std::vector<double>& tau_max() const noexcept { return tau_max_; }

@@ -372,7 +372,7 @@ TEST(PriceTableFactoryTest, SegmentedTablePreservesBuildScheduleForValidation) {
     query.market_price = 5.0;
 
     // Mismatched schedule must be rejected.
-    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 3.0}};
+    query.discrete_dividends = {{.calendar_time = 0.3, .amount = 3.0}};
     auto mismatch = solver->solve(query);
     ASSERT_FALSE(mismatch.has_value())
         << "expected mismatched schedule to be rejected";
@@ -380,7 +380,7 @@ TEST(PriceTableFactoryTest, SegmentedTablePreservesBuildScheduleForValidation) {
 
     // Matching schedule must not be rejected for a schedule mismatch (other
     // numerical failures, if any, are not what this regression test guards).
-    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}};
+    query.discrete_dividends = {{.calendar_time = 0.3, .amount = 2.0}};
     auto matching = solver->solve(query);
     if (!matching.has_value()) {
         EXPECT_NE(matching.error().code, IVErrorCode::DiscreteDividendMismatch);
@@ -414,7 +414,7 @@ TEST(PriceTableFactoryTest, AtMaturityDividendCanonicalizedOutOfProvenance) {
     // The 1.0 entry is both beyond the query's own maturity window (0.8)
     // and absent from the canonical build schedule ({{0.5, 2.0}}), so this
     // must be rejected as a schedule mismatch.
-    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0},
+    query.discrete_dividends = {{.calendar_time = 0.3, .amount = 2.0},
                                  {.calendar_time = 1.0, .amount = 3.0}};
     auto mismatch = solver->solve(query);
     ASSERT_FALSE(mismatch.has_value())
@@ -423,7 +423,7 @@ TEST(PriceTableFactoryTest, AtMaturityDividendCanonicalizedOutOfProvenance) {
     EXPECT_EQ(mismatch.error().code, IVErrorCode::DiscreteDividendMismatch);
 
     // The canonical schedule alone must still be accepted.
-    query.discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}};
+    query.discrete_dividends = {{.calendar_time = 0.3, .amount = 2.0}};
     auto matching = solver->solve(query);
     if (!matching.has_value()) {
         EXPECT_NE(matching.error().code, IVErrorCode::DiscreteDividendMismatch);

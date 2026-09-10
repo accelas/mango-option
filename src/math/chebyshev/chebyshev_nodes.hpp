@@ -18,6 +18,10 @@ chebyshev_nodes(size_t num_pts, double a, double b) {
         double t = std::cos(static_cast<double>(j) * M_PI / static_cast<double>(n));
         nodes[n - j] = (b + a) / 2.0 + (b - a) / 2.0 * t;
     }
+    // Preserve the supplied interval endpoints exactly. The affine map
+    // can otherwise round an endpoint outside its own interval.
+    nodes.front() = a;
+    nodes.back() = b;
     return nodes;
 }
 

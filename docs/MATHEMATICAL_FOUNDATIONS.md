@@ -609,6 +609,24 @@ When accuracy is critical, use the PDE solver directly (`AmericanOptionSolver`).
 
 Discrete dividends (section 5) break the smoothness that B-spline interpolation requires. A single surface cannot fit the price discontinuity at a dividend date. The segmented surface builder solves this by partitioning the maturity axis at dividend dates and fitting a separate B-spline surface per segment.
 
+The dated-dividend contract fixes expiry. If the anchor horizon is $T_0$
+and dividend offsets are $d_i$, a remaining-life query $\tau$ is valued
+$T_0-\tau$ after the anchor. Its future offsets are
+$d_i-(T_0-\tau)$, keeping only values strictly inside $(0,\tau)$.
+The fixed backward event coordinate is $\tau_i=T_0-d_i$.
+At equality the event has elapsed in calendar time; ordinary solver
+snapshots recorded after a backward jump instead represent the
+pre-dividend calendar side and cannot be used as that exact query value.
+Chebyshev currently refuses its unsampled dividend neighborhoods rather
+than interpolating across the jump or clamping to a different time.
+
+For constant coefficients without dated dividends, autonomous PDE evolution
+allows one long solve to supply shorter-maturity snapshots. For dated
+dividends this reuse supplies the fixed expiry's remaining life, not other
+expiries at the anchor. Chebyshev uses exact mandatory sample times and no
+horizon padding on this path; its adaptive reference solves roll the calendar
+by the same remaining-life rule.
+
 ### Maturity Partitioning
 
 For $N$ dividends at calendar times $t_1 < t_2 < \cdots < t_N$, the backward-time boundaries are:
@@ -621,9 +639,9 @@ where $\tau_k = T - t_k$. Each segment covers $[\tau_{k+1}, \tau_k]$ and has its
 
 **Segment $k > 0$** ($\tau \in [\tau_{N-k+1}, \tau_{N-k}]$): built in raw-price mode. Its initial condition is the previous segment's surface evaluated at the post-dividend spot:
 
-$$V_k(m, \sigma, r)\big|_{\tau = \tau_{N-k+1}} = V_{k-1}\!\left(m + \frac{D_{N-k+1}}{K_\text{ref}},\; \sigma,\; r\right)\bigg|_{\tau = \tau_{N-k+1}}$$
+$$V_k(m, \sigma, r)\big|_{\tau = \tau_{N-k+1}} = V_{k-1}\!\left(m - \frac{D_{N-k+1}}{K_\text{ref}},\; \sigma,\; r\right)\bigg|_{\tau = \tau_{N-k+1}}$$
 
-The moneyness shift $m \to m + D/K_\text{ref}$ accounts for the spot being higher before the dividend — the same jump condition as in the PDE solver (section 5), expressed in moneyness coordinates.
+The moneyness shift $m \to \max(m - D/K_\text{ref}, 0)$ accounts for the spot being higher before the dividend — the same jump condition as in the PDE solver (section 5), expressed in moneyness coordinates.
 
 ### Query-Time Evaluation
 
