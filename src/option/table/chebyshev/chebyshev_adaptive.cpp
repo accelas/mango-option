@@ -683,7 +683,8 @@ build_chebyshev_segmented_pieces(
 std::expected<ChebyshevAdaptiveResult, PriceTableError>
 build_adaptive_chebyshev(
     const AdaptiveGridParams& params,
-    const OptionGrid& chain, OptionType type)
+    const OptionGrid& chain, OptionType type,
+    std::optional<std::pair<double, double>> maturity_bounds)
 {
     // Chebyshev builds its own fit domain from the CC-level extension below,
     // so the B-spline headroom baked into `bounds` is discarded here (spec
@@ -697,6 +698,16 @@ build_adaptive_chebyshev(
     }
     auto ctx = std::move(*domain);
     ctx.option_type = type;
+    // Factories supply contract maturity bounds; direct chain builders keep
+    // their existing minimum-spread domain unless a bound is requested.
+    if (maturity_bounds) {
+        const auto [lo, hi] = *maturity_bounds;
+        if (!std::isfinite(lo) || !std::isfinite(hi) || lo <= 0 || hi <= lo) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+        ctx.sample_bounds.tau_min = lo;
+        ctx.sample_bounds.tau_max = hi;
+    }
     ctx.bounds = ctx.sample_bounds;
 
     // Initial CC levels for each dimension

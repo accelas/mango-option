@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/american_option.hpp"
+#include "mango/option/price_table_factory.hpp"
 #include "mango/option/table/bspline/bspline_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/bspline/bspline_tensor_accessor.hpp"
@@ -270,6 +271,7 @@ TEST(IVSolverFactoryChebyshev, ContinuousBuildsAndSolves) {
     ASSERT_TRUE(solver.has_value())
         << "Chebyshev continuous build failed: code "
         << static_cast<int>(solver.error().code);
+    EXPECT_FALSE(solver->build_diagnostics().has_value());
 
     // Round-trip: price an ATM put at known vol, then recover IV
     PricingParams params(
@@ -285,6 +287,27 @@ TEST(IVSolverFactoryChebyshev, ContinuousBuildsAndSolves) {
     ASSERT_TRUE(result.has_value())
         << "Chebyshev IV solve failed";
     EXPECT_NEAR(result->implied_vol, 0.20, 0.02);
+}
+
+TEST(IVSolverFactoryChebyshev, ContinuousAdaptiveRejectsInvalidControls) {
+    auto config = make_base_config();
+    config.backend = ChebyshevBackend{.maturity = 1.0, .num_pts = {5, 5, 5, 3}};
+    config.adaptive = AdaptiveGridParams{.max_iter = 0};
+
+    auto table = make_price_table(config);
+    ASSERT_FALSE(table.has_value());
+    EXPECT_EQ(table.error().code, ValidationErrorCode::PriceTableBuildFailed);
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_FALSE(solver.has_value());
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::PriceTableBuildFailed);
+}
+
+TEST(IVSolverFactoryChebyshev, ContinuousManualHonorsExplicitNodeCounts) {
+    auto config = make_base_config();
+    config.backend = ChebyshevBackend{.maturity = 1.0, .num_pts = {1, 5, 5, 3}};
+    auto table = make_price_table(config);
+    ASSERT_FALSE(table.has_value());
+    EXPECT_EQ(table.error().code, ValidationErrorCode::PriceTableBuildFailed);
 }
 
 TEST(IVSolverFactoryChebyshev, SegmentedBuildsAndSolves) {

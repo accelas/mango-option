@@ -1530,13 +1530,14 @@ cc_test(
     # --test_tag_filters applies, which would hide this target from the
     # nightly `--test_tag_filters=slow` run.  Per-PR CI excludes it with
     # `--test_tag_filters=-manual,-slow`.  One shard per case.
-    shard_count = 3,
+    shard_count = 5,
     srcs = ["iv_solver_factory_slow_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     tags = ["slow"],
     deps = [
         "//src/option:interpolated_iv_solver",
+        "//src/option:price_table_factory",
         "//src/option:american_option",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
