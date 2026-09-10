@@ -1969,3 +1969,16 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "grid_coverage_accuracy_test",
+    size = "large",
+    srcs = ["grid_coverage_accuracy_test.cc"],
+    tags = ["slow"],
+    deps = [
+        "//src/math/chebyshev:chebyshev_nodes",
+        "//src/option:european_option",
+        "//src/option/table/chebyshev:chebyshev_adaptive",
+        "@googletest//:gtest_main",
+    ],
+)

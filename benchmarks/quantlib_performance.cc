@@ -212,7 +212,7 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params).value();
 
     for (auto _ : state) {
         auto solver = AmericanOptionSolver::create(params).value();

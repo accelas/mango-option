@@ -758,7 +758,7 @@ TEST(AmericanOptionTest, CustomGridOmittingDividendDateStillAligns) {
     // (custom-grid) path with an EMPTY mandatory_times list, at a
     // deliberately non-divisor n_time so the dividend tau cannot land on
     // the grid by coincidence.
-    auto grid_pair = estimate_pde_grid(params);
+    auto grid_pair = estimate_pde_grid(params).value();
     PDEGridConfig custom_cfg{grid_pair.first, 27, {}};
 
     auto solver = AmericanOptionSolver::create(params, PDEGridSpec{custom_cfg});

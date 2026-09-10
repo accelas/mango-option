@@ -142,7 +142,7 @@ static const std::array<VanillaCaseData, 6>& get_vanilla_case_data() {
                     .rate = kRate, .dividend_yield = kDivYield,
                     .option_type = OptionType::PUT},
                 tc.vol);
-            auto [gs, td] = estimate_pde_grid(params);
+            auto [gs, td] = estimate_pde_grid(params).value();
             result[i].base = BaseGrid{gs.n_points(), td.n_steps(), gs.x_min(), gs.x_max(), kAlphaOpt};
             result[i].ref_price = solve_mango_vanilla(tc, result[i].base, 64, kAlphaOpt);
         }
@@ -377,7 +377,7 @@ static const std::array<DivCaseData, 6>& get_div_case_data() {
                     .rate = kDivRate, .dividend_yield = kDivContYield,
                     .option_type = OptionType::PUT},
                 tc.vol, divs);
-            auto [gs, td] = estimate_pde_grid(params);
+            auto [gs, td] = estimate_pde_grid(params).value();
             result[i].base = BaseGrid{gs.n_points(), td.n_steps(), gs.x_min(), gs.x_max(), 2.0};
             result[i].ref_price = solve_mango_div(tc, result[i].base, 64);
         }

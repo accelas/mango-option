@@ -19,7 +19,6 @@
 #include "iv_benchmark_ql.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/iv_solver.hpp"
-#include "mango/pde/internal/pde_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <array>
 #include <chrono>
@@ -183,7 +182,7 @@ static BaseGrid get_mango_base_grid(double strike, double maturity, double vol) 
             .rate = kRate, .dividend_yield = kDivYield,
             .option_type = OptionType::PUT},
         vol);
-    auto [gs, td] = estimate_pde_grid(params);
+    auto [gs, td] = estimate_pde_grid(params).value();
     return {gs.n_points(), td.n_steps()};
 }
 
@@ -194,7 +193,7 @@ static BaseGrid get_mango_base_grid_div(double strike, double maturity, double v
             .rate = kRate, .dividend_yield = kDivYield,
             .option_type = OptionType::PUT},
         vol, divs);
-    auto [gs, td] = estimate_pde_grid(params);
+    auto [gs, td] = estimate_pde_grid(params).value();
     return {gs.n_points(), td.n_steps()};
 }
 
@@ -433,7 +432,7 @@ static PDEGridConfig make_scaled_grid(double strike, int scale) {
             .rate = kRate, .dividend_yield = kDivYield,
             .option_type = OptionType::PUT},
         kScaledVol);
-    auto [gs, td] = estimate_pde_grid(params);
+    auto [gs, td] = estimate_pde_grid(params).value();
 
     size_t nx = gs.n_points() * static_cast<size_t>(scale);
     // Ensure odd for centered stencils

@@ -61,52 +61,8 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
         }
     }
 
-    // 6. Grid constraints (dx, width, margins)
-    // Eligibility is judged on the contract's own kink-region grid, not on
-    // the coverage-widened one (D14; #487 tracks judging the grid solved on).
-    GridAccuracyParams base = grid_accuracy_;
-    base.log_moneyness_coverage.reset();
-    auto [grid_spec, time_domain] = estimate_pde_grid(first, base);
-    (void)time_domain;  // Not used in eligibility check
-    double x_min = grid_spec.x_min();
-    double x_max = grid_spec.x_max();
-    size_t n_space = grid_spec.n_points();
-
-    // Check grid spacing (Von Neumann stability)
-    double dx = (x_max - x_min) / (n_space - 1);
-    if (dx > MAX_DX) {
-        return false;
-    }
-
-    // Check domain width (convergence constraint)
-    double width = x_max - x_min;
-    if (width > MAX_WIDTH) {
-        return false;
-    }
-
-    // Check margins based on moneyness range
-    std::vector<double> moneyness_values;
-    moneyness_values.reserve(params.size());
-    for (const auto& p : params) {
-        double m = p.spot / p.strike;
-        moneyness_values.push_back(m);
-    }
-
-    auto [m_min_it, m_max_it] = std::ranges::minmax_element(moneyness_values);
-    double m_min = *m_min_it;
-    double m_max = *m_max_it;
-
-    double x_min_data = std::log(m_min);
-    double x_max_data = std::log(m_max);
-
-    double margin_left = x_min_data - x_min;
-    double margin_right = x_max - x_max_data;
-    double min_margin = std::max(MIN_MARGIN_ABS, 6.0 * dx);
-
-    if (margin_left < min_margin || margin_right < min_margin) {
-        return false;
-    }
-
+    // Numerical validity is assessed by the actual per-group solve, after
+    // resolving caller overrides and required coverage.
     return true;
 }
 
@@ -167,61 +123,7 @@ void BatchAmericanOptionSolver::trace_ineligibility_reason(
         }
     }
 
-    // Check grid constraints
-    // Eligibility is judged on the contract's own kink-region grid, not on
-    // the coverage-widened one (D14; #487 tracks judging the grid solved on).
-    GridAccuracyParams base = grid_accuracy_;
-    base.log_moneyness_coverage.reset();
-    auto [grid_spec, time_domain] = estimate_pde_grid(first, base);
-    (void)time_domain;  // Not used in trace function
-    double x_min = grid_spec.x_min();
-    double x_max = grid_spec.x_max();
-    size_t n_space = grid_spec.n_points();
 
-    // Check grid spacing (Von Neumann stability)
-    double dx = (x_max - x_min) / (n_space - 1);
-    if (dx > MAX_DX) {
-        MANGO_TRACE_NORMALIZED_INELIGIBLE(
-            static_cast<int>(NormalizedIneligibilityReason::GRID_SPACING_TOO_LARGE), dx);
-        return;
-    }
-
-    // Check domain width (convergence constraint)
-    double width = x_max - x_min;
-    if (width > MAX_WIDTH) {
-        MANGO_TRACE_NORMALIZED_INELIGIBLE(
-            static_cast<int>(NormalizedIneligibilityReason::DOMAIN_TOO_WIDE), width);
-        return;
-    }
-
-    // Check margins based on moneyness range
-    std::vector<double> moneyness_values;
-    moneyness_values.reserve(params.size());
-    for (const auto& p : params) {
-        moneyness_values.push_back(p.spot / p.strike);
-    }
-
-    auto [m_min_it, m_max_it] = std::ranges::minmax_element(moneyness_values);
-    double x_min_data = std::log(*m_min_it);
-    double x_max_data = std::log(*m_max_it);
-
-    double margin_left = x_min_data - x_min;
-    double margin_right = x_max - x_max_data;
-    double min_margin = std::max(MIN_MARGIN_ABS, 6.0 * dx);
-
-    if (margin_left < min_margin) {
-        MANGO_TRACE_NORMALIZED_INELIGIBLE(
-            static_cast<int>(NormalizedIneligibilityReason::INSUFFICIENT_LEFT_MARGIN),
-            margin_left);
-        return;
-    }
-
-    if (margin_right < min_margin) {
-        MANGO_TRACE_NORMALIZED_INELIGIBLE(
-            static_cast<int>(NormalizedIneligibilityReason::INSUFFICIENT_RIGHT_MARGIN),
-            margin_right);
-        return;
-    }
 }
 
 std::vector<PDEParameterGroup> BatchAmericanOptionSolver::group_by_pde_parameters(
@@ -283,9 +185,15 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
     SetupCallback setup,
     std::optional<PDEGridSpec> custom_grid)
 {
-    // Ensure grid_accuracy_ is initialized
-    if (grid_accuracy_.tol == 0.0) {
-        grid_accuracy_ = GridAccuracyParams{};
+    const auto* accuracy = custom_grid
+        ? std::get_if<GridAccuracyParams>(&*custom_grid) : &grid_accuracy_;
+    if (accuracy && !validate_grid_accuracy(*accuracy)) {
+        BatchAmericanOptionResult result{.results = {}, .failed_count = params.size()};
+        for (size_t i = 0; i < params.size(); ++i) {
+            result.results.emplace_back(std::unexpected(SolverError{
+                .code = SolverErrorCode::InvalidConfiguration}));
+        }
+        return result;
     }
 
     // Disable normalized path if setup callback is provided
@@ -299,7 +207,6 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
 
     // Automatic routing based on eligibility
     if (use_normalized_ && is_normalized_eligible(params, use_shared_grid)) {
-        MANGO_TRACE_NORMALIZED_SELECTED(params.size());
         return solve_normalized_chain(params, setup, custom_grid);
     } else {
         if (use_normalized_ && !is_normalized_eligible(params, use_shared_grid)) {
@@ -365,9 +272,25 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
                 coverage.hi = std::max(coverage.hi, x);
             }
             accuracy.log_moneyness_coverage = coverage;
-            group_grid = estimate_batch_pde_grid_config(
+            // Original members retain the accuracy profile's full tail
+            // clearance even when they lie far from the normalized center.
+            accuracy.coverage_clearance_sigmas = std::max(
+                accuracy.coverage_clearance_sigmas, accuracy.n_sigma);
+            auto estimate = estimate_batch_pde_grid_config(
                 std::span{&normalized_params, 1}, accuracy);
+            if (!estimate) {
+                failed_count += group.option_indices.size();
+                continue;
+            }
+            group_grid = *estimate;
         }
+
+        // On a fixed resolved grid, every eligible contract solves the
+        // same normalized PDE, payoff, obstacle and boundary conditions.
+        // Width, spacing and boundary clearance affect both routes equally;
+        // duplicating that solve cannot improve its numerical quality.
+        // The regular solver below validates and solves the actual config.
+        MANGO_TRACE_NORMALIZED_SELECTED(group.option_indices.size());
 
         // Solve with shared grid to get full surface
         auto solve_result = solve_regular_batch(
@@ -463,8 +386,14 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     // Precompute shared grid if needed
     std::optional<std::pair<GridSpec<double>, TimeDomain>> shared_grid;
     if (use_shared_grid) {
-        shared_grid = resolved_config ? resolved_config
-                                      : std::optional{estimate_batch_pde_grid(params, accuracy)};
+        if (resolved_config) {
+            shared_grid = resolved_config;
+        } else {
+            auto estimate = estimate_batch_pde_grid(params, accuracy);
+            if (!estimate) return BatchAmericanOptionResult{
+                .results = std::move(results), .failed_count = params.size()};
+            shared_grid = std::move(*estimate);
+        }
     }
 
     MANGO_PRAGMA_PARALLEL
@@ -492,9 +421,15 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                     shared_grid->first,
                     shared_grid->second.n_steps(), std::move(mandatory_tau)}};
             } else {
-                auto [grid_spec, time_domain] = resolved_config
-                    ? resolved_config.value()
+                auto estimate = resolved_config
+                    ? std::expected<std::pair<GridSpec<double>, TimeDomain>, ValidationError>{*resolved_config}
                     : estimate_pde_grid(params[i], accuracy);
+                if (!estimate) {
+                    MANGO_PRAGMA_ATOMIC
+                    ++failed_count;
+                    continue;
+                }
+                auto& [grid_spec, time_domain] = *estimate;
                 solver_grid_spec = PDEGridSpec{PDEGridConfig{
                     grid_spec, time_domain.n_steps(), std::move(mandatory_tau)}};
             }

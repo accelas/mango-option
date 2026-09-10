@@ -327,3 +327,12 @@ TEST_F(IVSolverTest, DiscreteDividendIVInvalidScheduleRejected) {
     auto result = solver.solve(bad_query);
     ASSERT_FALSE(result.has_value());
 }
+
+TEST_F(IVSolverTest, RejectsImpossibleSpatialBoundsBeforeRootSearch) {
+    GridAccuracyParams accuracy;
+    accuracy.min_spatial_points = accuracy.max_spatial_points = 100;
+    config.grid = accuracy;
+    auto result = IVSolver(config).solve(query);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::InvalidGridConfig);
+}

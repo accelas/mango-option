@@ -101,7 +101,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
 
     auto pde_accuracy = make_grid_accuracy(GridAccuracyProfile::High);
 
-    auto [grid_spec, time_domain] = estimate_batch_pde_grid(pde_params, pde_accuracy);
+    auto [grid_spec, time_domain] = estimate_batch_pde_grid(pde_params, pde_accuracy).value();
 
     const double dividend_yield = scenarios.front().dividend_yield;
     for (const auto& scenario : scenarios) {

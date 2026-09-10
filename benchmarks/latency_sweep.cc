@@ -105,7 +105,7 @@ solve_prices(const GridAccuracyParams& accuracy, double q,
                     .option_type = OptionType::PUT},
                 kVol, discrete_divs);
 
-            auto [grid_spec, time_domain] = estimate_pde_grid(params, accuracy);
+            auto [grid_spec, time_domain] = estimate_pde_grid(params, accuracy).value();
             auto solver = AmericanOptionSolver::create(
                 params,
                 PDEGridConfig{.grid_spec = grid_spec,
@@ -181,7 +181,7 @@ static void BM_PDE_Pricing(benchmark::State& state) {
             .option_type = OptionType::PUT},
         kVol);
 
-    auto [grid_spec, time_domain] = estimate_pde_grid(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params).value();
     size_t n = grid_spec.n_points();
     size_t nt = time_domain.n_steps();
 

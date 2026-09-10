@@ -216,11 +216,13 @@ static size_t solve_missing_pde_pairs(
     // but that's safe: the batch solver rebuilds each contract's dividend
     // times from its own discrete_dividends schedule rather than reading
     // them off the shared config.
+    auto estimate = estimate_batch_pde_grid_config(
+            std::span<const PricingParams>(batch), accuracy);
+    if (!estimate) return 0;
     auto batch_result = solver.solve_batch(
         std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
         nullptr,
-        estimate_batch_pde_grid_config(
-            std::span<const PricingParams>(batch), accuracy));
+        *estimate);
 
     for (size_t bi = 0; bi < missing.size(); ++bi) {
         auto [si, ri] = missing[bi];
@@ -422,11 +424,13 @@ static BuildFn make_chebyshev_build_fn(
             solver.set_snapshot_times(std::span<const double>(tau_vec));
             // One shared grid per cohort (spec D13): keeps every cached
             // slice on the same x grid and the branch's numbers unchanged.
+            auto estimate = estimate_batch_pde_grid_config(
+                    std::span<const PricingParams>(batch), accuracy);
+            if (!estimate) return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
             auto batch_result = solver.solve_batch(
                 std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
                 nullptr,
-                estimate_batch_pde_grid_config(
-                    std::span<const PricingParams>(batch), accuracy));
+                *estimate);
             new_solves = batch.size() - batch_result.failed_count;
 
             for (size_t bi = 0; bi < missing.size(); ++bi) {

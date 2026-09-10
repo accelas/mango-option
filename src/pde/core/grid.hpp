@@ -12,6 +12,7 @@
 #include <optional>
 #include <algorithm>
 #include <limits>
+#include <numeric>
 #include <experimental/mdspan>
 #include "mango/support/aligned_allocator.hpp"
 #include "mango/support/error_types.hpp"
@@ -106,7 +107,7 @@ public:
                 ValidationErrorCode::InvalidBounds,
                 static_cast<double>(x_min)));
         }
-        if (concentration <= 0) {
+        if (!valid_sinh_concentration(concentration)) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::InvalidGridSpacing,
                 static_cast<double>(concentration)));
@@ -138,7 +139,7 @@ public:
 
         // Validate each cluster
         for (size_t i = 0; i < clusters.size(); ++i) {
-            if (clusters[i].alpha <= 0) {
+            if (!valid_sinh_concentration(clusters[i].alpha)) {
                 return std::unexpected(ValidationError(
                     ValidationErrorCode::InvalidGridSpacing,
                     static_cast<double>(clusters[i].alpha),
@@ -182,6 +183,43 @@ public:
     std::span<const MultiSinhCluster<T>> clusters() const { return clusters_; }
 
 private:
+    /// A monotone sinh map with its density peak at the requested center
+    /// and both domain endpoints represented before any rounding correction.
+    static bool valid_sinh_concentration(T alpha) {
+        // Keep the hyperbolic coordinates representable in the scalar type.
+        return std::isfinite(alpha) && alpha > T(0)
+            && alpha <= std::log(std::numeric_limits<T>::max());
+    }
+
+    struct SinhMap {
+        T lo, hi, center, strength, scale, u_left, u_right;
+        bool linear, scaled;
+
+        SinhMap(T left, T right, const MultiSinhCluster<T>& cluster)
+            : lo(left), hi(right), center(cluster.center_x)
+            , strength(T(2) * std::sinh(cluster.alpha / T(2)))
+            , scale(0), u_left(0), u_right(0)
+            , linear(cluster.alpha < std::sqrt(std::numeric_limits<T>::epsilon()))
+            , scaled(false) {
+            if (linear) return;
+            scale = (hi - lo) / strength;
+            scaled = std::isnormal(scale);
+            // Normalized ratios avoid losing a representable coordinate
+            // when the intermediate physical scale overflows or underflows.
+            u_left = std::asinh(scaled ? (lo - center) / scale
+                : ((lo - center) / (hi - lo)) * strength);
+            u_right = std::asinh(scaled ? (hi - center) / scale
+                : ((hi - center) / (hi - lo)) * strength);
+        }
+
+        T eval(T eta) const {
+            if (linear) return std::lerp(lo, hi, eta);
+            const T value = std::sinh(std::lerp(u_left, u_right, eta));
+            return center + (scaled ? scale * value
+                                    : (hi - lo) * (value / strength));
+        }
+    };
+
     GridSpec(Type type, T x_min, T x_max, size_t n_points, T concentration = T(1.0),
              std::vector<MultiSinhCluster<T>> clusters = {})
         : type_(type), x_min_(x_min), x_max_(x_max),
@@ -234,35 +272,6 @@ private:
                         break;
                     }
                 }
-            }
-        }
-    }
-
-    /// Enforce strict monotonicity in grid points
-    ///
-    /// Ensures x[i+1] > x[i] for all i, while preserving endpoints.
-    /// Uses iterative smoothing to fix non-monotonic regions.
-    static void enforce_monotonicity(std::vector<T>& points, T x_min, T x_max) {
-        const size_t n = points.size();
-        if (n < 2) return;
-
-        const T min_spacing = (x_max - x_min) / static_cast<T>(n * 100);
-
-        // Clamp endpoints
-        points[0] = x_min;
-        points[n-1] = x_max;
-
-        // Forward pass: ensure strictly increasing with minimum spacing
-        for (size_t i = 1; i < n - 1; ++i) {
-            if (points[i] <= points[i-1] + min_spacing) {
-                points[i] = points[i-1] + min_spacing;
-            }
-        }
-
-        // Backward pass: ensure last interior point doesn't exceed x_max - min_spacing
-        for (size_t i = n - 2; i > 0; --i) {
-            if (points[i] >= points[i+1] - min_spacing) {
-                points[i] = points[i+1] - min_spacing;
             }
         }
     }
@@ -372,6 +381,33 @@ GridBuffer<T> GridSpec<T>::generate() const {
     std::vector<T> points;
     points.reserve(n_points_);
 
+    // Center the arithmetic as well as the mathematical map. Forming a
+    // normalized [0,1] coordinate and subtracting a large endpoint destroys
+    // relative accuracy near zero and perturbs shared interior grid nodes.
+    const auto generate_centered_sinh = [&](T concentration) {
+        const T midpoint = std::midpoint(x_min_, x_max_);
+        const T half_width = std::midpoint(-x_min_, x_max_);
+        const T intervals = static_cast<T>(n_points_ - 1);
+        const T half_count = intervals / T(2);
+        const T half_sinh = std::sinh(concentration / T(2));
+        const T scale = half_width / half_sinh;
+        const T step = concentration / intervals;
+        points.push_back(x_min_);
+        for (size_t i = 1; i + 1 < n_points_; ++i) {
+            const T offset = static_cast<T>(i) - half_count;
+            const T u = step != T(0) ? offset * step
+                : concentration * (offset / intervals);
+            // Retain the ratio form when its scale overflows or underflows,
+            // and the linear limit if halving a tiny concentration underflows.
+            const T displacement = half_sinh == T(0)
+                ? half_width * (offset / half_count)
+                : std::isnormal(scale) ? scale * std::sinh(u)
+                : half_width * (std::sinh(u) / half_sinh);
+            points.push_back(midpoint + displacement);
+        }
+        points.push_back(x_max_);
+    };
+
     switch (type_) {
         case Type::Uniform: {
             const T dx = (x_max_ - x_min_) / static_cast<T>(n_points_ - 1);
@@ -392,17 +428,7 @@ GridBuffer<T> GridSpec<T>::generate() const {
         }
 
         case Type::SinhSpaced: {
-            // Sinh spacing: concentrates points at center
-            // x(eta) = x_min + (x_max - x_min) * [1 + sinh(c*(eta - 0.5)) / sinh(c/2)] / 2
-            // where eta goes from 0 to 1
-            const T c = concentration_;
-            const T sinh_half_c = std::sinh(c / T(2.0));
-            for (size_t i = 0; i < n_points_; ++i) {
-                const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-                const T sinh_term = std::sinh(c * (eta - T(0.5))) / sinh_half_c;
-                const T normalized = (T(1.0) + sinh_term) / T(2.0);
-                points.push_back(x_min_ + (x_max_ - x_min_) * normalized);
-            }
+            generate_centered_sinh(concentration_);
             break;
         }
 
@@ -414,7 +440,6 @@ GridBuffer<T> GridSpec<T>::generate() const {
                 const T c = cluster.alpha;
                 const T center = cluster.center_x;
                 const T range = x_max_ - x_min_;
-                const T sinh_half_c = std::sinh(c / T(2.0));
 
                 // Compute normalized center position
                 const T eta_center = (center - x_min_) / range;
@@ -423,31 +448,20 @@ GridBuffer<T> GridSpec<T>::generate() const {
                 const bool is_centered = std::abs(eta_center - T(0.5)) < T(1e-10);
 
                 if (is_centered) {
-                    // Centered cluster: use standard sinh formula (guaranteed in-bounds)
-                    for (size_t i = 0; i < n_points_; ++i) {
-                        const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-                        const T sinh_term = std::sinh(c * (eta - T(0.5))) / sinh_half_c;
-                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
-                        points.push_back(x_min_ + range * normalized);
-                    }
+                    generate_centered_sinh(c);
                 } else {
-                    // Off-center cluster: use generalized formula + monotonicity enforcement
-                    const T offset = center - (x_min_ + x_max_) / T(2.0);
-                    std::vector<T> raw_points(n_points_);
+                    // Parameterize both endpoints in sinh coordinates about
+                    // the requested center. Merely shifting the centered map
+                    // overshoots an endpoint; repairing it creates tiny edge
+                    // cells unrelated to the requested cluster.
+                    const SinhMap map(x_min_, x_max_, cluster);
                     for (size_t i = 0; i < n_points_; ++i) {
                         const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-                        const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
-                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
-                        raw_points[i] = x_min_ + range * normalized + offset;
+                        points.push_back(map.eval(eta));
                     }
-
-                    // Enforce monotonicity and bounds
-                    enforce_monotonicity(raw_points, x_min_, x_max_);
-
-                    // Transfer to output
-                    for (const auto& x : raw_points) {
-                        points.push_back(x);
-                    }
+                    // Preserve the supplied endpoint labels exactly.
+                    points.front() = x_min_;
+                    points.back() = x_max_;
                 }
             } else {
                 // Multi-cluster: combine weighted sinh transforms
@@ -459,39 +473,18 @@ GridBuffer<T> GridSpec<T>::generate() const {
                     total_weight += cluster.weight;
                 }
 
-                const T range = x_max_ - x_min_;
-
-                for (size_t i = 0; i < n_points_; ++i) {
-                    // Map i to eta ∈ [0, 1]
-                    const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-
-                    // Weighted combination of sinh transforms
-                    T weighted_x = T(0);
-                    for (const auto& cluster : clusters_) {
-                        const T c = cluster.alpha;
-                        const T center = cluster.center_x;
-                        const T w = cluster.weight / total_weight;
-                        const T sinh_half_c = std::sinh(c / T(2.0));
-
-                        // Compute normalized center position for this cluster
-                        const T eta_center = (center - x_min_) / range;
-
-                        // Apply sinh transform centered at eta_center
-                        const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
-                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
-
-                        // Transform to [x_min, x_max] with offset to place peak at center_x
-                        const T offset = center - (x_min_ + x_max_) / T(2.0);
-                        const T x_i = x_min_ + range * normalized + offset;
-
-                        weighted_x += w * x_i;
+                // Positive combinations of maps sharing the endpoints remain
+                // monotone and in bounds; no artificial edge cells are needed.
+                for (const auto& cluster : clusters_) {
+                    const SinhMap map(x_min_, x_max_, cluster);
+                    const T weight = cluster.weight / total_weight;
+                    for (size_t i = 1; i + 1 < n_points_; ++i) {
+                        const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+                        raw_points[i] += weight * map.eval(eta);
                     }
-
-                    raw_points[i] = weighted_x;
                 }
-
-                // Enforce monotonicity with smoothing pass
-                enforce_monotonicity(raw_points, x_min_, x_max_);
+                raw_points.front() = x_min_;
+                raw_points.back() = x_max_;
 
                 // Transfer to output
                 points = std::move(raw_points);

@@ -358,7 +358,9 @@ OptionBracketing::estimate_bracket_grid(
     bracket_rep.strike = 1.0;  // ATM representative
 
     // Get grid estimation for bracket representative
-    auto [grid_spec, time_domain] = estimate_pde_grid(bracket_rep, accuracy);
+    auto estimate = estimate_pde_grid(bracket_rep, accuracy);
+    if (!estimate) return std::unexpected(std::string{"Invalid grid accuracy controls"});
+    auto& [grid_spec, time_domain] = *estimate;
     size_t n_time = time_domain.n_steps();
 
     // Recompute Nx to maintain dx for the widened domain

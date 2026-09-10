@@ -122,11 +122,13 @@ build_chebyshev_table(const ChebyshevTableConfig& config) {
     // must resolve the whole node span (spec D12).
     accuracy.log_moneyness_coverage = LogMoneynessRange::of(m_nodes);
     // One shared grid for the whole batch.
-    auto batch_result = solver.solve_batch(
+    auto estimate = estimate_batch_pde_grid_config(
+            std::span<const PricingParams>(batch), accuracy);
+    if (!estimate) return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        auto batch_result = solver.solve_batch(
         std::span<const PricingParams>(batch), /*use_shared_grid=*/true,
         nullptr,
-        estimate_batch_pde_grid_config(
-            std::span<const PricingParams>(batch), accuracy));
+        *estimate);
 
     size_t n_pde_solves = batch.size() - batch_result.failed_count;
 

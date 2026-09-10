@@ -54,7 +54,7 @@ template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 // Grid resolution
 // ============================================================================
 
-std::pair<GridSpec<double>, TimeDomain> resolve_grid(
+std::expected<std::pair<GridSpec<double>, TimeDomain>, ValidationError> resolve_grid(
     const PricingParams& params,
     const std::optional<PDEGridSpec>& grid)
 {
@@ -65,7 +65,8 @@ std::pair<GridSpec<double>, TimeDomain> resolve_grid(
         [&](const GridAccuracyParams& acc) {
             return estimate_pde_grid(params, acc);
         },
-        [&](const PDEGridConfig& eg) {
+        [&](const PDEGridConfig& eg)
+            -> std::expected<std::pair<GridSpec<double>, TimeDomain>, ValidationError> {
             // Dividend taus are always merged in, even when the caller
             // supplies their own mandatory_times: process_temporal_events
             // fires an event only at a completed grid step, so a custom
@@ -439,9 +440,15 @@ AmericanOptionSolver::create(
         return std::unexpected(lcp_validation.error());
     }
 
+    if (grid) {
+        if (const auto* accuracy = std::get_if<GridAccuracyParams>(&*grid)) {
+            auto valid = validate_grid_accuracy(*accuracy);
+            if (!valid) return std::unexpected(valid.error());
+        }
+    }
     auto grid_config = resolve_grid(params, grid);
-
-    return AmericanOptionSolver(params, std::move(grid_config), snapshot_times);
+    if (!grid_config) return std::unexpected(grid_config.error());
+    return AmericanOptionSolver(params, std::move(*grid_config), snapshot_times);
 }
 
 AmericanOptionSolver::AmericanOptionSolver(
