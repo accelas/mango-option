@@ -468,3 +468,10 @@ match price_american(&params) {
 | `PriceTable::price` / `vega` | `(&PricingParams) -> f64` (infallible, extrapolates) |
 | `PriceTable::delta` / `gamma` / `theta` / `rho` | `(&PricingParams) -> Result<f64, Error>` |
 | `PriceTable::iv_solver` | `(Option<&InterpSolverConfig>) -> Result<InterpIvSolver, Error>` |
+
+## Chebyshev cost changes
+
+The manual segmented Chebyshev default change applies to C++ and Python.
+Rust's interpolation binding selects B-splines, so its table sizes and query
+costs are unaffected. See the [manual Chebyshev measurements](MATHEMATICAL_FOUNDATIONS.md#manual-chebyshev-defaults)
+for the price-accuracy and query-cost tradeoff on the supported interfaces.

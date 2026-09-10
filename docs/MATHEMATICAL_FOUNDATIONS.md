@@ -627,6 +627,60 @@ expiries at the anchor. Both backends use exact mandatory sample times and no
 horizon padding on this path; their adaptive reference solves roll the calendar
 by the same remaining-life rule.
 
+### Manual Chebyshev defaults
+
+Manual segmented Chebyshev construction uses CC levels `{8,3,2,2}`: 257
+moneyness, 9 time nodes per real segment, 5 volatility, and 5 rate nodes.
+The previous default was `{5,3,2,1}`, with 33 moneyness nodes; the old
+nine-moneyness-node explanation of issue #486 was stale. Explicit manual
+levels remain constraints. Volatility and rate nodes span their resolved
+domains without extra headroom; moneyness retains one nominal interval of
+padding beyond the dividend-widened domain. Extending parameter support can
+introduce exercise transitions outside the requested domain and degrade the
+global polynomial inside it. Adaptive levels and headroom are unchanged.
+
+The `manual_chebyshev_accuracy_test` regression measures 258 fixed-expiry
+queries with K=K_ref=100, S from 50 to 200, remaining maturity .01 to .25,
+volatility .05 to .15, rate .05, zero continuous yield, and a cash dividend
+of 1 at anchor offset .1. Both option types, off-node volatility, narrow
+exercise transitions, tails, and both sides of the event are included.
+High/Ultra direct-oracle disagreement is at most 4.59e-5 quote units; 36
+cardinal probes separately keep the sampled PDE error below 1.67e-5.
+
+| Measured price error | Previous defaults | Current defaults |
+|---|---:|---:|
+| Put maximum | .608521 | .005371 |
+| Call maximum | .287317 | .003597 |
+| Put RMS | .162779 | .000899 |
+| Call RMS | .083524 | .000645 |
+| Queries exceeding .01 | 164 / 258 | 0 / 258 |
+
+For this one-reference, two-segment build, stored values increase from 8,910
+to 115,650 doubles (about 70 to 904 KiB), and parameter-pair PDE solves from
+15 to 25. A matched comparison with the corrected grid policy also measured
+two cheaper level choices and isolated the support change at explicit levels
+`{5,3,2,1}`. Its 84 independent PUT references use spots 50, 95, 99.5, 100,
+100.5, 105, and 200; maturities .01, .151, and .25; and volatilities .05,
+.073, .127, and .15 under the same cash model. High/Ultra disagreement is
+at most 4.59e-5. Every row uses those same saved references.
+
+| Support / levels | Max price error | Queries above .01 | Stored doubles | Build seconds | Price query µs |
+|---|---:|---:|---:|---:|---:|
+| Previous / `{5,3,2,1}` | .608521 | 56 / 84 | 8,910 | 52.01 | 6.82 |
+| Current / `{5,3,2,1}` | .491362 | 44 / 84 | 8,910 | 14.66 | 6.76 |
+| Current / `{6,3,2,1}` | .263204 | 27 / 84 | 17,550 | 15.27 | 12.46 |
+| Current / `{7,3,2,2}` | .100509 | 8 / 84 | 58,050 | 24.99 | 35.43 |
+| Current / `{8,3,2,2}` | .005369 | 0 / 84 | 115,650 | 19.87 | 49.49 |
+
+Timings are single runs on a shared host with two OpenMP threads, cycling
+20,000 price queries over the same 84 points. They are measurements, not
+latency guarantees; the stored sizes and failure counts explain the tradeoff.
+The current default is the cheapest tested choice that meets this cohort's
+one-cent budget. Reduced support also applies to explicit-level builds, where
+it improves this cohort at the original levels without increasing storage.
+The broader 258-query price regression above remains the default's acceptance
+check. Greeks and off-reference-strike accuracy require their own validation.
+
 ### Maturity Partitioning
 
 For $N$ dividends at calendar times $t_1 < t_2 < \cdots < t_N$, the backward-time boundaries are:
@@ -982,3 +1036,9 @@ Adaptive refinement (section 10) provides a verified error bound by testing agai
 
 **For implementation details, see [ARCHITECTURE.md](ARCHITECTURE.md)**
 **For usage examples, see [API_GUIDE.md](API_GUIDE.md)**
+
+Before allocation, manual segmented builds estimate retained tensor buffers
+and one reference's raw PDE sample storage at the Ultra spatial ceiling.
+Requests exceeding the 128 MiB work budget return `InvalidConfig`, including
+representable but impractical levels such as `{31,1,1,1}`. This is a bound on
+estimated numerical buffers, not a guarantee of allocation success.

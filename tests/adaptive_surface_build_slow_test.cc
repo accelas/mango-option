@@ -892,5 +892,74 @@ TEST(AdaptiveRegressionTest, Q0BifurcationRetainedAndScreened) {
     EXPECT_NEAR(iv_result->implied_vol, 0.30, 2e-2);
 }
 
+double dividend_fdm_reference_price(double S, double K, double tau,
+                                    double sigma, double rate,
+                                    const std::vector<Dividend>& dividends,
+                                    GridAccuracyProfile profile = GridAccuracyProfile::High) {
+    PricingParams p(
+        OptionSpec{.spot = S, .strike = K, .maturity = tau, .rate = rate,
+                   .dividend_yield = 0.0, .option_type = OptionType::PUT},
+        sigma);
+    p.discrete_dividends = dividends;
+    auto solver = AmericanOptionSolver::create(
+        p, PDEGridSpec{make_grid_accuracy(profile)});
+    if (!solver.has_value()) {
+        ADD_FAILURE() << "dividend_fdm_reference_price solver create failed"
+                      << " for S=" << S << " sigma=" << sigma;
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    auto ref = solver->solve();
+    if (!ref.has_value()) {
+        ADD_FAILURE() << "dividend_fdm_reference_price solve failed for S="
+                      << S << " sigma=" << sigma;
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return ref->value_at(S);
+}
+
+
+TEST(AdaptiveGridBuilderTest, SegmentedChebyshevTailsMatchFdmAtExtremeMoneyness) {
+    const std::vector<Dividend> dividends = {
+        Dividend{.calendar_time = 0.1, .amount = 1.0}};
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = dividends,
+        .maturity = 0.25,
+        .kref_config = {.K_refs = {100.0}},   // single K_ref: no strike blend
+    };
+    IVGrid grid{
+        .moneyness = {std::log(0.5), 0.0, std::log(2.0)},  // log(S/K) here
+        .vol = {0.10},                                       // -> [0.05, 0.15]
+        .rate = {0.03, 0.05},
+    };
+
+    auto surface = build_chebyshev_segmented_manual(seg_config, grid);
+    ASSERT_TRUE(surface.has_value())
+        << "build failed: " << static_cast<int>(surface.error().code);
+
+    const double K = 100.0;
+    const double tau = 0.25;
+    const double r = 0.05;
+
+    // #486: defaults must meet the requested one-cent price budget on this
+    // declared tail cohort. The original coverage-only tolerance was 0.10.
+    // Raw timeline accuracy remains separately pinned at cardinal nodes.
+    constexpr double TOL_USER = 0.01;
+
+    for (double S : {50.0, 200.0}) {
+        for (double sigma : {0.05, 0.15}) {
+            const double got = surface->price(S, K, tau, sigma, r);
+            const double coarse = dividend_fdm_reference_price(S, K, tau, sigma, r, dividends);
+            const double usr = dividend_fdm_reference_price(
+                S, K, tau, sigma, r, dividends, GridAccuracyProfile::Ultra);
+            ASSERT_NEAR(coarse, usr, 0.001) << "direct oracle must converge";
+            EXPECT_NEAR(got, usr, TOL_USER)
+                << "user oracle S=" << S << " sigma=" << sigma;
+        }
+    }
+}
+
 }  // namespace
 }  // namespace mango

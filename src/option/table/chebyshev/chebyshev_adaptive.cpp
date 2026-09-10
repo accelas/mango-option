@@ -54,6 +54,34 @@ struct SegmentedChebyshevBuildConfig {
     std::vector<bool> seg_is_gap;  ///< true for synthetic dividend gap segments
 };
 
+// Reject impractical requests before allocating nodes or launching PDE work.
+// Budget retained tensors plus one reference's peak raw PDE sample storage.
+bool valid_manual_cc_levels(const std::array<size_t, 4>& levels,
+                            size_t segments, size_t references) {
+    constexpr size_t max_values = (128u * 1024u * 1024u) / sizeof(double);
+    std::array<size_t, 4> counts;
+    for (size_t axis = 0; axis < levels.size(); ++axis) {
+        if (levels[axis] >= std::numeric_limits<unsigned>::digits ||
+            levels[axis] >= std::numeric_limits<size_t>::digits) return false;
+        counts[axis] = (size_t{1} << levels[axis]) + 1;
+    }
+    size_t rows = 1;
+    for (size_t factor : {segments, counts[1], counts[2], counts[3]}) {
+        if (factor == 0 || rows > max_values / factor) return false;
+        rows *= factor;
+    }
+    const size_t pde_points = make_grid_accuracy(GridAccuracyProfile::Ultra).max_spatial_points;
+    if (rows > max_values / pde_points) return false;
+    const size_t remaining = max_values - rows * pde_points;
+    size_t tensors = rows;
+    // Retained values and the fitting buffer can coexist during assembly.
+    for (size_t factor : {counts[0], references, size_t{2}}) {
+        if (factor == 0 || tensors > remaining / factor) return false;
+        tensors *= factor;
+    }
+    return true;
+}
+
 }  // anonymous namespace
 
 namespace detail {
@@ -942,11 +970,23 @@ ChebyshevSegmentedBuilder::build_all_krefs(
 std::expected<ChebyshevMultiKRefSurface, PriceTableError>
 ChebyshevSegmentedBuilder::build(std::array<size_t, 4> cc_levels) const
 {
-    auto ext = compute_headroom(cc_levels);
-
-    auto m_nodes = cc_level_nodes(cc_levels[0], ext.m_lo, ext.m_hi);
-    auto sigma_nodes = cc_level_nodes(cc_levels[2], ext.sigma_lo, ext.sigma_hi);
-    auto rate_nodes = cc_level_nodes(cc_levels[3], ext.rate_lo, ext.rate_hi);
+    if (!valid_manual_cc_levels(cc_levels,
+            std::count(seg_is_gap_.begin(), seg_is_gap_.end(), false), K_refs_.size())) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+    // Manual fits use the resolved parameter domains. Extra sigma/rate
+    // headroom can introduce exercise transitions outside the query domain
+    // and make a fixed-degree global polynomial inaccurate inside it (#486).
+    // Keep one nominal moneyness interval beyond the dividend-widened domain;
+    // PDE spatial clearance is independently owned by the grid estimator.
+    const double m_padding = (domain_.m_max - domain_.m_min)
+        / static_cast<double>(std::max(size_t{1} << cc_levels[0], size_t{3}));
+    auto m_nodes = cc_level_nodes(
+        cc_levels[0], domain_.m_min - m_padding, domain_.m_max + m_padding);
+    auto sigma_nodes = cc_level_nodes(
+        cc_levels[2], domain_.sigma_min, domain_.sigma_max);
+    auto rate_nodes = cc_level_nodes(
+        cc_levels[3], domain_.rate_min, domain_.rate_max);
     auto tau_nodes = generate_tau_nodes(cc_levels[1]);
     if (tau_nodes.empty()) {
         return std::unexpected(
@@ -1134,6 +1174,9 @@ build_chebyshev_segmented_manual(
     const IVGrid& domain,
     std::array<size_t, 4> cc_levels)
 {
+    if (!valid_manual_cc_levels(cc_levels, 1, 1)) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
     auto builder = ChebyshevSegmentedBuilder::create(config, domain);
     if (!builder) return std::unexpected(builder.error());
     return builder->build(cc_levels);
