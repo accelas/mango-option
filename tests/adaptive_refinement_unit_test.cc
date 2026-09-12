@@ -1449,6 +1449,25 @@ TEST(AggregateProbeGridsTest, ThinsUnionToCapKeepingEndpoints) {
     EXPECT_TRUE(std::ranges::find(g.moneyness, 0.9) != g.moneyness.end());
 }
 
+// Regression: a `max_points_per_dim` below four thinned the merged axis under
+// the cubic B-spline minimum, so the final segmented build failed with
+// InsufficientGridPoints where the sizes-only path had kept the seed count.
+// Bug: cap thinning did not floor at four points.
+TEST(AggregateProbeGridsTest, CapBelowCubicMinimumKeepsFourPoints) {
+    mango::RefinementResult a;
+    a.moneyness = {0.0, 0.2, 0.4, 0.6, 0.8, 1.0};
+    a.vol = a.rate = {0.1, 0.2, 0.3, 0.4};
+
+    for (size_t cap : {size_t{0}, size_t{2}, size_t{3}}) {
+        auto g = mango::aggregate_probe_grids({a}, cap);
+        ASSERT_EQ(g.moneyness.size(), 4u) << "cap " << cap;
+        EXPECT_DOUBLE_EQ(g.moneyness.front(), 0.0);
+        EXPECT_DOUBLE_EQ(g.moneyness.back(), 1.0);
+        EXPECT_EQ(g.vol.size(), 4u);
+        EXPECT_EQ(g.rate.size(), 4u);
+    }
+}
+
 // The final retry bumps the aggregated grids by inserting midpoints into the
 // largest gaps, so the retained positions survive the bump.
 TEST(InsertLargestGapMidpointsTest, FillsLargestGapsAndHonorsCap) {

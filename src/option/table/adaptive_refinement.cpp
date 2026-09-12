@@ -228,8 +228,9 @@ std::vector<double> merge_axis(const std::vector<RefinementResult>& probes,
     }
 
     // Honor the ceiling by dropping the interior position nearest to a
-    // neighbour (lowest index on ties); endpoints are never candidates.
-    while (unique_pos.size() > std::max(cap, size_t{2})) {
+    // neighbour (lowest index on ties); endpoints are never candidates and
+    // the cubic minimum is a floor the ceiling cannot push through.
+    while (unique_pos.size() > std::max(cap, kCubicMinPoints)) {
         size_t victim = 1;
         double crowding = std::numeric_limits<double>::infinity();
         for (size_t i = 1; i + 1 < unique_pos.size(); ++i) {
