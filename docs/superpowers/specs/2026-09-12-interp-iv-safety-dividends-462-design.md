@@ -228,9 +228,12 @@ and w = (K − L)/(H − L):
   discretization error, which the reference-resolution check below bounds.
 - **Eligibility (reference-only).** A query is eligible for IV-equivalent
   statistics when P_FDM(K), P_FDM(L), P_FDM(H) and vega_FDM(K) are finite,
-  vega_FDM(K) ≥ `AdaptiveGridParams::vega_floor` (1e-4), and
-  (P_FDM(K) − intrinsic)/K ≥ 1e-4, the same TV/K and vega-floor thresholds
-  `make_iv_score_fn` applies. Eligibility depends only on the references,
+  (P_FDM(K) − intrinsic)/K ≥ 1e-4 (the TV/K threshold `make_iv_score_fn`
+  applies), and vega_FDM(K) ≥ `AdaptiveGridParams::vega_floor` (1e-4). The
+  library *clamps* vega to the floor instead of excluding the point; the
+  sweep excludes, because a clamped point reports price error in floor units
+  that the blend/surface split cannot interpret, and the exclusion count
+  says how many points that costs. Eligibility depends only on the references,
   never on the surface or the inversion. Ineligible queries are counted per
   reason (`ref-fail`, `low-vega`, `low-tv`) and enter no statistic.
 - B_FDM(K) = K · [(1 − w) · P_FDM(L)/L + w · P_FDM(H)/H]: the blend policy
