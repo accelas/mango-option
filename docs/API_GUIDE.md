@@ -772,7 +772,10 @@ commit `385ced9e`, `-c opt`, `OMP_NUM_THREADS=16`).** Manual segmented
 B-spline surfaces (41 log-moneyness knots on [-0.30, 0.30], 5 tau points per
 segment, vol knots {0.10, 0.15, 0.20, 0.30, 0.50}, rate knots {0.02, 0.03,
 0.05, 0.07}), PUT, spot 100, r = 5%, q = 2%, quarterly $0.50 calendar, query
-window K in [85, 115].
+window K in [85, 115]. The `interp_iv_safety` target builds with `-O3
+-march=native` (`benchmarks/BUILD.bazel`), so these figures are tied to the
+host ISA they were measured on and are not expected to reproduce bit-for-bit
+on a different CPU.
 
 An **anchor** is a query strike equal to one of the sweep's K_refs; a
 **mid-anchor** is the midpoint strike between two adjacent K_refs. The rows
@@ -783,13 +786,17 @@ K_ref surface at its own strike, normalizing by strike (S/K in each case),
 and interpolating linearly in strike: `K * [(1-w) * P(L)/L + w * P(H)/H]`.
 Eligibility is reference-only: finite FDM references and vega at the query
 and its bracketing K_refs, TV/K >= 1e-4, vega >= 1e-4. `blend max` is the
-blend policy's own error, applied to exact FDM prices and divided by FD vega
-as an IV-equivalent estimate; `blend max (Ultra)` recomputes it with every
-reference re-solved at `make_grid_accuracy(GridAccuracyProfile::Ultra)`;
-`ref-sens` is the absolute difference between the two and is an observed
-sensitivity, not a bound. Status compares `blend max` with 10 bps and is
-`inconclusive` when the gap to 10 bps is within `ref-sens`, and `incomplete`
-when eligible mid-anchors fall below 90% of queries in the window.
+blend policy's own error, applied to exact FDM prices and divided by FD
+vega as an IV-equivalent estimate, where every reference in this base
+column is solved at the solver's default automatic grid accuracy — the
+same accuracy the references use everywhere else in this table, not a
+fixed high-accuracy setting; `blend max (Ultra)` recomputes the same
+quantity with every one of those references re-solved instead at
+`make_grid_accuracy(GridAccuracyProfile::Ultra)`. `ref-sens` is the
+absolute difference between the two and is an observed sensitivity, not a
+bound. Status compares `blend max` with 10 bps and is `inconclusive` when
+the gap to 10 bps is within `ref-sens`, and `incomplete` when eligible
+mid-anchors fall below 90% of queries in the window.
 
 | Δ (Δ/spot) | T | σ | blend max | blend max (Ultra) | blend mean (signed) | blend rms | ref-sens | status |
 |---|---|---|---|---|---|---|---|---|
