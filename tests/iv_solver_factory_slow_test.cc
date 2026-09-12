@@ -195,6 +195,41 @@ TEST(IVSolverFactorySegmented, DocumentedBSplineConfigReportsAccuracyAndSolves) 
     EXPECT_NEAR(result->implied_vol, p.volatility, 0.01);
 }
 
+// Regression: interp_iv_safety's dividends path must keep building.
+// Bug: the benchmark's B-spline per-maturity config rotted into a
+// configuration the #454 viability gate refuses (moneyness range wider
+// than its K_ref span, and three dividends scaled into a 7-day option),
+// and nothing outside the manual benchmark noticed (#462). The documented
+// pin above uses a different yield, schedule and a single maturity, so it
+// cannot catch this. Viability only: no accuracy number is pinned here.
+TEST(IVSolverFactorySegmented, BenchmarkDividendsConfigBuildsAtEveryMaturity) {
+    // Mirrors benchmarks/interp_iv_safety.cc kDoc* constants + quarterly_div_schedule.
+    const std::vector<double> maturities = {7.0 / 365, 14.0 / 365, 30.0 / 365, 60.0 / 365,
+                                            90.0 / 365, 180.0 / 365, 1.0, 2.0};
+    for (double T : maturities) {
+        std::vector<Dividend> divs;
+        for (double t = 0.25; t < T; t += 0.25) divs.push_back({.calendar_time = t, .amount = 0.50});
+        IVSolverFactoryConfig config{
+            .option_type = OptionType::PUT,
+            .spot = 100.0,
+            .dividend_yield = 0.02,
+            .grid = IVGrid{.moneyness = {0.92, 0.95, 1.0, 1.05, 1.08},
+                           .vol = {0.10, 0.15, 0.20, 0.30},
+                           .rate = {0.02, 0.03, 0.05, 0.07}},
+            .adaptive = AdaptiveGridParams{.target_iv_error = 0.001},
+            .backend = BSplineBackend{},
+            .discrete_dividends = DiscreteDividendConfig{
+                .maturity = T, .discrete_dividends = divs,
+                .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0, 102.5, 105.0, 107.5, 110.0}}},
+        };
+        auto solver = make_interpolated_iv_solver(config);
+        ASSERT_TRUE(solver.has_value()) << "T=" << T << " code " << static_cast<int>(solver.error().code);
+        auto diag = solver->build_diagnostics();
+        ASSERT_TRUE(diag.has_value());
+        EXPECT_GT(diag->holdout_points_measured, 0u) << "T=" << T;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Side-by-side accuracy comparison
 // ---------------------------------------------------------------------------
