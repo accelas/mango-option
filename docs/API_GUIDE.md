@@ -767,6 +767,95 @@ the same K_refs with the default ±30% moneyness grid puts most queried
 strikes outside the K_ref span, where the blend clamps to a single K_ref, and
 the build fails with `NoViableSurface` rather than returning it.
 
+**Measured K_ref spacing baseline (2026-09-12, `interp_iv_safety --path=kref`,
+commit `385ced9e`, `-c opt`, `OMP_NUM_THREADS=16`).** Manual segmented
+B-spline surfaces (41 log-moneyness knots on [-0.30, 0.30], 5 tau points per
+segment, vol knots {0.10, 0.15, 0.20, 0.30, 0.50}, rate knots {0.02, 0.03,
+0.05, 0.07}), PUT, spot 100, r = 5%, q = 2%, quarterly $0.50 calendar, query
+window K in [85, 115].
+
+An **anchor** is a query strike equal to one of the sweep's K_refs; a
+**mid-anchor** is the midpoint strike between two adjacent K_refs. The rows
+below are mid-anchors only, since anchors are exact by construction for the
+blend policy. The **blend policy** (`MultiKRefSplit`) prices a query strike K
+between K_refs L and H (L <= K <= H, weight w = (K-L)/(H-L)) by querying each
+K_ref surface at its own strike, normalizing by strike (S/K in each case),
+and interpolating linearly in strike: `K * [(1-w) * P(L)/L + w * P(H)/H]`.
+Eligibility is reference-only: finite FDM references and vega at the query
+and its bracketing K_refs, TV/K >= 1e-4, vega >= 1e-4. `blend max` is the
+blend policy's own error, applied to exact FDM prices and divided by FD vega
+as an IV-equivalent estimate; `blend max (Ultra)` recomputes it with every
+reference re-solved at `make_grid_accuracy(GridAccuracyProfile::Ultra)`;
+`ref-sens` is the absolute difference between the two and is an observed
+sensitivity, not a bound. Status compares `blend max` with 10 bps and is
+`inconclusive` when the gap to 10 bps is within `ref-sens`, and `incomplete`
+when eligible mid-anchors fall below 90% of queries in the window.
+
+| Δ (Δ/spot) | T | σ | blend max | blend max (Ultra) | blend mean (signed) | blend rms | ref-sens | status |
+|---|---|---|---|---|---|---|---|---|
+| 10 (10%) | 0.20 | 15% | 691.80 | 699.42 | 479.62 | 503.65 | 7.62 | incomplete |
+| 10 (10%) | 0.30 | 15% | 381.67 | 385.17 | 273.87 | 286.16 | 3.50 | incomplete |
+| 10 (10%) | 0.60 | 15% | 167.34 | 168.32 | 119.35 | 123.18 | 0.98 | fail |
+| 10 (10%) | 1.00 | 15% | 94.29 | 94.84 | 64.09 | 67.19 | 0.55 | fail |
+| 5 (5%) | 0.20 | 15% | 134.04 | 133.87 | 104.10 | 105.55 | 0.17 | incomplete |
+| 5 (5%) | 0.30 | 15% | 83.29 | 83.95 | 64.21 | 65.82 | 0.66 | fail |
+| 5 (5%) | 0.60 | 15% | 39.10 | 39.02 | 27.04 | 28.09 | 0.08 | fail |
+| 5 (5%) | 1.00 | 15% | 22.40 | 22.14 | 15.21 | 15.85 | 0.27 | fail |
+| 2.5 (2.5%) | 0.20 | 15% | 33.69 | 33.77 | 26.19 | 26.50 | 0.08 | incomplete |
+| 2.5 (2.5%) | 0.30 | 15% | 21.84 | 21.60 | 15.65 | 16.09 | 0.25 | fail |
+| 2.5 (2.5%) | 0.60 | 15% | 10.10 | 10.14 | 6.82 | 7.08 | 0.03 | fail |
+| 2.5 (2.5%) | 1.00 | 15% | 5.66 | 5.76 | 3.85 | 4.00 | 0.09 | pass |
+| 1.25 (1.25%) | 0.20 | 15% | 8.45 | 8.50 | 6.57 | 6.65 | 0.05 | incomplete |
+| 1.25 (1.25%) | 0.30 | 15% | 5.71 | 5.48 | 3.86 | 3.98 | 0.23 | pass |
+| 1.25 (1.25%) | 0.60 | 15% | 3.07 | 2.58 | 1.62 | 1.70 | 0.49 | pass |
+| 1.25 (1.25%) | 1.00 | 15% | 1.65 | 1.47 | 0.94 | 1.00 | 0.19 | pass |
+| 10 (10%) | 0.20 | 30% | 247.57 | 244.31 | 144.66 | 163.65 | 3.27 | fail |
+| 10 (10%) | 0.30 | 30% | 149.02 | 150.05 | 85.98 | 97.68 | 1.03 | fail |
+| 10 (10%) | 0.60 | 30% | 63.44 | 63.31 | 35.26 | 40.61 | 0.13 | fail |
+| 10 (10%) | 1.00 | 30% | 31.14 | 31.45 | 16.31 | 19.31 | 0.31 | fail |
+| 5 (5%) | 0.20 | 30% | 57.52 | 56.85 | 36.88 | 39.37 | 0.67 | fail |
+| 5 (5%) | 0.30 | 30% | 34.88 | 34.80 | 21.52 | 23.37 | 0.08 | fail |
+| 5 (5%) | 0.60 | 30% | 14.67 | 14.50 | 8.75 | 9.54 | 0.18 | fail |
+| 5 (5%) | 1.00 | 30% | 7.08 | 7.11 | 4.03 | 4.49 | 0.03 | pass |
+| 2.5 (2.5%) | 0.20 | 30% | 15.00 | 14.80 | 9.15 | 9.83 | 0.20 | fail |
+| 2.5 (2.5%) | 0.30 | 30% | 9.60 | 9.09 | 5.48 | 5.98 | 0.51 | inconclusive |
+| 2.5 (2.5%) | 0.60 | 30% | 3.34 | 3.80 | 1.64 | 1.87 | 0.46 | pass |
+| 2.5 (2.5%) | 1.00 | 30% | 2.11 | 1.87 | 0.96 | 1.13 | 0.24 | pass |
+| 1.25 (1.25%) | 0.20 | 30% | 3.84 | 3.77 | 2.30 | 2.53 | 0.07 | pass |
+| 1.25 (1.25%) | 0.30 | 30% | 2.78 | 2.32 | 1.32 | 1.50 | 0.46 | pass |
+| 1.25 (1.25%) | 0.60 | 30% | 1.62 | 0.97 | 0.54 | 0.67 | 0.65 | pass |
+| 1.25 (1.25%) | 1.00 | 30% | 0.97 | 0.48 | 0.25 | 0.36 | 0.49 | pass |
+
+The `fine` check (Δ = 2.5, T = 1.00 rebuilt with 81 moneyness knots and 9 tau
+points per segment) moves `surf max`/`surf rms` from 2.65/2.09 to 2.64/2.09
+at σ = 15% and from 0.70/0.43 to 0.68/0.42 at σ = 30%, both well under the 2x
+threshold, so the base row's surface resolution is not the limiting factor.
+
+None of the four tested spacings stays at or below 10 bps `blend max` at
+every measured (T, σ) with every row complete and none inconclusive. Δ =
+1.25 dollars (1.25% of spot) passes on every complete row, but its T = 0.20,
+σ = 15% row is incomplete. No spacing qualifies outright under the strict
+criterion.
+
+Incomplete rows (eligible mid-anchors below 90% of queries in the window, all
+at T = 0.20, σ = 15%, all from the `low-tv` exclusion): Δ = 10 (elig 3/4,
+low-tv 1), Δ = 5 (elig 5/6, low-tv 1), Δ = 2.5 (elig 10/12, low-tv 2), Δ =
+1.25 (elig 20/24, low-tv 4).
+
+Inconclusive rows (the gap between `blend max` and 10 bps falls within
+`ref-sens`): Δ = 2.5, T = 0.30, σ = 30% (`blend max` 9.60 bps, `ref-sens`
+0.51 bps, gap 0.40 bps).
+
+`blend mean` is positive on every row in the table: the linear-in-strike
+blend policy systematically overprices relative to the exact FDM references,
+never underprices, across every spacing, maturity and volatility measured.
+
+These numbers hold only under the conditions above (PUT, spot 100, r = 5%,
+q = 2%, this quarterly calendar, this window, this eligibility test, these
+reference accuracies, and manual segmented B-spline surfaces built from these
+knots). They are a baseline for the spot-scaling work in #460, not a
+guarantee for other spots, option types, rates or schedules.
+
 Note that `BSplineBackend::maturity_grid` is **ignored** whenever
 `discrete_dividends` is set, on both the manual and the adaptive segmented
 paths: tau comes from the dividend dates and `DiscreteDividendConfig::maturity`,

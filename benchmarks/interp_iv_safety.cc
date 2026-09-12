@@ -12,6 +12,22 @@
  *  3. Recover IV via interpolated solver and FDM IVSolver
  *  4. Error = |interp_iv − fdm_iv| in basis points
  *
+ * Paths (--path=...): all, bspline, chebyshev, q0, dividends, kref.
+ *
+ * The dividends path prices two discrete-dividend reference grids: the
+ * B-spline rows use a per-maturity schedule on a fixed quarterly $0.50
+ * calendar (kQuarterlyPerMaturity), the Chebyshev rows use a single 1y
+ * build rolled forward to each shorter maturity (kRolledFrom1y). Grid,
+ * K_refs and target IV error come from documented_adaptive_dividend_config()
+ * in tests/iv_solver_factory_slow_test.cc (see kDoc* below); the yield and
+ * the quarterly schedule itself are the benchmark's own.
+ *
+ * The kref path (--path=kref) sweeps the manual segmented B-spline's K_ref
+ * spacing against a same-query blend-policy control, reporting the
+ * MultiKRefSplit blend's own IV-equivalent error apart from the surface's.
+ * See docs/API_GUIDE.md, "Measured K_ref spacing baseline", for the
+ * committed run's numbers and their conditions.
+ *
  * Run with: bazel run //benchmarks:interp_iv_safety
  */
 
