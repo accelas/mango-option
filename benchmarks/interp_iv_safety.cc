@@ -34,6 +34,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -63,63 +65,76 @@ static const std::array<const char*, kNT> kMatLabels = {
     "  7d", " 14d", " 30d", " 60d", " 90d", "180d", "  1y", "  2y"};
 
 // ============================================================================
-// Step 1: Generate reference prices via batch chain solver
+// Generic per-path containers (strike count is a template parameter so the
+// dividends path can carry its own strike set)
 // ============================================================================
 
 // prices[vol_idx][mat_idx][strike_idx]
-using PriceGrid = std::array<std::array<std::array<double, kNS>, kNT>, kNV>;
+template <size_t NS>
+using PriceGridN = std::array<std::array<std::array<double, NS>, kNT>, kNV>;
 
-static PriceGrid generate_prices(bool with_dividends, double div_yield = kDivYield) {
-    PriceGrid prices{};
+// errors[mat_idx][strike_idx] in bps (NaN for failed cases)
+template <size_t NS>
+using ErrorTableN = std::array<std::array<double, NS>, kNT>;
+
+template <size_t NS>
+using TVKMaskN = std::array<std::array<bool, NS>, kNT>;
+
+using PriceGrid = PriceGridN<kNS>;    // vanilla/q0 keep these aliases
+using ErrorTable = ErrorTableN<kNS>;
+
+/// Maturity -> schedule for that contract; nullopt = maturity not covered
+/// by this path (its prices are NaN).
+using ScheduleFn = std::function<std::optional<std::vector<Dividend>>(double maturity)>;
+
+// ============================================================================
+// Step 1: Generate reference prices via batch chain solver
+// ============================================================================
+
+template <size_t NS>
+static PriceGridN<NS> generate_prices(const std::array<double, NS>& strikes,
+                                      const ScheduleFn& schedule,
+                                      double div_yield) {
+    PriceGridN<NS> prices{};
+    for (auto& v : prices) for (auto& t : v) t.fill(std::nan(""));
+
     BatchAmericanOptionSolver batch_solver;
-
-    // Build all PricingParams across (vol, maturity, strike)
-    // Chain solver groups by (σ, r, q, type, maturity) — one PDE per group
     std::vector<PricingParams> all_params;
-    all_params.reserve(kNV * kNT * kNS);
+    std::vector<std::array<size_t, 3>> index;  // (vi, ti, si)
+    all_params.reserve(kNV * kNT * NS);
 
     for (size_t vi = 0; vi < kNV; ++vi) {
         for (size_t ti = 0; ti < kNT; ++ti) {
-            auto divs = with_dividends
-                            ? make_div_schedule(kMaturities[ti])
-                            : std::vector<Dividend>{};
-
-            for (size_t si = 0; si < kNS; ++si) {
+            auto divs = schedule(kMaturities[ti]);
+            if (!divs) continue;  // maturity not covered: row stays NaN
+            for (size_t si = 0; si < NS; ++si) {
                 PricingParams p;
                 p.spot = kSpot;
-                p.strike = kStrikes[si];
+                p.strike = strikes[si];
                 p.maturity = kMaturities[ti];
                 p.rate = kRate;
                 p.dividend_yield = div_yield;
                 p.option_type = OptionType::PUT;
                 p.volatility = kVols[vi];
-                p.discrete_dividends = divs;
+                p.discrete_dividends = *divs;
                 all_params.push_back(std::move(p));
+                index.push_back({vi, ti, si});
             }
         }
     }
 
-    // Chain solving: use_shared_grid=true routes vanilla batches through
-    // normalized chain path (one PDE per σ×T group = 16 PDEs for 144 options)
     auto result = batch_solver.solve_batch(all_params, /*use_shared_grid=*/true);
-
-    // Map results back to 3D price grid
-    size_t idx = 0;
-    for (size_t vi = 0; vi < kNV; ++vi) {
-        for (size_t ti = 0; ti < kNT; ++ti) {
-            for (size_t si = 0; si < kNS; ++si) {
-                if (result.results[idx].has_value()) {
-                    prices[vi][ti][si] = result.results[idx]->value();
-                } else {
-                    prices[vi][ti][si] = std::nan("");
-                }
-                ++idx;
-            }
-        }
+    for (size_t i = 0; i < index.size(); ++i) {
+        auto [vi, ti, si] = index[i];
+        if (result.results[i].has_value())
+            prices[vi][ti][si] = result.results[i]->value();
     }
-
     return prices;
 }
+
+static const ScheduleFn kNoDividends = [](double) {
+    return std::optional<std::vector<Dividend>>{std::vector<Dividend>{}};
+};
 
 // ============================================================================
 // Step 2: Build interpolated IV solvers
@@ -253,24 +268,23 @@ static double solve_fdm_iv_div(double strike, double maturity,
 // Step 4: Compute error grids
 // ============================================================================
 
-// errors[mat_idx][strike_idx] in bps (NaN for failed cases)
-using ErrorTable = std::array<std::array<double, kNS>, kNT>;
-
-static ErrorTable compute_errors_vanilla(const PriceGrid& prices,
-                                          const AnyInterpIVSolver& interp_solver,
-                                          size_t vol_idx,
-                                          double div_yield = kDivYield) {
-    ErrorTable errors{};
+template <size_t NS>
+static ErrorTableN<NS> compute_errors_vanilla(const PriceGridN<NS>& prices,
+                                              const std::array<double, NS>& strikes,
+                                              const AnyInterpIVSolver& interp_solver,
+                                              size_t vol_idx,
+                                              double div_yield = kDivYield) {
+    ErrorTableN<NS> errors{};
     IVSolverConfig fdm_config;
     IVSolver fdm_solver(fdm_config);
 
     // Build all IVQueries for batch FDM solving
     std::vector<IVQuery> queries;
     std::vector<std::pair<size_t, size_t>> query_map;  // (mat_idx, strike_idx)
-    queries.reserve(kNT * kNS);
+    queries.reserve(kNT * NS);
 
     for (size_t ti = 0; ti < kNT; ++ti) {
-        for (size_t si = 0; si < kNS; ++si) {
+        for (size_t si = 0; si < NS; ++si) {
             double price = prices[vol_idx][ti][si];
             if (std::isnan(price) || price <= 0) {
                 errors[ti][si] = std::nan("");
@@ -279,7 +293,7 @@ static ErrorTable compute_errors_vanilla(const PriceGrid& prices,
 
             IVQuery q;
             q.spot = kSpot;
-            q.strike = kStrikes[si];
+            q.strike = strikes[si];
             q.maturity = kMaturities[ti];
             q.rate = kRate;
             q.dividend_yield = div_yield;
@@ -314,12 +328,13 @@ static ErrorTable compute_errors_vanilla(const PriceGrid& prices,
     return errors;
 }
 
-template <typename Solver>
-static ErrorTable compute_errors_div(
-    const PriceGrid& prices,
+template <size_t NS, typename Solver>
+static ErrorTableN<NS> compute_errors_div(
+    const PriceGridN<NS>& prices,
+    const std::array<double, NS>& strikes,
     const std::vector<std::pair<size_t, Solver>>& div_solvers,
     size_t vol_idx) {
-    ErrorTable errors{};
+    ErrorTableN<NS> errors{};
 
     // Initialize all to NaN
     for (auto& row : errors)
@@ -344,13 +359,13 @@ static ErrorTable compute_errors_div(
         std::vector<IVQuery> queries;
         std::vector<size_t> strike_indices;
 
-        for (size_t si = 0; si < kNS; ++si) {
+        for (size_t si = 0; si < NS; ++si) {
             double price = prices[vol_idx][ti][si];
             if (std::isnan(price) || price <= 0) continue;
 
             IVQuery q;
             q.spot = kSpot;
-            q.strike = kStrikes[si];
+            q.strike = strikes[si];
             q.maturity = maturity;
             q.rate = kRate;
             q.dividend_yield = kDivYield;
@@ -370,7 +385,7 @@ static ErrorTable compute_errors_div(
 
             // FDM reference: manual Brent with dividends
             double fdm_iv = solve_fdm_iv_div(
-                kStrikes[si], maturity,
+                strikes[si], maturity,
                 prices[vol_idx][ti][si], divs);
 
             if (std::isnan(fdm_iv)) continue;
@@ -387,44 +402,42 @@ static ErrorTable compute_errors_div(
 // Step 5: Print heatmap
 // ============================================================================
 
-static void print_heatmap(const char* title, const ErrorTable& errors) {
+template <size_t NS>
+static void print_heatmap(const char* title, const std::array<double, NS>& strikes,
+                          const ErrorTableN<NS>& errors,
+                          const std::array<std::string, kNT>* row_suffix = nullptr) {
     std::printf("\n=== %s ===\n", title);
-
-    // Header
     std::printf("          ");
-    for (size_t si = 0; si < kNS; ++si) {
-        std::printf("  K=%-3.0f ", kStrikes[si]);
+    for (double K : strikes) {
+        // Integral strikes keep the historical "K=100" header; fractional
+        // ones (dividends path) print one decimal.
+        if (std::fmod(K, 1.0) == 0.0) std::printf("  K=%-3.0f ", K);
+        else                          std::printf(" K=%-5.1f", K);
     }
     std::printf("\n");
 
     size_t n_total = 0, n_failed = 0;
     double sum_sq = 0;
-
     for (size_t ti = 0; ti < kNT; ++ti) {
         std::printf("  T=%s  ", kMatLabels[ti]);
-        for (size_t si = 0; si < kNS; ++si) {
+        for (size_t si = 0; si < NS; ++si) {
             double e = errors[ti][si];
             n_total++;
-            if (std::isnan(e)) {
-                std::printf("   ---  ");
-                n_failed++;
-            } else {
-                const char* marker = "";
-                if (e > 200) marker = "***";
-                else if (e > 50) marker = "**";
-                else if (e > 10) marker = "*";
-
-                std::printf("%6.1f%-3s", e, marker);
-                sum_sq += e * e;
-            }
+            if (std::isnan(e)) { std::printf("   ---  "); n_failed++; continue; }
+            const char* marker = e > 200 ? "***" : e > 50 ? "**" : e > 10 ? "*" : "";
+            std::printf("%6.1f%-3s", e, marker);
+            sum_sq += e * e;
         }
+        if (row_suffix) std::printf("  %s", (*row_suffix)[ti].c_str());
         std::printf("\n");
     }
-
     size_t n_valid = n_total - n_failed;
-    double rms = n_valid > 0 ? std::sqrt(sum_sq / n_valid) : 0;
     std::printf("\n  Legend: * >10bps  ** >50bps  *** >200bps  --- solve failed\n");
-    std::printf("  Overall RMS: %.1f bps (%zu/%zu succeeded)\n", rms, n_valid, n_total);
+    if (n_valid == 0)
+        std::printf("  Overall RMS: n/a (0/%zu succeeded)\n", n_total);
+    else
+        std::printf("  Overall RMS: %.1f bps (%zu/%zu succeeded)\n",
+                    std::sqrt(sum_sq / n_valid), n_valid, n_total);
 }
 
 // ============================================================================
@@ -433,73 +446,55 @@ static void print_heatmap(const char* title, const ErrorTable& errors) {
 
 /// TV/K mask: which (maturity, strike) points survive a given threshold.
 /// Based purely on reference prices so all algorithms share the same mask.
-using TVKMask = std::array<std::array<bool, kNS>, kNT>;
-
-static TVKMask compute_tvk_mask(const PriceGrid& prices, size_t vol_idx,
-                                 double threshold) {
-    TVKMask mask{};
-    for (size_t ti = 0; ti < kNT; ++ti) {
-        for (size_t si = 0; si < kNS; ++si) {
+template <size_t NS>
+static TVKMaskN<NS> compute_tvk_mask(const PriceGridN<NS>& prices,
+                                     const std::array<double, NS>& strikes,
+                                     size_t vol_idx, double threshold) {
+    TVKMaskN<NS> mask{};
+    for (size_t ti = 0; ti < kNT; ++ti)
+        for (size_t si = 0; si < NS; ++si) {
             double price = prices[vol_idx][ti][si];
-            if (std::isnan(price) || price <= 0) {
-                mask[ti][si] = false;
-                continue;
-            }
-            double K = kStrikes[si];
-            double intrinsic = std::max(K - kSpot, 0.0);  // put
-            double tv = price - intrinsic;
-            mask[ti][si] = (tv / K) >= threshold;
+            if (std::isnan(price) || price <= 0) { mask[ti][si] = false; continue; }
+            double intrinsic = std::max(strikes[si] - kSpot, 0.0);  // put
+            mask[ti][si] = ((price - intrinsic) / strikes[si]) >= threshold;
         }
-    }
     return mask;
 }
 
 /// Print RMS error for multiple algorithms at a given TV/K threshold.
 /// All algorithms are filtered by the SAME mask (from reference prices).
-struct AlgoErrors {
-    const char* label;
-    const ErrorTable* errors;
-};
+template <size_t NS>
+struct AlgoErrorsN { const char* label; const ErrorTableN<NS>* errors; };  // null => n/a
 
-static void print_tvk_comparison(const PriceGrid& prices, size_t vol_idx,
-                                  std::span<const AlgoErrors> algos) {
+template <size_t NS>
+static void print_tvk_comparison(const PriceGridN<NS>& prices,
+                                 const std::array<double, NS>& strikes,
+                                 size_t vol_idx,
+                                 std::span<const AlgoErrorsN<NS>> algos) {
     static constexpr double kThresholds[] = {0.0, 1e-4, 1e-3, 5e-3};
-    static constexpr const char* kThreshLabels[] = {
-        "none", "1e-4", "1e-3", "5e-3"};
-
+    static constexpr const char* kThreshLabels[] = {"none", "1e-4", "1e-3", "5e-3"};
     std::printf("\n  TV/K filtered RMS (σ=%.0f%%):\n", kVols[vol_idx] * 100);
-
-    // Header
     std::printf("  %-20s", "TV/K >=");
-    for (const auto& a : algos)
-        std::printf("  %14s", a.label);
+    for (const auto& a : algos) std::printf("  %14s", a.label);
     std::printf("\n");
-
     for (size_t fi = 0; fi < 4; ++fi) {
-        auto mask = compute_tvk_mask(prices, vol_idx, kThresholds[fi]);
-
+        auto mask = compute_tvk_mask(prices, strikes, vol_idx, kThresholds[fi]);
         size_t mask_count = 0;
-        for (size_t ti = 0; ti < kNT; ++ti)
-            for (size_t si = 0; si < kNS; ++si)
-                if (mask[ti][si]) mask_count++;
-
-        std::printf("  %-12s [%2zu/%zu]", kThreshLabels[fi],
-                    mask_count, kNT * kNS);
+        for (auto& row : mask) for (bool b : row) mask_count += b;
+        std::printf("  %-12s [%2zu/%zu]", kThreshLabels[fi], mask_count, kNT * NS);
         for (const auto& a : algos) {
-            double sum_sq = 0;
-            size_t n = 0;
-            for (size_t ti = 0; ti < kNT; ++ti) {
-                for (size_t si = 0; si < kNS; ++si) {
+            if (!a.errors) { std::printf("  %14s", "n/a (no surf)"); continue; }
+            double sum_sq = 0; size_t n = 0;
+            for (size_t ti = 0; ti < kNT; ++ti)
+                for (size_t si = 0; si < NS; ++si) {
                     if (!mask[ti][si]) continue;
                     double e = (*a.errors)[ti][si];
                     if (std::isnan(e)) continue;
-                    sum_sq += e * e;
-                    n++;
+                    sum_sq += e * e; n++;
                 }
-            }
-            double rms = n > 0 ? std::sqrt(sum_sq / n) : 0;
             char buf[32];
-            std::snprintf(buf, sizeof(buf), "%.1f (%zu)", rms, n);
+            if (n == 0) std::snprintf(buf, sizeof(buf), "n/a (0)");
+            else        std::snprintf(buf, sizeof(buf), "%.1f (%zu)", std::sqrt(sum_sq / n), n);
             std::printf("  %14s", buf);
         }
         std::printf("\n");
@@ -536,22 +531,23 @@ static ChebyshevTableResult build_chebyshev_surface() {
 
 /// Generic error computation via any InterpolatedIVSolver.
 /// The solver's built-in vega pre-check handles edge-case filtering.
-template <typename Solver>
-static ErrorTable compute_errors_via_solver(
-    const PriceGrid& prices,
+template <size_t NS, typename Solver>
+static ErrorTableN<NS> compute_errors_via_solver(
+    const PriceGridN<NS>& prices,
+    const std::array<double, NS>& strikes,
     const Solver& interp_solver,
     size_t vol_idx,
     double div_yield = kDivYield) {
-    ErrorTable errors{};
+    ErrorTableN<NS> errors{};
     IVSolverConfig fdm_config;
     IVSolver fdm_solver(fdm_config);
 
     std::vector<IVQuery> queries;
     std::vector<std::pair<size_t, size_t>> query_map;
-    queries.reserve(kNT * kNS);
+    queries.reserve(kNT * NS);
 
     for (size_t ti = 0; ti < kNT; ++ti) {
-        for (size_t si = 0; si < kNS; ++si) {
+        for (size_t si = 0; si < NS; ++si) {
             double price = prices[vol_idx][ti][si];
             if (std::isnan(price) || price <= 0) {
                 errors[ti][si] = std::nan("");
@@ -560,7 +556,7 @@ static ErrorTable compute_errors_via_solver(
 
             IVQuery q;
             q.spot = kSpot;
-            q.strike = kStrikes[si];
+            q.strike = strikes[si];
             q.maturity = kMaturities[ti];
             q.rate = kRate;
             q.dividend_yield = div_yield;
@@ -614,8 +610,8 @@ run_chebyshev_4d(const PriceGrid& prices) {
             std::snprintf(title, sizeof(title),
                           "Chebyshev 4D IV Error (bps) — σ=%.0f%%",
                           kVols[vi] * 100);
-            all_errors[vi] = compute_errors_via_solver(prices, *solver, vi);
-            print_heatmap(title, all_errors[vi]);
+            all_errors[vi] = compute_errors_via_solver(prices, kStrikes, *solver, vi);
+            print_heatmap(title, kStrikes, all_errors[vi]);
         }
     }
     return all_errors;
@@ -684,8 +680,8 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
         std::snprintf(title, sizeof(title),
                       "Chebyshev Adaptive IV Error (bps) — σ=%.0f%%",
                       kVols[vi] * 100);
-        all_errors[vi] = compute_errors_via_solver(prices, *solver, vi);
-        print_heatmap(title, all_errors[vi]);
+        all_errors[vi] = compute_errors_via_solver(prices, kStrikes, *solver, vi);
+        print_heatmap(title, kStrikes, all_errors[vi]);
     }
     return all_errors;
 }
@@ -830,7 +826,7 @@ run_chebyshev_dividends(const PriceGrid& prices) {
         std::snprintf(title, sizeof(title),
                       "Cheb Dividend IV Error (bps) — σ=%.0f%%",
                       kVols[vi] * 100);
-        print_heatmap(title, all_errors[vi]);
+        print_heatmap(title, kStrikes, all_errors[vi]);
     }
     return all_errors;
 }
@@ -930,11 +926,14 @@ int main(int argc, char* argv[]) {
 
     if (need_vanilla) {
         std::printf("--- Generating vanilla reference prices (batch chain solver)...\n");
-        vanilla_prices = generate_prices(/*with_dividends=*/false);
+        vanilla_prices = generate_prices(kStrikes, kNoDividends, kDivYield);
     }
     if (need_divs) {
         std::printf("--- Generating dividend reference prices (batch solver)...\n");
-        div_prices = generate_prices(/*with_dividends=*/true);
+        div_prices = generate_prices(
+            kStrikes,
+            [](double T) { return std::optional{make_div_schedule(T)}; },
+            kDivYield);
     }
 
     // Per-path error tables
@@ -958,8 +957,8 @@ int main(int argc, char* argv[]) {
             std::snprintf(title, sizeof(title),
                           "Interpolation IV Error (bps) — σ=%.0f%%, no dividends",
                           kVols[vi] * 100);
-            vanilla_errors[vi] = compute_errors_vanilla(vanilla_prices, vanilla_solver, vi);
-            print_heatmap(title, vanilla_errors[vi]);
+            vanilla_errors[vi] = compute_errors_vanilla(vanilla_prices, kStrikes, vanilla_solver, vi);
+            print_heatmap(title, kStrikes, vanilla_errors[vi]);
         }
     }
 
@@ -973,8 +972,8 @@ int main(int argc, char* argv[]) {
             std::snprintf(title, sizeof(title),
                           "Interpolation IV Error (bps) — σ=%.0f%%, quarterly $0.50 div",
                           kVols[vi] * 100);
-            div_errors[vi] = compute_errors_div(div_prices, div_solvers, vi);
-            print_heatmap(title, div_errors[vi]);
+            div_errors[vi] = compute_errors_div(div_prices, kStrikes, div_solvers, vi);
+            print_heatmap(title, kStrikes, div_errors[vi]);
         }
     }
 
@@ -997,17 +996,17 @@ int main(int argc, char* argv[]) {
         std::printf("================================================================\n");
 
         std::printf("--- Generating q=0 reference prices...\n");
-        q0_prices = generate_prices(/*with_dividends=*/false, /*div_yield=*/0.0);
+        q0_prices = generate_prices(kStrikes, kNoDividends, /*div_yield=*/0.0);
 
         std::printf("--- Building 4D B-spline (q=0, adaptive)...\n");
         auto bs4d_solver = build_bspline_q0();
         for (size_t vi = 0; vi < kNV; ++vi) {
-            q0_bs4d_errors[vi] = compute_errors_vanilla(q0_prices, bs4d_solver, vi, 0.0);
+            q0_bs4d_errors[vi] = compute_errors_vanilla(q0_prices, kStrikes, bs4d_solver, vi, 0.0);
             char title[128];
             std::snprintf(title, sizeof(title),
                           "4D B-spline (q=0) IV Error (bps) — σ=%.0f%%",
                           kVols[vi] * 100);
-            print_heatmap(title, q0_bs4d_errors[vi]);
+            print_heatmap(title, kStrikes, q0_bs4d_errors[vi]);
         }
 
         std::printf("\n--- Building dimensionless 3D B-spline (q=0)...\n");
@@ -1015,12 +1014,12 @@ int main(int argc, char* argv[]) {
         if (dim3d_bs.has_value()) {
             for (size_t vi = 0; vi < kNV; ++vi) {
                 q0_dim3d_bs_errors[vi] = compute_errors_vanilla(
-                    q0_prices, *dim3d_bs, vi, 0.0);
+                    q0_prices, kStrikes, *dim3d_bs, vi, 0.0);
                 char title[128];
                 std::snprintf(title, sizeof(title),
                               "Dim3D B-spline (q=0) IV Error (bps) — σ=%.0f%%",
                               kVols[vi] * 100);
-                print_heatmap(title, q0_dim3d_bs_errors[vi]);
+                print_heatmap(title, kStrikes, q0_dim3d_bs_errors[vi]);
             }
         } else {
             std::fprintf(stderr, "Dimensionless 3D B-spline build failed\n");
@@ -1031,12 +1030,12 @@ int main(int argc, char* argv[]) {
         if (dim3d_ch.has_value()) {
             for (size_t vi = 0; vi < kNV; ++vi) {
                 q0_dim3d_ch_errors[vi] = compute_errors_vanilla(
-                    q0_prices, *dim3d_ch, vi, 0.0);
+                    q0_prices, kStrikes, *dim3d_ch, vi, 0.0);
                 char title[128];
                 std::snprintf(title, sizeof(title),
                               "Dim3D Chebyshev (q=0) IV Error (bps) — σ=%.0f%%",
                               kVols[vi] * 100);
-                print_heatmap(title, q0_dim3d_ch_errors[vi]);
+                print_heatmap(title, kStrikes, q0_dim3d_ch_errors[vi]);
             }
         } else {
             std::fprintf(stderr, "Dimensionless 3D Chebyshev build failed\n");
@@ -1050,7 +1049,7 @@ int main(int argc, char* argv[]) {
         std::printf("================================================================\n");
 
         for (size_t vi = 0; vi < kNV; ++vi) {
-            std::vector<AlgoErrors> vol_algos;
+            std::vector<AlgoErrorsN<kNS>> vol_algos;
             if (run_all || path == "bspline")
                 vol_algos.push_back({"B-spline", &vanilla_errors[vi]});
             if (run_all || path == "chebyshev") {
@@ -1058,7 +1057,7 @@ int main(int argc, char* argv[]) {
                 vol_algos.push_back({"Cheb(adapt)", &cheb_adaptive_errors[vi]});
             }
             if (!vol_algos.empty())
-                print_tvk_comparison(vanilla_prices, vi, vol_algos);
+                print_tvk_comparison<kNS>(vanilla_prices, kStrikes, vi, vol_algos);
         }
     }
 
@@ -1069,11 +1068,11 @@ int main(int argc, char* argv[]) {
         std::printf("================================================================\n");
 
         for (size_t vi = 0; vi < kNV; ++vi) {
-            std::vector<AlgoErrors> vol_algos;
+            std::vector<AlgoErrorsN<kNS>> vol_algos;
             vol_algos.push_back({"BS-4D(q=0)", &q0_bs4d_errors[vi]});
             vol_algos.push_back({"Dim3D-BS", &q0_dim3d_bs_errors[vi]});
             vol_algos.push_back({"Dim3D-Ch", &q0_dim3d_ch_errors[vi]});
-            print_tvk_comparison(q0_prices, vi, vol_algos);
+            print_tvk_comparison<kNS>(q0_prices, kStrikes, vi, vol_algos);
         }
     }
 
@@ -1083,13 +1082,13 @@ int main(int argc, char* argv[]) {
         std::printf("================================================================\n");
 
         for (size_t vi = 0; vi < kNV; ++vi) {
-            std::vector<AlgoErrors> vol_algos;
+            std::vector<AlgoErrorsN<kNS>> vol_algos;
             if (run_all || path == "dividends") {
                 vol_algos.push_back({"B-spline(div)", &div_errors[vi]});
                 vol_algos.push_back({"Cheb(div)", &cheb_div_errors[vi]});
             }
             if (!vol_algos.empty())
-                print_tvk_comparison(div_prices, vi, vol_algos);
+                print_tvk_comparison<kNS>(div_prices, kStrikes, vi, vol_algos);
         }
     }
 
