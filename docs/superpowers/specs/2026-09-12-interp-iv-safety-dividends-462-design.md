@@ -344,9 +344,9 @@ a few minutes, not a promise.
   builds the B-spline per-maturity configuration of D1 at all eight
   maturities and asserts viability with `holdout_points_measured > 0`; no
   accuracy number is pinned, and no Chebyshev case is added (minutes per
-  build). All three review rounds recommended it; this spec now recommends
-  accepting it. Until the user decides, the default remains the user's Q4
-  choice: no new test.
+  build). All three review rounds recommended it. **Decided at the go/no-go
+  (user, 2026-09-12): accepted.** The case is added to the existing
+  `iv_solver_factory_slow_test` target (plan Task 6).
 
 ## 5. Acceptance criteria
 
@@ -423,8 +423,9 @@ test on the benchmark's exact config; (iii) a shared config helper linked by
 both. **Chosen: (i).** A second near-identical fixture adds drift of its own;
 a shared library target for one fixture is not worth a BUILD target.
 Design review rounds 1 and 2 both disagreed: the pins cover a different
-schedule and one maturity. Carried to the go/no-go as D6's open item, with
-the spec now recommending the B-spline viability case.
+schedule and one maturity. Carried to the go/no-go, where the user
+**revised the choice to (ii)** in the form D6 describes: one nightly
+viability case on the benchmark's exact configuration, no accuracy pin.
 
 Q5. **The Chebyshev wide-band regression found during triage.** Options:
 (i) file a new issue and keep #462 as designed; (ii) fold the fix into #462;

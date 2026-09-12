@@ -1052,9 +1052,7 @@ API guide's reference-strike section as a conditional baseline for
 
 ---
 
-### Task 6 (conditional on the user's go/no-go answer to D6): nightly viability case
-
-Skip this task if the user keeps decision Q4 (no new test).
+### Task 6: nightly viability case (D6, accepted by the user at the go/no-go)
 
 **Files:**
 - Modify: `tests/iv_solver_factory_slow_test.cc` (after `DocumentedBSplineConfigReportsAccuracyAndSolves`)
