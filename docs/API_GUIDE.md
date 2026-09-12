@@ -795,8 +795,10 @@ quantity with every one of those references re-solved instead at
 `make_grid_accuracy(GridAccuracyProfile::Ultra)`. `ref-sens` is the
 absolute difference between the two and is an observed sensitivity, not a
 bound. Status compares `blend max` with 10 bps and is `inconclusive` when
-the gap to 10 bps is within `ref-sens`, and `incomplete` when eligible
-mid-anchors fall below 90% of queries in the window.
+the gap to 10 bps is within `ref-sens` or when any eligible mid-anchor lacks
+a usable Ultra reference (the two maxima would then describe different
+query sets), and `incomplete` when eligible mid-anchors fall below 90% of
+queries in the window.
 
 | Δ (Δ/spot) | T | σ | blend max | blend max (Ultra) | blend mean (signed) | blend rms | ref-sens | status |
 |---|---|---|---|---|---|---|---|---|

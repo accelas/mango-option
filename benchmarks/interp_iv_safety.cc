@@ -1237,7 +1237,8 @@ static void print_legend() {
     std::printf("    ref-sens  |blendmaxU - blendmax|: an observed reference sensitivity,\n");
     std::printf("              not a discretization-error bound\n");
     std::printf("    status    pass/fail = mid-anchor blendmax vs %.0f bps; inconclusive = the gap to\n", kQualifyBps);
-    std::printf("              %.0f bps is within ref-sens; incomplete = eligible mid-anchors < 90%% of q\n", kQualifyBps);
+    std::printf("              %.0f bps is within ref-sens, or any eligible mid-anchor lacks a usable\n", kQualifyBps);
+    std::printf("              Ultra reference (ref-sens-skip > 0); incomplete = eligible mid-anchors < 90%% of q\n");
     std::printf("    n/a       an empty population\n");
     std::printf("  exclusions (printed under any row that has them): ref-fail = a reference solve\n");
     std::printf("    failed or returned a non-finite value; low-tv = TV/K below the threshold;\n");
@@ -1272,7 +1273,12 @@ static void print_row(const char* delta_label, const char* t_label, const RowRes
     fmt(b5, 16, m.inv_n ? m.inv_max : std::nan(""));
     fmt(b6, 16, a.surf_n ? a.surf_max : std::nan("")); fmt(b7, 16, a.surf_rms());
     fmt(b8, 16, a.inv_n ? a.inv_max : std::nan(""));
-    const double sens = (m.fine_n && m.elig) ? std::abs(m.blend_max_fine - m.blend_max) : std::nan("");
+    // The sensitivity is only meaningful over the identical population: if
+    // any eligible mid-anchor lacked a usable Ultra reference (fine_skip > 0)
+    // the two maxima describe different query sets, so the row cannot be
+    // classified and is reported inconclusive.
+    const double sens = (m.elig && m.fine_n == m.elig)
+        ? std::abs(m.blend_max_fine - m.blend_max) : std::nan("");
     fmt(b9, 16, sens);
     const char* status = !m.complete() ? "incomplete"
         : (std::isnan(sens) || std::abs(m.blend_max - kQualifyBps) <= sens) ? "inconclusive"
