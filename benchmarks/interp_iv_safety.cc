@@ -1027,10 +1027,23 @@ static std::vector<Query> queries_for(const std::vector<double>& krefs) {
     return qs;
 }
 
+/// The blend policy applied to exact prices: query each bracketing K_ref
+/// surface at (spot, K_ref), normalize by K_ref, interpolate linearly in
+/// strike, multiply by strike. `w` is 0 at an anchor, where L == H == K and
+/// the expression collapses to that strike's own reference price.
+static double blend_control(double K, double L, double H, double w,
+                            double price_L, double price_H) {
+    return K * ((1.0 - w) * price_L / L + w * price_H / H);
+}
+
 /// Accumulator for one (delta, T, sigma, anchor/mid) population.
 struct Stat {
-    size_t q = 0, elig = 0, ref_fail = 0, low_vega = 0, low_tv = 0, surf_nonfinite = 0;
+    size_t q = 0, elig = 0, ref_fail = 0, low_tv = 0, surf_nonfinite = 0;
+    // The sweep's vega test is signed, which is stricter than make_iv_score_fn's
+    // |vega| test only for negative FD vega; neg_vega counts that difference.
+    size_t low_vega = 0, neg_vega = 0;
     double blend_max = 0, blend_sq = 0;   // |B_fdm - P_fdm| / vega, bps
+    double blend_signed_sum = 0;          // signed (B_fdm - P_fdm) / vega, bps
     double surf_max = 0, surf_sq = 0;     // |P_hat - B_fdm| / vega, bps
     size_t surf_n = 0;
     size_t inv_n = 0, inv_fail = 0; double inv_max = 0;
@@ -1040,6 +1053,8 @@ struct Stat {
     double blend_max_fine = 0; size_t fine_n = 0, fine_skip = 0;
     bool complete() const { return elig >= 1 && 100 * elig >= 90 * q; }
     double blend_rms() const { return elig ? std::sqrt(blend_sq / elig) : std::nan(""); }
+    double blend_mean() const { return elig ? blend_signed_sum / static_cast<double>(elig)
+                                            : std::nan(""); }
     double surf_rms()  const { return surf_n ? std::sqrt(surf_sq / surf_n) : std::nan(""); }
 };
 
@@ -1097,15 +1112,18 @@ static RowResult run_row(double delta, double T, double sigma, size_t n_m, int t
         if (!rk.ok || !rl.ok || !rh.ok) { st.ref_fail++; continue; }
         const double intrinsic = intrinsic_value(kSpot, qy.K, OptionType::PUT);
         if ((rk.price - intrinsic) / qy.K < kTVKThreshold) { st.low_tv++; continue; }
+        if (rk.vega < 0.0) { st.neg_vega++; continue; }
         if (rk.vega < kVegaFloor) { st.low_vega++; continue; }
         st.elig++;
 
         // Anchors take w = 0 against their own reference: no (H - L) division.
         const double w = qy.anchor ? 0.0 : (qy.K - qy.L) / (qy.H - qy.L);
-        const double b_fdm = qy.K * ((1.0 - w) * rl.price / qy.L + w * rh.price / qy.H);
-        const double blend_bps = std::abs(b_fdm - rk.price) / rk.vega * 1e4;
+        const double b_fdm = blend_control(qy.K, qy.L, qy.H, w, rl.price, rh.price);
+        const double blend_signed_bps = (b_fdm - rk.price) / rk.vega * 1e4;
+        const double blend_bps = std::abs(blend_signed_bps);
         st.blend_max = std::max(st.blend_max, blend_bps);
         st.blend_sq += blend_bps * blend_bps;
+        st.blend_signed_sum += blend_signed_bps;
 
         const double p_hat = surf.price(kSpot, qy.K, T, sigma, kRate);
         if (!std::isfinite(p_hat)) { st.surf_nonfinite++; }
@@ -1128,7 +1146,7 @@ static RowResult run_row(double delta, double T, double sigma, size_t n_m, int t
             Ref fl = cached_ref(cache, qy.L, T, sigma, divs, true);
             Ref fh = cached_ref(cache, qy.H, T, sigma, divs, true);
             if (fk.ok && fl.ok && fh.ok && fk.vega >= kVegaFloor) {
-                const double b_fine = qy.K * ((1.0 - w) * fl.price / qy.L + w * fh.price / qy.H);
+                const double b_fine = blend_control(qy.K, qy.L, qy.H, w, fl.price, fh.price);
                 st.blend_max_fine = std::max(st.blend_max_fine, std::abs(b_fine - fk.price) / fk.vega * 1e4);
                 st.fine_n++;
             } else {
@@ -1149,38 +1167,51 @@ static void print_legend() {
                 kTVKThreshold, kVegaFloor);
     std::printf("    blendmax  max |B_FDM - P_FDM| / vega_FDM in bps over the eligible queries,\n");
     std::printf("              B_FDM = K[(1-w)P_FDM(L)/L + w P_FDM(H)/H]: the blend policy's own error\n");
-    std::printf("    blendrms  rms of the same quantity over the same population\n");
+    std::printf("    blendmaxU the same maximum with every reference re-solved at\n");
+    std::printf("              GridAccuracyProfile::Ultra, over the same mid-anchor population\n");
+    std::printf("    blendmean signed mean of (B_FDM - P_FDM) / vega_FDM in bps over that population:\n");
+    std::printf("              blendmax and blendrms are absolute, so this is where the sign shows\n");
+    std::printf("    blendrms  rms of |B_FDM - P_FDM| / vega_FDM over the same population\n");
     std::printf("    surfmax   max |P_hat - B_FDM| / vega_FDM in bps: the surface's own error,\n");
     std::printf("    surfrms   and its rms; population = eligible queries with a finite P_hat\n");
     std::printf("    inv n     inversions where both IV_interp and IV_FDM converged\n");
     std::printf("    inv max   max |IV_interp - IV_FDM| in bps over that population\n");
     std::printf("    anchors   blendmax/blendrms are identically zero at an anchor (w = 0 against\n");
     std::printf("              its own reference), so only the surface and inversion columns print\n");
-    std::printf("    ref-sens  |blendmax(Ultra references) - blendmax| over the same mid-anchor\n");
-    std::printf("              population: an observed sensitivity, not a discretization bound\n");
+    std::printf("    ref-sens  |blendmaxU - blendmax|: an observed reference sensitivity,\n");
+    std::printf("              not a discretization-error bound\n");
     std::printf("    status    pass/fail = mid-anchor blendmax vs %.0f bps; inconclusive = the gap to\n", kQualifyBps);
     std::printf("              %.0f bps is within ref-sens; incomplete = eligible mid-anchors < 90%% of q\n", kQualifyBps);
     std::printf("    n/a       an empty population\n");
+    std::printf("  exclusions (printed under any row that has them): ref-fail = a reference solve\n");
+    std::printf("    failed or returned a non-finite value; low-tv = TV/K below the threshold;\n");
+    std::printf("    low-vega = 0 <= vega < floor; neg-vega = vega < 0 (the sweep's signed test is\n");
+    std::printf("    stricter than make_iv_score_fn's |vega| test only here); surf-nonfinite = the\n");
+    std::printf("    surface returned a non-finite price; inv-fail = an inversion did not converge;\n");
+    std::printf("    ref-sens-skip = an eligible mid-anchor whose Ultra references were unusable.\n");
 }
 
 static void print_header() {
-    std::printf("  %15s%s   %s\n", "", "----------------------------- mid-anchors -----------------------------", "-------------------- anchors --------------------");
-    std::printf("  %6s %5s | %4s %5s %10s %10s %10s %10s %5s %10s"
+    std::printf("  %15s%s   %s\n", "", "---------------------------------------- mid-anchors ----------------------------------------", "-------------------- anchors --------------------");
+    std::printf("  %6s %5s | %4s %5s %10s %10s %10s %10s %10s %10s %5s %10s"
                 " | %4s %5s %10s %10s %5s %10s | %10s %-12s %7s\n",
-                "\u0394", "T", "q", "elig", "blendmax", "blendrms", "surfmax", "surfrms",
-                "inv n", "inv max",
+                "\u0394", "T", "q", "elig", "blendmax", "blendmaxU", "blendmean", "blendrms",
+                "surfmax", "surfrms", "inv n", "inv max",
                 "q", "elig", "surfmax", "surfrms", "inv n", "inv max",
                 "ref-sens", "status", "time");
 }
 
 static void print_row(const char* delta_label, const char* t_label, const RowResult& r) {
-    char b1[16], b2[16], b3[16], b4[16], b5[16], b6[16], b7[16], b8[16], b9[16];
+    char b1[16], b1u[16], b1m[16], b2[16], b3[16], b4[16], b5[16], b6[16], b7[16], b8[16], b9[16];
     if (!r.built) {
         std::printf("  %6s %5s | (no surface)\n", delta_label, t_label);
         return;
     }
     const Stat& m = r.mid; const Stat& a = r.anchor;
-    fmt(b1, 16, m.elig ? m.blend_max : std::nan("")); fmt(b2, 16, m.blend_rms());
+    fmt(b1, 16, m.elig ? m.blend_max : std::nan(""));
+    fmt(b1u, 16, m.fine_n ? m.blend_max_fine : std::nan(""));
+    fmt(b1m, 16, m.blend_mean());
+    fmt(b2, 16, m.blend_rms());
     fmt(b3, 16, m.surf_n ? m.surf_max : std::nan("")); fmt(b4, 16, m.surf_rms());
     fmt(b5, 16, m.inv_n ? m.inv_max : std::nan(""));
     fmt(b6, 16, a.surf_n ? a.surf_max : std::nan("")); fmt(b7, 16, a.surf_rms());
@@ -1190,17 +1221,20 @@ static void print_row(const char* delta_label, const char* t_label, const RowRes
     const char* status = !m.complete() ? "incomplete"
         : (std::isnan(sens) || std::abs(m.blend_max - kQualifyBps) <= sens) ? "inconclusive"
         : (m.blend_max <= kQualifyBps ? "pass" : "fail");
-    std::printf("  %6s %5s | %4zu %5zu %s %s %s %s %5zu %s"
+    std::printf("  %6s %5s | %4zu %5zu %s %s %s %s %s %s %5zu %s"
                 " | %4zu %5zu %s %s %5zu %s | %s %-12s %6.0fs\n",
-                delta_label, t_label, m.q, m.elig, b1, b2, b3, b4, m.inv_n, b5,
+                delta_label, t_label, m.q, m.elig, b1, b1u, b1m, b2, b3, b4, m.inv_n, b5,
                 a.q, a.elig, b6, b7, a.inv_n, b8, b9, status, r.seconds);
-    if (m.ref_fail || m.low_vega || m.low_tv || m.surf_nonfinite || m.inv_fail || m.fine_skip ||
-        a.ref_fail || a.low_vega || a.low_tv || a.surf_nonfinite || a.inv_fail)
-        std::printf("         excluded: mid ref-fail=%zu low-tv=%zu low-vega=%zu surf-nonfinite=%zu"
-                    " inv-fail=%zu ref-sens-skip=%zu | anchor ref-fail=%zu low-tv=%zu low-vega=%zu"
+    if (m.ref_fail || m.low_vega || m.neg_vega || m.low_tv || m.surf_nonfinite || m.inv_fail ||
+        m.fine_skip ||
+        a.ref_fail || a.low_vega || a.neg_vega || a.low_tv || a.surf_nonfinite || a.inv_fail)
+        std::printf("         excluded: mid ref-fail=%zu low-tv=%zu low-vega=%zu neg-vega=%zu"
+                    " surf-nonfinite=%zu inv-fail=%zu ref-sens-skip=%zu"
+                    " | anchor ref-fail=%zu low-tv=%zu low-vega=%zu neg-vega=%zu"
                     " surf-nonfinite=%zu inv-fail=%zu\n",
-                    m.ref_fail, m.low_tv, m.low_vega, m.surf_nonfinite, m.inv_fail, m.fine_skip,
-                    a.ref_fail, a.low_tv, a.low_vega, a.surf_nonfinite, a.inv_fail);
+                    m.ref_fail, m.low_tv, m.low_vega, m.neg_vega, m.surf_nonfinite, m.inv_fail,
+                    m.fine_skip,
+                    a.ref_fail, a.low_tv, a.low_vega, a.neg_vega, a.surf_nonfinite, a.inv_fail);
 }
 
 }  // namespace kref
