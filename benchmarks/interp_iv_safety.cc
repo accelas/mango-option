@@ -93,6 +93,12 @@ static const char* code_name(PriceTableErrorCode c) {
     return "?";  // unreachable; -Wswitch flags a new enumerator above
 }
 
+// Both helpers print to stderr and stdout: stderr surfaces the failure to a
+// terminal immediately (even if stdout is buffered or the run is piped
+// through `tee`), while stdout keeps it inline with the rest of the run's
+// output so a redirected transcript (e.g. `... > log.txt 2>&1`) still shows
+// the failure next to the table it broke, instead of only in a separate
+// stderr capture that may not be kept.
 static void report_build_failure(const char* what, const PriceTableError& e) {
     g_build_failed = true;
     std::fprintf(stderr, "  [FAILED] %s: %s (axis=%zu count=%zu)\n",
@@ -232,11 +238,20 @@ static const ScheduleFn kRolledFrom1y = [](double T) -> std::optional<std::vecto
     return rolled_dividends(quarterly_div_schedule(1.0), 1.0, T);
 };
 
-static std::array<std::string, kNT> dividend_count_labels(const ScheduleFn& schedule) {
-    std::array<std::string, kNT> out;
+/// Per-row dividend-count labels alongside a per-row coverage flag, so
+/// print_heatmap can exclude schedule-uncovered rows from its aggregate
+/// (Minor 3) without string-matching the "(not covered)" text.
+struct DividendRowLabels {
+    std::array<std::string, kNT> text;
+    std::array<bool, kNT> covered;
+};
+
+static DividendRowLabels dividend_count_labels(const ScheduleFn& schedule) {
+    DividendRowLabels out{};
     for (size_t ti = 0; ti < kNT; ++ti) {
         auto d = schedule(kMaturities[ti]);
-        out[ti] = d ? "(" + std::to_string(d->size()) + " div)" : "(not covered)";
+        out.covered[ti] = d.has_value();
+        out.text[ti] = d ? "(" + std::to_string(d->size()) + " div)" : "(not covered)";
     }
     return out;
 }
@@ -311,7 +326,12 @@ static std::vector<std::pair<size_t, BSplineDivSolver>> build_div_solvers() {
                     result->total_pde_solves, result->used_retry ? " (retry)" : "");
 
         // Published bounds are the builder's measured sample domain (spec D2
-        // of #454), not the input arrays.
+        // of #454), not the input arrays. In particular sample_bounds.tau_max
+        // == mat here: expand_segmented_domain (adaptive_refinement.cpp)
+        // clamps max_tau to the requested maturity, and the solver's own
+        // schedule validation rolls query dividends from tau_max, so this
+        // wrapper's roll point always lines up with the contract it was
+        // built for.
         auto wrapper = BSplineMultiKRefSurface(
             std::move(result->surface), result->sample_bounds, OptionType::PUT, kDivYield);
         auto solver = BSplineDivSolver::create(std::move(wrapper), {}, divs);
@@ -355,73 +375,69 @@ static double solve_fdm_iv_div(double strike, double maturity,
 // Step 4: Compute error grids
 // ============================================================================
 
-template <size_t NS>
-static ErrorTableN<NS> compute_errors_vanilla(const PriceGridN<NS>& prices,
-                                              const std::array<double, NS>& strikes,
-                                              const AnyInterpIVSolver& interp_solver,
-                                              size_t vol_idx,
-                                              double div_yield = kDivYield) {
-    ErrorTableN<NS> errors{};
-    IVSolverConfig fdm_config;
-    IVSolver fdm_solver(fdm_config);
+/// Per-table failure-reason counts (spec D3 bullet 4). A NaN cell in a
+/// dividends error table can hide any of three distinct causes — a bad
+/// reference price/IV, the interpolated solver rejecting the query, or a
+/// row no schedule ever covers — and printing "0.0" or a bare "---" makes
+/// them indistinguishable. `attempted` counts cells in covered rows only;
+/// `succeeded + ref_fail + inv_fail == attempted`; `uncovered` counts cells
+/// in rows the schedule (or, for the B-spline path, the per-maturity
+/// builder) never produced at all, so `attempted + uncovered` is the full
+/// table population.
+struct ErrorCounts {
+    size_t attempted = 0, succeeded = 0, ref_fail = 0, inv_fail = 0, uncovered = 0;
+    std::map<IVErrorCode, size_t> inv_fail_codes;
+};
 
-    // Build all IVQueries for batch FDM solving
-    std::vector<IVQuery> queries;
-    std::vector<std::pair<size_t, size_t>> query_map;  // (mat_idx, strike_idx)
-    queries.reserve(kNT * NS);
-
-    for (size_t ti = 0; ti < kNT; ++ti) {
-        for (size_t si = 0; si < NS; ++si) {
-            double price = prices[vol_idx][ti][si];
-            if (std::isnan(price) || price <= 0) {
-                errors[ti][si] = std::nan("");
-                continue;
-            }
-
-            IVQuery q;
-            q.spot = kSpot;
-            q.strike = strikes[si];
-            q.maturity = kMaturities[ti];
-            q.rate = kRate;
-            q.dividend_yield = div_yield;
-            q.option_type = OptionType::PUT;
-            q.market_price = price;
-            queries.push_back(q);
-            query_map.emplace_back(ti, si);
-        }
+// Local mirror of mango::iv_error_message() (src/support/error_types.hpp),
+// using a return-per-case switch rather than a switch-assigned local: GCC's
+// -Wmaybe-uninitialized cannot prove the header's version is fully
+// initialized once inlined into a std::map iteration under -O3, and that
+// header must not change here. Falls back to the integer code, mirroring
+// this file's own code_name() above, if a mapping is ever missing.
+static const char* iv_error_code_name(IVErrorCode code) {
+    switch (code) {
+        case IVErrorCode::NegativeSpot:             return "NegativeSpot";
+        case IVErrorCode::NegativeStrike:           return "NegativeStrike";
+        case IVErrorCode::NegativeMaturity:         return "NegativeMaturity";
+        case IVErrorCode::NegativeMarketPrice:      return "NegativeMarketPrice";
+        case IVErrorCode::ArbitrageViolation:       return "ArbitrageViolation";
+        case IVErrorCode::InvalidGridConfig:        return "InvalidGridConfig";
+        case IVErrorCode::OptionTypeMismatch:       return "OptionTypeMismatch";
+        case IVErrorCode::DividendYieldMismatch:    return "DividendYieldMismatch";
+        case IVErrorCode::DiscreteDividendMismatch: return "DiscreteDividendMismatch";
+        case IVErrorCode::MaxIterationsExceeded:    return "MaxIterationsExceeded";
+        case IVErrorCode::BracketingFailed:         return "BracketingFailed";
+        case IVErrorCode::NumericalInstability:     return "NumericalInstability";
+        case IVErrorCode::VegaTooSmall:             return "VegaTooSmall";
+        case IVErrorCode::PDESolveFailed:           return "PDESolveFailed";
+        case IVErrorCode::MultipleRoots:            return "MultipleRoots";
     }
+    return nullptr;  // unreachable; -Wswitch flags a new enumerator above
+}
 
-    // Batch FDM IV (parallelized via OpenMP)
-    auto fdm_results = fdm_solver.solve_batch(queries);
-
-    // Batch interpolated IV (parallelized via OpenMP)
-    auto interp_results = interp_solver.solve_batch(queries);
-
-    // Compute errors
-    for (size_t i = 0; i < queries.size(); ++i) {
-        auto [ti, si] = query_map[i];
-
-        if (!fdm_results.results[i].has_value() ||
-            !interp_results.results[i].has_value()) {
-            errors[ti][si] = std::nan("");
-            continue;
+static void print_error_counts(const ErrorCounts& c) {
+    std::printf("  counts: attempted=%zu succeeded=%zu ref-fail=%zu inv-fail=%zu uncovered=%zu\n",
+                c.attempted, c.succeeded, c.ref_fail, c.inv_fail, c.uncovered);
+    if (!c.inv_fail_codes.empty()) {
+        std::printf("  inv-fail by code:");
+        for (const auto& [code, n] : c.inv_fail_codes) {
+            const char* name = iv_error_code_name(code);
+            if (name) std::printf(" %s=%zu", name, n);
+            else      std::printf(" %d=%zu", static_cast<int>(code), n);
         }
-
-        double fdm_iv = fdm_results.results[i]->implied_vol;
-        double interp_iv = interp_results.results[i]->implied_vol;
-        errors[ti][si] = std::abs(interp_iv - fdm_iv) * 10000.0;
+        std::printf("\n");
     }
-
-    return errors;
 }
 
 template <size_t NS, typename Solver>
-static ErrorTableN<NS> compute_errors_div(
+static std::pair<ErrorTableN<NS>, ErrorCounts> compute_errors_div(
     const PriceGridN<NS>& prices,
     const std::array<double, NS>& strikes,
     const std::vector<std::pair<size_t, Solver>>& div_solvers,
     size_t vol_idx) {
     ErrorTableN<NS> errors{};
+    ErrorCounts counts;
 
     // Initialize all to NaN
     for (auto& row : errors)
@@ -436,7 +452,7 @@ static ErrorTableN<NS> compute_errors_div(
     }
 
     for (size_t ti = 0; ti < kNT; ++ti) {
-        if (solver_idx[ti] < 0) continue;  // no solver for this maturity
+        if (solver_idx[ti] < 0) { counts.uncovered += NS; continue; }  // no solver for this maturity
 
         double maturity = kMaturities[ti];
         auto divs = quarterly_div_schedule(maturity);
@@ -447,8 +463,9 @@ static ErrorTableN<NS> compute_errors_div(
         std::vector<size_t> strike_indices;
 
         for (size_t si = 0; si < NS; ++si) {
+            counts.attempted++;
             double price = prices[vol_idx][ti][si];
-            if (std::isnan(price) || price <= 0) continue;
+            if (std::isnan(price) || price <= 0) { counts.ref_fail++; continue; }
 
             IVQuery q;
             q.spot = kSpot;
@@ -469,21 +486,26 @@ static ErrorTableN<NS> compute_errors_div(
         for (size_t i = 0; i < queries.size(); ++i) {
             size_t si = strike_indices[i];
 
-            if (!interp_results.results[i].has_value()) continue;
+            if (!interp_results.results[i].has_value()) {
+                counts.inv_fail++;
+                counts.inv_fail_codes[interp_results.results[i].error().code]++;
+                continue;
+            }
 
             // FDM reference: manual Brent with dividends
             double fdm_iv = solve_fdm_iv_div(
                 strikes[si], maturity,
                 prices[vol_idx][ti][si], divs);
 
-            if (std::isnan(fdm_iv)) continue;
+            if (std::isnan(fdm_iv)) { counts.ref_fail++; continue; }
 
             double interp_iv = interp_results.results[i]->implied_vol;
             errors[ti][si] = std::abs(interp_iv - fdm_iv) * 10000.0;
+            counts.succeeded++;
         }
     }
 
-    return errors;
+    return {errors, counts};
 }
 
 // ============================================================================
@@ -493,7 +515,8 @@ static ErrorTableN<NS> compute_errors_div(
 template <size_t NS>
 static void print_heatmap(const char* title, const std::array<double, NS>& strikes,
                           const ErrorTableN<NS>& errors,
-                          const std::array<std::string, kNT>* row_suffix = nullptr) {
+                          const std::array<std::string, kNT>* row_suffix = nullptr,
+                          const std::array<bool, kNT>* row_covered = nullptr) {
     std::printf("\n=== %s ===\n", title);
     std::printf("          ");
     for (double K : strikes) {
@@ -504,12 +527,17 @@ static void print_heatmap(const char* title, const std::array<double, NS>& strik
     }
     std::printf("\n");
 
-    size_t n_total = 0, n_failed = 0;
+    // Rows the schedule never covers (row_covered[ti] == false) carry no
+    // data at all; counting their cells toward n_total/n_failed made an
+    // entirely absent row look like a row of failed solves (Minor 3).
+    size_t n_total = 0, n_failed = 0, n_uncovered = 0;
     double sum_sq = 0;
     for (size_t ti = 0; ti < kNT; ++ti) {
+        bool covered = !row_covered || (*row_covered)[ti];
         std::printf("  T=%s  ", kMatLabels[ti]);
         for (size_t si = 0; si < NS; ++si) {
             double e = errors[ti][si];
+            if (!covered) { std::printf("   ---  "); n_uncovered++; continue; }
             n_total++;
             if (std::isnan(e)) { std::printf("   ---  "); n_failed++; continue; }
             const char* marker = e > 200 ? "***" : e > 50 ? "**" : e > 10 ? "*" : "";
@@ -521,11 +549,15 @@ static void print_heatmap(const char* title, const std::array<double, NS>& strik
     }
     size_t n_valid = n_total - n_failed;
     std::printf("\n  Legend: * >10bps  ** >50bps  *** >200bps  --- solve failed\n");
+    char uncovered_suffix[48] = "";
+    if (n_uncovered > 0)
+        std::snprintf(uncovered_suffix, sizeof(uncovered_suffix),
+                      ", %zu cells not covered", n_uncovered);
     if (n_valid == 0)
-        std::printf("  Overall RMS: n/a (0/%zu succeeded)\n", n_total);
+        std::printf("  Overall RMS: n/a (0/%zu succeeded%s)\n", n_total, uncovered_suffix);
     else
-        std::printf("  Overall RMS: %.1f bps (%zu/%zu succeeded)\n",
-                    std::sqrt(sum_sq / n_valid), n_valid, n_total);
+        std::printf("  Overall RMS: %.1f bps (%zu/%zu succeeded%s)\n",
+                    std::sqrt(sum_sq / n_valid), n_valid, n_total, uncovered_suffix);
 }
 
 // ============================================================================
@@ -855,15 +887,17 @@ run_chebyshev_dividends(const PriceGridN<kNDS>& prices) {
             for (auto& v : row)
                 v = std::nan("");
 
+        ErrorCounts counts;
         for (size_t ti = 0; ti < kNT; ++ti) {
             double tau = kMaturities[ti];
             auto rolled = kRolledFrom1y(tau);
-            if (!rolled) continue;                       // T > 1: not covered
+            if (!rolled) { counts.uncovered += kNDS; continue; }   // T > 1: not covered
             for (size_t si = 0; si < kNDS; ++si) {
+                counts.attempted++;
                 double price = prices[vi][ti][si];       // from the rolled reference grid
-                if (std::isnan(price) || price <= 0) continue;
+                if (std::isnan(price) || price <= 0) { counts.ref_fail++; continue; }
                 double fdm_iv = solve_fdm_iv_div(kDivStrikes[si], tau, price, *rolled);
-                if (std::isnan(fdm_iv)) continue;
+                if (std::isnan(fdm_iv)) { counts.ref_fail++; continue; }
                 IVQuery q;
                 q.spot = kSpot;
                 q.strike = kDivStrikes[si];
@@ -874,8 +908,13 @@ run_chebyshev_dividends(const PriceGridN<kNDS>& prices) {
                 q.market_price = price;
                 q.discrete_dividends = *rolled;
                 auto iv_result = solver->solve(q);
-                if (!iv_result.has_value()) continue;
+                if (!iv_result.has_value()) {
+                    counts.inv_fail++;
+                    counts.inv_fail_codes[iv_result.error().code]++;
+                    continue;
+                }
                 errors[ti][si] = std::abs(iv_result->implied_vol - fdm_iv) * 10000.0;
+                counts.succeeded++;
             }
         }
 
@@ -884,7 +923,8 @@ run_chebyshev_dividends(const PriceGridN<kNDS>& prices) {
                       "Cheb Dividend IV Error (bps) — σ=%.0f%%, 1y calendar rolled",
                       kVols[vi] * 100);
         auto labels = dividend_count_labels(kRolledFrom1y);
-        print_heatmap(title, kDivStrikes, errors, &labels);
+        print_heatmap(title, kDivStrikes, errors, &labels.text, &labels.covered);
+        print_error_counts(counts);
     }
     return all_errors;
 }
@@ -1385,7 +1425,7 @@ int main(int argc, char* argv[]) {
             std::snprintf(title, sizeof(title),
                           "Interpolation IV Error (bps) — σ=%.0f%%, no dividends",
                           kVols[vi] * 100);
-            vanilla_errors[vi] = compute_errors_vanilla(vanilla_prices, kStrikes, vanilla_solver, vi);
+            vanilla_errors[vi] = compute_errors_via_solver(vanilla_prices, kStrikes, vanilla_solver, vi);
             print_heatmap(title, kStrikes, vanilla_errors[vi]);
         }
     }
@@ -1398,12 +1438,14 @@ int main(int argc, char* argv[]) {
             auto labels = dividend_count_labels(kQuarterlyPerMaturity);
             std::printf("\n--- Computing dividend IV errors...\n");
             for (size_t vi = 0; vi < kNV; ++vi) {
-                (*div_errors)[vi] = compute_errors_div(bs_div_prices, kDivStrikes, div_solvers, vi);
+                auto [errors, counts] = compute_errors_div(bs_div_prices, kDivStrikes, div_solvers, vi);
+                (*div_errors)[vi] = errors;
                 char title[160];
                 std::snprintf(title, sizeof(title),
                     "Interpolation IV Error (bps) — σ=%.0f%%, quarterly $0.50 calendar (B-spline per-maturity)",
                     kVols[vi] * 100);
-                print_heatmap(title, kDivStrikes, (*div_errors)[vi], &labels);
+                print_heatmap(title, kDivStrikes, (*div_errors)[vi], &labels.text, &labels.covered);
+                print_error_counts(counts);
             }
         }
         cheb_div_errors = run_chebyshev_dividends(cheb_div_prices);
@@ -1428,7 +1470,7 @@ int main(int argc, char* argv[]) {
         std::printf("--- Building 4D B-spline (q=0, adaptive)...\n");
         auto bs4d_solver = build_bspline_q0();
         for (size_t vi = 0; vi < kNV; ++vi) {
-            q0_bs4d_errors[vi] = compute_errors_vanilla(q0_prices, kStrikes, bs4d_solver, vi, 0.0);
+            q0_bs4d_errors[vi] = compute_errors_via_solver(q0_prices, kStrikes, bs4d_solver, vi, 0.0);
             char title[128];
             std::snprintf(title, sizeof(title),
                           "4D B-spline (q=0) IV Error (bps) — σ=%.0f%%",
@@ -1440,7 +1482,7 @@ int main(int argc, char* argv[]) {
         auto dim3d_bs = build_dimless_3d(DimensionlessBackend::Interpolant::BSpline);
         if (dim3d_bs.has_value()) {
             for (size_t vi = 0; vi < kNV; ++vi) {
-                q0_dim3d_bs_errors[vi] = compute_errors_vanilla(
+                q0_dim3d_bs_errors[vi] = compute_errors_via_solver(
                     q0_prices, kStrikes, *dim3d_bs, vi, 0.0);
                 char title[128];
                 std::snprintf(title, sizeof(title),
@@ -1456,7 +1498,7 @@ int main(int argc, char* argv[]) {
         auto dim3d_ch = build_dimless_3d(DimensionlessBackend::Interpolant::Chebyshev);
         if (dim3d_ch.has_value()) {
             for (size_t vi = 0; vi < kNV; ++vi) {
-                q0_dim3d_ch_errors[vi] = compute_errors_vanilla(
+                q0_dim3d_ch_errors[vi] = compute_errors_via_solver(
                     q0_prices, kStrikes, *dim3d_ch, vi, 0.0);
                 char title[128];
                 std::snprintf(title, sizeof(title),
