@@ -1074,3 +1074,64 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
 
 }  // namespace
 }  // namespace mango
+
+namespace mango {
+namespace {
+
+// ===========================================================================
+// Regression tests for issue #461: segmented probe aggregation
+// ===========================================================================
+
+// Regression: the segmented adaptive builder rebuilt its final grids as
+// `linspace` at the probes' maximum sizes, so every knot position the probe
+// loops (and the user's seed) had chosen was discarded.
+// Bug: `aggregate_max_sizes` carried `.size()` per axis, not the vectors.
+//
+// With `max_iter = 1` the probes return their seeds, and the seeds are the
+// user's knots.  The non-uniform vol seed {0.10, 0.15, 0.20, 0.30} cannot
+// survive `linspace(0.10, 0.30, 4)`, so its presence in the returned grid is
+// the signature of position-preserving aggregation.
+TEST(SegmentedKnotRetention, ReturnedGridKeepsSeedKnotPositions) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    };
+
+    auto m_domain = to_log_m({0.85, 0.9, 1.0, 1.1, 1.2});
+    std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
+    std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
+
+    auto result = build_adaptive_bspline_segmented(
+        params, seg_config, {m_domain, v_domain, r_domain});
+    ASSERT_TRUE(result.has_value())
+        << "code " << static_cast<int>(result.error().code);
+
+    const auto contains = [](const std::vector<double>& grid, double x) {
+        return std::ranges::any_of(grid, [x](double g) {
+            return std::abs(g - x) < 1e-12; });
+    };
+    for (double v : v_domain) {
+        EXPECT_TRUE(contains(result->grid.vol, v))
+            << "vol seed knot " << v << " was lost by aggregation";
+    }
+    for (double r : r_domain) {
+        EXPECT_TRUE(contains(result->grid.rate, r))
+            << "rate seed knot " << r << " was lost by aggregation";
+    }
+    for (double m : m_domain) {
+        EXPECT_TRUE(contains(result->grid.moneyness, m))
+            << "moneyness seed knot " << m << " was lost by aggregation";
+    }
+}
+
+}  // namespace
+}  // namespace mango

@@ -1341,3 +1341,148 @@ TEST(BSplineRefineFnTest, InsertionCrossesFormerCollocationCliff) {
         EXPECT_NEAR(spline->eval({mid}), polynomial(mid), 1e-9);
     }
 }
+
+// ===========================================================================
+// Regression tests for issue #461: segmented probe aggregation
+// ===========================================================================
+
+// Regression: aggregating probe results by grid *sizes* discarded the knot
+// positions each probe's refinement loop had chosen, so the final rebuild on
+// uniform grids at those sizes could measure worse than any probe.
+// Bug: `aggregate_max_sizes` kept only `.size()` per axis and the caller
+// re-spaced the axis with `linspace`.
+TEST(AggregateProbeGridsTest, UnionKeepsEveryProbePosition) {
+    mango::RefinementResult a;
+    a.moneyness = {-0.2, -0.15, -0.1, 0.0, 0.2};   // refined near the low end
+    a.vol = {0.1, 0.2, 0.3, 0.4};
+    a.rate = {0.01, 0.03, 0.05, 0.07};
+    a.tau_points = 5;
+    mango::RefinementResult b;
+    b.moneyness = {-0.2, 0.0, 0.1, 0.15, 0.2};     // refined near the high end
+    b.vol = {0.1, 0.15, 0.2, 0.3, 0.4};
+    b.rate = {0.01, 0.03, 0.05, 0.07};
+    b.tau_points = 7;
+
+    auto g = mango::aggregate_probe_grids({a, b}, /*max_points_per_dim=*/160);
+
+    const std::vector<double> want_m = {-0.2, -0.15, -0.1, 0.0, 0.1, 0.15, 0.2};
+    const std::vector<double> want_v = {0.1, 0.15, 0.2, 0.3, 0.4};
+    EXPECT_EQ(g.moneyness, want_m);
+    EXPECT_EQ(g.vol, want_v);
+    EXPECT_EQ(g.rate, a.rate);
+    EXPECT_EQ(g.tau_points, 7);
+}
+
+// Two probes that refined the same interval land midpoints that differ only
+// by floating-point noise; a near-duplicate knot pair would be rejected by the
+// collocation solver as an unsorted grid.
+TEST(AggregateProbeGridsTest, NearDuplicatePositionsCollapse) {
+    mango::RefinementResult a;
+    a.moneyness = {0.0, 0.25, 0.5, 1.0};
+    a.vol = a.rate = {0.1, 0.2, 0.3, 0.4};
+    mango::RefinementResult b = a;
+    b.moneyness[1] = 0.25 + 1e-14;
+
+    auto g = mango::aggregate_probe_grids({a, b}, 160);
+
+    ASSERT_EQ(g.moneyness.size(), 4u);
+    for (size_t i = 1; i < g.moneyness.size(); ++i) {
+        EXPECT_GT(g.moneyness[i] - g.moneyness[i - 1], 1e-9);
+    }
+}
+
+// Regression: collapsing a near-duplicate pair can leave an axis below the
+// cubic B-spline minimum, and the final segmented build then fails with
+// InsufficientGridPoints before its retry.  The merged axis must be
+// replenished with midpoints, not handed over short.
+// Bug: `merge_axis` deduplicated without restoring the four-point minimum.
+TEST(AggregateProbeGridsTest, NearDuplicateCollapseReplenishesCubicMinimum) {
+    mango::RefinementResult a;
+    a.moneyness = a.vol = {0.1, 0.2, 0.3, 0.4};
+    a.rate = {0.01, 0.03, 0.03 + 1e-13, 0.07};
+
+    auto g = mango::aggregate_probe_grids({a}, 160);
+
+    ASSERT_GE(g.rate.size(), 4u);
+    for (size_t i = 1; i < g.rate.size(); ++i) {
+        EXPECT_GT(g.rate[i] - g.rate[i - 1], 1e-9);
+    }
+    EXPECT_DOUBLE_EQ(g.rate.front(), 0.01);
+    EXPECT_DOUBLE_EQ(g.rate.back(), 0.07);
+    EXPECT_TRUE(std::ranges::find(g.rate, 0.03) != g.rate.end());
+}
+
+// Regression: an interior knot within the merge tolerance of the upper
+// endpoint won the ascending dedupe pass and the endpoint itself was dropped,
+// narrowing the fitted domain below the published sample bounds.
+// Bug: `merge_axis` kept the first member of a cluster, not the endpoint.
+TEST(AggregateProbeGridsTest, UpperEndpointSurvivesNearDuplicateMerge) {
+    mango::RefinementResult a;
+    a.moneyness = a.vol = {0.1, 0.2, 0.3, 0.4};
+    a.rate = {0.01, 0.03, 0.05, 0.07 - 1e-13, 0.07};
+
+    auto g = mango::aggregate_probe_grids({a}, 160);
+
+    ASSERT_EQ(g.rate.size(), 4u);
+    EXPECT_DOUBLE_EQ(g.rate.back(), 0.07);
+}
+
+// The union of three probes can exceed `max_points_per_dim`; the ceiling is
+// honored by dropping the most crowded interior positions, never an endpoint,
+// and never by re-spacing the survivors.
+TEST(AggregateProbeGridsTest, ThinsUnionToCapKeepingEndpoints) {
+    mango::RefinementResult a;
+    a.moneyness = {0.0, 0.1, 0.11, 0.12, 0.5, 0.9, 1.0};
+    a.vol = a.rate = {0.1, 0.2, 0.3, 0.4};
+
+    auto g = mango::aggregate_probe_grids({a}, /*max_points_per_dim=*/5);
+
+    ASSERT_EQ(g.moneyness.size(), 5u);
+    EXPECT_DOUBLE_EQ(g.moneyness.front(), 0.0);
+    EXPECT_DOUBLE_EQ(g.moneyness.back(), 1.0);
+    for (double x : g.moneyness) {
+        EXPECT_TRUE(std::ranges::find(a.moneyness, x) != a.moneyness.end())
+            << "thinning must keep original positions, got " << x;
+    }
+    // The crowded cluster {0.1, 0.11, 0.12} loses two of its three points.
+    EXPECT_TRUE(std::ranges::find(g.moneyness, 0.5) != g.moneyness.end());
+    EXPECT_TRUE(std::ranges::find(g.moneyness, 0.9) != g.moneyness.end());
+}
+
+// Regression: a `max_points_per_dim` below four thinned the merged axis under
+// the cubic B-spline minimum, so the final segmented build failed with
+// InsufficientGridPoints where the sizes-only path had kept the seed count.
+// Bug: cap thinning did not floor at four points.
+TEST(AggregateProbeGridsTest, CapBelowCubicMinimumKeepsFourPoints) {
+    mango::RefinementResult a;
+    a.moneyness = {0.0, 0.2, 0.4, 0.6, 0.8, 1.0};
+    a.vol = a.rate = {0.1, 0.2, 0.3, 0.4};
+
+    for (size_t cap : {size_t{0}, size_t{2}, size_t{3}}) {
+        auto g = mango::aggregate_probe_grids({a}, cap);
+        ASSERT_EQ(g.moneyness.size(), 4u) << "cap " << cap;
+        EXPECT_DOUBLE_EQ(g.moneyness.front(), 0.0);
+        EXPECT_DOUBLE_EQ(g.moneyness.back(), 1.0);
+        EXPECT_EQ(g.vol.size(), 4u);
+        EXPECT_EQ(g.rate.size(), 4u);
+    }
+}
+
+// The final retry bumps the aggregated grids by inserting midpoints into the
+// largest gaps, so the retained positions survive the bump.
+TEST(InsertLargestGapMidpointsTest, FillsLargestGapsAndHonorsCap) {
+    // Dyadic values keep every midpoint and gap comparison exact.
+    std::vector<double> grid = {0.0, 0.25, 0.5, 2.0};
+
+    auto one = mango::insert_largest_gap_midpoints(grid, /*count=*/1, /*cap=*/160);
+    const std::vector<double> want_one = {0.0, 0.25, 0.5, 1.25, 2.0};
+    EXPECT_EQ(one, want_one);
+
+    // Second insertion: the two equal gaps tie, the lower one wins.
+    auto two = mango::insert_largest_gap_midpoints(grid, 2, 160);
+    const std::vector<double> want_two = {0.0, 0.25, 0.5, 0.875, 1.25, 2.0};
+    EXPECT_EQ(two, want_two);
+
+    auto capped = mango::insert_largest_gap_midpoints(grid, 2, /*cap=*/4);
+    EXPECT_EQ(capped, grid);
+}

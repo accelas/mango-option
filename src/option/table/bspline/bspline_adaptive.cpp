@@ -755,8 +755,9 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         probe_results.push_back(std::move(*sizes));
     }
 
-    // 3. Aggregate max grid sizes and convergence stats across probes
-    auto gsz = aggregate_max_sizes(probe_results);
+    // 3. Merge the probes' refined knot positions (issue #461) and gather
+    //    convergence stats across probes
+    auto agg = aggregate_probe_grids(probe_results, params.max_points_per_dim);
 
     // Worst-case convergence stats across probes
     std::vector<IterationStats> all_iterations;
@@ -768,13 +769,12 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         }
     }
 
-    // 4. Build final uniform grids and all surfaces
-    auto final_m = linspace(fit_domain.m_min, fit_domain.m_max, gsz.moneyness);
-    auto final_v = linspace(fit_domain.sigma_min, fit_domain.sigma_max, gsz.vol);
-    auto final_r = linspace(fit_domain.rate_min, fit_domain.rate_max, gsz.rate);
-    int max_tau_pts = gsz.tau_points;
+    // 4. Build all surfaces on the merged grids.  These are the positions the
+    //    probe loops actually chose; re-spacing them uniformly at the same
+    //    sizes was the defect behind issue #461.
+    int max_tau_pts = agg.tau_points;
 
-    auto seg_template = make_seg_config(config_, final_m, final_v, final_r, max_tau_pts);
+    auto seg_template = make_seg_config(config_, agg.moneyness, agg.vol, agg.rate, max_tau_pts);
     auto seg_surfaces = build_segmented_surfaces(seg_template, K_refs_, total_pde, diagnostics);
     if (!seg_surfaces) return std::unexpected(seg_surfaces.error());
 
@@ -836,22 +836,21 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         validation->points, orig_handle, final_score_fn, final_ctx);
 
     // 7. Optional retry with bumped grids -- triggered when the original
-    //    misses the target OR is not viable at all (spec D9 step 2).
+    //    misses the target OR is not viable at all (spec D9 step 2).  The
+    //    bump inserts midpoints into the merged grids' largest gaps so the
+    //    retained positions survive it.
     std::optional<BSplineMultiKRefInner> retry_surface;
     std::optional<detail::FinalScore> retry_score;
     IVGrid retry_grid;
     int retry_tau_pts = 0;
 
     if (detail::needs_final_retry(orig_score, params.target_iv_error)) {
-        size_t bumped_m = std::min(gsz.moneyness + 2, params.max_points_per_dim);
-        size_t bumped_v = std::min(gsz.vol + 1, params.max_points_per_dim);
-        size_t bumped_r = std::min(gsz.rate + 1, params.max_points_per_dim);
-        int bumped_tau = std::min(gsz.tau_points + 2,
-            static_cast<int>(params.max_points_per_dim));
+        const size_t cap = params.max_points_per_dim;
+        int bumped_tau = std::min(agg.tau_points + 2, static_cast<int>(cap));
 
-        auto retry_m = linspace(fit_domain.m_min, fit_domain.m_max, bumped_m);
-        auto retry_v = linspace(fit_domain.sigma_min, fit_domain.sigma_max, bumped_v);
-        auto retry_r = linspace(fit_domain.rate_min, fit_domain.rate_max, bumped_r);
+        auto retry_m = insert_largest_gap_midpoints(agg.moneyness, 2, cap);
+        auto retry_v = insert_largest_gap_midpoints(agg.vol, 1, cap);
+        auto retry_r = insert_largest_gap_midpoints(agg.rate, 1, cap);
 
         auto retry_template = make_seg_config(config_, retry_m, retry_v, retry_r, bumped_tau);
         auto retry_segs = build_segmented_surfaces(retry_template, K_refs_, total_pde, diagnostics);

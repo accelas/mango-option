@@ -81,9 +81,18 @@ struct RefinementResult {
     BuildDiagnostics diagnostics;
 };
 
-/// Aggregate max grid sizes across probe results
-struct MaxGridSizes {
-    size_t moneyness = 0, vol = 0, rate = 0;
+/// Probe-refined grids merged across probe results (issue #461).
+///
+/// The continuous axes carry the *positions* every probe's refinement loop
+/// chose, not just their counts: rebuilding on uniform grids at the probes'
+/// maximum sizes threw those positions away, and the rebuilt surface could
+/// measure worse than the probe that sized it.  Tau stays a per-segment
+/// count because the segmented builder places its own tau nodes inside each
+/// dividend regime.
+struct AggregatedGrids {
+    std::vector<double> moneyness;
+    std::vector<double> vol;
+    std::vector<double> rate;
     int tau_points = 0;
 };
 
@@ -310,8 +319,20 @@ TauSegmentSplit make_tau_split_from_segments(
 // callback types declared above but never depends on the American solver
 // behind them.
 
-/// Aggregate max grid sizes across probe results.
-MaxGridSizes aggregate_max_sizes(const std::vector<RefinementResult>& probe_results);
+/// Merge probe results into one set of grids: the sorted union of each
+/// probe's knot positions per continuous axis, with positions closer than
+/// 1e-9 of the axis span collapsed, then thinned to `max_points_per_dim` by
+/// dropping the most crowded interior position first.  Endpoints always
+/// survive; surviving positions are never re-spaced.  `tau_points` is the
+/// maximum per-segment count across probes.
+AggregatedGrids aggregate_probe_grids(const std::vector<RefinementResult>& probe_results,
+                                      size_t max_points_per_dim);
+
+/// Insert up to `count` midpoints into the largest gaps of `grid`, one at a
+/// time, without exceeding `cap` points.  Used by the segmented final retry
+/// so the bump keeps the aggregated positions instead of re-spacing them.
+std::vector<double> insert_largest_gap_midpoints(std::vector<double> grid,
+                                                 size_t count, size_t cap);
 
 /// Helper to create evenly spaced grid.
 /// Requires n >= 2 to avoid divide-by-zero; returns {lo, hi} if n < 2.
