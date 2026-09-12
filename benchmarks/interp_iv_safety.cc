@@ -45,6 +45,49 @@ using namespace mango;
 using namespace mango::bench;
 
 // ============================================================================
+// Failure reporting (D3): every build/wrap failure prints its error code
+// and marks the run as failed so main() can exit non-zero.
+// ============================================================================
+
+static bool g_build_failed = false;
+
+static const char* code_name(PriceTableErrorCode c) {
+    switch (c) {
+        case PriceTableErrorCode::InvalidConfig:          return "InvalidConfig";
+        case PriceTableErrorCode::InsufficientGridPoints: return "InsufficientGridPoints";
+        case PriceTableErrorCode::GridNotSorted:          return "GridNotSorted";
+        case PriceTableErrorCode::NonPositiveValue:       return "NonPositiveValue";
+        case PriceTableErrorCode::EmptyBatch:             return "EmptyBatch";
+        case PriceTableErrorCode::ExtractionFailed:       return "ExtractionFailed";
+        case PriceTableErrorCode::RepairFailed:           return "RepairFailed";
+        case PriceTableErrorCode::FittingFailed:          return "FittingFailed";
+        case PriceTableErrorCode::SurfaceBuildFailed:     return "SurfaceBuildFailed";
+        case PriceTableErrorCode::SerializationFailed:    return "SerializationFailed";
+        case PriceTableErrorCode::ArenaAllocationFailed:  return "ArenaAllocationFailed";
+        case PriceTableErrorCode::TensorCreationFailed:   return "TensorCreationFailed";
+        case PriceTableErrorCode::ValidationFailed:       return "ValidationFailed";
+        case PriceTableErrorCode::NoViableSurface:        return "NoViableSurface";
+    }
+    return "?";  // unreachable; -Wswitch flags a new enumerator above
+}
+
+static void report_build_failure(const char* what, const PriceTableError& e) {
+    g_build_failed = true;
+    std::fprintf(stderr, "  [FAILED] %s: %s (axis=%zu count=%zu)\n",
+                 what, code_name(e.code), e.axis_index, e.count);
+    std::printf("  [FAILED] %s: %s (axis=%zu count=%zu)\n",
+                what, code_name(e.code), e.axis_index, e.count);
+}
+
+static void report_wrap_failure(const char* what, const ValidationError& e) {
+    g_build_failed = true;
+    std::fprintf(stderr, "  [FAILED] %s: ValidationErrorCode %d\n",
+                 what, static_cast<int>(e.code));
+    std::printf("  [FAILED] %s: ValidationErrorCode %d\n",
+                what, static_cast<int>(e.code));
+}
+
+// ============================================================================
 // Test parameters
 // ============================================================================
 
@@ -162,7 +205,7 @@ static AnyInterpIVSolver build_vanilla_solver() {
 
     auto solver = make_interpolated_iv_solver(config);
     if (!solver.has_value()) {
-        std::fprintf(stderr, "Failed to build vanilla interpolated solver\n");
+        report_wrap_failure("vanilla interpolated solver", solver.error());
         std::exit(1);
     }
     return std::move(*solver);
@@ -201,8 +244,10 @@ static std::vector<std::pair<size_t, BSplineDivSolver>> build_div_solvers() {
         auto result = build_adaptive_bspline_segmented(
             adaptive, seg_config, {log_m, vols, rates});
         if (!result.has_value()) {
-            std::fprintf(stderr, "  [skip] T=%s — adaptive build failed\n",
-                         kMatLabels[ti]);
+            char label[32];
+            std::snprintf(label, sizeof(label), "B-spline dividends T=%s",
+                          kMatLabels[ti]);
+            report_build_failure(label, result.error());
             continue;
         }
 
@@ -228,12 +273,17 @@ static std::vector<std::pair<size_t, BSplineDivSolver>> build_div_solvers() {
             std::move(result->surface), bounds, OptionType::PUT, kDivYield);
         auto solver = BSplineDivSolver::create(std::move(wrapper));
         if (!solver.has_value()) {
-            std::fprintf(stderr, "  [skip] T=%s — solver wrap failed\n",
-                         kMatLabels[ti]);
+            char label[32];
+            std::snprintf(label, sizeof(label), "B-spline dividends T=%s",
+                          kMatLabels[ti]);
+            report_wrap_failure(label, solver.error());
             continue;
         }
         solvers.emplace_back(ti, std::move(*solver));
     }
+    std::printf("  built %zu/%zu per-maturity solvers:", solvers.size(), kNT);
+    for (const auto& [ti, _] : solvers) std::printf(" %s", kMatLabels[ti]);
+    std::printf("\n");
     return solvers;
 }
 
@@ -519,7 +569,7 @@ static ChebyshevTableResult build_chebyshev_surface() {
 
     auto result = build_chebyshev_table(config);
     if (!result.has_value()) {
-        std::fprintf(stderr, "Chebyshev build failed\n");
+        report_build_failure("Chebyshev 4D", result.error());
         std::exit(1);
     }
 
@@ -603,7 +653,7 @@ run_chebyshev_4d(const PriceGrid& prices) {
     auto solver = InterpolatedIVSolver<ChebyshevSurface>::create(
         std::move(surface.surface));
     if (!solver.has_value()) {
-        std::fprintf(stderr, "Chebyshev 4D solver creation failed\n");
+        report_wrap_failure("Chebyshev 4D solver", solver.error());
     } else {
         for (size_t vi = 0; vi < kNV; ++vi) {
             char title[128];
@@ -645,7 +695,7 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
 
     auto result = build_adaptive_chebyshev(params, chain, OptionType::PUT);
     if (!result.has_value()) {
-        std::fprintf(stderr, "Chebyshev adaptive build failed\n");
+        report_build_failure("Chebyshev adaptive", result.error());
         std::array<ErrorTable, kNV> empty{};
         return empty;
     }
@@ -669,7 +719,7 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
     auto solver = InterpolatedIVSolver<ChebyshevRawSurface>::create(
         std::move(*result->surface));
     if (!solver.has_value()) {
-        std::fprintf(stderr, "Chebyshev adaptive solver creation failed\n");
+        report_wrap_failure("Chebyshev adaptive solver", solver.error());
         return {};
     }
 
@@ -724,7 +774,7 @@ run_chebyshev_dividends(const PriceGrid& prices) {
 
     auto result = build_adaptive_chebyshev_segmented(params, config, domain);
     if (!result.has_value()) {
-        std::fprintf(stderr, "Chebyshev dividend build failed\n");
+        report_build_failure("Chebyshev dividends", result.error());
         std::array<ErrorTable, kNV> empty{};
         return empty;
     }
@@ -766,7 +816,7 @@ run_chebyshev_dividends(const PriceGrid& prices) {
     auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
         std::move(result->surface));
     if (!solver.has_value()) {
-        std::fprintf(stderr, "Chebyshev dividend solver creation failed\n");
+        report_wrap_failure("Chebyshev dividends solver", solver.error());
         return {};
     }
 
@@ -853,7 +903,7 @@ static AnyInterpIVSolver build_bspline_q0() {
     };
     auto solver = make_interpolated_iv_solver(config);
     if (!solver.has_value()) {
-        std::fprintf(stderr, "4D B-spline (q=0) build failed\n");
+        report_wrap_failure("4D B-spline (q=0)", solver.error());
         std::exit(1);
     }
     return std::move(*solver);
@@ -1022,7 +1072,7 @@ int main(int argc, char* argv[]) {
                 print_heatmap(title, kStrikes, q0_dim3d_bs_errors[vi]);
             }
         } else {
-            std::fprintf(stderr, "Dimensionless 3D B-spline build failed\n");
+            report_wrap_failure("Dimensionless 3D B-spline (q=0)", dim3d_bs.error());
         }
 
         std::printf("\n--- Building dimensionless 3D Chebyshev (q=0)...\n");
@@ -1038,7 +1088,7 @@ int main(int argc, char* argv[]) {
                 print_heatmap(title, kStrikes, q0_dim3d_ch_errors[vi]);
             }
         } else {
-            std::fprintf(stderr, "Dimensionless 3D Chebyshev build failed\n");
+            report_wrap_failure("Dimensionless 3D Chebyshev (q=0)", dim3d_ch.error());
         }
     }
 
@@ -1092,5 +1142,5 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    return 0;
+    return g_build_failed ? 1 : 0;
 }
