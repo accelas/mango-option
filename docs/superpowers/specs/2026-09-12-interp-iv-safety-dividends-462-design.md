@@ -1,7 +1,7 @@
 # Retune `interp_iv_safety` dividends path and measure sparse-K_ref accuracy (#462)
 
 Date: 2026-09-12. Branch `fix/462-dividends-retune`. Issue #462 (follow-up 6 of 7
-from PR #454). Revision 3 (after Codex design review rounds 1 and 2).
+from PR #454). Revision 4 (after Codex design review rounds 1–3; gate 1 passed by convergence).
 
 ## 1. Problem
 
@@ -149,7 +149,8 @@ exercised rather than bypassed by an empty query schedule.
 **Containers.** To carry two strike sets the per-path containers become
 generic over the strike count: `PriceGrid`, `ErrorTable`, `TVKMask` and the
 functions that take them (`generate_prices`, `compute_errors_*`,
-`print_heatmap`, `compute_tvk_mask`, `print_tvk_comparison`) take
+`print_heatmap`, `compute_tvk_mask`, `print_tvk_comparison`, plus the
+`AlgoErrors` record that holds an `ErrorTable` pointer) take
 `template <size_t NS>` with the strike array supplied alongside. Maturity and
 vol dimensions stay fixed. The Chebyshev T = 1 point diagnostic loop and the
 opening banner read from the strike array they are given. No output format
@@ -229,13 +230,19 @@ and w = (K − L)/(H − L):
 - **Eligibility (reference-only).** A query is eligible for IV-equivalent
   statistics when P_FDM(K), P_FDM(L), P_FDM(H) and vega_FDM(K) are finite,
   (P_FDM(K) − intrinsic)/K ≥ 1e-4 (the TV/K threshold `make_iv_score_fn`
-  applies), and vega_FDM(K) ≥ `AdaptiveGridParams::vega_floor` (1e-4). The
-  library *clamps* vega to the floor instead of excluding the point; the
-  sweep excludes, because a clamped point reports price error in floor units
-  that the blend/surface split cannot interpret, and the exclusion count
-  says how many points that costs. Eligibility depends only on the references,
+  applies), and vega_FDM(K) ≥ `AdaptiveGridParams::vega_floor` (1e-4).
+  `make_iv_score_fn` excludes |vega| < floor; the sweep requires a signed
+  positive vega, which is stricter only for negative FD vega, and counts the
+  difference. Eligibility depends only on the references,
   never on the surface or the inversion. Ineligible queries are counted per
-  reason (`ref-fail`, `low-vega`, `low-tv`) and enter no statistic.
+  reason and enter no statistic: `ref-fail` (a reference solve failed or
+  returned a non-finite value: a numerical failure) is reported separately
+  from `low-vega` and `low-tv` (valid contracts whose IV metric is
+  undefined: not failures). At an anchor the control uses the anchor's own
+  reference (w = 0 against itself), never a degenerate L = H bracket.
+- **Non-finite surface values.** If P̂(K) is non-finite the query's `surf`
+  and `inv` entries are excluded and counted as `surf-nonfinite`; its `blend`
+  entry, which does not involve the surface, stays.
 - B_FDM(K) = K · [(1 − w) · P_FDM(L)/L + w · P_FDM(H)/H]: the blend policy
   applied to exact prices. This is the same-query control: it is what the
   assembled surface would return if every K_ref surface were exact.
@@ -266,28 +273,38 @@ K_ref spacing sweep — σ=15%  (window K∈[85,115]; bps = |price| / FD vega un
 exclusion counts in a footer), `blend` is |B_FDM − P_FDM|/vega, `surf` is
 |P̂ − B_FDM|/vega, `inv n` and `inv max` the inversion population and its
 maximum. A cell with an empty population prints `n/a`. A row is `complete`
-for D5 when `elig` ≥ 1 and `elig` ≥ 90% of `q`; otherwise it is marked
-`incomplete` and excluded from D5. Inversion counts never affect
-completeness.
+for D5 when its mid-anchor `elig` ≥ 1 and ≥ 90% of its mid-anchor `q`;
+otherwise it is marked `incomplete` and excluded from D5. An incomplete row
+is a valid outcome (short-maturity, low-vol rows can legitimately have
+negligible time value), and the sweep publishes it with its counts.
+Inversion counts and `surf-nonfinite` never affect completeness.
 
-**Resolution checks.** Two, both printed as extra rows after the sweep:
+**Resolution checks.** Two:
 
-- `fine` (surface): the Δ = 2.5 row at T = 1 rebuilt with 81 moneyness knots
-  and `tau_points_per_segment = 9`. If `surf` moves by more than a factor of
-  two the per-surface floor is not converged and the footer says so; the
-  blend column does not depend on the surface, so the blend conclusion stands.
-- `ref-fine` (reference): the same row's mid-anchor references P_FDM(K),
-  P_FDM(L), P_FDM(H) and vega re-solved at a finer PDE accuracy (the plan
-  pins the `GridAccuracyParams`), with `blend` recomputed from them. The
-  change in `blend max` is the reference uncertainty. D5 classifies a spacing
-  against 10 bps only when that uncertainty is below 2 bps; otherwise the
-  baseline is published as oracle-dependent with the uncertainty stated.
+- `fine` (surface moneyness/tau resolution): the Δ = 2.5 row at T = 1
+  rebuilt with 81 moneyness knots and `tau_points_per_segment = 9`, printed
+  as one extra row. If `surf` moves by more than a factor of two the
+  per-surface floor is not converged in those two axes and the footer says
+  so; PDE, vol and rate resolution are unchanged, so this is a sensitivity
+  check, not a convergence proof. The blend column does not depend on the
+  surface, so the blend conclusion stands.
+- `ref-sens` (reference sensitivity), **for every row**: the row's eligible
+  mid-anchor references P_FDM(K), P_FDM(L), P_FDM(H) and vega_FDM(K) are
+  re-solved at a finer PDE accuracy (the plan pins the `GridAccuracyParams`)
+  over the identical query population, and `blend` is recomputed. Each row
+  prints its `blend max` at both accuracies and the difference, labelled
+  reference sensitivity: an observed sensitivity, not a discretization-error
+  bound. D5 classifies a row against 10 bps only when |blend max − 10 bps|
+  exceeds that row's sensitivity; a row that straddles is `inconclusive`
+  and published as such.
 
-**Cost.** Surfaces: 3 maturities × (5 + 9 + 17 + 33) K_refs × 20 (σ, r) knot
-pairs = 3840 short fixed-expiry solves, plus the fine row. Queries: about
-550 (T, K, σ) points, each three FD solves for price and vega plus a Brent
-inversion. Runtime is measured during execution and printed; the target is a
-few minutes, not a promise.
+**Cost.** Surfaces: 4 maturities × (5 + 9 + 17 + 33) K_refs × 20 (σ, r) knot
+pairs = 5120 short fixed-expiry solves, plus the `fine` row. Queries: 752
+(Δ, T, K, σ) instances before caching (anchor references are shared across
+spacings at the same strike), each three FD solves for price and vega plus a
+Brent inversion, and the mid-anchor subset again at the finer accuracy for
+`ref-sens`. Runtime is measured during execution and printed; the target is
+a few minutes, not a promise.
 
 ### D5. Documentation
 
@@ -297,8 +314,9 @@ few minutes, not a promise.
   date, commit and build flags that produced it. The accompanying text is a
   conditional baseline, not a rule: it names the spacings whose `blend max`
   stays at or below 10 bps IV-equivalent at every measured (T, σ) with every
-  row `complete` and the reference uncertainty below 2 bps, states explicitly
-  that none may qualify, and states the conditions (spot 100, PUT, r = 5%,
+  row `complete` and none `inconclusive`, states explicitly that none may
+  qualify, lists incomplete or inconclusive rows as such, and states the
+  conditions (spot 100, PUT, r = 5%,
   q = 2%, quarterly $0.50 calendar, window [85, 115], the eligibility rules,
   the reference accuracy settings, manual B-spline segmented surfaces)
   outside which the numbers do not transfer.
@@ -326,7 +344,7 @@ few minutes, not a promise.
   builds the B-spline per-maturity configuration of D1 at all eight
   maturities and asserts viability with `holdout_points_measured > 0`; no
   accuracy number is pinned, and no Chebyshev case is added (minutes per
-  build). Two review rounds recommended it; this spec now recommends
+  build). All three review rounds recommended it; this spec now recommends
   accepting it. Until the user decides, the default remains the user's Q4
   choice: no new test.
 
@@ -338,17 +356,20 @@ few minutes, not a promise.
   B-spline per-maturity solvers and the Chebyshev surface, prints their
   diagnostics and dividend counts, uses the seven `kDivStrikes` columns, and
   exits 0. Coverage: every built row has at least one successful query at
-  each σ, and at least 75% of all dividend-path queries produce an error
-  value. If a pilot run falls short, the shortfall is reported as a finding
-  with its per-reason counts, not tuned away.
+  each σ, and at least 75% of the dividend-path queries (8 B-spline rows plus
+  7 Chebyshev rows, the 2y Chebyshev row being unsupported by design, × 7
+  strikes × 2 σ = 210) produce an error value. A shortfall below 75% does
+  not block acceptance; it is reported as a documented finding with its
+  per-reason counts, never tuned away.
 - AC3. With a deliberately incoherent config (verified once by hand, not
   committed) the benchmark prints the error code name and `n/a` cells and
   exits 1.
-- AC4. `interp_iv_safety --path=kref` completes, prints the four-spacing
-  blocks for both σ with the `fine` and `ref-fine` rows and the per-reason
-  exclusion counts, and every row is `complete` (eligibility is
-  reference-only, so this is a statement about the FDM references in the
-  window, not about the surfaces).
+- AC4. `interp_iv_safety --path=kref` completes and prints the four-spacing
+  blocks for both σ with the `fine` row, every row's `ref-sens` figures, the
+  per-reason exclusion counts, and each row's `complete` / `incomplete` /
+  `inconclusive` status. No row may have a `ref-fail` count above zero
+  (numerical reference failures are defects to investigate); incomplete or
+  inconclusive rows are valid outcomes and do not block acceptance.
 - AC5. `--path=bspline`, `--path=chebyshev` and `--path=q0` produce the same
   error values and layout as before; only timing lines, the usage/banner
   lines, the added count lines and `n/a` for empty aggregates may differ.
