@@ -21,25 +21,30 @@
 #include "mango/option/dividend_utils.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/option/grid_spec_types.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
 #include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include "mango/option/table/bspline/bspline_3d_surface.hpp"
 #include "mango/option/table/bspline/bspline_adaptive.hpp"
+#include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/price_table.hpp"
 #include "mango/option/table/dimensionless/dimensionless_builder.hpp"
 #include "mango/option/table/transforms/dimensionless_3d.hpp"
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 using namespace mango;
@@ -913,6 +918,333 @@ build_dimless_3d(DimensionlessBackend::Interpolant interp) {
 }
 
 // ============================================================================
+// K_ref spacing sweep (--path=kref): blend policy vs surface, with a
+// same-query FDM control. Spec: docs/superpowers/specs/2026-09-12-interp-iv-safety-dividends-462-design.md D4.
+//
+// Terms: an *anchor* is a strike equal to a K_ref; a *mid-anchor* is the
+// midpoint between two adjacent K_refs; the *blend policy* is
+// MultiKRefSplit (query each bracketing K_ref surface at (spot, K_ref),
+// normalize by K_ref, interpolate linearly in strike, multiply by strike).
+// ============================================================================
+namespace kref {
+
+constexpr double kSpanLo = 80.0, kSpanHi = 120.0;
+constexpr double kWindowLo = 85.0, kWindowHi = 115.0;
+constexpr std::array<double, 4> kSpacings = {10.0, 5.0, 2.5, 1.25};
+constexpr std::array<double, 4> kSweepMaturities = {0.20, 0.30, 0.60, 1.0};
+constexpr std::array<double, 2> kSweepVols = {0.15, 0.30};
+constexpr double kVegaFloor = 1e-4;      // AdaptiveGridParams::vega_floor default
+constexpr double kTVKThreshold = 1e-4;   // make_iv_score_fn's threshold
+constexpr double kQualifyBps = 10.0;     // D5 classification threshold
+constexpr size_t kBaseMoneynessKnots = 41;
+constexpr int kBaseTauPoints = 5;
+
+struct Ref { double price = 0.0, vega = 0.0; bool ok = false; };
+
+/// FDM reference price and central-bump vega (same bump as
+/// make_fd_vega_refs_fn: eps = max(1e-4, 0.01*sigma)). `accuracy` nullopt =
+/// the solver's automatic grid; set = an explicit GridAccuracyParams.
+static Ref fdm_ref(double K, double T, double sigma,
+                   const std::vector<Dividend>& divs,
+                   std::optional<GridAccuracyParams> accuracy) {
+    auto price_at = [&](double sg) -> std::optional<double> {
+        PricingParams p;
+        p.spot = kSpot; p.strike = K; p.maturity = T; p.rate = kRate;
+        p.dividend_yield = kDivYield; p.option_type = OptionType::PUT;
+        p.volatility = sg; p.discrete_dividends = divs;
+        std::optional<PDEGridSpec> grid;
+        if (accuracy) grid = PDEGridSpec{*accuracy};
+        auto solver = AmericanOptionSolver::create(p, grid);
+        if (!solver) return std::nullopt;
+        auto r = solver->solve();
+        if (!r || !std::isfinite(r->value())) return std::nullopt;
+        return r->value();
+    };
+    Ref out;
+    const double eps = std::max(1e-4, 0.01 * sigma);
+    const double sigma_dn = std::max(1e-4, sigma - eps);
+    auto p0 = price_at(sigma);
+    auto pu = price_at(sigma + eps);
+    auto pd = price_at(sigma_dn);
+    if (!p0 || !pu || !pd) return out;
+    out.price = *p0;
+    out.vega = (*pu - *pd) / ((sigma + eps) - sigma_dn);
+    out.ok = std::isfinite(out.vega);
+    return out;
+}
+
+static std::vector<double> krefs_for(double delta) {
+    std::vector<double> ks;
+    for (double k = kSpanLo; k <= kSpanHi + 1e-9; k += delta) ks.push_back(k);
+    return ks;
+}
+
+/// Manual (non-adaptive) multi-K_ref segmented B-spline surface on fixed
+/// input knots. Mirrors build_multi_kref_manual + manual_segmented_bounds in
+/// src/option/price_table_factory.cpp.
+static std::expected<BSplineMultiKRefSurface, PriceTableError>
+build_manual(const std::vector<double>& krefs, double T, size_t n_m, int tau_pts) {
+    std::vector<double> log_m(n_m);
+    for (size_t i = 0; i < n_m; ++i)
+        log_m[i] = -0.30 + 0.60 * static_cast<double>(i) / static_cast<double>(n_m - 1);
+    const std::vector<double> vols  = {0.10, 0.15, 0.20, 0.30, 0.50};
+    const std::vector<double> rates = {0.02, 0.03, 0.05, 0.07};  // builder needs >= 4 knots
+    DividendSpec dividends{.dividend_yield = kDivYield,
+                           .discrete_dividends = quarterly_div_schedule(T)};
+    std::vector<BSplineMultiKRefEntry> entries;
+    entries.reserve(krefs.size());
+    for (double k : krefs) {
+        SegmentedPriceTableBuilder::Config cfg{
+            .K_ref = k, .option_type = OptionType::PUT, .dividends = dividends,
+            .grid = IVGrid{.moneyness = log_m, .vol = vols, .rate = rates},
+            .maturity = T, .tau_points_per_segment = tau_pts,
+        };
+        auto surface = SegmentedPriceTableBuilder::build(cfg);
+        if (!surface) return std::unexpected(surface.error());
+        entries.push_back({.K_ref = k, .surface = std::move(*surface)});
+    }
+    auto inner = build_multi_kref_surface(std::move(entries));
+    if (!inner) return std::unexpected(inner.error());
+    SurfaceBounds bounds{.m_min = -0.30, .m_max = 0.30, .tau_min = 0.0, .tau_max = T,
+                         .sigma_min = vols.front(), .sigma_max = vols.back(),
+                         .rate_min = rates.front(), .rate_max = rates.back()};
+    return BSplineMultiKRefSurface(std::move(*inner), bounds, OptionType::PUT, kDivYield);
+}
+
+struct Query { double K; bool anchor; double L, H; };
+
+static std::vector<Query> queries_for(const std::vector<double>& krefs) {
+    std::vector<Query> qs;
+    for (size_t i = 0; i < krefs.size(); ++i) {
+        if (krefs[i] >= kWindowLo && krefs[i] <= kWindowHi)
+            qs.push_back({krefs[i], true, krefs[i], krefs[i]});   // anchor: control = itself
+        if (i + 1 < krefs.size()) {
+            double mid = 0.5 * (krefs[i] + krefs[i + 1]);
+            if (mid >= kWindowLo && mid <= kWindowHi)
+                qs.push_back({mid, false, krefs[i], krefs[i + 1]});
+        }
+    }
+    return qs;
+}
+
+/// Accumulator for one (delta, T, sigma, anchor/mid) population.
+struct Stat {
+    size_t q = 0, elig = 0, ref_fail = 0, low_vega = 0, low_tv = 0, surf_nonfinite = 0;
+    double blend_max = 0, blend_sq = 0;   // |B_fdm - P_fdm| / vega, bps
+    double surf_max = 0, surf_sq = 0;     // |P_hat - B_fdm| / vega, bps
+    size_t surf_n = 0;
+    size_t inv_n = 0, inv_fail = 0; double inv_max = 0;
+    // ref-sens (mid-anchors only): fine_n counts eligible queries whose finer
+    // references all solved; fine_skip the eligible ones they did not cover,
+    // so a population mismatch against `elig` is visible rather than silent.
+    double blend_max_fine = 0; size_t fine_n = 0, fine_skip = 0;
+    bool complete() const { return elig >= 1 && 100 * elig >= 90 * q; }
+    double blend_rms() const { return elig ? std::sqrt(blend_sq / elig) : std::nan(""); }
+    double surf_rms()  const { return surf_n ? std::sqrt(surf_sq / surf_n) : std::nan(""); }
+};
+
+static void fmt(char* buf, size_t n, double v) {
+    if (std::isnan(v)) std::snprintf(buf, n, "%10s", "n/a");
+    else std::snprintf(buf, n, "%10.2f", v);
+}
+
+/// Reference cache keyed by (T, sigma, K, fine): each (K, sigma, T) is solved
+/// once per accuracy no matter how many spacings share it.
+using RefKey = std::tuple<int, int, long, int>;
+static Ref cached_ref(std::map<RefKey, Ref>& cache, double K, double T, double sigma,
+                      const std::vector<Dividend>& divs, bool fine) {
+    RefKey key{static_cast<int>(std::lround(T * 1e4)), static_cast<int>(std::lround(sigma * 1e4)),
+               std::lround(K * 1e3), fine ? 1 : 0};
+    auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
+    auto r = fdm_ref(K, T, sigma, divs,
+                     fine ? std::optional{make_grid_accuracy(GridAccuracyProfile::Ultra)} : std::nullopt);
+    cache.emplace(key, r);
+    return r;
+}
+
+struct RowResult { Stat mid, anchor; bool built = false; double seconds = 0; };
+
+static RowResult run_row(double delta, double T, double sigma, size_t n_m, int tau_pts,
+                         std::map<RefKey, Ref>& cache) {
+    RowResult row;
+    auto t0 = std::chrono::steady_clock::now();
+    const auto divs = quarterly_div_schedule(T);
+    const auto krefs = krefs_for(delta);
+    auto surface = build_manual(krefs, T, n_m, tau_pts);
+    if (!surface) {
+        char what[64]; std::snprintf(what, sizeof(what), "kref sweep delta=%.2f T=%.2f", delta, T);
+        report_build_failure(what, surface.error());
+        return row;
+    }
+    // InterpolatedIVSolver keeps its surface private, so keep a copy for
+    // direct pricing (PriceTable and SplitSurface are value types).
+    const BSplineMultiKRefSurface surf = *surface;
+    auto solver = InterpolatedIVSolver<BSplineMultiKRefSurface>::create(std::move(*surface), {}, divs);
+    if (!solver) {
+        char what[64]; std::snprintf(what, sizeof(what), "kref sweep delta=%.2f T=%.2f", delta, T);
+        report_wrap_failure(what, solver.error());
+        return row;
+    }
+    row.built = true;
+
+    for (const Query& qy : queries_for(krefs)) {
+        Stat& st = qy.anchor ? row.anchor : row.mid;
+        st.q++;
+        Ref rk = cached_ref(cache, qy.K, T, sigma, divs, false);
+        Ref rl = qy.anchor ? rk : cached_ref(cache, qy.L, T, sigma, divs, false);
+        Ref rh = qy.anchor ? rk : cached_ref(cache, qy.H, T, sigma, divs, false);
+        if (!rk.ok || !rl.ok || !rh.ok) { st.ref_fail++; continue; }
+        const double intrinsic = intrinsic_value(kSpot, qy.K, OptionType::PUT);
+        if ((rk.price - intrinsic) / qy.K < kTVKThreshold) { st.low_tv++; continue; }
+        if (rk.vega < kVegaFloor) { st.low_vega++; continue; }
+        st.elig++;
+
+        // Anchors take w = 0 against their own reference: no (H - L) division.
+        const double w = qy.anchor ? 0.0 : (qy.K - qy.L) / (qy.H - qy.L);
+        const double b_fdm = qy.K * ((1.0 - w) * rl.price / qy.L + w * rh.price / qy.H);
+        const double blend_bps = std::abs(b_fdm - rk.price) / rk.vega * 1e4;
+        st.blend_max = std::max(st.blend_max, blend_bps);
+        st.blend_sq += blend_bps * blend_bps;
+
+        const double p_hat = surf.price(kSpot, qy.K, T, sigma, kRate);
+        if (!std::isfinite(p_hat)) { st.surf_nonfinite++; }
+        else {
+            const double surf_bps = std::abs(p_hat - b_fdm) / rk.vega * 1e4;
+            st.surf_max = std::max(st.surf_max, surf_bps);
+            st.surf_sq += surf_bps * surf_bps; st.surf_n++;
+
+            double iv_fdm = solve_fdm_iv_div(qy.K, T, rk.price, divs);
+            IVQuery q; q.spot = kSpot; q.strike = qy.K; q.maturity = T; q.rate = kRate;
+            q.dividend_yield = kDivYield; q.option_type = OptionType::PUT;
+            q.market_price = rk.price; q.discrete_dividends = divs;
+            auto iv = solver->solve(q);
+            if (std::isnan(iv_fdm) || !iv) st.inv_fail++;
+            else { st.inv_n++; st.inv_max = std::max(st.inv_max, std::abs(iv->implied_vol - iv_fdm) * 1e4); }
+        }
+
+        if (!qy.anchor) {   // ref-sens: same query, finer references
+            Ref fk = cached_ref(cache, qy.K, T, sigma, divs, true);
+            Ref fl = cached_ref(cache, qy.L, T, sigma, divs, true);
+            Ref fh = cached_ref(cache, qy.H, T, sigma, divs, true);
+            if (fk.ok && fl.ok && fh.ok && fk.vega >= kVegaFloor) {
+                const double b_fine = qy.K * ((1.0 - w) * fl.price / qy.L + w * fh.price / qy.H);
+                st.blend_max_fine = std::max(st.blend_max_fine, std::abs(b_fine - fk.price) / fk.vega * 1e4);
+                st.fine_n++;
+            } else {
+                st.fine_skip++;
+            }
+        }
+    }
+    row.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    return row;
+}
+
+static void print_legend() {
+    std::printf("  legend\n");
+    std::printf("    Δ         K_ref spacing in dollars; K_refs are 80, 80+Δ, ..., 120\n");
+    std::printf("    T         maturity in years (0.20 carries no dividend: the control row)\n");
+    std::printf("    q/elig    queries in the window / the eligible subset (reference-only test:\n");
+    std::printf("              finite P_FDM(K), P_FDM(L), P_FDM(H) and vega, TV/K >= %.0e, vega >= %.0e)\n",
+                kTVKThreshold, kVegaFloor);
+    std::printf("    blendmax  max |B_FDM - P_FDM| / vega_FDM in bps over the eligible queries,\n");
+    std::printf("              B_FDM = K[(1-w)P_FDM(L)/L + w P_FDM(H)/H]: the blend policy's own error\n");
+    std::printf("    blendrms  rms of the same quantity over the same population\n");
+    std::printf("    surfmax   max |P_hat - B_FDM| / vega_FDM in bps: the surface's own error,\n");
+    std::printf("    surfrms   and its rms; population = eligible queries with a finite P_hat\n");
+    std::printf("    inv n     inversions where both IV_interp and IV_FDM converged\n");
+    std::printf("    inv max   max |IV_interp - IV_FDM| in bps over that population\n");
+    std::printf("    anchors   blendmax/blendrms are identically zero at an anchor (w = 0 against\n");
+    std::printf("              its own reference), so only the surface and inversion columns print\n");
+    std::printf("    ref-sens  |blendmax(Ultra references) - blendmax| over the same mid-anchor\n");
+    std::printf("              population: an observed sensitivity, not a discretization bound\n");
+    std::printf("    status    pass/fail = mid-anchor blendmax vs %.0f bps; inconclusive = the gap to\n", kQualifyBps);
+    std::printf("              %.0f bps is within ref-sens; incomplete = eligible mid-anchors < 90%% of q\n", kQualifyBps);
+    std::printf("    n/a       an empty population\n");
+}
+
+static void print_header() {
+    std::printf("  %15s%s   %s\n", "", "----------------------------- mid-anchors -----------------------------", "-------------------- anchors --------------------");
+    std::printf("  %6s %5s | %4s %5s %10s %10s %10s %10s %5s %10s"
+                " | %4s %5s %10s %10s %5s %10s | %10s %-12s %7s\n",
+                "\u0394", "T", "q", "elig", "blendmax", "blendrms", "surfmax", "surfrms",
+                "inv n", "inv max",
+                "q", "elig", "surfmax", "surfrms", "inv n", "inv max",
+                "ref-sens", "status", "time");
+}
+
+static void print_row(const char* delta_label, const char* t_label, const RowResult& r) {
+    char b1[16], b2[16], b3[16], b4[16], b5[16], b6[16], b7[16], b8[16], b9[16];
+    if (!r.built) {
+        std::printf("  %6s %5s | (no surface)\n", delta_label, t_label);
+        return;
+    }
+    const Stat& m = r.mid; const Stat& a = r.anchor;
+    fmt(b1, 16, m.elig ? m.blend_max : std::nan("")); fmt(b2, 16, m.blend_rms());
+    fmt(b3, 16, m.surf_n ? m.surf_max : std::nan("")); fmt(b4, 16, m.surf_rms());
+    fmt(b5, 16, m.inv_n ? m.inv_max : std::nan(""));
+    fmt(b6, 16, a.surf_n ? a.surf_max : std::nan("")); fmt(b7, 16, a.surf_rms());
+    fmt(b8, 16, a.inv_n ? a.inv_max : std::nan(""));
+    const double sens = (m.fine_n && m.elig) ? std::abs(m.blend_max_fine - m.blend_max) : std::nan("");
+    fmt(b9, 16, sens);
+    const char* status = !m.complete() ? "incomplete"
+        : (std::isnan(sens) || std::abs(m.blend_max - kQualifyBps) <= sens) ? "inconclusive"
+        : (m.blend_max <= kQualifyBps ? "pass" : "fail");
+    std::printf("  %6s %5s | %4zu %5zu %s %s %s %s %5zu %s"
+                " | %4zu %5zu %s %s %5zu %s | %s %-12s %6.0fs\n",
+                delta_label, t_label, m.q, m.elig, b1, b2, b3, b4, m.inv_n, b5,
+                a.q, a.elig, b6, b7, a.inv_n, b8, b9, status, r.seconds);
+    if (m.ref_fail || m.low_vega || m.low_tv || m.surf_nonfinite || m.inv_fail || m.fine_skip ||
+        a.ref_fail || a.low_vega || a.low_tv || a.surf_nonfinite || a.inv_fail)
+        std::printf("         excluded: mid ref-fail=%zu low-tv=%zu low-vega=%zu surf-nonfinite=%zu"
+                    " inv-fail=%zu ref-sens-skip=%zu | anchor ref-fail=%zu low-tv=%zu low-vega=%zu"
+                    " surf-nonfinite=%zu inv-fail=%zu\n",
+                    m.ref_fail, m.low_tv, m.low_vega, m.surf_nonfinite, m.inv_fail, m.fine_skip,
+                    a.ref_fail, a.low_tv, a.low_vega, a.surf_nonfinite, a.inv_fail);
+}
+
+}  // namespace kref
+
+static void run_kref_sweep() {
+    using namespace kref;
+    const auto sweep_start = std::chrono::steady_clock::now();
+    std::printf("\n================================================================\n");
+    std::printf("K_ref spacing sweep — manual segmented B-spline, quarterly $0.50 calendar\n");
+    std::printf("================================================================\n");
+    std::printf("S=%.0f, PUT, r=%.0f%%, q=%.0f%%; window K in [%.0f, %.0f] inclusive;\n",
+                kSpot, kRate * 100, kDivYield * 100, kWindowLo, kWindowHi);
+    std::printf("surfaces: SegmentedPriceTableBuilder on %zu log-moneyness knots over [-0.30, 0.30],\n",
+                kBaseMoneynessKnots);
+    std::printf("vol {0.10, 0.15, 0.20, 0.30, 0.50}, rate {0.02, 0.03, 0.05, 0.07}, "
+                "tau_points_per_segment=%d\n", kBaseTauPoints);
+    std::printf("all error columns are IV-equivalent estimates in bps except 'inv', "
+                "which is a true IV error\n\n");
+    print_legend();
+    std::map<RefKey, Ref> cache;
+    for (double sigma : kSweepVols) {
+        std::printf("\n  σ=%.0f%%\n", sigma * 100);
+        print_header();
+        for (double delta : kSpacings) {
+            for (double T : kSweepMaturities) {
+                char dl[8], tl[8];
+                std::snprintf(dl, sizeof(dl), "%.2f", delta);
+                std::snprintf(tl, sizeof(tl), "%.2f", T);
+                auto row = run_row(delta, T, sigma, kBaseMoneynessKnots, kBaseTauPoints, cache);
+                print_row(dl, tl, row);
+            }
+        }
+        auto fine = run_row(2.5, 1.0, sigma, 81, 9, cache);
+        print_row("fine", "1.00", fine);
+        std::printf("  (fine = Δ 2.5, T 1.00 with 81 moneyness knots and 9 tau points per segment; "
+                    "a surf max change > 2x\n   means the surface floor is not converged in those axes. "
+                    "The blend columns do not depend on the surface.)\n");
+    }
+    const double total = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - sweep_start).count();
+    std::printf("\n  K_ref sweep total: %.0f s (%.1f min)\n", total, total / 60.0);
+}
+
+// ============================================================================
 // CLI path selection
 // ============================================================================
 
@@ -962,6 +1294,7 @@ int main(int argc, char* argv[]) {
     bool need_vanilla = run_all || path == "bspline" || path == "chebyshev";
     bool need_divs = run_all || path == "dividends";
     bool need_q0 = run_all || path == "q0";
+    bool need_kref = run_all || path == "kref";
 
     if (need_vanilla) {
         std::printf("--- Generating vanilla reference prices (batch chain solver)...\n");
@@ -1085,6 +1418,8 @@ int main(int argc, char* argv[]) {
             report_wrap_failure("Dimensionless 3D Chebyshev (q=0)", dim3d_ch.error());
         }
     }
+
+    if (need_kref) run_kref_sweep();
 
     // TV/K filtered comparison — vanilla backends (q=0.02)
     if (need_vanilla) {
