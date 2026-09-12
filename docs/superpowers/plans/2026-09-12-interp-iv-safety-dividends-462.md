@@ -334,7 +334,7 @@ static void report_wrap_failure(const char* what, const ValidationError& e) {
 }
 ```
 
-(`ValidationError` has a `.code` of `ValidationErrorCode`; check `src/support/error_types.hpp` if the field name differs.)
+(`ValidationError::code` is a `ValidationErrorCode`; see `src/support/error_types.hpp:63`.)
 
 - [ ] **Step 2: Route every build failure through the helpers**
 
@@ -840,6 +840,9 @@ static RowResult run_row(double delta, double T, double sigma, size_t n_m, int t
         report_build_failure(what, surface.error());
         return row;
     }
+    // InterpolatedIVSolver keeps its surface private, so keep a copy for
+    // direct pricing (PriceTable and SplitSurface are value types).
+    const BSplineMultiKRefSurface surf = *surface;
     auto solver = InterpolatedIVSolver<BSplineMultiKRefSurface>::create(std::move(*surface), {}, divs);
     if (!solver) {
         char what[64]; std::snprintf(what, sizeof(what), "kref sweep delta=%.2f T=%.2f", delta, T);
@@ -847,7 +850,6 @@ static RowResult run_row(double delta, double T, double sigma, size_t n_m, int t
         return row;
     }
     row.built = true;
-    const auto& surf = solver->surface();   // if InterpolatedIVSolver has no accessor, keep a copy of the surface before moving it into create()
 
     for (const Query& qy : queries_for(krefs)) {
         Stat& st = qy.anchor ? row.anchor : row.mid;
@@ -958,7 +960,7 @@ static void run_kref_sweep() {
 
 Add `#include <chrono>`, `#include <map>`, `#include <tuple>`, `#include "mango/option/table/bspline/bspline_segmented_builder.hpp"`, `#include "mango/option/grid_spec_types.hpp"`.
 
-If `InterpolatedIVSolver` exposes no `surface()` accessor, build the surface, copy it (`BSplineMultiKRefSurface` is copyable; check) into `surf` before `create(std::move(...))`, or price through a second `build_manual` result. Do not add an accessor to the library.
+`InterpolatedIVSolver` has no surface accessor (its `surface_` is private); the copy above is the intended approach. Do not add an accessor to the library.
 
 - [ ] **Step 2: Wire the CLI**
 
@@ -1180,4 +1182,4 @@ git commit -m "Remove #462 scratch driver"   # only if the diff is non-empty
 - **Spec coverage:** D1 → Task 3; D2 → Tasks 1, 3; D3 → Task 2 (+ `n/a` in Task 1); D4 → Task 4; D5 → Task 5; D6 → Task 3 step 7 and Task 6 (conditional); AC1/3/5/6 → Task 7; AC2 → Task 3 step 8; AC4 → Task 4 step 3; AC7 → Task 5.
 - **Placeholders:** the API-guide template in Task 5 has `…`/`<…>` cells by design, to be filled from the run; the step says so explicitly.
 - **Type consistency:** `PriceGridN<NS>`, `ErrorTableN<NS>`, `AlgoErrorsN<NS>`, `ScheduleFn`, `kDivStrikes`/`kNDS`, `kDoc*`, `quarterly_div_schedule`, `report_build_failure`/`report_wrap_failure`, `g_build_failed` are used with the same names in every task.
-- **Known uncertainty:** whether `InterpolatedIVSolver` exposes its surface (Task 4 step 1 gives the fallback); the exact field name of `ValidationError::code` (Task 2 step 1 notes where to check).
+- **Resolved during planning:** `InterpolatedIVSolver` has no surface accessor (Task 4 copies the surface); `ValidationError::code` is the field name.
