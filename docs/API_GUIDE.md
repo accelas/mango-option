@@ -723,7 +723,7 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 ### Discrete Dividends with Adaptive Grid
 
-Adaptive grid also works with discrete dividends. The builder probes 2–3 representative K_ref values using segmented PDE surfaces, takes per-axis maximum grid sizes across probes, then builds all segments with a uniform grid:
+Adaptive grid also works with discrete dividends. The builder probes 2–3 representative K_ref values using segmented PDE surfaces, merges the knot positions each probe's refinement chose (union per axis, thinned to `max_points_per_dim`), then builds all segments on those merged grids:
 
 ```cpp
 mango::IVSolverFactoryConfig config{

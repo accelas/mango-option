@@ -717,17 +717,17 @@ Cash dividends break the scale invariance that American options normally have in
 
 ### Adaptive Grid Refinement for Segmented Surfaces
 
-The adaptive grid builder (section 10) extends to segmented surfaces via a probe-and-max strategy. Rather than building the full multi-K_ref surface at each refinement iteration, the builder:
+The adaptive grid builder (section 10) extends to segmented surfaces via a probe-and-merge strategy. Rather than building the full multi-K_ref surface at each refinement iteration, the builder:
 
 1. **Selects 2–3 probe K_ref values** from the full list: the lowest, highest, and the one closest to ATM (deduplicated if ATM coincides with an endpoint).
 
 2. **Runs independent refinement loops** on each probe, building single-K_ref `BSplineSegmentedSurface` instances. Each probe validates at strike = K_ref (the only strike that single-K_ref raw segments can price exactly).
 
-3. **Takes the per-axis maximum** grid sizes across probes — the worst-case K_ref determines each axis.
+3. **Merges the refined knot positions** across probes: per continuous axis, the sorted union of every probe's grid (positions within $10^{-9}$ of the axis span collapse to one knot), thinned to `max_points_per_dim` by dropping the most crowded interior knot first. Endpoints always survive and surviving knots are never re-spaced. The tau axis keeps the maximum per-segment count. Carrying sizes alone and rebuilding uniform grids at those sizes discarded where each probe had placed its knots, so the rebuilt surface could measure worse than the probe that sized it (issue #461).
 
-4. **Builds the full `SegmentedMultiKRefSurface`** once, using uniform grids at the maximum sizes with `skip_moneyness_expansion = true` (the domain was pre-expanded in step 1).
+4. **Builds the full `SegmentedMultiKRefSurface`** once on the merged grids with `skip_moneyness_expansion = true` (the domain was pre-expanded in step 1).
 
-5. **Final validation** at arbitrary strikes against fresh PDE reference prices. If the error exceeds the target, all grids are bumped by one refinement step and the surface is rebuilt (one retry).
+5. **Final validation** at arbitrary strikes against fresh PDE reference prices. If the error exceeds the target, midpoints are inserted into the largest gaps of the merged grids (two in moneyness, one each in volatility and rate, plus two tau points per segment) and the surface is rebuilt (one retry).
 
 The moneyness domain is pre-expanded before probing using the worst-case (smallest) K_ref: $m_\text{min}' = \max(m_\text{min} - \sum D_k / K_\text{ref,min},\; 0.01)$. This ensures all K_refs share the same expanded domain.
 
@@ -742,7 +742,7 @@ The 4D grid density directly controls IV accuracy. Too coarse and the B-spline i
 The library offers two grid specification modes:
 
 - **Manual grid.** The user supplies explicit grid vectors for moneyness, volatility, and rate (each requiring $\geq 4$ points for the cubic B-spline). Predefined accuracy profiles translate a qualitative accuracy level into concrete grid sizes derived from the curvature-based formula below.
-- **Adaptive grid.** The user specifies a target IV error $\varepsilon_\text{target}$ and domain bounds. The builder automatically determines grid density via iterative refinement, validated against fresh PDE solves. This works for both the standard path (continuous dividends) and the segmented path (discrete dividends; see section 9 for the probe-and-max strategy). This removes the need for manual tuning at the cost of additional PDE solves during construction.
+- **Adaptive grid.** The user specifies a target IV error $\varepsilon_\text{target}$ and domain bounds. The builder automatically determines grid density via iterative refinement, validated against fresh PDE solves. This works for both the standard path (continuous dividends) and the segmented path (discrete dividends; see section 9 for the probe-and-merge strategy). This removes the need for manual tuning at the cost of additional PDE solves during construction.
 
 Both modes share the same maturity grid (supplied via the path configuration) and produce the same `BSplineND<double, 4>` — the difference is only in how the per-axis point counts are chosen.
 

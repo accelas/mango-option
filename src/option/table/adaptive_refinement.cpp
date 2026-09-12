@@ -188,15 +188,72 @@ TauSegmentSplit make_tau_split_from_segments(
         std::move(tau_min), std::move(tau_max), K_ref);
 }
 
-MaxGridSizes aggregate_max_sizes(const std::vector<RefinementResult>& probe_results) {
-    MaxGridSizes s;
-    for (const auto& pr : probe_results) {
-        s.moneyness = std::max(s.moneyness, pr.moneyness.size());
-        s.vol = std::max(s.vol, pr.vol.size());
-        s.rate = std::max(s.rate, pr.rate.size());
-        s.tau_points = std::max(s.tau_points, pr.tau_points);
+namespace {
+
+// Two probes refining the same interval land midpoints that agree up to
+// rounding; anything closer than this fraction of the axis span is one knot.
+constexpr double kKnotMergeRelTol = 1e-9;
+
+std::vector<double> merge_axis(const std::vector<RefinementResult>& probes,
+                               std::vector<double> RefinementResult::* axis,
+                               size_t cap) {
+    std::vector<double> merged;
+    for (const auto& pr : probes) {
+        merged.insert(merged.end(), (pr.*axis).begin(), (pr.*axis).end());
     }
-    return s;
+    if (merged.empty()) return merged;
+    std::sort(merged.begin(), merged.end());
+
+    const double tol = kKnotMergeRelTol * (merged.back() - merged.front());
+    std::vector<double> unique_pos;
+    unique_pos.reserve(merged.size());
+    for (double x : merged) {
+        if (unique_pos.empty() || x - unique_pos.back() > tol) {
+            unique_pos.push_back(x);
+        }
+    }
+
+    // Honor the ceiling by dropping the interior position nearest to a
+    // neighbour (lowest index on ties); endpoints are never candidates.
+    while (unique_pos.size() > std::max(cap, size_t{2})) {
+        size_t victim = 1;
+        double crowding = std::numeric_limits<double>::infinity();
+        for (size_t i = 1; i + 1 < unique_pos.size(); ++i) {
+            const double d = std::min(unique_pos[i] - unique_pos[i - 1],
+                                      unique_pos[i + 1] - unique_pos[i]);
+            if (d < crowding) { crowding = d; victim = i; }
+        }
+        unique_pos.erase(unique_pos.begin() + static_cast<std::ptrdiff_t>(victim));
+    }
+    return unique_pos;
+}
+
+}  // namespace
+
+AggregatedGrids aggregate_probe_grids(const std::vector<RefinementResult>& probe_results,
+                                      size_t max_points_per_dim) {
+    AggregatedGrids g;
+    g.moneyness = merge_axis(probe_results, &RefinementResult::moneyness, max_points_per_dim);
+    g.vol = merge_axis(probe_results, &RefinementResult::vol, max_points_per_dim);
+    g.rate = merge_axis(probe_results, &RefinementResult::rate, max_points_per_dim);
+    for (const auto& pr : probe_results) {
+        g.tau_points = std::max(g.tau_points, pr.tau_points);
+    }
+    return g;
+}
+
+std::vector<double> insert_largest_gap_midpoints(std::vector<double> grid,
+                                                 size_t count, size_t cap) {
+    for (size_t k = 0; k < count && grid.size() < cap && grid.size() >= 2; ++k) {
+        size_t at = 0;
+        for (size_t i = 1; i + 1 < grid.size(); ++i) {
+            if (grid[i + 1] - grid[i] > grid[at + 1] - grid[at]) at = i;
+        }
+        const double mid = 0.5 * (grid[at] + grid[at + 1]);
+        if (!(mid > grid[at] && mid < grid[at + 1])) break;  // gap below resolution
+        grid.insert(grid.begin() + static_cast<std::ptrdiff_t>(at) + 1, mid);
+    }
+    return grid;
 }
 
 std::vector<double> linspace(double lo, double hi, size_t n) {
