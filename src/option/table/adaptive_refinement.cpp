@@ -212,6 +212,20 @@ std::vector<double> merge_axis(const std::vector<RefinementResult>& probes,
             unique_pos.push_back(x);
         }
     }
+    // The ascending pass keeps a cluster's first member; for the last
+    // cluster that must be the axis endpoint itself, or the fitted domain
+    // narrows below the published bounds.
+    unique_pos.back() = merged.back();
+
+    // Collapsing near-duplicates can leave fewer than the cubic B-spline
+    // minimum; refill from the largest gaps rather than hand over a grid
+    // the segmented build would reject.
+    constexpr size_t kCubicMinPoints = 4;
+    if (unique_pos.size() < kCubicMinPoints) {
+        const size_t missing = kCubicMinPoints - unique_pos.size();
+        unique_pos = insert_largest_gap_midpoints(
+            std::move(unique_pos), missing, std::max(cap, kCubicMinPoints));
+    }
 
     // Honor the ceiling by dropping the interior position nearest to a
     // neighbour (lowest index on ties); endpoints are never candidates.

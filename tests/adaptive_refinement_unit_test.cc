@@ -1391,6 +1391,42 @@ TEST(AggregateProbeGridsTest, NearDuplicatePositionsCollapse) {
     }
 }
 
+// Regression: collapsing a near-duplicate pair can leave an axis below the
+// cubic B-spline minimum, and the final segmented build then fails with
+// InsufficientGridPoints before its retry.  The merged axis must be
+// replenished with midpoints, not handed over short.
+// Bug: `merge_axis` deduplicated without restoring the four-point minimum.
+TEST(AggregateProbeGridsTest, NearDuplicateCollapseReplenishesCubicMinimum) {
+    mango::RefinementResult a;
+    a.moneyness = a.vol = {0.1, 0.2, 0.3, 0.4};
+    a.rate = {0.01, 0.03, 0.03 + 1e-13, 0.07};
+
+    auto g = mango::aggregate_probe_grids({a}, 160);
+
+    ASSERT_GE(g.rate.size(), 4u);
+    for (size_t i = 1; i < g.rate.size(); ++i) {
+        EXPECT_GT(g.rate[i] - g.rate[i - 1], 1e-9);
+    }
+    EXPECT_DOUBLE_EQ(g.rate.front(), 0.01);
+    EXPECT_DOUBLE_EQ(g.rate.back(), 0.07);
+    EXPECT_TRUE(std::ranges::find(g.rate, 0.03) != g.rate.end());
+}
+
+// Regression: an interior knot within the merge tolerance of the upper
+// endpoint won the ascending dedupe pass and the endpoint itself was dropped,
+// narrowing the fitted domain below the published sample bounds.
+// Bug: `merge_axis` kept the first member of a cluster, not the endpoint.
+TEST(AggregateProbeGridsTest, UpperEndpointSurvivesNearDuplicateMerge) {
+    mango::RefinementResult a;
+    a.moneyness = a.vol = {0.1, 0.2, 0.3, 0.4};
+    a.rate = {0.01, 0.03, 0.05, 0.07 - 1e-13, 0.07};
+
+    auto g = mango::aggregate_probe_grids({a}, 160);
+
+    ASSERT_EQ(g.rate.size(), 4u);
+    EXPECT_DOUBLE_EQ(g.rate.back(), 0.07);
+}
+
 // The union of three probes can exceed `max_points_per_dim`; the ceiling is
 // honored by dropping the most crowded interior positions, never an endpoint,
 // and never by re-spacing the survivors.
