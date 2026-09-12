@@ -74,6 +74,9 @@ std::vector<IVQuery> make_test_queries() {
 /// (Pattern 4) and docs/API_GUIDE.md ("Discrete Dividends with Adaptive
 /// Grid").  Shared by the two tests below so the pinning and the
 /// documented-limitation companion cannot drift apart.
+///
+/// benchmarks/interp_iv_safety.cc copies this grid, K_ref list and target
+/// (kDoc* constants) for its dividends path; keep them in step.
 IVSolverFactoryConfig documented_adaptive_dividend_config() {
     return IVSolverFactoryConfig{
         .option_type = OptionType::PUT,

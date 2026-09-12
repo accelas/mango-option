@@ -18,6 +18,7 @@
 #include "iv_benchmark_common.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/dividend_utils.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/option_spec.hpp"
@@ -180,6 +181,46 @@ static const ScheduleFn kNoDividends = [](double) {
 };
 
 // ============================================================================
+// Dividends path: the documented adaptive discrete-dividend configuration.
+// Grid, K_refs and target are verbatim from documented_adaptive_dividend_config()
+// in tests/iv_solver_factory_slow_test.cc (the nightly pin); if that helper
+// changes, change these too. The yield (kDivYield) and the schedule
+// (quarterly_div_schedule) are the benchmark's own.
+// ============================================================================
+static constexpr std::array<double, 7> kDivStrikes = {
+    93.0, 95.0, 97.5, 100.0, 102.5, 105.0, 107.0};   // all inside S/K in [0.92, 1.08]
+static constexpr size_t kNDS = kDivStrikes.size();
+static const std::vector<double> kDocMoneyness = {0.92, 0.95, 1.0, 1.05, 1.08};
+static const std::vector<double> kDocVols      = {0.10, 0.15, 0.20, 0.30};
+static const std::vector<double> kDocRates     = {0.02, 0.03, 0.05, 0.07};
+static const std::vector<double> kDocKRefs     = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                                  102.5, 105.0, 107.5, 110.0};
+static constexpr double kDocTargetIVError = 1e-3;
+
+static std::vector<double> doc_log_moneyness() {
+    std::vector<double> out;
+    for (double m : kDocMoneyness) out.push_back(std::log(m));
+    return out;
+}
+
+static const ScheduleFn kQuarterlyPerMaturity = [](double T) {
+    return std::optional{quarterly_div_schedule(T)};
+};
+static const ScheduleFn kRolledFrom1y = [](double T) -> std::optional<std::vector<Dividend>> {
+    if (T > 1.0 + 1e-9) return std::nullopt;
+    return rolled_dividends(quarterly_div_schedule(1.0), 1.0, T);
+};
+
+static std::array<std::string, kNT> dividend_count_labels(const ScheduleFn& schedule) {
+    std::array<std::string, kNT> out;
+    for (size_t ti = 0; ti < kNT; ++ti) {
+        auto d = schedule(kMaturities[ti]);
+        out[ti] = d ? "(" + std::to_string(d->size()) + " div)" : "(not covered)";
+    }
+    return out;
+}
+
+// ============================================================================
 // Step 2: Build interpolated IV solvers
 // ============================================================================
 
@@ -214,23 +255,19 @@ static AnyInterpIVSolver build_vanilla_solver() {
 using BSplineDivSolver = InterpolatedIVSolver<BSplineMultiKRefSurface>;
 
 // Dividends: one solver per maturity via BSpline + discrete dividends + adaptive grid.
-// Uses the lower-level builder directly to capture convergence stats.
+// Uses the lower-level builder directly to capture convergence stats. Grid,
+// K_refs and target are the documented adaptive discrete-dividend config
+// (see kDoc* above); the schedule is a fixed quarterly $0.50 calendar.
 static std::vector<std::pair<size_t, BSplineDivSolver>> build_div_solvers() {
     std::vector<std::pair<size_t, BSplineDivSolver>> solvers;
-
-    // S/K moneyness → log-moneyness for the builder
-    const std::vector<double> sk_moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30};
-    std::vector<double> log_m;
-    log_m.reserve(sk_moneyness.size());
-    for (double m : sk_moneyness) log_m.push_back(std::log(m));
-
-    const std::vector<double> vols = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50};
-    const std::vector<double> rates = {0.01, 0.03, 0.05, 0.10};
-    const AdaptiveGridParams adaptive{.target_iv_error = 2e-5};
+    const auto log_m = doc_log_moneyness();
+    const AdaptiveGridParams adaptive{.target_iv_error = kDocTargetIVError};
 
     for (size_t ti = 0; ti < kNT; ++ti) {
-        double mat = kMaturities[ti];
-        auto divs = make_div_schedule(mat);
+        const double mat = kMaturities[ti];
+        auto divs = quarterly_div_schedule(mat);
+        char label[48];
+        std::snprintf(label, sizeof(label), "B-spline dividends T=%s", kMatLabels[ti]);
 
         SegmentedAdaptiveConfig seg_config{
             .spot = kSpot,
@@ -238,47 +275,26 @@ static std::vector<std::pair<size_t, BSplineDivSolver>> build_div_solvers() {
             .dividend_yield = kDivYield,
             .discrete_dividends = divs,
             .maturity = mat,
-            .kref_config = {.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end())},
+            .kref_config = {.K_refs = kDocKRefs},
         };
-
         auto result = build_adaptive_bspline_segmented(
-            adaptive, seg_config, {log_m, vols, rates});
-        if (!result.has_value()) {
-            char label[32];
-            std::snprintf(label, sizeof(label), "B-spline dividends T=%s",
-                          kMatLabels[ti]);
-            report_build_failure(label, result.error());
-            continue;
-        }
+            adaptive, seg_config, {log_m, kDocVols, kDocRates});
+        if (!result.has_value()) { report_build_failure(label, result.error()); continue; }
 
-        // Print convergence stats
-        std::printf("  T=%s: iters=%zu target_met=%s max_err=%.1f bps "
-                    "avg_err=%.1f bps PDE=%zu%s\n",
-                    kMatLabels[ti],
-                    result->iterations.size(),
+        std::printf("  T=%s (%zu div): iters=%zu target_met=%s max_err=%.1f bps "
+                    "avg_err=%.1f bps measured=%zu PDE=%zu%s\n",
+                    kMatLabels[ti], divs.size(), result->iterations.size(),
                     result->target_met ? "yes" : "no",
-                    result->achieved_max_error * 1e4,
-                    result->achieved_avg_error * 1e4,
-                    result->total_pde_solves,
-                    result->used_retry ? " (retry)" : "");
+                    result->achieved_max_error * 1e4, result->achieved_avg_error * 1e4,
+                    result->diagnostics.holdout_points_measured,
+                    result->total_pde_solves, result->used_retry ? " (retry)" : "");
 
-        // Wrap in BSplineMultiKRefSurface → InterpolatedIVSolver
-        SurfaceBounds bounds{
-            .m_min = log_m.front(), .m_max = log_m.back(),
-            .tau_min = 0.0, .tau_max = mat,
-            .sigma_min = vols.front(), .sigma_max = vols.back(),
-            .rate_min = rates.front(), .rate_max = rates.back(),
-        };
+        // Published bounds are the builder's measured sample domain (spec D2
+        // of #454), not the input arrays.
         auto wrapper = BSplineMultiKRefSurface(
-            std::move(result->surface), bounds, OptionType::PUT, kDivYield);
-        auto solver = BSplineDivSolver::create(std::move(wrapper));
-        if (!solver.has_value()) {
-            char label[32];
-            std::snprintf(label, sizeof(label), "B-spline dividends T=%s",
-                          kMatLabels[ti]);
-            report_wrap_failure(label, solver.error());
-            continue;
-        }
+            std::move(result->surface), result->sample_bounds, OptionType::PUT, kDivYield);
+        auto solver = BSplineDivSolver::create(std::move(wrapper), {}, divs);
+        if (!solver.has_value()) { report_wrap_failure(label, solver.error()); continue; }
         solvers.emplace_back(ti, std::move(*solver));
     }
     std::printf("  built %zu/%zu per-maturity solvers:", solvers.size(), kNT);
@@ -402,7 +418,7 @@ static ErrorTableN<NS> compute_errors_div(
         if (solver_idx[ti] < 0) continue;  // no solver for this maturity
 
         double maturity = kMaturities[ti];
-        auto divs = make_div_schedule(maturity);
+        auto divs = quarterly_div_schedule(maturity);
         const auto& solver = div_solvers[static_cast<size_t>(solver_idx[ti])].second;
 
         // Build queries for this maturity
@@ -421,6 +437,7 @@ static ErrorTableN<NS> compute_errors_div(
             q.dividend_yield = kDivYield;
             q.option_type = OptionType::PUT;
             q.market_price = price;
+            q.discrete_dividends = divs;
             queries.push_back(q);
             strike_indices.push_back(si);
         }
@@ -740,43 +757,29 @@ run_chebyshev_adaptive(const PriceGrid& prices) {
 // Chebyshev Adaptive — Discrete Dividends (segmented, no EEP)
 // ============================================================================
 
-static std::array<ErrorTable, kNV>
-run_chebyshev_dividends(const PriceGrid& prices) {
+static std::optional<std::array<ErrorTableN<kNDS>, kNV>>
+run_chebyshev_dividends(const PriceGridN<kNDS>& prices) {
     std::printf("\n================================================================\n");
     std::printf("Chebyshev Adaptive — Discrete Dividends (segmented)\n");
     std::printf("================================================================\n\n");
 
-    AdaptiveGridParams params;
-    params.target_iv_error = 5e-4;  // 5 bps
-    params.max_iter = 6;
-
+    AdaptiveGridParams params{.target_iv_error = kDocTargetIVError};
+    const auto divs_1y = quarterly_div_schedule(1.0);
     SegmentedAdaptiveConfig config{
         .spot = kSpot,
         .option_type = OptionType::PUT,
         .dividend_yield = kDivYield,
-        .discrete_dividends = make_div_schedule(1.0),
+        .discrete_dividends = divs_1y,
         .maturity = 1.0,
-        .kref_config = {.K_refs = std::vector<double>(kStrikes.begin(), kStrikes.end())},
+        .kref_config = {.K_refs = kDocKRefs},
     };
-
-    IVGrid domain{
-        .moneyness = {std::log(kSpot / 120.0), std::log(kSpot / 115.0),
-                      std::log(kSpot / 110.0), std::log(kSpot / 105.0),
-                      std::log(kSpot / 100.0), std::log(kSpot / 95.0),
-                      std::log(kSpot / 90.0), std::log(kSpot / 85.0),
-                      std::log(kSpot / 80.0)},
-        .vol = {0.10, 0.15, 0.20, 0.30, 0.50},
-        .rate = {0.03, 0.05, 0.07},
-    };
-
-    std::printf("--- Building segmented Chebyshev surface (target=%.1f bps)...\n",
-                params.target_iv_error * 1e4);
-
+    IVGrid domain{.moneyness = doc_log_moneyness(), .vol = kDocVols, .rate = kDocRates};
+    std::printf("--- Building segmented Chebyshev surface (documented config, "
+                "target=%.1f bps, %zu div)...\n", params.target_iv_error * 1e4, divs_1y.size());
     auto result = build_adaptive_chebyshev_segmented(params, config, domain);
     if (!result.has_value()) {
         report_build_failure("Chebyshev dividends", result.error());
-        std::array<ErrorTable, kNV> empty{};
-        return empty;
+        return {};   // callers treat an empty optional/table as "no surface" (see main)
     }
 
     std::printf("  Iterations: %zu, PDE solves: %zu, target_met: %s\n",
@@ -793,40 +796,35 @@ run_chebyshev_dividends(const PriceGrid& prices) {
     }
 
     // Point diagnostic at T=1y (the surface's maturity) for both σ values
-    auto diag_divs = make_div_schedule(1.0);
     std::printf("--- Diagnostic: surface vs FDM at T=1y (same dividends) ---\n");
     for (double sigma : {0.15, 0.30}) {
         std::printf("  σ=%.2f:\n", sigma);
-        for (double K : {80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0}) {
+        for (double K : kDivStrikes) {
             double surf = result->surface.price(kSpot, K, 1.0, sigma, kRate);
             PricingParams pp;
             pp.spot = kSpot; pp.strike = K; pp.maturity = 1.0;
             pp.rate = kRate; pp.dividend_yield = kDivYield;
             pp.option_type = OptionType::PUT; pp.volatility = sigma;
-            pp.discrete_dividends = diag_divs;
+            pp.discrete_dividends = divs_1y;
             auto fdm = solve_american_option(pp);
             double ref = fdm.has_value() ? fdm->value() : -1.0;
             double pct_err = ref > 0.001 ? 100.0 * (surf - ref) / ref : 0.0;
-            std::printf("    K=%3.0f: surf=%8.4f fdm=%8.4f diff=%+.4f (%.1f%%)\n",
+            std::printf("    K=%5.1f: surf=%8.4f fdm=%8.4f diff=%+.4f (%.1f%%)\n",
                         K, surf, ref, surf - ref, pct_err);
         }
     }
 
-    // Wrap in InterpolatedIVSolver for consistent vega pre-check
+    // Wrap in InterpolatedIVSolver for consistent vega pre-check. The
+    // surface already carries its published sample bounds; it only needs
+    // the build schedule for query-time roll validation.
     auto solver = InterpolatedIVSolver<ChebyshevMultiKRefSurface>::create(
-        std::move(result->surface));
-    if (!solver.has_value()) {
-        report_wrap_failure("Chebyshev dividends solver", solver.error());
-        return {};
-    }
+        std::move(result->surface), {}, divs_1y);
+    if (!solver.has_value()) { report_wrap_failure("Chebyshev dividends", solver.error()); return {}; }
 
     // Compute IV errors at each maturity using dividend-aware FDM reference.
-    // The surface was built for maturity=1.0 with make_div_schedule(1.0).
-    // FDM reference needs dividends still in the option's future at each tau.
-    auto all_divs = make_div_schedule(1.0);
-    double surface_maturity = 1.0;
-
-    std::array<ErrorTable, kNV> all_errors{};
+    // The surface was built for maturity=1.0 with quarterly_div_schedule(1.0);
+    // each other maturity's schedule is that calendar rolled forward.
+    std::array<ErrorTableN<kNDS>, kNV> all_errors{};
     std::printf("--- Computing Chebyshev dividend IV errors...\n");
     for (size_t vi = 0; vi < kNV; ++vi) {
         auto& errors = all_errors[vi];
@@ -836,47 +834,34 @@ run_chebyshev_dividends(const PriceGrid& prices) {
 
         for (size_t ti = 0; ti < kNT; ++ti) {
             double tau = kMaturities[ti];
-            if (tau > surface_maturity + 0.01) continue;
-
-            double cal_now = surface_maturity - tau;
-            std::vector<Dividend> future_divs;
-            for (const auto& d : all_divs) {
-                if (d.calendar_time > cal_now)
-                    future_divs.push_back(
-                        Dividend{.calendar_time = d.calendar_time - cal_now,
-                                 .amount = d.amount});
-            }
-
-            for (size_t si = 0; si < kNS; ++si) {
-                double price = prices[vi][ti][si];
+            auto rolled = kRolledFrom1y(tau);
+            if (!rolled) continue;                       // T > 1: not covered
+            for (size_t si = 0; si < kNDS; ++si) {
+                double price = prices[vi][ti][si];       // from the rolled reference grid
                 if (std::isnan(price) || price <= 0) continue;
-
-                // FDM reference with the same dividends
-                double fdm_iv = solve_fdm_iv_div(
-                    kStrikes[si], tau, price, future_divs);
+                double fdm_iv = solve_fdm_iv_div(kDivStrikes[si], tau, price, *rolled);
                 if (std::isnan(fdm_iv)) continue;
-
-                // Surface IV via InterpolatedIVSolver (vega pre-check built in)
                 IVQuery q;
                 q.spot = kSpot;
-                q.strike = kStrikes[si];
+                q.strike = kDivStrikes[si];
                 q.maturity = tau;
                 q.rate = kRate;
                 q.dividend_yield = kDivYield;
                 q.option_type = OptionType::PUT;
                 q.market_price = price;
+                q.discrete_dividends = *rolled;
                 auto iv_result = solver->solve(q);
                 if (!iv_result.has_value()) continue;
-
                 errors[ti][si] = std::abs(iv_result->implied_vol - fdm_iv) * 10000.0;
             }
         }
 
-        char title[128];
+        char title[160];
         std::snprintf(title, sizeof(title),
-                      "Cheb Dividend IV Error (bps) — σ=%.0f%%",
+                      "Cheb Dividend IV Error (bps) — σ=%.0f%%, 1y calendar rolled",
                       kVols[vi] * 100);
-        print_heatmap(title, kStrikes, all_errors[vi]);
+        auto labels = dividend_count_labels(kRolledFrom1y);
+        print_heatmap(title, kDivStrikes, errors, &labels);
     }
     return all_errors;
 }
@@ -960,16 +945,18 @@ int main(int argc, char* argv[]) {
 
     std::printf("Strikes: ");
     for (double K : kStrikes) std::printf("%.0f ", K);
+    std::printf("\nDividend strikes: ");
+    for (double K : kDivStrikes) std::printf("%.1f ", K);
     std::printf("\nMaturities: ");
     for (size_t i = 0; i < kNT; ++i) std::printf("%s ", kMatLabels[i]);
     std::printf("\nVols: ");
     for (double v : kVols) std::printf("%.0f%% ", v * 100);
     std::printf("\n");
 
-    std::printf("Usage: interp_iv_safety [--path=all|bspline|chebyshev|q0|dividends]\n\n");
+    std::printf("Usage: interp_iv_safety [--path=all|bspline|chebyshev|q0|dividends|kref]\n\n");
 
     // Step 1: Generate reference prices (always needed)
-    PriceGrid vanilla_prices{}, div_prices{};
+    PriceGrid vanilla_prices{};
     bool need_vanilla = run_all || path == "bspline" || path == "chebyshev";
     bool need_divs = run_all || path == "dividends";
     bool need_q0 = run_all || path == "q0";
@@ -978,25 +965,31 @@ int main(int argc, char* argv[]) {
         std::printf("--- Generating vanilla reference prices (batch chain solver)...\n");
         vanilla_prices = generate_prices(kStrikes, kNoDividends, kDivYield);
     }
+
+    // Each dividends backend prices the contract it actually builds: the
+    // B-spline path is one solver per maturity against that maturity's own
+    // quarterly calendar, while the Chebyshev path is a single fixed-expiry
+    // (1y) surface whose dividends are the 1y calendar rolled to each query
+    // maturity. Sharing one price grid between them would validate the
+    // wrong schedule for one of the two.
+    PriceGridN<kNDS> bs_div_prices{}, cheb_div_prices{};
     if (need_divs) {
-        std::printf("--- Generating dividend reference prices (batch solver)...\n");
-        div_prices = generate_prices(
-            kStrikes,
-            [](double T) { return std::optional{make_div_schedule(T)}; },
-            kDivYield);
+        std::printf("--- Generating dividend reference prices: per-maturity quarterly calendar (B-spline)...\n");
+        bs_div_prices = generate_prices(kDivStrikes, kQuarterlyPerMaturity, kDivYield);
+        std::printf("--- Generating dividend reference prices: 1y calendar rolled to each maturity (Chebyshev)...\n");
+        cheb_div_prices = generate_prices(kDivStrikes, kRolledFrom1y, kDivYield);
     }
 
     // Per-path error tables
     std::array<ErrorTable, kNV> vanilla_errors{};
-    std::array<ErrorTable, kNV> div_errors{};
     std::array<ErrorTable, kNV> cheb_errors{};
     std::array<ErrorTable, kNV> cheb_adaptive_errors{};
-    std::array<ErrorTable, kNV> cheb_div_errors{};
     std::array<ErrorTable, kNV> q0_bs4d_errors{};
     std::array<ErrorTable, kNV> q0_dim3d_bs_errors{};
     std::array<ErrorTable, kNV> q0_dim3d_ch_errors{};
+    std::optional<std::array<ErrorTableN<kNDS>, kNV>> div_errors, cheb_div_errors;
 
-    // B-spline adaptive (vanilla + dividends)
+    // B-spline adaptive (vanilla)
     if (run_all || path == "bspline") {
         std::printf("--- Building vanilla interpolated solver (adaptive)...\n");
         auto vanilla_solver = build_vanilla_solver();
@@ -1015,27 +1008,26 @@ int main(int argc, char* argv[]) {
     if (run_all || path == "dividends") {
         std::printf("--- Building dividend interpolated solvers (per-maturity)...\n");
         auto div_solvers = build_div_solvers();
-
-        std::printf("\n--- Computing dividend IV errors...\n");
-        for (size_t vi = 0; vi < kNV; ++vi) {
-            char title[128];
-            std::snprintf(title, sizeof(title),
-                          "Interpolation IV Error (bps) — σ=%.0f%%, quarterly $0.50 div",
-                          kVols[vi] * 100);
-            div_errors[vi] = compute_errors_div(div_prices, kStrikes, div_solvers, vi);
-            print_heatmap(title, kStrikes, div_errors[vi]);
+        if (!div_solvers.empty()) {
+            div_errors.emplace();
+            auto labels = dividend_count_labels(kQuarterlyPerMaturity);
+            std::printf("\n--- Computing dividend IV errors...\n");
+            for (size_t vi = 0; vi < kNV; ++vi) {
+                (*div_errors)[vi] = compute_errors_div(bs_div_prices, kDivStrikes, div_solvers, vi);
+                char title[160];
+                std::snprintf(title, sizeof(title),
+                    "Interpolation IV Error (bps) — σ=%.0f%%, quarterly $0.50 calendar (B-spline per-maturity)",
+                    kVols[vi] * 100);
+                print_heatmap(title, kDivStrikes, (*div_errors)[vi], &labels);
+            }
         }
+        cheb_div_errors = run_chebyshev_dividends(cheb_div_prices);
     }
 
     // Chebyshev 4D
     if (run_all || path == "chebyshev") {
         cheb_errors = run_chebyshev_4d(vanilla_prices);
         cheb_adaptive_errors = run_chebyshev_adaptive(vanilla_prices);
-    }
-
-    // Chebyshev dividends
-    if (run_all || path == "dividends") {
-        cheb_div_errors = run_chebyshev_dividends(div_prices);
     }
 
     // q=0 comparison: 4D B-spline vs dimensionless 3D (B-spline & Chebyshev)
@@ -1132,13 +1124,12 @@ int main(int argc, char* argv[]) {
         std::printf("================================================================\n");
 
         for (size_t vi = 0; vi < kNV; ++vi) {
-            std::vector<AlgoErrorsN<kNS>> vol_algos;
-            if (run_all || path == "dividends") {
-                vol_algos.push_back({"B-spline(div)", &div_errors[vi]});
-                vol_algos.push_back({"Cheb(div)", &cheb_div_errors[vi]});
-            }
-            if (!vol_algos.empty())
-                print_tvk_comparison<kNS>(div_prices, kStrikes, vi, vol_algos);
+            std::printf("\n  [B-spline per-maturity, reference = quarterly calendar per maturity]");
+            std::array<AlgoErrorsN<kNDS>, 1> a{{{"B-spline(div)", div_errors ? &(*div_errors)[vi] : nullptr}}};
+            print_tvk_comparison<kNDS>(bs_div_prices, kDivStrikes, vi, a);
+            std::printf("\n  [Chebyshev fixed-expiry 1y, reference = 1y calendar rolled]");
+            std::array<AlgoErrorsN<kNDS>, 1> c{{{"Cheb(div)", cheb_div_errors ? &(*cheb_div_errors)[vi] : nullptr}}};
+            print_tvk_comparison<kNDS>(cheb_div_prices, kDivStrikes, vi, c);
         }
     }
 

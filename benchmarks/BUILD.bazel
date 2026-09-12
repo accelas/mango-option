@@ -526,10 +526,12 @@ cc_binary(
     deps = [
         "//src/option:american_option",
         "//src/option:american_option_batch",
+        "//src/option:dividend_utils",
         "//src/option:iv_solver",
         "//src/option:interpolated_iv_solver",
         "//src/option:price_table_factory",
         "//src/option/table:adaptive_grid_types",
+        "//src/option/table/bspline:bspline_adaptive",
         "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option/table/chebyshev:chebyshev_table_builder",
         "//src/option/table/bspline:bspline_3d_surface",
