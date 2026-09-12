@@ -782,10 +782,12 @@ run_chebyshev_dividends(const PriceGridN<kNDS>& prices) {
         return {};   // callers treat an empty optional/table as "no surface" (see main)
     }
 
-    std::printf("  Iterations: %zu, PDE solves: %zu, target_met: %s\n",
-                result->iterations.size(),
-                result->total_pde_solves,
-                result->target_met ? "yes" : "no");
+    std::printf("  Iterations: %zu, PDE solves: %zu, target_met: %s, "
+                "achieved max=%.1f bps avg=%.1f bps measured=%zu\n",
+                result->iterations.size(), result->total_pde_solves,
+                result->target_met ? "yes" : "no",
+                result->achieved_max_error * 1e4, result->achieved_avg_error * 1e4,
+                result->diagnostics.holdout_points_measured);
     for (const auto& it : result->iterations) {
         std::printf("  iter %zu: grid [%zu, %zu, %zu, %zu] "
                     "max_err=%.1f bps avg_err=%.1f bps\n",
