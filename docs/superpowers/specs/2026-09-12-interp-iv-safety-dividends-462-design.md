@@ -1,7 +1,7 @@
 # Retune `interp_iv_safety` dividends path and measure sparse-K_ref accuracy (#462)
 
 Date: 2026-09-12. Branch `fix/462-dividends-retune`. Issue #462 (follow-up 6 of 7
-from PR #454). Revision 2 (after Codex design review round 1).
+from PR #454). Revision 3 (after Codex design review rounds 1 and 2).
 
 ## 1. Problem
 
@@ -135,9 +135,16 @@ Both grids are produced by `generate_prices` given a schedule function; the
 existing scaled-schedule call site for the vanilla and q0 paths is unchanged.
 Each backend's heatmap and TV/K mask use its own reference grid, and the
 TV/K comparison prints the two backends in separate blocks headed by their
-schedule, since their masks differ. The recovered FDM IV then equals the
-displayed 15% or 30% on both backends, which keeps every query inside the
-documented vol range [0.10, 0.30].
+schedule, since their masks differ. The generating volatilities (15% and
+30%) then lie inside the documented vol range [0.10, 0.30] on both backends.
+That does not guarantee recovery: 30% sits on the published upper bound, and
+an underpriced surface whose root would lie above it correctly fails; such
+failures are counted, not hidden (D3).
+
+**Query schedules.** Dividend-path queries carry their contract's schedule in
+`IVQuery::discrete_dividends` (the per-maturity schedule for B-spline, the
+rolled schedule for Chebyshev), so the solver's schedule validation (#449) is
+exercised rather than bypassed by an empty query schedule.
 
 **Containers.** To carry two strike sets the per-path containers become
 generic over the strike count: `PriceGrid`, `ErrorTable`, `TVKMask` and the
@@ -163,6 +170,12 @@ changes for the vanilla and q0 paths.
 - Every table reports counts: attempted, succeeded, failed (reference or
   inversion), filtered (TV/K). The B-spline per-maturity block lists which
   maturities built and which did not.
+- **Population law.** Every reported statistic names the population it is
+  computed over, and a point enters a statistic only if that statistic's own
+  inputs are valid. A failure in one measurement (an inversion that does not
+  converge) never removes the point from another measurement whose inputs are
+  intact (a price decomposition against the FDM reference). `max` always
+  means the maximum absolute value; signed values are kept per point.
 - Exit status: `main` returns 1 if any *build* the requested path needed
   failed (adaptive build, manual build, or solver wrap). Per-point reference
   or inversion failures never change the exit status; they are data and are
@@ -192,11 +205,14 @@ the vol and rate knot ranges, matching `manual_segmented_bounds`. The IV
 solver is `InterpolatedIVSolver<BSplineMultiKRefSurface>::create(surface, {},
 schedule)`.
 
-**Maturities.** T ∈ {90/365, 180/365, 1.0}: one, two and three dividends
-under the quarterly calendar. Rate 5%, σ ∈ {0.15, 0.30}.
+**Maturities.** T ∈ {0.20, 0.30, 0.60, 1.0}: zero, one, two and three
+dividends under the quarterly calendar (`filter_and_merge_dividends` keeps
+dividends strictly inside (0, T), so 0.20 carries none and is the
+dividend-free control row). Rate 5%, σ ∈ {0.15, 0.30}.
 
-**Query strikes.** Inside the window [85, 115], inclusive, so every query is
-at least one coarse spacing away from the clamped outer bands:
+**Query strikes.** Inside the window [85, 115], inclusive. Clamping to a
+single K_ref happens only outside [80, 120]; the window keeps a $5 margin
+from those endpoints so no query is clamped at any spacing:
 
 - anchors: the spacing's K_refs in the window;
 - mid-anchors: all midpoints between adjacent K_refs that lie in the window.
@@ -204,10 +220,19 @@ at least one coarse spacing away from the clamped outer bands:
 **Per-query quantities.** For a query (T, K, σ) with bracketing K_refs L ≤ K ≤ H
 and w = (K − L)/(H − L):
 
-- P_FDM(K): `solve_american_option` at (spot, K, T, σ, r) with the schedule;
-  vega_FDM(K) by the same central σ-bump `make_fd_vega_refs_fn` in
-  `src/option/table/adaptive_metrics.cpp` uses (two more solves). At anchors P_FDM(L) and P_FDM(H) are the
-  anchor references already solved.
+- P_FDM(K): the FDM reference price, `solve_american_option` at
+  (spot, K, T, σ, r) with the schedule; vega_FDM(K) by the same central
+  σ-bump `make_fd_vega_refs_fn` in `src/option/table/adaptive_metrics.cpp`
+  uses (two more solves). At anchors P_FDM(L) and P_FDM(H) are the anchor
+  references already solved. These are numerical references with their own
+  discretization error, which the reference-resolution check below bounds.
+- **Eligibility (reference-only).** A query is eligible for IV-equivalent
+  statistics when P_FDM(K), P_FDM(L), P_FDM(H) and vega_FDM(K) are finite,
+  vega_FDM(K) ≥ `AdaptiveGridParams::vega_floor` (1e-4), and
+  (P_FDM(K) − intrinsic)/K ≥ 1e-4, the same TV/K and vega-floor thresholds
+  `make_iv_score_fn` applies. Eligibility depends only on the references,
+  never on the surface or the inversion. Ineligible queries are counted per
+  reason (`ref-fail`, `low-vega`, `low-tv`) and enter no statistic.
 - B_FDM(K) = K · [(1 − w) · P_FDM(L)/L + w · P_FDM(H)/H]: the blend policy
   applied to exact prices. This is the same-query control: it is what the
   assembled surface would return if every K_ref surface were exact.
@@ -221,28 +246,39 @@ and w = (K − L)/(H − L):
 - End-to-end IV inversion error: |IV_interp − IV_FDM| in bps, where IV_FDM is
   `solve_fdm_iv_div` on P_FDM(K) and IV_interp is the solver's `solve` on the
   same price. This is the benchmark's usual metric, reported next to the
-  decomposition, never mixed with it.
+  decomposition, never mixed with it. Its population is the eligible queries
+  whose two inversions both converged; an inversion failure is counted in
+  `inv fail` and leaves the query's `blend` and `surf` entries untouched.
 
 **Output.** One block per σ, one row per (Δ, T):
 
 ```
-K_ref spacing sweep — σ=15%  (window K∈[85,115]; bps = price / FD vega unless "inv")
-                     mid-anchors                                   anchors
-  Δ     T    n  blend max  blend rms  surf max  surf rms  inv max  fail |  n  surf max  surf rms  inv max  fail
-  10   90d  ...
+K_ref spacing sweep — σ=15%  (window K∈[85,115]; bps = |price| / FD vega unless "inv")
+                        mid-anchors                                              anchors
+  Δ     T  q  elig  blend max  blend rms  surf max  surf rms  inv n  inv max |  q  elig  surf max  surf rms  inv n  inv max
+  10  0.20 ...
 ```
 
-`blend` is [B_FDM − P_FDM]/vega, `surf` is [P̂ − B_FDM]/vega, `inv` is the
-inversion error, `fail` counts queries whose reference solve or inversion
-failed. A cell with n = 0 prints `n/a`. A row whose `fail` exceeds 10% of its
-queries is marked `incomplete` and excluded from D5.
+`q` is the number of queries, `elig` the eligible ones (with the per-reason
+exclusion counts in a footer), `blend` is |B_FDM − P_FDM|/vega, `surf` is
+|P̂ − B_FDM|/vega, `inv n` and `inv max` the inversion population and its
+maximum. A cell with an empty population prints `n/a`. A row is `complete`
+for D5 when `elig` ≥ 1 and `elig` ≥ 90% of `q`; otherwise it is marked
+`incomplete` and excluded from D5. Inversion counts never affect
+completeness.
 
-**Resolution check.** After the sweep, the Δ = 2.5 row at T = 1 is rebuilt
-with 81 moneyness knots and `tau_points_per_segment = 9` and printed as one
-extra row labelled `fine`. If `surf` moves by more than a factor of two the
-per-surface floor is not converged and the sweep says so in its footer; the
-blend column is independent of the floor by construction, so the conclusion
-about the blend policy stands either way.
+**Resolution checks.** Two, both printed as extra rows after the sweep:
+
+- `fine` (surface): the Δ = 2.5 row at T = 1 rebuilt with 81 moneyness knots
+  and `tau_points_per_segment = 9`. If `surf` moves by more than a factor of
+  two the per-surface floor is not converged and the footer says so; the
+  blend column does not depend on the surface, so the blend conclusion stands.
+- `ref-fine` (reference): the same row's mid-anchor references P_FDM(K),
+  P_FDM(L), P_FDM(H) and vega re-solved at a finer PDE accuracy (the plan
+  pins the `GridAccuracyParams`), with `blend` recomputed from them. The
+  change in `blend max` is the reference uncertainty. D5 classifies a spacing
+  against 10 bps only when that uncertainty is below 2 bps; otherwise the
+  baseline is published as oracle-dependent with the uncertainty stated.
 
 **Cost.** Surfaces: 3 maturities × (5 + 9 + 17 + 33) K_refs × 20 (σ, r) knot
 pairs = 3840 short fixed-expiry solves, plus the fine row. Queries: about
@@ -257,10 +293,12 @@ few minutes, not a promise.
   `blend max` and `blend rms` per (Δ, T) for both σ, headed by the command,
   date, commit and build flags that produced it. The accompanying text is a
   conditional baseline, not a rule: it names the spacings whose `blend max`
-  stays at or below 10 bps IV-equivalent at every measured (T, σ) with no
-  `incomplete` row, states explicitly that none may qualify, and states the
-  conditions (spot 100, PUT, r = 5%, quarterly $0.50 calendar, manual B-spline
-  segmented surfaces) outside which the numbers do not transfer.
+  stays at or below 10 bps IV-equivalent at every measured (T, σ) with every
+  row `complete` and the reference uncertainty below 2 bps, states explicitly
+  that none may qualify, and states the conditions (spot 100, PUT, r = 5%,
+  q = 2%, quarterly $0.50 calendar, window [85, 115], the eligibility rules,
+  the reference accuracy settings, manual B-spline segmented surfaces)
+  outside which the numbers do not transfer.
 - Comment on #460 with the same table and text as its measured baseline.
 - Terms used in the sweep output and guide, defined where first used:
   *anchor* (a strike equal to a K_ref), *mid-anchor* (the midpoint between two
@@ -285,7 +323,8 @@ few minutes, not a promise.
   builds the B-spline per-maturity configuration of D1 at all eight
   maturities and asserts viability with `holdout_points_measured > 0`; no
   accuracy number is pinned, and no Chebyshev case is added (minutes per
-  build). Until the user decides, the spec's default remains the user's Q4
+  build). Two review rounds recommended it; this spec now recommends
+  accepting it. Until the user decides, the default remains the user's Q4
   choice: no new test.
 
 ## 5. Acceptance criteria
@@ -295,16 +334,23 @@ few minutes, not a promise.
 - AC2. `interp_iv_safety --path=dividends` on this branch builds all eight
   B-spline per-maturity solvers and the Chebyshev surface, prints their
   diagnostics and dividend counts, uses the seven `kDivStrikes` columns, and
-  exits 0.
+  exits 0. Coverage: every built row has at least one successful query at
+  each σ, and at least 75% of all dividend-path queries produce an error
+  value. If a pilot run falls short, the shortfall is reported as a finding
+  with its per-reason counts, not tuned away.
 - AC3. With a deliberately incoherent config (verified once by hand, not
   committed) the benchmark prints the error code name and `n/a` cells and
   exits 1.
 - AC4. `interp_iv_safety --path=kref` completes, prints the four-spacing
-  blocks for both σ with the `fine` row and counts, and has no `incomplete`
-  row at Δ ≤ 5.
+  blocks for both σ with the `fine` and `ref-fine` rows and the per-reason
+  exclusion counts, and every row is `complete` (eligibility is
+  reference-only, so this is a statement about the FDM references in the
+  window, not about the surfaces).
 - AC5. `--path=bspline`, `--path=chebyshev` and `--path=q0` produce the same
-  tables as before apart from timing lines and the usage/banner lines.
-  `--path=all` includes `kref` and its dividends sections change as designed.
+  error values and layout as before; only timing lines, the usage/banner
+  lines, the added count lines and `n/a` for empty aggregates may differ.
+  Vanilla and q0 strike headers keep their integer format. `--path=all`
+  includes `kref`, and its dividends sections change as designed.
 - AC6. The fast suite (`bazel test //tests/... --test_tag_filters=-manual,-slow`)
   passes with the same count as on `main`; `bazel test //tests:iv_solver_factory_slow_test`
   passes.
@@ -352,8 +398,9 @@ the existing nightly pins plus cross-reference comments; (ii) a new slow
 test on the benchmark's exact config; (iii) a shared config helper linked by
 both. **Chosen: (i).** A second near-identical fixture adds drift of its own;
 a shared library target for one fixture is not worth a BUILD target.
-Design review round 1 disagreed: the pins cover a different schedule and one
-maturity. Carried to the go/no-go as D6's open item.
+Design review rounds 1 and 2 both disagreed: the pins cover a different
+schedule and one maturity. Carried to the go/no-go as D6's open item, with
+the spec now recommending the B-spline viability case.
 
 Q5. **The Chebyshev wide-band regression found during triage.** Options:
 (i) file a new issue and keep #462 as designed; (ii) fold the fix into #462;
