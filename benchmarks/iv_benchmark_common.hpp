@@ -21,6 +21,18 @@ inline std::vector<Dividend> make_div_schedule(double maturity) {
     };
 }
 
+// Fixed quarterly $0.50 calendar, filtered to the option's life. Used by
+// interp_iv_safety's dividends path (#462): unlike make_div_schedule it does
+// not scale with maturity, so a 7-day option carries no dividend and a
+// 1-year option carries three. See the retune spec for why the scaled
+// schedule refuses on the segmented B-spline path at short maturities (#501).
+inline std::vector<Dividend> quarterly_div_schedule(double maturity) {
+    std::vector<Dividend> out;
+    for (double t = 0.25; t < maturity; t += 0.25)
+        out.push_back(Dividend{.calendar_time = t, .amount = 0.50});
+    return out;
+}
+
 // Brent solver for IV recovery using the library's find_root.
 // Returns vol on success, NaN on failure.
 template <typename PriceFn>
