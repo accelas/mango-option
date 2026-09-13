@@ -781,6 +781,48 @@ TEST(RunRefinementTest, NonFiniteHoldoutDisqualifies) {
     EXPECT_NEAR(r->achieved_max_error, 0.05, 1e-12);
 }
 
+// Regression #501: event gaps are outside the measurement domain. Sampling
+// them made the expected NaN price veto every otherwise viable candidate.
+TEST(RunRefinementTest, ExcludedMaturitiesAreNeverEvaluated) {
+    Harness h;
+    h.ctx.maturity_is_supported = [](double tau) { return tau >= 0.3; };
+    h.price_override = [](double spot, double strike, double tau, double,
+                          double rate) {
+        return tau < 0.3 ? std::numeric_limits<double>::quiet_NaN()
+                         : analytic_ref(spot, strike, tau, rate);
+    };
+
+    auto r = h.run();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r->target_met);
+    EXPECT_LT(r->diagnostics.holdout_points, h.params.validation_samples);
+    EXPECT_EQ(r->diagnostics.holdout_points_invalid, 0u);
+    EXPECT_EQ(r->diagnostics.holdout_points_measured,
+              r->diagnostics.holdout_points);
+    for (const auto& pt : h.queried) EXPECT_GE(pt[1], 0.3);
+    for (const auto& pt : h.holdout_keys) EXPECT_GE(pt[1], 0.3);
+
+    // Domain admission must not hide a bad price at a supported time.
+    Harness bad;
+    bad.ctx.maturity_is_supported = h.ctx.maturity_is_supported;
+    bad.script = [](const GridSizes&, size_t) {
+        return SurfaceScript{.nan_fresh = true, .nan_holdout = true};
+    };
+    auto rejected = bad.run();
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, mango::PriceTableErrorCode::NoViableSurface);
+}
+
+TEST(RunRefinementTest, ExcludedMaturitiesCannotCertifyEmptyHoldout) {
+    Harness h;
+    h.ctx.maturity_is_supported = [](double) { return false; };
+    auto r = h.run();
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::ValidationFailed);
+    EXPECT_EQ(h.prepare_calls, 0u);
+    EXPECT_EQ(h.build_calls, 0u);
+}
+
 TEST(RunRefinementTest, NonFiniteFreshDisqualifies) {
     Harness h;
     h.script = by_growth(

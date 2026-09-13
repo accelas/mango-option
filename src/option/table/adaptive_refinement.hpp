@@ -53,6 +53,10 @@ struct RefinementContext {
     OptionType option_type;
     SurfaceBounds bounds;         ///< fit domain (support incl. headroom)
     SurfaceBounds sample_bounds;  ///< user-facing measurement domain
+    /// Optional time-domain admission, fixed across all candidates. Segmented
+    /// builders exclude unsupported event neighborhoods before drawing refs;
+    /// non-finite prices at admitted times still disqualify a candidate.
+    std::function<bool(double)> maturity_is_supported = {};
 };
 
 /// Absolute holdout-error ceiling above which a candidate surface is treated

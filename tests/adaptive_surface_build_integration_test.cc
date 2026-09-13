@@ -22,6 +22,57 @@
 namespace mango {
 namespace {
 
+// Regression #501: validation sampled the deliberately omitted event gaps,
+// mistook their NaN prices for corrupt surfaces, and refused viable builds.
+class SegmentedDividendPlacement
+    : public testing::TestWithParam<std::pair<double, double>> {};
+
+TEST_P(SegmentedDividendPlacement, SupportedTimesBuildAndEventGapsStillRefuse) {
+    const auto [first_days, maturity_days] = GetParam();
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {},
+        .maturity = maturity_days / 365.0,
+        .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                 102.5, 105.0, 107.5, 110.0}},
+    };
+    for (double day = first_days; day < maturity_days; day += 91.25) {
+        config.discrete_dividends.push_back({day / 365.0, 0.50});
+    }
+    IVGrid domain{
+        .moneyness = {std::log(0.92), std::log(0.95), 0.0,
+                      std::log(1.05), std::log(1.08)},
+        .vol = {0.10, 0.15, 0.20, 0.30},
+        .rate = {0.02, 0.03, 0.05, 0.07},
+    };
+    auto result = build_adaptive_bspline_segmented(
+        AdaptiveGridParams{.target_iv_error = 1e-3}, config, domain);
+    ASSERT_TRUE(result.has_value())
+        << "code " << static_cast<int>(result.error().code);
+    EXPECT_TRUE(std::isfinite(result->achieved_max_error));
+    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    EXPECT_GT(result->diagnostics.holdout_points_measured, 0u);
+    EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
+
+    for (const auto& dividend : config.discrete_dividends) {
+        const double event_tau = config.maturity - dividend.calendar_time;
+        EXPECT_FALSE(result->surface.contains_maturity(event_tau));
+        EXPECT_TRUE(std::isnan(result->surface.price(
+            100.0, 100.0, event_tau, 0.20, 0.03)));
+        for (double tau : {event_tau - 0.001, event_tau + 0.001}) {
+            EXPECT_TRUE(result->surface.contains_maturity(tau));
+            EXPECT_TRUE(std::isfinite(result->surface.price(
+                100.0, 100.0, tau, 0.20, 0.03)));
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Issue501, SegmentedDividendPlacement,
+    testing::Values(std::pair{10.0, 30.0}, std::pair{60.0, 180.0},
+                    std::pair{75.0, 365.0}));
+
 /// Convert S/K moneyness to log-moneyness for internal builder APIs.
 std::vector<double> to_log_m(std::initializer_list<double> sk) {
     std::vector<double> v;

@@ -593,13 +593,21 @@ Explicit levels supplied to `ChebyshevSegmentedBuilder::build` or
 [measured default accuracy and cost](MATHEMATICAL_FOUNDATIONS.md#manual-chebyshev-defaults)
 for the tested domain and the distinction between price accuracy and IV/Greek guarantees.
 
-Chebyshev's current event topology omits `5e-4` years (4.38 hours) on each
-side of each dividend. Queries in these gaps, including the exact event,
-are unsupported: `validate_pricing_params` reports `OutOfRange`, Greeks
+The segmented B-spline and Chebyshev event topology omits `5e-4` years
+(4.38 hours) on each side of each dividend. Queries in these gaps, including
+the exact event, are unsupported: `validate_pricing_params` reports `OutOfRange`, Greeks
 report `OutOfDomain`, and interpolated IV reports `InvalidGridConfig`.
 Unchecked scalar price/vega methods return NaN. No neighboring-time price
 is substituted. Topologies that put an event inside a fitted leaf are
 rejected as `InvalidConfig`. These exclusions matter for intraday use.
+
+Adaptive B-spline validation measures only supported times: excluded event
+neighborhoods do not count as failed reference solves or invalid prices.
+Non-finite prices at supported times still fail the viability gate, and a
+build with too few supported holdout references is refused. This does not
+guarantee the requested accuracy; short maturities can still miss the target
+or fail the final accuracy gate.
+
 An exact event, if represented by a backend, means the post-dividend
 calendar side. The solver's ordinary snapshots are taken after backward
 jump callbacks, which is the pre-dividend calendar side.

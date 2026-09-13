@@ -1027,6 +1027,38 @@ TEST(SegmentedFinalContract, SparseReferencesFailValidation) {
     EXPECT_EQ(ok->invalid, 12u);
 }
 
+// Regression #501: the final assembly and retry must share references only
+// at supported times, without counting domain exclusions as solver failures.
+TEST(SegmentedFinalContract, ReferencesExcludeUnsupportedMaturities) {
+    AdaptiveGridParams params;
+    params.validation_samples = 16;
+    auto ctx = make_score_ctx();
+    ctx.maturity_is_supported = [](double tau) { return tau >= 0.3; };
+    size_t calls = 0;
+    PrepareRefsFn refs = [&calls](double, double, double tau, double, double)
+        -> std::expected<ErrorRefs, SolverError> {
+        EXPECT_GE(tau, 0.3);
+        ++calls;
+        return ErrorRefs{.ref_price = 10.0, .vega = 1.0};
+    };
+    auto set = detail::prepare_final_validation(params, ctx, refs,
+                                               params.lhs_seed + 999);
+    ASSERT_TRUE(set.has_value());
+    EXPECT_GE(set->points.size(), 4u);
+    EXPECT_LT(set->points.size(), params.validation_samples);
+    EXPECT_EQ(set->ref_attempts, calls);
+    EXPECT_EQ(set->points.size(), calls);
+    EXPECT_EQ(set->invalid, 0u);
+    for (const auto& pt : set->points) EXPECT_GE(pt.coords[1], 0.3);
+
+    ctx.maturity_is_supported = [](double) { return false; };
+    auto empty = detail::prepare_final_validation(params, ctx, refs,
+                                                 params.lhs_seed + 999);
+    ASSERT_FALSE(empty.has_value());
+    EXPECT_EQ(empty.error().code, PriceTableErrorCode::ValidationFailed);
+    EXPECT_EQ(calls, set->ref_attempts);
+}
+
 // Selection returns the lowest-error *viable* surface -- the retry is not
 // preferred just because it was built.
 TEST(SegmentedFinalContract, SelectionKeepsOriginalWhenRetryIsWorse) {
