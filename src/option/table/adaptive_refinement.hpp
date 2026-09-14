@@ -90,14 +90,14 @@ struct RefinementResult {
 /// The continuous axes carry the *positions* every probe's refinement loop
 /// chose, not just their counts: rebuilding on uniform grids at the probes'
 /// maximum sizes threw those positions away, and the rebuilt surface could
-/// measure worse than the probe that sized it.  Tau stays a per-segment
-/// count because the segmented builder places its own tau nodes inside each
-/// dividend regime.
+/// measure worse than the probe that sized it. B-spline builders also retain
+/// global tau positions; count-based backends continue to use tau_points.
 struct AggregatedGrids {
     std::vector<double> moneyness;
     std::vector<double> vol;
     std::vector<double> rate;
     int tau_points = 0;
+    std::vector<double> tau{};
 };
 
 /// Initial grids for seeding the refinement loop (optional for each dimension)

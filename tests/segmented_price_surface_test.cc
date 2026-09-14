@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace mango;
@@ -98,6 +99,71 @@ TEST(SegmentedSurfaceTest, ExactDividendSelectsPostCalendarSide) {
 // ---------------------------------------------------------------------------
 // Greek tests
 // ---------------------------------------------------------------------------
+
+TEST(SegmentedSurfaceTest, MultiStrikeSpotGreeksMatchPriceDifferences) {
+    std::vector<BSplineMultiKRefEntry> entries;
+    for (double k : {80.0, 120.0}) {
+        SegmentedPriceTableBuilder::Config c{};
+        c.K_ref = k;
+        c.option_type = OptionType::PUT;
+        c.maturity = 1;
+        c.dividends.discrete_dividends = {{0.5, 0.5}};
+        c.grid.moneyness.clear();
+        for (int i = 0; i < 60; ++i)
+            c.grid.moneyness.push_back(std::lerp(-0.3, 0.3, i / 59.0));
+        auto built = SegmentedPriceTableBuilder::build(c);
+        ASSERT_TRUE(built.has_value());
+        entries.push_back({k, std::move(*built)});
+    }
+    auto surface = build_multi_kref_surface(std::move(entries));
+    ASSERT_TRUE(surface.has_value());
+    PricingParams p(OptionSpec{.spot = 100, .strike = 105, .maturity = 0.7,
+        .rate = 0.04, .option_type = OptionType::PUT}, 0.225);
+    const auto price = [&](double s) { return surface->price(s, 105, 0.7, 0.225, 0.04); };
+    const double h = 0.01;
+    auto delta = surface->greek(Greek::Delta, p);
+    auto gamma = surface->gamma(p);
+    ASSERT_TRUE(delta.has_value());
+    ASSERT_TRUE(gamma.has_value());
+    EXPECT_NEAR(*delta, (price(100+h)-price(100-h))/(2*h), 1e-6);
+    EXPECT_NEAR(*gamma, (price(100+h)-2*price(100)+price(100-h))/(h*h), 1e-6);
+}
+
+TEST(SegmentedSurfaceTest, RetainsRequestedMaturityKnots) {
+    SegmentedPriceTableBuilder::Config c{};
+    c.K_ref = 100;
+    c.option_type = OptionType::PUT;
+    c.maturity = 1;
+    c.dividends.discrete_dividends = {{0.5, 0.5}};
+    c.grid.moneyness = log_m_grid({0.8, 0.9, 1.0, 1.1, 1.2});
+    c.tau_grid = {0.0, 0.003, 0.019, 0.2, 0.5, 0.61, 0.73, 1.0};
+    auto built = SegmentedPriceTableBuilder::build(c);
+    ASSERT_TRUE(built.has_value());
+    for (double t : c.tau_grid) {
+        auto bracket = built->split().bracket(100, 100, t, 0.2, 0.04);
+        const size_t i = bracket.entries[0].index;
+        const auto& leaf = built->pieces()[i];
+        const auto& knots = leaf.interpolant().get().grid(1);
+        EXPECT_TRUE(std::binary_search(knots.begin(), knots.end(), t - built->split().tau_start()[i]));
+    }
+}
+
+TEST(SegmentedSurfaceTest, RejectsInvalidRequestedMaturityKnots) {
+    SegmentedPriceTableBuilder::Config c{};
+    c.K_ref = 100;
+    c.option_type = OptionType::PUT;
+    c.maturity = 1;
+    c.grid.moneyness = log_m_grid({0.8, 0.9, 1, 1.1});
+    for (const auto& times : std::vector<std::vector<double>>{
+             {-0.01}, {1.01}, {0.1, 0.1}, {0.2, 0.1},
+             {std::numeric_limits<double>::quiet_NaN()},
+             {std::numeric_limits<double>::infinity()}}) {
+        c.tau_grid = times;
+        auto built = SegmentedPriceTableBuilder::build(c);
+        ASSERT_FALSE(built.has_value());
+        EXPECT_EQ(built.error().code, PriceTableErrorCode::InvalidConfig);
+    }
+}
 
 TEST(SegmentedSurfaceTest, VegaIsPositive) {
     SegmentedPriceTableBuilder::Config config{

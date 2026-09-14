@@ -94,6 +94,9 @@ public:
             auto piece_greek = pieces_[br.entries[i].index].greek(g, local_params);
             if (!piece_greek.has_value()) return std::unexpected(piece_greek.error());
             double norm = split_.normalize(br.entries[i].index, strike, *piece_greek);
+            if constexpr (requires { split_.spot_scale(size_t{}, strike); }) {
+                if (g == Greek::Delta) norm *= split_.spot_scale(br.entries[i].index, strike);
+            }
             result += br.entries[i].weight * norm;
         }
         return split_.denormalize(result, spot, strike, tau, sigma, rate);
@@ -121,6 +124,10 @@ public:
             auto piece_gamma = pieces_[br.entries[i].index].gamma(local_params);
             if (!piece_gamma.has_value()) return std::unexpected(piece_gamma.error());
             double norm = split_.normalize(br.entries[i].index, strike, *piece_gamma);
+            if constexpr (requires { split_.spot_scale(size_t{}, strike); }) {
+                const double scale = split_.spot_scale(br.entries[i].index, strike);
+                norm *= scale * scale;
+            }
             result += br.entries[i].weight * norm;
         }
         return split_.denormalize(result, spot, strike, tau, sigma, rate);

@@ -151,6 +151,28 @@ void evaluate(const std::string& fixture, const PriceTable<Inner>& table,
     }
 }
 
+int evaluate_placements() {
+    size_t failed = 0;
+    std::cout << "first_days,maturity_days,built,max_iv_error,target_met\n";
+    for (double first : {10.0, 20.0, 30.0, 45.0, 60.0, 75.0, 91.25}) {
+        for (double days : {7.0, 14.0, 30.0, 60.0, 90.0, 180.0, 365.0, 730.0}) {
+            auto config = config_for(1);
+            config.maturity = days / 365.0;
+            config.discrete_dividends.clear();
+            for (double d = first; d < days; d += 91.25)
+                config.discrete_dividends.push_back({d / 365.0, 0.5});
+            auto result = build_adaptive_bspline_segmented(
+                AdaptiveGridParams{.target_iv_error = 1e-3}, config, domain());
+            std::cout << first << ',' << days << ',' << result.has_value() << ','
+                      << (result ? result->achieved_max_error : nan) << ','
+                      << (result && result->target_met) << std::endl;
+            failed += !result;
+        }
+    }
+    std::cerr << "placements=56 failed=" << failed << '\n';
+    return failed ? 1 : 0;
+}
+
 int evaluate_tables(const char* file) {
     const auto pts = read_references(file);
     std::cout << "fixture,id,supported,price,iv,iv_error_code,iv_high\n";
@@ -186,7 +208,8 @@ int evaluate_tables(const char* file) {
 int main(int argc, char** argv) {
     std::cout << std::setprecision(17);
     if (argc == 2 && std::string(argv[1]) == "--references") return make_references();
+    if (argc == 2 && std::string(argv[1]) == "--placements") return evaluate_placements();
     if (argc == 3 && std::string(argv[1]) == "--evaluate") return evaluate_tables(argv[2]);
-    std::cerr << "Usage: event_snapshot_accuracy --references | --evaluate refs.csv\n";
+    std::cerr << "Usage: event_snapshot_accuracy --references | --evaluate refs.csv | --placements\n";
     return 2;
 }

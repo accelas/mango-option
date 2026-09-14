@@ -104,9 +104,9 @@ TEST(AdaptiveGridBuilderTest, StableFittingReportsShortTauBestEffortAccuracy) {
 // Coverage gap tests — Priority 2 (High)
 // ===========================================================================
 
-// Regression: the fixed-expiry oracle exposes an asymmetric-grid refusal.
-// This pin checks honest admission, not probe-deduplication mechanics.
-TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridRefusesCorrectedOracle) {
+// Regression: preserve moneyness on an asymmetric reference-strike grid
+// and compare with an independently rolled fixed-expiry reference.
+TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridPassesCorrectedOracle) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
     params.max_iter = 1;
@@ -120,7 +120,7 @@ TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridRefusesCorrectedOracle) {
 
     // spot=100, K_refs sorted: {100, 110, 120, 130}
     // Lowest=100, highest=130, ATM=100 (closest to spot)
-    // ATM == lowest → only 2 probes (100, 130)
+    // ATM == lowest; the endpoint probe is deduplicated.
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
@@ -130,19 +130,24 @@ TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridRefusesCorrectedOracle) {
         .kref_config = {.K_refs = {100.0, 110.0, 120.0, 130.0}},
     };
 
-    // Strikes must stay inside the K_ref span: S/K in [0.77, 1.0] maps to
-    // K in [100, 130].  Outside it the multi-K_ref blend clamps to the
-    // nearest K_ref and the assembled surface is not viable.
+    // S/K in [0.77, 1.0] exercises strikes around [100, 130].
     auto m = to_log_m({0.77, 0.85, 0.9, 0.95, 1.0});
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    // The correctly rolled oracle exposes the existing B-spline fit/blend
-    // limitation on this asymmetric reference grid (#488/#458/#460). Keep
-    // the refusal explicit until those gates make the configuration viable.
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
+    auto prepare = make_fd_vega_refs_fn(params, make_validate_fn(
+        0.0, OptionType::PUT, seg_config.discrete_dividends, seg_config.maturity));
+    auto refs = prepare(100.0, 112.5, 0.75, 0.225, 0.04);
+    ASSERT_TRUE(refs.has_value());
+    const double price = result->surface.price(100.0, 112.5, 0.75, 0.225, 0.04);
+    auto error = make_iv_score_fn(params, OptionType::PUT)(
+        price, *refs, 100.0, 112.5, 0.75, 0.225, 0.04);
+    ASSERT_TRUE(error.has_value());
+    EXPECT_LE(*error, kViabilityBound);
 }
 
 // Coverage: ATM K_ref coincides with highest K_ref

@@ -223,8 +223,8 @@ auto solver = mango::make_interpolated_iv_solver(config);
 auto result = solver->solve(query);
 ```
 
-The moneyness grid and the `K_refs` must agree: the assembled surface blends
-K_ref-struck prices linearly in strike, so the K_refs must span and resolve
+The moneyness grid and the `K_refs` must agree: the assembled surface preserves moneyness and blends
+normalized prices in inverse strike, so the K_refs must span and resolve
 the strike range the moneyness grid implies (`S/K ∈ [0.92, 1.08]` means
 strikes in `[92.6, 108.7]`, served by K_refs at 2.5% spacing across
 `[90, 110]`).  Without `.adaptive` there is no viability gate to catch a
@@ -239,11 +239,11 @@ knots.
 **Pattern 4: Discrete Dividend IV with Adaptive Grid**
 
 With explicit `K_refs`, the moneyness grid and the K_refs must agree: the
-assembled surface blends K_ref-struck prices linearly in strike, so the
+assembled surface preserves moneyness and blends normalized prices in inverse strike, so the
 K_refs must **span and resolve** the strike range the moneyness grid implies.
 Below, `S/K ∈ [0.92, 1.08]` means strikes in `[92.6, 108.7]`, served by K_refs
-at 2.5% spacing across `[90, 110]`. A mismatch is not silent: the build fails
-with `NoViableSurface`.
+at 2.5% spacing across `[90, 110]`. Adaptive builds validate the assembled surface and refuse it when no
+candidate passes the viability gate.
 
 ```cpp
 #include "mango/option/interpolated_iv_solver.hpp"

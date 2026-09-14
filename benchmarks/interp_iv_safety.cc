@@ -979,8 +979,8 @@ build_dimless_3d(DimensionlessBackend::Interpolant interp) {
 //
 // Terms: an *anchor* is a strike equal to a K_ref; a *mid-anchor* is the
 // midpoint between two adjacent K_refs; the *blend policy* is
-// MultiKRefSplit (query each bracketing K_ref surface at (spot, K_ref),
-// normalize by K_ref, interpolate linearly in strike, multiply by strike).
+// MultiKRefSplit (preserve S/K, normalize by K_ref, interpolate in 1/K,
+// and multiply by the query strike).
 // ============================================================================
 namespace kref {
 
@@ -1002,10 +1002,10 @@ struct Ref { double price = 0.0, vega = 0.0; bool ok = false; };
 /// the solver's automatic grid; set = an explicit GridAccuracyParams.
 static Ref fdm_ref(double K, double T, double sigma,
                    const std::vector<Dividend>& divs,
-                   std::optional<GridAccuracyParams> accuracy) {
+                   std::optional<GridAccuracyParams> accuracy, double spot = kSpot) {
     auto price_at = [&](double sg) -> std::optional<double> {
         PricingParams p;
-        p.spot = kSpot; p.strike = K; p.maturity = T; p.rate = kRate;
+        p.spot = spot; p.strike = K; p.maturity = T; p.rate = kRate;
         p.dividend_yield = kDivYield; p.option_type = OptionType::PUT;
         p.volatility = sg; p.discrete_dividends = divs;
         std::optional<PDEGridSpec> grid;
@@ -1084,8 +1084,8 @@ static std::vector<Query> queries_for(const std::vector<double>& krefs) {
 }
 
 /// The blend policy applied to exact prices: query each bracketing K_ref
-/// surface at (spot, K_ref), normalize by K_ref, interpolate linearly in
-/// strike, multiply by strike. `w` is 0 at an anchor, where L == H == K and
+/// surface at (spot*K_ref/K, K_ref), normalize by K_ref, interpolate in
+/// inverse strike, and multiply by strike. `w` is 0 at an anchor, where L == H == K and
 /// the expression collapses to that strike's own reference price.
 static double blend_control(double K, double L, double H, double w,
                             double price_L, double price_H) {
@@ -1119,17 +1119,17 @@ static void fmt(char* buf, size_t n, double v) {
     else std::snprintf(buf, n, "%10.2f", v);
 }
 
-/// Reference cache keyed by (T, sigma, K, fine): each (K, sigma, T) is solved
+/// Reference cache keyed by (T, sigma, K, fine, spot): each scaled query is solved
 /// once per accuracy no matter how many spacings share it.
-using RefKey = std::tuple<int, int, long, int>;
+using RefKey = std::tuple<int, int, long, int, double>;
 static Ref cached_ref(std::map<RefKey, Ref>& cache, double K, double T, double sigma,
-                      const std::vector<Dividend>& divs, bool fine) {
+                      const std::vector<Dividend>& divs, bool fine, double spot = kSpot) {
     RefKey key{static_cast<int>(std::lround(T * 1e4)), static_cast<int>(std::lround(sigma * 1e4)),
-               std::lround(K * 1e3), fine ? 1 : 0};
+               std::lround(K * 1e3), fine ? 1 : 0, spot};
     auto it = cache.find(key);
     if (it != cache.end()) return it->second;
     auto r = fdm_ref(K, T, sigma, divs,
-                     fine ? std::optional{make_grid_accuracy(GridAccuracyProfile::Ultra)} : std::nullopt);
+                     fine ? std::optional{make_grid_accuracy(GridAccuracyProfile::Ultra)} : std::nullopt, spot);
     cache.emplace(key, r);
     return r;
 }
@@ -1163,8 +1163,8 @@ static RowResult run_row(double delta, double T, double sigma, size_t n_m, int t
         Stat& st = qy.anchor ? row.anchor : row.mid;
         st.q++;
         Ref rk = cached_ref(cache, qy.K, T, sigma, divs, false);
-        Ref rl = qy.anchor ? rk : cached_ref(cache, qy.L, T, sigma, divs, false);
-        Ref rh = qy.anchor ? rk : cached_ref(cache, qy.H, T, sigma, divs, false);
+        Ref rl = qy.anchor ? rk : cached_ref(cache, qy.L, T, sigma, divs, false, kSpot * qy.L / qy.K);
+        Ref rh = qy.anchor ? rk : cached_ref(cache, qy.H, T, sigma, divs, false, kSpot * qy.H / qy.K);
         if (!rk.ok || !rl.ok || !rh.ok) { st.ref_fail++; continue; }
         const double intrinsic = intrinsic_value(kSpot, qy.K, OptionType::PUT);
         if ((rk.price - intrinsic) / qy.K < kTVKThreshold) { st.low_tv++; continue; }
@@ -1173,7 +1173,7 @@ static RowResult run_row(double delta, double T, double sigma, size_t n_m, int t
         st.elig++;
 
         // Anchors take w = 0 against their own reference: no (H - L) division.
-        const double w = qy.anchor ? 0.0 : (qy.K - qy.L) / (qy.H - qy.L);
+        const double w = qy.anchor ? 0.0 : (qy.H / qy.K) * (qy.K - qy.L) / (qy.H - qy.L);
         const double b_fdm = blend_control(qy.K, qy.L, qy.H, w, rl.price, rh.price);
         const double blend_signed_bps = (b_fdm - rk.price) / rk.vega * 1e4;
         const double blend_bps = std::abs(blend_signed_bps);
@@ -1199,8 +1199,8 @@ static RowResult run_row(double delta, double T, double sigma, size_t n_m, int t
 
         if (!qy.anchor) {   // ref-sens: same query, finer references
             Ref fk = cached_ref(cache, qy.K, T, sigma, divs, true);
-            Ref fl = cached_ref(cache, qy.L, T, sigma, divs, true);
-            Ref fh = cached_ref(cache, qy.H, T, sigma, divs, true);
+            Ref fl = cached_ref(cache, qy.L, T, sigma, divs, true, kSpot * qy.L / qy.K);
+            Ref fh = cached_ref(cache, qy.H, T, sigma, divs, true, kSpot * qy.H / qy.K);
             if (fk.ok && fl.ok && fh.ok && fk.vega >= kVegaFloor) {
                 const double b_fine = blend_control(qy.K, qy.L, qy.H, w, fl.price, fh.price);
                 st.blend_max_fine = std::max(st.blend_max_fine, std::abs(b_fine - fk.price) / fk.vega * 1e4);
@@ -1222,7 +1222,7 @@ static void print_legend() {
     std::printf("              finite P_FDM(K), P_FDM(L), P_FDM(H) and vega, TV/K >= %.0e, vega >= %.0e)\n",
                 kTVKThreshold, kVegaFloor);
     std::printf("    blendmax  max |B_FDM - P_FDM| / vega_FDM in bps over the eligible queries,\n");
-    std::printf("              B_FDM = K[(1-w)P_FDM(L)/L + w P_FDM(H)/H]: the blend policy's own error\n");
+    std::printf("              B_FDM = K[(1-w)P_FDM(SL/K,L)/L + w P_FDM(SH/K,H)/H], w linear in 1/K\n");
     std::printf("    blendmaxU the same maximum with every reference re-solved at\n");
     std::printf("              GridAccuracyProfile::Ultra, over the same mid-anchor population\n");
     std::printf("    blendmean signed mean of (B_FDM - P_FDM) / vega_FDM in bps over that population:\n");

@@ -63,6 +63,11 @@ struct BSplineSegmentedAdaptiveResult {
     /// surface must use this as the queryable bounds, not the aggregated
     /// grids' own span (which includes fit-domain support headroom).
     SurfaceBounds sample_bounds{};
+    /// Retained global maturity knots, before adding event endpoints and
+    /// per-segment cubic support. `tau_points_per_segment` is the largest
+    /// actual fitted segment size.
+    std::vector<double> tau_grid{};
+
 };
 
 /// Create a RefineFn that does B-spline midpoint insertion, targeted at the

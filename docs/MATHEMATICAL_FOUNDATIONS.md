@@ -719,25 +719,42 @@ or European add-back is applied to segmented leaves.
 
 ### Multiple Reference Strikes
 
-Cash dividends break the scale invariance that American options normally have in strike (the EEP decomposition assumes $P \propto K$, which fails when $D/K$ varies with $K$). The builder constructs surfaces at several reference strikes and interpolates across them with Catmull-Rom splines in $\ln(K_\text{ref})$, producing a `SegmentedMultiKRefSurface`.
+With a fixed cash schedule, the normalized price has the form
+$P(S,K;D)/K = f(S/K,D/K)$. For $L \le K \le H$, evaluate the reference
+surfaces at $(SL/K,L)$ and $(SH/K,H)$ and interpolate their normalized
+prices in $1/K$, with $w = (H/K)(K-L)/(H-L)$. Then
+
+$$P(S,K) \approx K\left[(1-w)\frac{P(SL/K,L)}{L}
+                         + w\frac{P(SH/K,H)}{H}\right].$$
+
+This preserves the homogeneous no-cash limit and the linear payoff regions.
+It approximates the dependence on normalized cash amounts rather than mixing
+prices at different moneyness values. Each reference's Delta receives a
+factor $K_{ref}/K$, and Gamma its square, in addition to value normalization.
 
 ### Adaptive Grid Refinement for Segmented Surfaces
 
-The adaptive grid builder (section 10) extends to segmented surfaces via a probe-and-merge strategy. Rather than building the full multi-K_ref surface at each refinement iteration, the builder:
+B-spline construction probes the outer reference strikes, the nearest ATM
+reference, and references nearest the queried strike-range endpoints.
+Each usable probe validates its served strike band against independently
+solved, consistently scaled references. Including the query endpoints avoids
+missing the wings when the outer reference strikes only supply support.
 
-1. **Selects 2–3 probe K_ref values** from the full list: the lowest, highest, and the one closest to ATM (deduplicated if ATM coincides with an endpoint).
+The time seed starts at the exact expiry payoff and is uniform in
+$\sqrt{\tau-\tau_{start}}$ within each event interval, resolving boundary
+layers after expiry and dividend projections. Optional sites respect the
+collocation spacing floor. Volatility starts with at least seven sites,
+subject to the point cap, to resolve flat exercise regions. All four axes retain refined knot positions through merging and the
+final retry. Each segment retains its global time knots and event endpoints;
+missing cubic support is supplied by bisecting its largest gaps. Manual
+count-based sampling remains available when no explicit time knots are given.
+The raw PDE cohort uses at least 201 spatial points and at least twice the
+fitted moneyness count plus one, subject to its spatial cap.
 
-2. **Runs independent refinement loops** on each probe, building single-K_ref `BSplineSegmentedSurface` instances. Each probe validates at strike = K_ref (the only strike that single-K_ref raw segments can price exactly).
-
-3. **Merges the refined knot positions** across probes: per continuous axis, the sorted union of every probe's grid (positions within $10^{-9}$ of the axis span collapse to one knot), thinned to `max_points_per_dim` by dropping the most crowded interior knot first. Endpoints always survive and surviving knots are never re-spaced. The tau axis keeps the maximum per-segment count. Carrying sizes alone and rebuilding uniform grids at those sizes discarded where each probe had placed its knots, so the rebuilt surface could measure worse than the probe that sized it (issue #461).
-
-4. **Builds the full `SegmentedMultiKRefSurface`** once on the merged grids with `skip_moneyness_expansion = true` (the domain was pre-expanded in step 1).
-
-5. **Final validation** at arbitrary strikes against fresh PDE reference prices. If the error exceeds the target, midpoints are inserted into the largest gaps of the merged grids (two in moneyness, one each in volatility and rate, plus two tau points per segment) and the surface is rebuilt (one retry).
-
-The moneyness domain is pre-expanded before probing using the worst-case (smallest) K_ref: $m_\text{min}' = \max(m_\text{min} - \sum D_k / K_\text{ref,min},\; 0.01)$. This ensures all K_refs share the same expanded domain.
-
-The tau axis is refined via the `tau_points_per_segment` scalar (minimum 4 for B-spline), which the refinement loop increments when tau is the worst dimension.
+Final validation measures the assembled surface on a separate cached
+reference set. One retry adds knots to the largest gaps; the lower-error
+viable result is returned. A successful build can still miss the requested
+target, which remains visible in its diagnostics.
 
 ---
 

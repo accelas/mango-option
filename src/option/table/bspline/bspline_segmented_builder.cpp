@@ -236,6 +236,13 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
 
     const double T = config.maturity;
     const double K_ref = config.K_ref;
+    for (size_t i = 0; i < config.tau_grid.size(); ++i) {
+        const double t = config.tau_grid[i];
+        if (!std::isfinite(t) || t < 0.0 || t > T ||
+            (i > 0 && t <= config.tau_grid[i - 1])) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig, 1});
+        }
+    }
 
     // =====================================================================
     // Step 1: Filter and sort dividends
@@ -292,12 +299,25 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
     std::vector<double> requested_times;
     size_t tau_cap_hits = 0;
     for (size_t s = 0; s < split.tau_start().size(); ++s) {
-        auto local = make_segment_tau_grid(
-            0.0, split.tau_end()[s] - split.tau_start()[s],
-            config.tau_points_per_segment, config.tau_target_dt,
-            config.tau_points_min, config.tau_points_max, tau_cap_hits);
         std::vector<double> global;
-        for (double t : local) global.push_back(split.tau_start()[s] + t);
+        if (config.tau_grid.empty()) {
+            auto local = make_segment_tau_grid(
+                0.0, ends[s] - starts[s], config.tau_points_per_segment,
+                config.tau_target_dt, config.tau_points_min,
+                config.tau_points_max, tau_cap_hits);
+            for (double t : local) global.push_back(starts[s] + t);
+        } else {
+            global.push_back(starts[s]);
+            for (double t : config.tau_grid) {
+                if (t > starts[s] && t < ends[s]) global.push_back(t);
+            }
+            global.push_back(ends[s]);
+            // Only add missing cubic support; never re-space requested knots.
+            if (global.size() < 4) {
+                const size_t missing = 4 - global.size();
+                global = insert_largest_gap_midpoints(std::move(global), missing, 4);
+            }
+        }
         // Preserve event coordinates exactly, including for very short leaves.
         global.front() = starts[s];
         global.back() = ends[s];

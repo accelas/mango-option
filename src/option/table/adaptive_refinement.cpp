@@ -251,6 +251,7 @@ AggregatedGrids aggregate_probe_grids(const std::vector<RefinementResult>& probe
     g.moneyness = merge_axis(probe_results, &RefinementResult::moneyness, max_points_per_dim);
     g.vol = merge_axis(probe_results, &RefinementResult::vol, max_points_per_dim);
     g.rate = merge_axis(probe_results, &RefinementResult::rate, max_points_per_dim);
+    g.tau = merge_axis(probe_results, &RefinementResult::tau, max_points_per_dim);
     for (const auto& pr : probe_results) {
         g.tau_points = std::max(g.tau_points, pr.tau_points);
     }
