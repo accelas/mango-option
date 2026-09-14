@@ -25,13 +25,6 @@ accuracy_test_table.bin
 .bazel_cache/
 .actrc
 
-# Generated event-snapshot benchmark output (reports and scripts are tracked)
-benchmarks/results/2026-09-14-event-snapshots/raw/
-benchmarks/results/2026-09-14-event-snapshots/*.json
-benchmarks/results/2026-09-14-event-snapshots/accuracy/*.json
-benchmarks/results/2026-09-14-event-snapshots/accuracy/*.csv
-benchmarks/results/2026-09-14-event-snapshots/accuracy/*.log
-
 # Conan artifacts
 conan_deps/
 
