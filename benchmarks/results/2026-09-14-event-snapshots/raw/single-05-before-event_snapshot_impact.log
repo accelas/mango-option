@@ -1,0 +1,21 @@
+2026-09-14T01:50:15+00:00
+Running /tmp/mango-event-bench-20260914/before/bazel-bin/benchmarks/event_snapshot_impact
+Run on (32 X 5058 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x16)
+  L1 Instruction 32 KiB (x16)
+  L2 Unified 1024 KiB (x16)
+  L3 Unified 32768 KiB (x2)
+Load Average: 1.26, 1.08, 0.74
+***WARNING*** CPU scaling is enabled, the benchmark real time measurements may be noisy and will incur extra overhead.
+---------------------------------------------------------------------------------------------
+Benchmark                                   Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------------------------------
+BM_EventDirectSolve/0/real_time        458851 ns       458824 ns          763 price=6.65614
+BM_EventDirectSolve/1/real_time        550990 ns       550947 ns          635 price=6.74802
+BM_EventManualBuild/0/real_time      15858986 ns     15858739 ns           22 pde_solves=16 price=5.35055 sample_points=13.68k sample_rows=80
+BM_EventManualBuild/1/real_time      17322683 ns     17319169 ns           20 pde_solves=16 price=5.3869 sample_points=25.44k sample_rows=160
+BM_EventManualBuild/3/real_time      18988358 ns     18987973 ns           18 pde_solves=16 price=5.82066 sample_points=38.08k sample_rows=320
+BM_EventAdaptiveBuild/0/real_time  1608583927 ns   1608330790 ns            1 error_bps=46.2824 pde_solves=1.216k refinement_iterations=8 sample_points=4.2492M sample_rows=35.472k
+BM_EventAdaptiveBuild/1/real_time   398941994 ns    398927692 ns            1 error_bps=376.187 pde_solves=1.151k refinement_iterations=5 sample_points=769.496k sample_rows=7.748k
+BM_EventFixedGridSolve/0/real_time    7200737 ns      7197172 ns           49 extra_snapshot_bytes=0 ordinary_snapshot_bytes=33.768k price=7.23456 time_steps=1.008k

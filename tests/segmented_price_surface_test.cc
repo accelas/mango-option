@@ -58,7 +58,7 @@ TEST(SegmentedSurfaceTest, FindsCorrectSegment) {
     EXPECT_GT(p1, p0);
 }
 
-TEST(SegmentedSurfaceTest, UnrepresentedDividendSideIsRefused) {
+TEST(SegmentedSurfaceTest, ExactDividendSelectsPostCalendarSide) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
@@ -77,18 +77,22 @@ TEST(SegmentedSurfaceTest, UnrepresentedDividendSideIsRefused) {
     auto result = SegmentedPriceTableBuilder::build(config);
     ASSERT_TRUE(result.has_value());
 
-    // One solver snapshot cannot stand for both sides of the cash jump.
-    // The current inset topology explicitly excludes the event neighborhood.
+    // Equality belongs to the smaller-tau (post-dividend calendar) leaf.
+    // Even adjacent floating-point times must retain the correct event side.
     double p_boundary = result->price(100.0, 100.0, 0.5, 0.25, 0.05);
-    EXPECT_TRUE(std::isnan(p_boundary));
-    EXPECT_FALSE(result->contains_maturity(0.5));
-    EXPECT_TRUE(result->contains_maturity(0.4995));
-    EXPECT_TRUE(result->contains_maturity(0.5005));
+    const double left = std::nextafter(0.5, 0.0);
+    const double right = std::nextafter(0.5, 1.0);
+    EXPECT_TRUE(std::isfinite(p_boundary));
+    EXPECT_TRUE(result->contains_maturity(0.5));
+    EXPECT_TRUE(result->contains_maturity(left));
+    EXPECT_TRUE(result->contains_maturity(right));
+    EXPECT_NEAR(p_boundary, result->price(100.0, 100.0, left, 0.25, 0.05), 1e-12);
+    EXPECT_GT(result->price(100.0, 100.0, right, 0.25, 0.05) - p_boundary, 0.25);
     PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
         .maturity = 0.5, .rate = 0.05, .option_type = OptionType::PUT}, 0.25);
     auto gamma = result->gamma(p);
-    ASSERT_FALSE(gamma.has_value());
-    EXPECT_EQ(gamma.error(), GreekError::OutOfDomain);
+    ASSERT_TRUE(gamma.has_value());
+    EXPECT_TRUE(std::isfinite(*gamma));
 }
 
 // ---------------------------------------------------------------------------

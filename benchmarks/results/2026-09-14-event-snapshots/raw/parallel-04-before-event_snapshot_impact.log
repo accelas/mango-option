@@ -1,0 +1,18 @@
+2026-09-14T01:54:54+00:00
+Running /tmp/mango-event-bench-20260914/before/bazel-bin/benchmarks/event_snapshot_impact
+Run on (32 X 5058 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x16)
+  L1 Instruction 32 KiB (x16)
+  L2 Unified 1024 KiB (x16)
+  L3 Unified 32768 KiB (x2)
+Load Average: 1.52, 1.55, 1.07
+***WARNING*** CPU scaling is enabled, the benchmark real time measurements may be noisy and will incur extra overhead.
+--------------------------------------------------------------------------------------------
+Benchmark                                  Time             CPU   Iterations UserCounters...
+--------------------------------------------------------------------------------------------
+BM_EventManualBuild/0/real_time     15146131 ns     15012177 ns           23 pde_solves=16 price=5.35055 sample_points=13.68k sample_rows=80
+BM_EventManualBuild/1/real_time      2817943 ns      2756489 ns          122 pde_solves=16 price=5.3869 sample_points=25.44k sample_rows=160
+BM_EventManualBuild/3/real_time      3530118 ns      3323802 ns          100 pde_solves=16 price=5.82066 sample_points=38.08k sample_rows=320
+BM_EventAdaptiveBuild/0/real_time  806121111 ns    775876333 ns            1 error_bps=46.2824 pde_solves=1.216k refinement_iterations=8 sample_points=4.2492M sample_rows=35.472k
+BM_EventAdaptiveBuild/1/real_time  189602256 ns    181381886 ns            2 error_bps=376.187 pde_solves=1.151k refinement_iterations=5 sample_points=769.496k sample_rows=7.748k

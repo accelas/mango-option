@@ -177,7 +177,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    EXPECT_FALSE(result->surface.contains_maturity(0.5));
+    EXPECT_TRUE(result->surface.contains_maturity(0.5));
     double price = result->surface.price(100.0, 90.0, 0.6, 0.20, 0.05);
     EXPECT_GT(price, 0.0);
 }

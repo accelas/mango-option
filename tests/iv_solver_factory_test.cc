@@ -184,18 +184,18 @@ TEST(IVSolverFactorySegmented, DiscreteDividends) {
     auto solver = make_interpolated_iv_solver(config);
     ASSERT_TRUE(solver.has_value()) << "Factory should succeed with discrete dividends";
 
-    IVQuery query;
-    query.spot = 100.0;
-    query.strike = 100.0;
-    query.maturity = 0.5;
-    query.rate = RateSpec{0.05};
-    query.option_type = OptionType::PUT;
-    query.market_price = 7.0;
-
-    auto result = solver->solve(query);
-    if (result.has_value()) {
-        EXPECT_GT(result->implied_vol, 0.0);
-        EXPECT_LT(result->implied_vol, 3.0);
+    // The public factory must now serve the old gap, including the exact
+    // event on its post-dividend calendar side, using independent PDE price references.
+    for (double tau : {0.4999, 0.5, 0.5001}) {
+        PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+            .maturity = tau, .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
+        if (tau > 0.5) p.discrete_dividends = {{tau - 0.5, 2.0}};
+        auto reference = solve_american_option(p);
+        ASSERT_TRUE(reference.has_value());
+        IVQuery query(p, reference->value(), p.discrete_dividends);
+        auto result = solver->solve(query);
+        ASSERT_TRUE(result.has_value()) << "tau=" << tau;
+        EXPECT_NEAR(result->implied_vol, 0.2, 0.01);
     }
 }
 

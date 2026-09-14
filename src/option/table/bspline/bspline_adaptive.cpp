@@ -570,14 +570,6 @@ BSplineSegmentedBuilder::assemble(std::vector<BSplineSegmentedSurface> surfaces)
 std::expected<BSplineSegmentedAdaptiveResult, PriceTableError>
 BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
 {
-    // Use the same fixed time topology as SegmentedPriceTableBuilder. Event
-    // gaps are outside the query domain, not failed surface evaluations.
-    auto [time_bounds, time_gaps] = compute_segment_boundaries(
-        config_.discrete_dividends, config_.maturity, 0.0, config_.maturity);
-    const auto maturity_is_supported =
-        [split = make_tau_split_from_segments(time_bounds, time_gaps, config_.spot)]
-        (double tau) { return split.contains_maturity(tau); };
-
     // 0. Derive the fit domain from the sample domain (spec D3): headroom
     //    scale is the expected seeded moneyness density, not the user's
     //    knot count.
@@ -751,7 +743,6 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             .option_type = config_.option_type,
             .bounds = fit_domain,
             .sample_bounds = probe_sample,
-            .maturity_is_supported = maturity_is_supported,
         };
 
         auto refine_fn = make_bspline_refine_fn(params);
@@ -804,7 +795,6 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         // Final validation measures the user-facing domain (spec D2), not
         // the interpolation support band.
         .sample_bounds = sample_domain_,
-        .maturity_is_supported = maturity_is_supported,
     };
 
     auto final_validate_fn = make_validate_fn(

@@ -4,6 +4,9 @@ Diagnosed on 2026-09-13 against `f510c1ab`, using optimized builds and
 `OMP_NUM_THREADS=1`. [Issue #501](https://github.com/accelas/mango-option/issues/501)
 contains the original configuration and observations.
 
+This records the initial validation-only fix in PR #503. The event-sided
+snapshot follow-up below supersedes its gap-admission behavior.
+
 ## Confirmed cause and change
 
 The segmented surface deliberately returns NaN inside omitted dividend
@@ -121,3 +124,49 @@ instrumentation remains in source or tests.
 
 The Python binding, benchmark wildcard, seven explicit CI benchmark targets,
 and CI debug-mode adaptive logic test also passed.
+
+## Event-sided snapshot follow-up (2026-09-14)
+
+The B-spline builder now fits exact dividend boundaries using two raw rows
+per event: the state immediately before the backward jump, and the ordinary
+state after the jump and exercise/boundary projections. The smaller-tau leaf
+owns equality, giving an exact-event query the post-dividend calendar value.
+No fixed exclusion width or minimum event spacing is used by this builder.
+Chebyshev retains its existing gap-based representation.
+
+The PDE equations, TR-BDF2/Rannacher stages, and jump/projection operations
+are unchanged. Optional snapshot capture copies existing states; call/put
+regressions verify bit-identical final solutions, previous solutions, and
+ordinary snapshots with capture enabled and disabled. A separate truncated
+solve checks the first post-dividend calendar state independently. Extra
+storage is allocated only for the requested event-side rows.
+
+A former-gap regression at tau 0.4999 failed before this change (4 ms) and
+now prices tau 0.4999, 0.5, and 0.5001 against independent FDM references.
+Further tests cover sub-hour distances from either endpoint, sub-hour
+separation between events, merged same-date dividends, adjacent floating-
+point times on either side of an event, public IV solving, and persistence.
+The tight near-expiry price checks use the High grid profile; supporting
+the time itself does not establish the accuracy of a coarse grid.
+
+The 56-case replay still builds 53 cases. The same (first dividend day,
+maturity days) pairs (10, 14), (20, 30), and (45, 60) still return
+`NoViableSurface`; this representation change does not resolve their
+numerical accuracy. All formerly buildable cases remain buildable, and
+validation now samples the full time domain, including the old gaps.
+
+All 146 non-nightly targets passed with the CI compilation mode and
+`OMP_NUM_THREADS=8`. An attempted full optimized suite exposed an existing
+`NDEBUG` restriction on test-only builder accessors, so the full suite was
+run in its supported CI mode; targeted optimized event tests also passed.
+
+The three high-accuracy segmented sampling/Greek tests and three affected
+slow B-spline adaptive tests also passed in optimized mode. The temporary
+56-case matrix harness was removed after recording its results.
+
+Before updating PR #503 with the complete implementation, all 156 repository
+test targets passed, including nightly and Rust coverage, with
+`OMP_NUM_THREADS=8`. The Python binding, new benchmark harnesses, explicit CI
+benchmark targets, and debug-mode adaptive logic test also passed. The accuracy
+harness was cleaned up to avoid a GCC initializer warning and reproduced both
+stored evaluation CSVs byte-for-byte.

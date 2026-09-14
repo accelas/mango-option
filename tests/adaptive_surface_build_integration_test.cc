@@ -22,12 +22,12 @@
 namespace mango {
 namespace {
 
-// Regression #501: validation sampled the deliberately omitted event gaps,
-// mistook their NaN prices for corrupt surfaces, and refused viable builds.
+// Regression #501: these placements originally failed validation in event
+// gaps. Event-sided sampling now supports those neighborhoods themselves.
 class SegmentedDividendPlacement
     : public testing::TestWithParam<std::pair<double, double>> {};
 
-TEST_P(SegmentedDividendPlacement, SupportedTimesBuildAndEventGapsStillRefuse) {
+TEST_P(SegmentedDividendPlacement, BuildsAndPricesAcrossExactEventBoundaries) {
     const auto [first_days, maturity_days] = GetParam();
     SegmentedAdaptiveConfig config{
         .spot = 100.0,
@@ -58,8 +58,8 @@ TEST_P(SegmentedDividendPlacement, SupportedTimesBuildAndEventGapsStillRefuse) {
 
     for (const auto& dividend : config.discrete_dividends) {
         const double event_tau = config.maturity - dividend.calendar_time;
-        EXPECT_FALSE(result->surface.contains_maturity(event_tau));
-        EXPECT_TRUE(std::isnan(result->surface.price(
+        EXPECT_TRUE(result->surface.contains_maturity(event_tau));
+        EXPECT_TRUE(std::isfinite(result->surface.price(
             100.0, 100.0, event_tau, 0.20, 0.03)));
         for (double tau : {event_tau - 0.001, event_tau + 0.001}) {
             EXPECT_TRUE(result->surface.contains_maturity(tau));

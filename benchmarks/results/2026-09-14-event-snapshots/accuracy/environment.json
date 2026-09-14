@@ -1,0 +1,26 @@
+{
+  "baseline_commit": "8ef8f5829b42d043f73c8109a9b4ee4da5cb8bd2",
+  "candidate": "event-sided snapshot working tree on feature/dividend-event-snapshots",
+  "reference_source": "baseline direct FDM, generated once for both revisions",
+  "harness_sha256": "9a7236399d71de16039e687c7cd94c78ade0c1b616dc5c55bcfb653a7ad87fa1",
+  "references_sha256": "dbc47df2714c1aa15c9e57237abc7525ed0ca87f1a520f9adca83ed76cb67f4d",
+  "build_flags": [
+    "-c",
+    "opt",
+    "--jobs=8"
+  ],
+  "runtime": {
+    "OMP_NUM_THREADS": "8",
+    "OMP_PROC_BIND": "false",
+    "OMP_DYNAMIC": "FALSE",
+    "OMP_WAIT_POLICY": "PASSIVE",
+    "cpu_mask": "8-15"
+  },
+  "binary_sha256": {
+    "before": "a25c1aa49743099241f071e456c7951ef8c66eb20f3676eb3200b90411fe5414",
+    "after": "9ea6b02750b7be3179dc3f1e43acb208d8e29b962f551ac8a1117ca66b850119"
+  },
+  "reference_generation_harness_sha256": "c3525414d2559e374076f6ebbd44a990667479d0ba31cb6b5a79f3f740f4e870",
+  "reference_generation_binary_sha256": "8aea74363178cb84dac9648fd3d8d7c31018592cd4c6e256980cae1a88921c81",
+  "final_harness_validation": "Manual configuration initialization was rewritten to avoid a GCC 14 warning. Both revisions reproduce the original evaluation CSVs byte-for-byte. Reference-generation code and reference CSV are unchanged."
+}

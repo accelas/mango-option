@@ -792,7 +792,7 @@ convert_times_to_indices(std::span<const double> times,
 
     for (double t : times) {
         // Validate range
-        if (t < t_start || t > t_end) {
+        if (!std::isfinite(t) || t < t_start || t > t_end) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::OutOfRange,
                 t));
@@ -855,10 +855,13 @@ public:
     /// @param grid_spec Grid specification (uniform, sinh, etc)
     /// @param time_domain Time domain information
     /// @param snapshot_times Optional times to record snapshots
+    /// @param before_event_snapshot_times Optional times to also record the
+    ///        state before event dispatch (ordinary snapshots are after it)
     /// @return Grid instance or error message
     static std::expected<std::shared_ptr<Grid<T>>, ValidationError>
     create(const GridSpec<T>& grid_spec, const TimeDomain& time_domain,
-           std::span<const double> snapshot_times = {}) {
+           std::span<const double> snapshot_times = {},
+           std::span<const double> before_event_snapshot_times = {}) {
         // Generate grid buffer
         auto grid_buffer = grid_spec.generate();
         auto grid_view = grid_buffer.view();
@@ -895,6 +898,14 @@ public:
             // Allocate snapshot storage
             size_t total_size = grid->snapshot_indices_.size() * n;
             grid->surface_history_ = std::vector<T>(total_size);
+        }
+
+        if (!before_event_snapshot_times.empty()) {
+            auto conversion = convert_times_to_indices(before_event_snapshot_times, time_domain);
+            if (!conversion) return std::unexpected(conversion.error());
+            grid->before_event_times_ = std::move(conversion->second);
+            grid->before_event_history_.resize(grid->before_event_times_.size() * n);
+            grid->before_event_recorded_.resize(grid->before_event_times_.size(), false);
         }
 
         return grid;
@@ -966,6 +977,31 @@ public:
         return snapshot_times_;
     }
 
+    /// Optional snapshots taken after evolution to a time, before its events.
+    /// For backward option solves this is the post-dividend calendar side.
+    /// Ordinary at() snapshots retain their after-events meaning.
+    std::span<const double> before_event_snapshot_times() const {
+        return before_event_times_;
+    }
+
+    std::span<const T> at_before_events(size_t snapshot_idx) const {
+        if (snapshot_idx >= before_event_times_.size() ||
+            !before_event_recorded_[snapshot_idx]) return {};
+        return {before_event_history_.data() + snapshot_idx * n_space(), n_space()};
+    }
+
+    /// Called immediately before dispatching events, including startup steps.
+    /// Only exact requested grid times are recorded; an earlier startup
+    /// half-step must never masquerade as the endpoint's event-side state.
+    void record_before_events(double time, std::span<const T> solution) {
+        auto it = std::lower_bound(before_event_times_.begin(), before_event_times_.end(), time);
+        if (it == before_event_times_.end() || *it != time) return;
+        const size_t row = it - before_event_times_.begin();
+        std::copy(solution.begin(), solution.end(),
+                  before_event_history_.begin() + row * n_space());
+        before_event_recorded_[row] = true;
+    }
+
     // Recording API (for PDESolver)
     bool should_record(size_t state_idx) const {
         return find_snapshot_index(state_idx).has_value();
@@ -1015,6 +1051,9 @@ private:
     std::vector<size_t> snapshot_indices_;       // State indices to record
     std::vector<double> snapshot_times_;         // Actual times (after snapping)
     std::optional<std::vector<T>> surface_history_;  // Snapshots (row-major)
+    std::vector<double> before_event_times_;
+    std::vector<T> before_event_history_;
+    std::vector<bool> before_event_recorded_;
 };
 
 } // namespace mango

@@ -160,6 +160,7 @@ public:
         auto u_prev = grid_->solution_prev();
 
         // Record initial condition if requested
+        grid_->record_before_events(t, u_current);
         if (grid_->should_record(0)) {
             grid_->record(0, u_current);
         }
@@ -292,6 +293,7 @@ private:
     /// interpolate the solution, which can violate constraints.
     void process_temporal_events(double t_old, double t_new, [[maybe_unused]] size_t step,
                                   std::span<double> u_current) {
+        grid_->record_before_events(t_new, u_current);
         while (next_event_idx_ < events_.size()) {
             const auto& event = events_[next_event_idx_];
 

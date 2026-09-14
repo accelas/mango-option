@@ -1,0 +1,21 @@
+{
+  "grid_object_bytes": {
+    "before": 264,
+    "after": 352
+  },
+  "manual_builds": {
+    "one_dividend": {
+      "before_steps": 249,
+      "after_steps": 240,
+      "spatial_points": 101,
+      "pde_solves": 16
+    },
+    "three_dividends": {
+      "before_steps": 262,
+      "after_steps": 240,
+      "spatial_points": 101,
+      "pde_solves": 16
+    }
+  },
+  "method": "GDB at AmericanOptionSolver::solve, optimized binaries rebuilt with debug symbols after timing completed. No timing results from debugger runs are used."
+}

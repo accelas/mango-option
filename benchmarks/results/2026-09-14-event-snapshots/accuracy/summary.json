@@ -1,0 +1,656 @@
+{
+  "reference_points": 279,
+  "table_queries_per_revision": 342,
+  "reference_price_disagreement_usd": {
+    "n": 279,
+    "median": 6.4064212725867264e-06,
+    "p95": 3.5891322887682255e-05,
+    "max": 9.1665097118665e-05
+  },
+  "groups": [
+    {
+      "fixture": "manual_1y",
+      "region": "common",
+      "queries": 36,
+      "before": {
+        "price_error_usd": {
+          "n": 36,
+          "median": 0.006415060359737268,
+          "p95": 0.15523449702136077,
+          "max": 0.27545341773681264
+        },
+        "iv_eligible": 36,
+        "iv_error_bps": {
+          "n": 35,
+          "median": 2.4500093833912384,
+          "p95": 82.61476239532331,
+          "max": 382.42932958499534
+        },
+        "iv_failures_all": {
+          "10": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 35,
+          "median": 0.002360269756862543,
+          "p95": 0.02143087763328831,
+          "max": 0.06066775135149527
+        }
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 36,
+          "median": 0.006435117719392203,
+          "p95": 0.15529193455007367,
+          "max": 0.27554728977627296
+        },
+        "iv_eligible": 36,
+        "iv_error_bps": {
+          "n": 35,
+          "median": 2.453174420700144,
+          "p95": 82.60631767592344,
+          "max": 382.5848449161859
+        },
+        "iv_failures_all": {
+          "10": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 35,
+          "median": 0.002359901239423756,
+          "p95": 0.021431528409332476,
+          "max": 0.06066951005301302
+        }
+      },
+      "same_iv_failure_queries": true,
+      "max_price_movement_usd": 0.0005415876059489122,
+      "max_eligible_iv_movement_bps": 0.2747104517614174
+    },
+    {
+      "fixture": "manual_1y",
+      "region": "gap",
+      "queries": 27,
+      "before": {
+        "price_error_usd": null,
+        "iv_eligible": 27,
+        "iv_error_bps": null,
+        "iv_failures_all": {
+          "5": 27
+        },
+        "iv_failures_eligible": {
+          "5": 27
+        },
+        "iv_reference_sensitivity_bps": null
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 27,
+          "median": 0.006521702588152323,
+          "p95": 0.013041061774142637,
+          "max": 0.013330437117323513
+        },
+        "iv_eligible": 27,
+        "iv_error_bps": {
+          "n": 27,
+          "median": 2.5290066528790844,
+          "p95": 6.589377459521345,
+          "max": 6.74717038891548
+        },
+        "iv_failures_all": {},
+        "iv_failures_eligible": {},
+        "iv_reference_sensitivity_bps": {
+          "n": 27,
+          "median": 0.0024547302293620454,
+          "p95": 0.007536038920202825,
+          "max": 0.007824952701906973
+        }
+      }
+    },
+    {
+      "fixture": "manual_1y",
+      "region": "interior",
+      "queries": 18,
+      "before": {
+        "price_error_usd": {
+          "n": 18,
+          "median": 0.0061331199148888516,
+          "p95": 0.23333365991181704,
+          "max": 0.27545341773681264
+        },
+        "iv_eligible": 18,
+        "iv_error_bps": {
+          "n": 17,
+          "median": 2.0879386547259515,
+          "p95": 251.66474540236842,
+          "max": 382.42932958499534
+        },
+        "iv_failures_all": {
+          "10": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 17,
+          "median": 0.002360269756862543,
+          "p95": 0.0321476410478638,
+          "max": 0.06066775135149527
+        }
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 18,
+          "median": 0.006154111833651665,
+          "p95": 0.2334188136375112,
+          "max": 0.27554728977627296
+        },
+        "iv_eligible": 18,
+        "iv_error_bps": {
+          "n": 17,
+          "median": 2.092965177577233,
+          "p95": 251.7731598284601,
+          "max": 382.5848449161859
+        },
+        "iv_failures_all": {
+          "10": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 17,
+          "median": 0.002359901239423756,
+          "p95": 0.032149390216118484,
+          "max": 0.06066951005301302
+        }
+      }
+    },
+    {
+      "fixture": "manual_1y",
+      "region": "edge",
+      "queries": 18,
+      "before": {
+        "price_error_usd": {
+          "n": 18,
+          "median": 0.0064873989118603426,
+          "p95": 0.013041520511324456,
+          "max": 0.013297650962194929
+        },
+        "iv_eligible": 18,
+        "iv_error_bps": {
+          "n": 18,
+          "median": 2.4899630538946504,
+          "p95": 6.5963532289915054,
+          "max": 6.723878958067308
+        },
+        "iv_failures_all": {},
+        "iv_failures_eligible": {},
+        "iv_reference_sensitivity_bps": {
+          "n": 18,
+          "median": 0.002200976108868158,
+          "p95": 0.007084119592867809,
+          "max": 0.007828839402312937
+        }
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 18,
+          "median": 0.0065220843446684995,
+          "p95": 0.012873053387935074,
+          "max": 0.013327927590460753
+        },
+        "iv_eligible": 18,
+        "iv_error_bps": {
+          "n": 18,
+          "median": 2.493167244893846,
+          "p95": 6.510537902330165,
+          "max": 6.739288419877754
+        },
+        "iv_failures_all": {},
+        "iv_failures_eligible": {},
+        "iv_reference_sensitivity_bps": {
+          "n": 18,
+          "median": 0.0022008409326923495,
+          "p95": 0.007084010502381165,
+          "max": 0.007827988971476074
+        }
+      }
+    },
+    {
+      "fixture": "adaptive_1y",
+      "region": "common",
+      "queries": 108,
+      "before": {
+        "price_error_usd": {
+          "n": 108,
+          "median": 0.008392709631128703,
+          "p95": 0.034561646945353276,
+          "max": 0.047253010064997214
+        },
+        "iv_eligible": 108,
+        "iv_error_bps": {
+          "n": 107,
+          "median": 3.3491789951334283,
+          "p95": 51.178081363336474,
+          "max": 126.54882549309035
+        },
+        "iv_failures_all": {
+          "10": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 107,
+          "median": 0.002060418372584749,
+          "p95": 0.024396842941296064,
+          "max": 0.08902844163161117
+        }
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 108,
+          "median": 0.008477153289415229,
+          "p95": 0.03454507618828553,
+          "max": 0.047171857968805964
+        },
+        "iv_eligible": 108,
+        "iv_error_bps": {
+          "n": 107,
+          "median": 3.3019566621145247,
+          "p95": 50.70200491780022,
+          "max": 126.42222302698528
+        },
+        "iv_failures_all": {
+          "10": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 107,
+          "median": 0.002060441318674222,
+          "p95": 0.02440262332396858,
+          "max": 0.08905808466797005
+        }
+      },
+      "same_iv_failure_queries": true,
+      "max_price_movement_usd": 0.00043902110569771224,
+      "max_eligible_iv_movement_bps": 0.6593811093813517
+    },
+    {
+      "fixture": "adaptive_1y",
+      "region": "gap",
+      "queries": 81,
+      "before": {
+        "price_error_usd": null,
+        "iv_eligible": 81,
+        "iv_error_bps": null,
+        "iv_failures_all": {
+          "5": 81
+        },
+        "iv_failures_eligible": {
+          "5": 81
+        },
+        "iv_reference_sensitivity_bps": null
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 81,
+          "median": 0.007319769741050308,
+          "p95": 0.026600434681429697,
+          "max": 0.034783111749484785
+        },
+        "iv_eligible": 81,
+        "iv_error_bps": {
+          "n": 81,
+          "median": 3.2892513708604465,
+          "p95": 16.20967565071102,
+          "max": 22.681721211705725
+        },
+        "iv_failures_all": {},
+        "iv_failures_eligible": {},
+        "iv_reference_sensitivity_bps": {
+          "n": 81,
+          "median": 0.001931224418716404,
+          "p95": 0.006932355961219994,
+          "max": 0.008793537720208633
+        }
+      }
+    },
+    {
+      "fixture": "adaptive_1y",
+      "region": "interior",
+      "queries": 54,
+      "before": {
+        "price_error_usd": {
+          "n": 54,
+          "median": 0.009307281645033028,
+          "p95": 0.03920741938834358,
+          "max": 0.047253010064997214
+        },
+        "iv_eligible": 54,
+        "iv_error_bps": {
+          "n": 53,
+          "median": 3.382699390653554,
+          "p95": 77.42819942061755,
+          "max": 126.54882549309035
+        },
+        "iv_failures_all": {
+          "10": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 53,
+          "median": 0.002537080712183837,
+          "p95": 0.05074990613779251,
+          "max": 0.08902844163161117
+        }
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 54,
+          "median": 0.009309652801132051,
+          "p95": 0.03916948302786535,
+          "max": 0.047171857968805964
+        },
+        "iv_eligible": 54,
+        "iv_error_bps": {
+          "n": 53,
+          "median": 3.3522463191118512,
+          "p95": 76.94312690019609,
+          "max": 126.42222302698528
+        },
+        "iv_failures_all": {
+          "10": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 53,
+          "median": 0.0025370871198360234,
+          "p95": 0.05075528165759957,
+          "max": 0.08905808466797005
+        }
+      }
+    },
+    {
+      "fixture": "adaptive_1y",
+      "region": "edge",
+      "queries": 54,
+      "before": {
+        "price_error_usd": {
+          "n": 54,
+          "median": 0.007264152309223615,
+          "p95": 0.02627339764290086,
+          "max": 0.03476550474943019
+        },
+        "iv_eligible": 54,
+        "iv_error_bps": {
+          "n": 54,
+          "median": 3.2692835486483607,
+          "p95": 16.488350900065768,
+          "max": 22.74369805373988
+        },
+        "iv_failures_all": {},
+        "iv_failures_eligible": {},
+        "iv_reference_sensitivity_bps": {
+          "n": 54,
+          "median": 0.001935506056260916,
+          "p95": 0.006219538803406415,
+          "max": 0.008795392949512149
+        }
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 54,
+          "median": 0.007342997952951347,
+          "p95": 0.026248718073747932,
+          "max": 0.03474831116989052
+        },
+        "iv_eligible": 54,
+        "iv_error_bps": {
+          "n": 54,
+          "median": 3.2255474534309547,
+          "p95": 16.473193136055805,
+          "max": 22.73396079509077
+        },
+        "iv_failures_all": {},
+        "iv_failures_eligible": {},
+        "iv_reference_sensitivity_bps": {
+          "n": 54,
+          "median": 0.0019355130123632769,
+          "p95": 0.006219645368385479,
+          "max": 0.008795613331002983
+        }
+      }
+    },
+    {
+      "fixture": "adaptive_30d",
+      "region": "common",
+      "queries": 63,
+      "before": {
+        "price_error_usd": {
+          "n": 63,
+          "median": 0.02870078363179296,
+          "p95": 0.05506046797423646,
+          "max": 0.1395193744137499
+        },
+        "iv_eligible": 55,
+        "iv_error_bps": {
+          "n": 54,
+          "median": 42.85107186708659,
+          "p95": 178.12329258586468,
+          "max": 721.6983982495004
+        },
+        "iv_failures_all": {
+          "3": 1,
+          "10": 2,
+          "4": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 54,
+          "median": 0.022166142973900627,
+          "p95": 0.11679762213855079,
+          "max": 0.37341300640481023
+        }
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 63,
+          "median": 0.028669653145352747,
+          "p95": 0.055055764827304655,
+          "max": 0.13964531567662136
+        },
+        "iv_eligible": 55,
+        "iv_error_bps": {
+          "n": 54,
+          "median": 42.81908739627485,
+          "p95": 178.1242387023125,
+          "max": 722.5505043524097
+        },
+        "iv_failures_all": {
+          "3": 1,
+          "10": 2,
+          "4": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 54,
+          "median": 0.022166478953616897,
+          "p95": 0.11681301854771227,
+          "max": 0.37350890676468573
+        }
+      },
+      "same_iv_failure_queries": true,
+      "max_price_movement_usd": 0.00012594126287146512,
+      "max_eligible_iv_movement_bps": 0.8521061029093113
+    },
+    {
+      "fixture": "adaptive_30d",
+      "region": "gap",
+      "queries": 27,
+      "before": {
+        "price_error_usd": null,
+        "iv_eligible": 27,
+        "iv_error_bps": null,
+        "iv_failures_all": {
+          "5": 27
+        },
+        "iv_failures_eligible": {
+          "5": 27
+        },
+        "iv_reference_sensitivity_bps": null
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 27,
+          "median": 0.030688708307028634,
+          "p95": 0.045585214051743796,
+          "max": 0.0548087229188505
+        },
+        "iv_eligible": 27,
+        "iv_error_bps": {
+          "n": 27,
+          "median": 46.32455122217494,
+          "p95": 121.71002034356232,
+          "max": 122.64480124794599
+        },
+        "iv_failures_all": {},
+        "iv_failures_eligible": {},
+        "iv_reference_sensitivity_bps": {
+          "n": 27,
+          "median": 0.020168945340515165,
+          "p95": 0.043798418450313736,
+          "max": 0.04561632760247125
+        }
+      }
+    },
+    {
+      "fixture": "adaptive_30d",
+      "region": "interior",
+      "queries": 45,
+      "before": {
+        "price_error_usd": {
+          "n": 45,
+          "median": 0.027231554861148588,
+          "p95": 0.06315761032069472,
+          "max": 0.1395193744137499
+        },
+        "iv_eligible": 37,
+        "iv_error_bps": {
+          "n": 36,
+          "median": 39.71008197312678,
+          "p95": 247.21248829906781,
+          "max": 721.6983982495004
+        },
+        "iv_failures_all": {
+          "3": 1,
+          "10": 2,
+          "4": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 36,
+          "median": 0.023254848143527962,
+          "p95": 0.13222553745896592,
+          "max": 0.37341300640481023
+        }
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 45,
+          "median": 0.027208993016083483,
+          "p95": 0.06320362503757312,
+          "max": 0.13964531567662136
+        },
+        "iv_eligible": 37,
+        "iv_error_bps": {
+          "n": 36,
+          "median": 39.68600034335773,
+          "p95": 247.3274059391038,
+          "max": 722.5505043524097
+        },
+        "iv_failures_all": {
+          "3": 1,
+          "10": 2,
+          "4": 1
+        },
+        "iv_failures_eligible": {
+          "10": 1
+        },
+        "iv_reference_sensitivity_bps": {
+          "n": 36,
+          "median": 0.023255016642909077,
+          "p95": 0.1322582608456746,
+          "max": 0.37350890676468573
+        }
+      }
+    },
+    {
+      "fixture": "adaptive_30d",
+      "region": "edge",
+      "queries": 18,
+      "before": {
+        "price_error_usd": {
+          "n": 18,
+          "median": 0.029679018382637867,
+          "p95": 0.04713427036718559,
+          "max": 0.054854398044893365
+        },
+        "iv_eligible": 18,
+        "iv_error_bps": {
+          "n": 18,
+          "median": 45.776773311626414,
+          "p95": 121.72003775397414,
+          "max": 122.88303767964803
+        },
+        "iv_failures_all": {},
+        "iv_failures_eligible": {},
+        "iv_reference_sensitivity_bps": {
+          "n": 18,
+          "median": 0.021412777202328703,
+          "p95": 0.041969251625029166,
+          "max": 0.04865067295578562
+        }
+      },
+      "after": {
+        "price_error_usd": {
+          "n": 18,
+          "median": 0.029645784124076258,
+          "p95": 0.04711952234936157,
+          "max": 0.05485021728820805
+        },
+        "iv_eligible": 18,
+        "iv_error_bps": {
+          "n": 18,
+          "median": 45.73472880739601,
+          "p95": 121.715286150667,
+          "max": 122.88015206365424
+        },
+        "iv_failures_all": {},
+        "iv_failures_eligible": {},
+        "iv_reference_sensitivity_bps": {
+          "n": 18,
+          "median": 0.021413450919799404,
+          "p95": 0.04196959196148263,
+          "max": 0.04865230396278175
+        }
+      }
+    }
+  ]
+}

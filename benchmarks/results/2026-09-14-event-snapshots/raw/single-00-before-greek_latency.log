@@ -1,0 +1,16 @@
+2026-09-14T01:48:43+00:00
+Running /tmp/mango-event-bench-20260914/before/bazel-bin/benchmarks/greek_latency
+Run on (32 X 5058 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x16)
+  L1 Instruction 32 KiB (x16)
+  L2 Unified 1024 KiB (x16)
+  L3 Unified 32768 KiB (x2)
+Load Average: 0.65, 0.96, 0.66
+***WARNING*** CPU scaling is enabled, the benchmark real time measurements may be noisy and will incur extra overhead.
+-------------------------------------------------------------
+Benchmark                   Time             CPU   Iterations
+-------------------------------------------------------------
+BM_Segmented_Price        253 ns          253 ns      1366086
+BM_Segmented_Vega         465 ns          465 ns       752197
+BM_Segmented_All         2831 ns         2831 ns       123938

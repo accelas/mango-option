@@ -1,0 +1,135 @@
+{
+  "context": {
+    "date": "2026-09-14T01:54:30+00:00",
+    "host_name": "mango",
+    "executable": "/tmp/mango-event-bench-20260914/after/bazel-bin/benchmarks/event_snapshot_impact",
+    "num_cpus": 32,
+    "mhz_per_cpu": 5058,
+    "cpu_scaling_enabled": true,
+    "aslr_enabled": false,
+    "caches": [
+      {
+        "type": "Data",
+        "level": 1,
+        "size": 49152,
+        "num_sharing": 2
+      },
+      {
+        "type": "Instruction",
+        "level": 1,
+        "size": 32768,
+        "num_sharing": 2
+      },
+      {
+        "type": "Unified",
+        "level": 2,
+        "size": 1048576,
+        "num_sharing": 2
+      },
+      {
+        "type": "Unified",
+        "level": 3,
+        "size": 33554432,
+        "num_sharing": 16
+      }
+    ],
+    "load_avg": [0.931641,1.43896,1.0249],
+    "library_version": "1.9.4",
+    "library_build_type": "release",
+    "json_schema_version": 1
+  },
+  "benchmarks": [
+    {
+      "name": "BM_EventManualBuild/0/real_time",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "BM_EventManualBuild/0/real_time",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 23,
+      "real_time": 1.5158984972083051e+07,
+      "cpu_time": 1.5013801347826088e+07,
+      "time_unit": "ns",
+      "pde_solves": 1.6000000000000000e+01,
+      "price": 5.3505510003133256e+00,
+      "sample_points": 1.3680000000000000e+04,
+      "sample_rows": 8.0000000000000000e+01
+    },
+    {
+      "name": "BM_EventManualBuild/1/real_time",
+      "family_index": 0,
+      "per_family_instance_index": 1,
+      "run_name": "BM_EventManualBuild/1/real_time",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 130,
+      "real_time": 2.7225219286405123e+06,
+      "cpu_time": 2.6354900307692299e+06,
+      "time_unit": "ns",
+      "pde_solves": 1.6000000000000000e+01,
+      "price": 5.3869094615241186e+00,
+      "sample_points": 2.5440000000000000e+04,
+      "sample_rows": 1.6000000000000000e+02
+    },
+    {
+      "name": "BM_EventManualBuild/3/real_time",
+      "family_index": 0,
+      "per_family_instance_index": 2,
+      "run_name": "BM_EventManualBuild/3/real_time",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 107,
+      "real_time": 3.2959073503440786e+06,
+      "cpu_time": 3.1244833364485987e+06,
+      "time_unit": "ns",
+      "pde_solves": 1.6000000000000000e+01,
+      "price": 5.8206440851332832e+00,
+      "sample_points": 3.8080000000000000e+04,
+      "sample_rows": 3.2000000000000000e+02
+    },
+    {
+      "name": "BM_EventAdaptiveBuild/0/real_time",
+      "family_index": 1,
+      "per_family_instance_index": 0,
+      "run_name": "BM_EventAdaptiveBuild/0/real_time",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 1,
+      "real_time": 7.9346966743469238e+08,
+      "cpu_time": 7.6459984600000036e+08,
+      "time_unit": "ns",
+      "error_bps": 4.5355311531408866e+01,
+      "pde_solves": 1.2170000000000000e+03,
+      "refinement_iterations": 8.0000000000000000e+00,
+      "sample_points": 4.2492000000000000e+06,
+      "sample_rows": 3.5472000000000000e+04
+    },
+    {
+      "name": "BM_EventAdaptiveBuild/1/real_time",
+      "family_index": 1,
+      "per_family_instance_index": 1,
+      "run_name": "BM_EventAdaptiveBuild/1/real_time",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 2,
+      "real_time": 1.8725550174713135e+08,
+      "cpu_time": 1.8002611600000006e+08,
+      "time_unit": "ns",
+      "error_bps": 3.7582537048129717e+02,
+      "pde_solves": 1.1540000000000000e+03,
+      "refinement_iterations": 5.0000000000000000e+00,
+      "sample_points": 7.6949600000000000e+05,
+      "sample_rows": 7.7480000000000000e+03
+    }
+  ]
+}

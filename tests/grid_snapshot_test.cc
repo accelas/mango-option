@@ -5,6 +5,25 @@
 #include <gtest/gtest.h>
 #include <vector>
 
+TEST(GridSnapshotTest, BeforeEventStorageIsOptionalAndSeparate) {
+    auto spec = mango::GridSpec<double>::uniform(0.0, 1.0, 11).value();
+    auto time = mango::TimeDomain::from_n_steps(0.0, 1.0, 2);
+    std::vector<double> times{0.5};
+    auto grid = mango::Grid<double>::create(spec, time, times, times).value();
+    EXPECT_TRUE(grid->at_before_events(0).empty());
+    std::vector<double> before(11, 1.0), after(11, 2.0);
+    grid->record_before_events(0.25, before);  // startup half-step, not endpoint
+    EXPECT_TRUE(grid->at_before_events(0).empty());
+    grid->record_before_events(0.5, before);
+    grid->record(1, after);
+    EXPECT_EQ(grid->at_before_events(0)[5], 1.0);
+    EXPECT_EQ(grid->at(0)[5], 2.0);
+    EXPECT_TRUE(grid->at_before_events(1).empty());
+    EXPECT_FALSE(mango::Grid<double>::create(spec, time, {}, std::vector<double>{1.1}).has_value());
+    EXPECT_FALSE(mango::Grid<double>::create(spec, time, {},
+        std::vector<double>{std::numeric_limits<double>::quiet_NaN()}).has_value());
+}
+
 TEST(GridSnapshotTest, CreateWithoutSnapshots) {
     auto grid_spec = mango::GridSpec<double>::uniform(0.0, 1.0, 11).value();
     auto time_domain = mango::TimeDomain::from_n_steps(0.0, 1.0, 10);

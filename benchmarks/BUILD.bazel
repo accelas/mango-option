@@ -640,3 +640,34 @@ cc_binary(
     ],
     tags = ["manual"],
 )
+
+cc_binary(
+    name = "event_snapshot_impact",
+    srcs = ["event_snapshot_impact.cc"],
+    copts = ["-Wall", "-Wextra", "-O3", "-march=native", "-fopenmp"],
+    linkopts = ["-fopenmp"],
+    linkstatic = True,
+    deps = [
+        "//src/option:american_option",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/option/table/bspline:bspline_segmented_builder",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "event_snapshot_accuracy",
+    srcs = ["event_snapshot_accuracy.cc"],
+    copts = ["-Wall", "-Wextra", "-O3", "-march=native", "-fopenmp"],
+    linkopts = ["-fopenmp"],
+    linkstatic = True,
+    deps = [
+        "//src/option:american_option",
+        "//src/option:dividend_utils",
+        "//src/option:interpolated_iv_solver",
+        "//src/option/table/bspline:bspline_adaptive",
+        "//src/option/table/bspline:bspline_segmented_builder",
+    ],
+    tags = ["benchmark", "manual"],
+)

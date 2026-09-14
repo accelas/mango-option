@@ -26,7 +26,8 @@ build_multi_kref_surface(std::vector<BSplineMultiKRefEntry> entries);
 
 /// Builds a single-reference segmented surface from raw fixed-expiry PDE
 /// snapshots. All leaves store V/K_ref; fitted values never feed a PDE solve.
-/// Event neighborhoods without both calendar sides are explicitly excluded.
+/// Paired event-side snapshots close each segment at the actual dividend time.
+/// Exact-event queries use the post-dividend calendar side.
 class SegmentedPriceTableBuilder {
 public:
     struct Config {
@@ -58,8 +59,9 @@ public:
         GridAccuracyParams pde_accuracy = {};
     };
 
-    /// Counts describe requested (tau, sigma, rate) spatial rows, including
-    /// the analytic payoff row. Missing rows are refused before fitting.
+    /// Counts describe requested (tau, sigma, rate, event side) spatial rows,
+    /// including the analytic payoff row and both rows at each internal event.
+    /// Missing rows are refused before fitting.
     struct BuildResult {
         BSplineSegmentedSurface surface;
         size_t pde_solves;
@@ -76,7 +78,8 @@ public:
     /// Algorithm:
     ///   1. Filter dividends outside (0, T), sort, compute segment boundaries in τ.
     ///   2. Expand moneyness grid downward to accommodate spot adjustment.
-    ///   3. Solve each (sigma, rate) end to end with exact mandatory samples.
+    ///   3. Solve each (sigma, rate) end to end with exact mandatory samples,
+    ///      capturing both sides of dividend events.
     ///   4. Fit temporal regimes from raw snapshots, refusing missing rows.
     ///   5. Assemble into SegmentedSurface.
     static std::expected<BSplineSegmentedSurface, PriceTableError> build(const Config& config);
