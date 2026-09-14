@@ -71,7 +71,42 @@ TEST_P(SegmentedDividendPlacement, BuildsAndPricesAcrossExactEventBoundaries) {
 
 INSTANTIATE_TEST_SUITE_P(Issue501, SegmentedDividendPlacement,
     testing::Values(std::pair{10.0, 30.0}, std::pair{60.0, 180.0},
-                    std::pair{75.0, 365.0}));
+                    std::pair{75.0, 365.0}, std::pair{10.0, 14.0},
+                    std::pair{20.0, 30.0}, std::pair{45.0, 60.0},
+                    std::pair{10.0, 60.0}, std::pair{75.0, 90.0}));
+
+TEST(SegmentedShortMaturity, RecoversOneDayAtmVolatility) {
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0, .option_type = OptionType::PUT, .dividend_yield = 0.02,
+        .discrete_dividends = {{10.0 / 365, 0.50}}, .maturity = 30.0 / 365,
+        .kref_config = {.K_refs = {90, 92.5, 95, 97.5, 100, 102.5, 105, 107.5, 110}},
+    };
+    IVGrid domain{
+        .moneyness = {std::log(0.92), std::log(0.95), 0, std::log(1.05), std::log(1.08)},
+        .vol = {0.10, 0.15, 0.20, 0.30}, .rate = {0.02, 0.03, 0.05, 0.07},
+    };
+    auto built = build_adaptive_bspline_segmented(
+        AdaptiveGridParams{.target_iv_error = 1e-3}, config, domain);
+    ASSERT_TRUE(built.has_value());
+    PricingParams query(OptionSpec{.spot = 100, .strike = 100,
+        .maturity = 1.0 / 365, .rate = 0.04, .dividend_yield = 0.02,
+        .option_type = OptionType::PUT}, 0.225);
+    auto reference_solver = AmericanOptionSolver::create(query,
+        PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::Ultra)});
+    ASSERT_TRUE(reference_solver.has_value());
+    auto reference = reference_solver->solve();
+    ASSERT_TRUE(reference.has_value());
+    BSplineMultiKRefSurface table(built->surface, built->sample_bounds,
+        OptionType::PUT, 0.02);
+    auto solver = InterpolatedIVSolver<BSplineMultiKRefSurface>::create(
+        table, {}, config.discrete_dividends);
+    ASSERT_TRUE(solver.has_value());
+    auto iv = solver->solve(IVQuery(query, reference->value()));
+    ASSERT_TRUE(iv.has_value());
+    EXPECT_NEAR(iv->implied_vol, 0.225, 1e-3)
+        << "price " << table.price(100, 100, query.maturity, 0.225, 0.04)
+        << " reference " << reference->value();
+}
 
 /// Convert S/K moneyness to log-moneyness for internal builder APIs.
 std::vector<double> to_log_m(std::initializer_list<double> sk) {
@@ -207,26 +242,8 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
     EXPECT_EQ(solves1, solves2) << "Second build should recompute all slices for new chain";
 }
 
-// A two-K_ref list cannot blend accurately across the strike range it is
-// asked to serve, and the build refuses rather than shipping the blend.
-//
-// K_refs {90, 110} against S/K in [0.91, 1.1] means strikes in [90.9, 109.9]
-// served by exactly two surfaces: every query but the two endpoints is a
-// linear-in-strike blend across a 20-point gap.  The assembled surface
-// measures **0.4756 (4,756 bps) max IV error** on the D9 validation set
-// (avg 0.1191, 15 of 16 points measured), and the bumped-grid retry measures
-// 0.4766 -- both far outside the 0.20 viability bound, so the build returns
-// `NoViableSurface`.
-//
-// This shipped silently before #434.  The test previously asserted success:
-// with the full dividend schedule handed to every reference solve, each
-// sample below the dividend date lost its reference and only the long-tau
-// tail was measured, which was not enough to expose the blend.  Once
-// `make_validate_fn` filters the schedule by the sampled maturity all 16
-// samples measure, and the sparse-K_ref error is unavoidable.
-//
-// Tracked as the sparse-K_ref accuracy follow-up (MultiKRefSplit blend
-// resolution); the refusal is the correct behavior until it lands.
+// Regression: a sparse reference-strike pair preserves moneyness while
+// interpolating the normalized cash amounts.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -247,9 +264,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_FALSE(result.has_value())
-        << "a two-K_ref blend measuring 4,756 bps must not be returned";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 }
 
 // Large discrete dividend (total_div/K_ref > 0.2, stresses moneyness expansion)
@@ -328,13 +345,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
 // (which would fail the build with InvalidConfig).  K_refs one basis point
 // apart give the middle probe a band ~1e-4 wide in log-moneyness.
 //
-// Such a config cannot produce a usable surface: three K_refs within one
-// basis point of 100 cannot resolve strikes spanning [90.9, 111.1], and the
-// assembled surface measures 0.278 (2,776 bps) on the final validation
-// against the 0.20 viability bound, so the build refuses (spec D9).  What
-// this test pins is *which* refusal: `NoViableSurface` from the final gate
-// means the degenerate band was widened and every probe loop ran;
-// `InvalidConfig` would mean the band was handed over degenerate.
+// With no cash dividends, preserving moneyness makes this configuration
+// homogeneous in strike even outside the tightly clustered reference span.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
@@ -356,12 +368,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    ASSERT_FALSE(result.has_value())
-        << "three K_refs a basis point apart cannot serve [90.9, 111.1]";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface)
-        << "a degenerate band must be widened and measured, not rejected up "
-           "front (InvalidConfig would mean it reached run_refinement "
-           "degenerate)";
+    ASSERT_TRUE(result.has_value());
+    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 }
 
 // A probe whose served band lies entirely outside the user's strike range is
@@ -401,20 +410,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedEmptyProbeBandSkipped) {
     EXPECT_EQ(skipped, 1u) << "the K_ref = 50 probe should be recorded skipped";
 }
 
-// Coverage: Single auto-generated K_ref (count=1)
-//
-// One K_ref cannot serve a +/-30 % strike range.  The assembled surface
-// prices every query as (K / K_ref) * P(S, K_ref) -- the multi-K_ref split
-// substitutes K_ref for the query strike while holding the spot fixed -- so
-// it measures 4.69 (46,924 bps) on the final validation and the build
-// refuses (spec D9).  The coverage here is that `K_ref_count = 1` resolves
-// to a single K_ref and the build runs all the way to the final gate rather
-// than failing configuration validation.
-//
-// Revisit when MultiKRefSplit spot-scaling is fixed (follow-up): a split
-// that mapped the query onto the K_ref problem instead of substituting the
-// strike would make a single K_ref usable, and this test would go back to
-// asserting a successful build.
+// A single automatic reference can pass validation after spot remapping.
+// Its normalized cash amount remains an approximation away from that strike.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -436,20 +433,13 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    ASSERT_FALSE(result.has_value())
-        << "a lone K_ref cannot serve a +/-30 % strike range";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface)
-        << "K_ref_count = 1 must resolve and build, then fail the final "
-           "viability gate -- not fail configuration validation";
+    ASSERT_TRUE(result.has_value());
+    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 }
 
-// Coverage: Very short maturity — tau domain compressed, max_tau clamped
-//
-// A 0.05-year maturity with a discrete dividend has vega near zero, so any
-// price error divides into an enormous IV error: the assembled surface
-// measures 229 (2.29 million bps) on user-domain validation and the worst
-// probe 3,847.  Returning it silently was the pre-#434 behavior; the build
-// now refuses (spec D5).
+// Short-maturity construction retains a positive measurement domain while
+// fitting from the exact expiry payoff and resolving dividend regimes.
 TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
@@ -469,8 +459,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    // The tau domain is still built and clamped to the maturity -- the
-    // refusal below comes from the accuracy gate, not from a domain error.
+    // The IV measurement domain remains positive and bounded by maturity.
     auto bounds = expand_segmented_domain(
         {m, v, r}, seg_config.maturity, seg_config.dividend_yield,
         seg_config.discrete_dividends, 90.0);
@@ -479,9 +468,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     EXPECT_GT(bounds->tau_min, 0.0);
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    ASSERT_FALSE(result.has_value())
-        << "an unusable surface must not be returned";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 }
 
 // ===========================================================================
@@ -839,22 +828,23 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
                      .rate = domain.rate});
 
     const size_t m_bump = result->used_retry ? 2 : 0;
-    const size_t v_bump = result->used_retry ? 1 : 0;
     const size_t r_bump = result->used_retry ? 1 : 0;
-    const int tau_bump = result->used_retry ? 2 : 0;
 
     EXPECT_EQ(result->grid.moneyness.size(),
               std::min(seeded.moneyness.size() + m_bump,
                        params.max_points_per_dim))
         << "reported moneyness grid does not describe the returned surface"
         << " (used_retry = " << result->used_retry << ")";
-    EXPECT_EQ(result->grid.vol.size(),
-              std::min(seeded.vol.size() + v_bump, params.max_points_per_dim));
+    const auto& first_leaf = result->surface.pieces().front().pieces().front();
+    EXPECT_EQ(result->grid.vol, first_leaf.interpolant().get().grid(2));
     EXPECT_EQ(result->grid.rate.size(),
               std::min(seeded.rate.size() + r_bump, params.max_points_per_dim));
-    EXPECT_EQ(result->tau_points_per_segment,
-              std::min(static_cast<int>(seeded.tau.size()) + tau_bump,
-                       static_cast<int>(params.max_points_per_dim)));
+    size_t max_segment_size = 0;
+    for (const auto& segment : result->surface.pieces().front().pieces()) {
+        max_segment_size = std::max(max_segment_size, segment.interpolant().get().grid(1).size());
+    }
+    EXPECT_EQ(result->tau_points_per_segment, max_segment_size);
+    EXPECT_FALSE(result->tau_grid.empty());
 }
 
 // Reference FDM price with a PINNED explicit configuration (spec: the

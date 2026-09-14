@@ -8,7 +8,9 @@
 namespace mango {
 
 /// Split policy for multi-K_ref surfaces (discrete dividends).
-/// Merges KRefBracket + KRefTransform from old architecture.
+/// Hold S/K fixed and interpolate V/K in 1/K. With a fixed cash schedule,
+/// this interpolates the normalized dividend amounts D/K, preserving the
+/// homogeneous no-cash limit and the linear exercise-payoff regions.
 class MultiKRefSplit {
 public:
     explicit MultiKRefSplit(std::vector<double> k_refs)
@@ -33,7 +35,8 @@ public:
         size_t hi = 1;
         while (hi < n && k_refs_[hi] < strike) ++hi;
         size_t lo = hi - 1;
-        double t = (strike - k_refs_[lo]) / (k_refs_[hi] - k_refs_[lo]);
+        double t = (k_refs_[hi] / strike) *
+                   ((strike - k_refs_[lo]) / (k_refs_[hi] - k_refs_[lo]));
         br.entries[0] = {lo, 1.0 - t};
         br.entries[1] = {hi, t};
         br.count = 2;
@@ -41,9 +44,13 @@ public:
     }
 
     [[nodiscard]] std::tuple<double, double, double, double, double>
-    to_local(size_t i, double spot, double /*strike*/,
+    to_local(size_t i, double spot, double strike,
              double tau, double sigma, double rate) const noexcept {
-        return {spot, k_refs_[i], tau, sigma, rate};
+        return {spot * spot_scale(i, strike), k_refs_[i], tau, sigma, rate};
+    }
+
+    [[nodiscard]] double spot_scale(size_t i, double strike) const noexcept {
+        return k_refs_[i] / strike;
     }
 
     [[nodiscard]] double normalize(size_t i, double /*strike*/,

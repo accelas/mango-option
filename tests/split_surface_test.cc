@@ -6,6 +6,18 @@
 
 using namespace mango;
 
+// Exact expiry payoff is an independent reference for strike interpolation.
+TEST(SplitSurfaceTest, MultiStrikePreservesExpiryPayoff) {
+    struct Payoff {
+        double price(double s, double k, double, double, double) const {
+            return intrinsic_value(s, k, OptionType::PUT);
+        }
+    };
+    SplitSurface<Payoff, MultiKRefSplit> surface({{}, {}}, MultiKRefSplit({80, 120}));
+    EXPECT_NEAR(surface.price(90, 105, 0, 0.2, 0.04), 15.0, 1e-12);
+    EXPECT_NEAR(surface.price(110, 105, 0, 0.2, 0.04), 0.0, 1e-12);
+}
+
 // Mock inner that returns spot / strike + offset (easy to verify routing)
 struct MockInner {
     double offset = 0.0;
@@ -74,8 +86,8 @@ TEST(MultiKRefSplitTest, BracketsCorrectly) {
     EXPECT_EQ(br2.count, 2u);
     EXPECT_EQ(br2.entries[0].index, 0u);  // K_ref=80
     EXPECT_EQ(br2.entries[1].index, 1u);  // K_ref=100
-    EXPECT_NEAR(br2.entries[0].weight, 0.5, 1e-12);
-    EXPECT_NEAR(br2.entries[1].weight, 0.5, 1e-12);
+    EXPECT_NEAR(br2.entries[0].weight, 4.0 / 9, 1e-12);
+    EXPECT_NEAR(br2.entries[1].weight, 5.0 / 9, 1e-12);
 
     // Above last -> clamp to last
     auto br3 = split.bracket(100, 130.0, 0.5, 0.20, 0.05);
@@ -87,7 +99,7 @@ TEST(MultiKRefSplitTest, ToLocalSetsStrikeToKRef) {
     MultiKRefSplit split({80.0, 100.0, 120.0});
     auto [ls, lk, lt, lv, lr] = split.to_local(1, 110.0, 95.0, 0.5, 0.20, 0.05);
     EXPECT_NEAR(lk, 100.0, 1e-12);      // strike -> K_ref[1]
-    EXPECT_NEAR(ls, 110.0, 1e-12);      // spot unchanged
+    EXPECT_NEAR(ls / lk, 110.0 / 95.0, 1e-12); // preserve moneyness
 }
 
 TEST(MultiKRefSplitTest, NormalizeDividesByKRef) {

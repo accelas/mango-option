@@ -354,7 +354,7 @@ fits raw `V/K_ref` samples, using the appropriate event side at its endpoints.
 An exact-event query selects the post-dividend calendar leaf. No fitted leaf
 feeds another PDE solve, and no fixed-width event gap is needed.
 
-**Multi-K_ref:** With continuous dividends, American option prices are homogeneous in strike: P(S, K) = K * f(S/K). Cash dividends break this property because the dividend amount is absolute, not proportional. To maintain interpolation accuracy, multiple reference strikes (K_ref) are used. Each K_ref produces a separate segmented surface, and queries interpolate across K_ref values weighted by proximity to the actual strike.
+**Multi-K_ref:** With continuous dividends, American option prices are homogeneous in strike: P(S, K) = K * f(S/K). Cash dividends break this property because the dividend amount is absolute, not proportional. To maintain interpolation accuracy, multiple reference strikes (K_ref) are used. Each K_ref produces a separate segmented surface, and queries preserve S/K while interpolating normalized prices in 1/K, equivalently interpolating the normalized dividend amounts D/K. Delta and Gamma include the spot-remapping chain rule.
 
 ### EEP vs Raw Price by Segment
 

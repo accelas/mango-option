@@ -36,8 +36,15 @@ SegmentedPriceTableBuilder::Config make_seg_config(
     const std::vector<double>& m_grid,
     const std::vector<double>& v_grid,
     const std::vector<double>& r_grid,
-    int tau_pts)
+    std::span<const double> tau_grid)
 {
+    GridAccuracyParams accuracy;
+    // Spatial extraction feeds a second interpolant. Resolve it more finely
+    // than the fitted axis so refinement does not fit a fixed coarse PDE.
+    const size_t largest_odd_grid = accuracy.max_spatial_points -
+        (accuracy.max_spatial_points % 2 == 0);
+    accuracy.min_spatial_points = std::min(largest_odd_grid,
+        std::max(size_t{201}, 2 * m_grid.size() + 1));
     return {
         .K_ref = 0.0,
         .option_type = config.option_type,
@@ -45,7 +52,8 @@ SegmentedPriceTableBuilder::Config make_seg_config(
                       .discrete_dividends = config.discrete_dividends},
         .grid = {.moneyness = m_grid, .vol = v_grid, .rate = r_grid},
         .maturity = config.maturity,
-        .tau_points_per_segment = tau_pts,
+        .pde_accuracy = accuracy,
+        .tau_grid = {tau_grid.begin(), tau_grid.end()},
     };
 }
 
@@ -574,6 +582,10 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     //    scale is the expected seeded moneyness density, not the user's
     //    knot count.
     SurfaceBounds fit_domain = support_domain_;
+    // The fitted table includes the exact payoff at expiry. Keep zero on
+    // the refinement axis as well, rather than adding a nearly coincident
+    // PDE row at the positive IV measurement floor.
+    fit_domain.tau_min = 0.0;
     {
         double h = spline_support_headroom(
             sample_domain_.m_max - sample_domain_.m_min,
@@ -583,18 +595,24 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         fit_domain.m_max += h;
     }
 
-    // 1. Select probe values (up to 3: front, back, nearest ATM)
+    // 1. Select reference-strike probes, including the served range endpoints
     auto probes = select_probes(K_refs_, config_.spot);
 
     // The strike range the user can actually query (m = ln(spot/K)).
     const double user_k_lo = config_.spot * std::exp(-sample_domain_.m_max);
     const double user_k_hi = config_.spot * std::exp(-sample_domain_.m_min);
+    // Endpoint K_refs can have empty served bands when callers provide
+    // support beyond the query range. Include the references nearest the
+    // queried strikes so refinement also sees the wings of that range.
+    for (double strike : {user_k_lo, user_k_hi}) {
+        const auto nearest = std::ranges::min_element(K_refs_, {},
+            [strike](double k) { return std::abs(k - strike); });
+        if (std::ranges::find(probes, *nearest) == probes.end()) probes.push_back(*nearest);
+    }
 
     // The strike band a probe dominates in the assembled surface.  The
-    // assembly blends the two K_refs bracketing a query's strike linearly
-    // (MultiKRefSplit::bracket), so a probe's weight is largest between the
-    // midpoints to its neighbours; we take geometric midpoints since K_refs
-    // are log-spaced.  This scopes a sizing measurement, not a safety gate —
+    // assembly blends in inverse strike, so a probe dominates between the
+    // harmonic midpoints to its neighbours.  This scopes a sizing measurement, not a safety gate —
     // the assembled surface's own final validation queries the true blend.
     // The outermost bands run out to the user's strike range, and a single
     // K_ref serves all of it.
@@ -603,16 +621,61 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         const size_t idx = static_cast<size_t>(
             std::ranges::lower_bound(K_refs_, k) - K_refs_.begin());
         double lo = (idx == 0)
-            ? user_k_lo : std::sqrt(K_refs_[idx - 1] * K_refs_[idx]);
+            ? user_k_lo : 2.0 * K_refs_[idx - 1] / (1.0 + K_refs_[idx - 1] / K_refs_[idx]);
         double hi = (idx + 1 >= n)
-            ? user_k_hi : std::sqrt(K_refs_[idx] * K_refs_[idx + 1]);
+            ? user_k_hi : 2.0 * K_refs_[idx] / (1.0 + K_refs_[idx] / K_refs_[idx + 1]);
         return std::pair{std::max(lo, user_k_lo), std::min(hi, user_k_hi)};
     };
 
     InitialGrids initial_grids;
     initial_grids.moneyness = initial_grid_.moneyness;
-    initial_grids.vol = initial_grid_.vol;
+    initial_grids.vol = seed_grid(initial_grid_.vol, fit_domain.sigma_min,
+                                  fit_domain.sigma_max, 7);
+    // Raw cash-dividend prices can be nearly flat in volatility beside an
+    // exercise boundary. A four-site cubic can undershoot that flat region;
+    // resolve the seed before relying on randomly located refinement probes.
+    const size_t vol_seed_count = std::min(params.max_points_per_dim, size_t{7});
+    if (initial_grids.vol.size() < vol_seed_count) {
+        const size_t missing = vol_seed_count - initial_grids.vol.size();
+        initial_grids.vol = insert_largest_gap_midpoints(
+            std::move(initial_grids.vol), missing, vol_seed_count);
+    }
     initial_grids.rate = initial_grid_.rate;
+    // Each dividend jump/projection starts another temporal boundary layer.
+    // Cluster in sqrt(elapsed time) in every regime, retaining physical tau.
+    std::vector<double> origins{fit_domain.tau_min, fit_domain.tau_max};
+    for (const auto& div : filter_and_merge_dividends(
+             config_.discrete_dividends, config_.maturity)) {
+        const double t = config_.maturity - div.calendar_time;
+        if (t > fit_domain.tau_min && t < fit_domain.tau_max) origins.push_back(t);
+    }
+    std::ranges::sort(origins);
+    const size_t seed_cap = std::max(params.max_points_per_dim, size_t{4});
+    const size_t per_regime = std::min(seed_cap, size_t{9});
+    initial_grids.tau.push_back(origins.front());
+    for (size_t j = 1; j < origins.size(); ++j) {
+        for (size_t i = 1; i < per_regime; ++i) {
+            const double u = static_cast<double>(i) / (per_regime - 1);
+            const double t = i + 1 == per_regime ? origins[j]
+                : std::lerp(origins[j - 1], origins[j], u * u);
+            // Match the collocation solver's absolute separation floor.
+            // Optional clustered sites must not make an otherwise usable
+            // very short event interval unfittable.
+            constexpr double min_spacing = 1e-14;
+            if (i + 1 < per_regime &&
+                (t - initial_grids.tau.back() < min_spacing ||
+                 origins[j] - t < min_spacing)) continue;
+            initial_grids.tau.push_back(t);
+        }
+    }
+    // Bound seed cost for schedules with many events. The builder still
+    // inserts event endpoints and the minimum cubic support in each regime.
+    if (initial_grids.tau.size() > seed_cap) {
+        std::vector<double> capped;
+        for (size_t i = 0; i < seed_cap; ++i)
+            capped.push_back(initial_grids.tau[i * (initial_grids.tau.size() - 1) / (seed_cap - 1)]);
+        initial_grids.tau = std::move(capped);
+    }
 
     // 2. Run adaptive refinement per probe, measured over its own band
     BuildDiagnostics diagnostics;
@@ -674,11 +737,10 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             std::span<const double> r_grid)
             -> std::expected<SurfaceHandle, PriceTableError>
         {
-            int tau_pts = static_cast<int>(tau_grid.size());
             std::vector<double> m_vec(m_grid.begin(), m_grid.end());
             std::vector<double> v_vec(v_grid.begin(), v_grid.end());
             std::vector<double> r_vec(r_grid.begin(), r_grid.end());
-            auto seg_cfg = make_seg_config(config_, m_vec, v_vec, r_vec, tau_pts);
+            auto seg_cfg = make_seg_config(config_, m_vec, v_vec, r_vec, tau_grid);
             seg_cfg.K_ref = probe_ref;
             auto result = SegmentedPriceTableBuilder::build_with_diagnostics(seg_cfg);
             if (!result) return std::unexpected(result.error());
@@ -772,9 +834,8 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     // 4. Build all surfaces on the merged grids.  These are the positions the
     //    probe loops actually chose; re-spacing them uniformly at the same
     //    sizes was the defect behind issue #461.
-    int max_tau_pts = agg.tau_points;
 
-    auto seg_template = make_seg_config(config_, agg.moneyness, agg.vol, agg.rate, max_tau_pts);
+    auto seg_template = make_seg_config(config_, agg.moneyness, agg.vol, agg.rate, agg.tau);
     auto seg_surfaces = build_segmented_surfaces(seg_template, K_refs_, total_pde, diagnostics);
     if (!seg_surfaces) return std::unexpected(seg_surfaces.error());
 
@@ -842,17 +903,17 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     std::optional<BSplineMultiKRefInner> retry_surface;
     std::optional<detail::FinalScore> retry_score;
     IVGrid retry_grid;
-    int retry_tau_pts = 0;
+    std::vector<double> retry_tau_grid;
 
     if (detail::needs_final_retry(orig_score, params.target_iv_error)) {
         const size_t cap = params.max_points_per_dim;
-        int bumped_tau = std::min(agg.tau_points + 2, static_cast<int>(cap));
+        auto retry_tau = insert_largest_gap_midpoints(agg.tau, 2, cap);
 
         auto retry_m = insert_largest_gap_midpoints(agg.moneyness, 2, cap);
         auto retry_v = insert_largest_gap_midpoints(agg.vol, 1, cap);
         auto retry_r = insert_largest_gap_midpoints(agg.rate, 1, cap);
 
-        auto retry_template = make_seg_config(config_, retry_m, retry_v, retry_r, bumped_tau);
+        auto retry_template = make_seg_config(config_, retry_m, retry_v, retry_r, retry_tau);
         auto retry_segs = build_segmented_surfaces(retry_template, K_refs_, total_pde, diagnostics);
         if (retry_segs) {
             auto assembled = assemble(std::move(*retry_segs));
@@ -863,7 +924,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
                     validation->points, handle_for(*retry_surface),
                     final_score_fn, final_ctx);
                 retry_grid = retry_template.grid;
-                retry_tau_pts = bumped_tau;
+                retry_tau_grid = std::move(retry_tau);
             }
         }
     }
@@ -906,10 +967,14 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
                               params.vega_floor, diagnostics);
     diagnostics.iterations = all_iterations;
 
+    size_t max_tau_points = 0;
+    for (const auto& piece : picked_surface.pieces().front().pieces()) {
+        max_tau_points = std::max(max_tau_points, piece.interpolant().get().grid(1).size());
+    }
     return BSplineSegmentedAdaptiveResult{
         .surface = std::move(picked_surface),
         .grid = use_retry ? retry_grid : seg_template.grid,
-        .tau_points_per_segment = use_retry ? retry_tau_pts : max_tau_pts,
+        .tau_points_per_segment = static_cast<int>(max_tau_points),
         .iterations = std::move(all_iterations),
         .achieved_max_error = final_score.max_error,
         .achieved_avg_error = final_score.avg_error,
@@ -918,6 +983,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         .used_retry = use_retry,
         .diagnostics = std::move(diagnostics),
         .sample_bounds = sample_domain_,
+        .tau_grid = use_retry ? std::move(retry_tau_grid) : std::move(agg.tau),
     };
 }
 

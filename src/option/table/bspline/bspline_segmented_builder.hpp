@@ -57,6 +57,11 @@ public:
         /// PDE grid accuracy for the fixed-expiry solve cohort.
         /// Default GridAccuracyParams{} gives ~100 spatial points.
         GridAccuracyParams pde_accuracy = {};
+
+        /// Optional global remaining-life knots, retained in their event
+        /// segments. When supplied, replaces count-based sampling; event
+        /// endpoints and enough interior points for a cubic fit are added.
+        std::vector<double> tau_grid{};
     };
 
     /// Counts describe requested (tau, sigma, rate, event side) spatial rows,
