@@ -299,6 +299,9 @@ TEST(PriceTableDataTest, BSplineSegmentedRoundTrip) {
     struct TestPoint { double spot, strike, tau, sigma, rate; };
     std::vector<TestPoint> test_points = {
         {100.0, 100.0, 0.3, 0.25, 0.04},
+        {100.0, 100.0, 0.4999, 0.20, 0.03},
+        {100.0, 100.0, 0.5, 0.20, 0.03},
+        {100.0, 100.0, 0.5001, 0.20, 0.03},
         {100.0, 100.0, 0.8, 0.20, 0.03},
     };
     for (const auto& p : test_points) {

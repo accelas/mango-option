@@ -593,28 +593,52 @@ Explicit levels supplied to `ChebyshevSegmentedBuilder::build` or
 [measured default accuracy and cost](MATHEMATICAL_FOUNDATIONS.md#manual-chebyshev-defaults)
 for the tested domain and the distinction between price accuracy and IV/Greek guarantees.
 
-Chebyshev's current event topology omits `5e-4` years (4.38 hours) on each
-side of each dividend. Queries in these gaps, including the exact event,
+Segmented B-spline tables capture both calendar sides of every dividend from
+the same PDE solve. Adjacent interpolation segments end and start at the
+exact event time with their own values. Queries immediately before, at, and
+after an event are supported; an exact-event query uses the post-dividend
+calendar side. There is no fixed minimum time separation or excluded
+neighborhood. Distinct sample times must still be representable by the
+numerical grid. Same-date dividends are combined; dividends at the build
+anchor or expiry are filtered out under the existing `(0, T)` convention.
+Previously saved tables retain their stored segment boundaries and gaps;
+rebuild them to obtain this event-side coverage.
+
+Chebyshev's current event topology still omits `5e-4` years (4.38 hours) on
+each side of each dividend. Queries in those gaps, including the exact event,
 are unsupported: `validate_pricing_params` reports `OutOfRange`, Greeks
 report `OutOfDomain`, and interpolated IV reports `InvalidGridConfig`.
 Unchecked scalar price/vega methods return NaN. No neighboring-time price
 is substituted. Topologies that put an event inside a fitted leaf are
 rejected as `InvalidConfig`. These exclusions matter for intraday use.
-An exact event, if represented by a backend, means the post-dividend
-calendar side. The solver's ordinary snapshots are taken after backward
-jump callbacks, which is the pre-dividend calendar side.
 
-**Why segmentation?** A single B-spline surface cannot fit the discontinuity at a dividend date. The builder splits the maturity axis into segments separated by dividend dates and solves each independently.
+Adaptive B-spline validation now measures the entire maturity range,
+including neighborhoods of dividends. Non-finite prices still fail the
+viability gate, and a build with too few usable holdout references is refused.
+Supporting a time does not guarantee the requested accuracy: short maturities
+and tightly spaced events may need finer grids or fail the accuracy gate.
 
-**How B-spline segments connect (the chaining follow-up is #488).** The builder works backward from expiry:
+The solver's ordinary snapshots are taken after backward jump callbacks and
+the exercise/boundary projections, which is the pre-dividend calendar side.
+Table construction additionally captures the state before those callbacks
+for the post-dividend calendar side. This recording does not change the PDE
+equations, integration method, or event operation. At an exact event, table
+Greeks are those of the selected post-dividend branch; theta is a one-sided
+time derivative and does not include the discrete jump.
 
-1. **Segment 0** (nearest to expiry, τ ∈ [0, τ₁]): Built with standard EEP (Early Exercise Premium) decomposition. The initial condition is the option payoff.
-
-2. **Segment k** (τ ∈ [τ_k, τ_{k+1}]): Built in raw-price mode. Its initial condition comes from the previous segment's surface, evaluated at the post-dividend spot: S_adj = S − D_k. This embeds the dividend jump into the initial condition, so no spot adjustment is needed at query time for these segments.
+**Why segmentation?** A smooth B-spline cannot span a dividend jump. The
+builder fits separate time segments from one fixed-expiry PDE solve per
+reference strike, volatility, and rate. All segments store raw normalized
+prices `V/K_ref`, including the expiry payoff. Each event has two endpoint
+values from that same solve; fitted surfaces never supply initial conditions
+for further PDE evolution.
 
 The result is a `BSplineSegmentedSurface` — an ordered list of segments that together cover [0, T]. At query time, the surface finds the segment covering the requested τ and evaluates it directly.
 
-**Why multiple K_ref values?** Cash dividends break the scale invariance that American options normally have in strike. A single reference-strike surface cannot accurately interpolate across strikes far from K_ref. The builder constructs surfaces at several reference strikes and interpolates across them with Catmull-Rom splines in log(K_ref). The result is a `SegmentedMultiKRefSurface`.
+**Why multiple K_ref values?** Fixed cash dividends prevent scaling spot and
+strike alone from preserving the pricing problem. The builder constructs
+surfaces at several reference strikes and blends their normalized prices
+linearly in strike. Reference strikes must span and resolve the query range.
 
 ### Building a Segmented IV Solver
 

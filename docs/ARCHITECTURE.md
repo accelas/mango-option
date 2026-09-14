@@ -346,7 +346,13 @@ one origin; excluded event gaps are checked domain failures. The ordinary
 PDE snapshot is after the backward jump, so its exact event value is the
 pre-dividend calendar side; this is not the supported exact query convention.
 
-**B-spline backward chaining (pending #488):** Segments are built from expiry backward. The last segment (dividend-free) solves the standard American PDE. Earlier segments use the next segment's price as their initial condition (after adjusting spot for the dividend drop). This propagates the dividend effect through the full maturity range.
+**B-spline event-sided sampling:** Each reference strike, volatility, and rate
+uses one fixed-expiry PDE solve. Optional pre-event snapshots preserve the
+post-dividend calendar state before the jump overwrites it; ordinary snapshots
+retain the state after the jump and exercise/boundary projections. Each leaf
+fits raw `V/K_ref` samples, using the appropriate event side at its endpoints.
+An exact-event query selects the post-dividend calendar leaf. No fitted leaf
+feeds another PDE solve, and no fixed-width event gap is needed.
 
 **Multi-K_ref:** With continuous dividends, American option prices are homogeneous in strike: P(S, K) = K * f(S/K). Cash dividends break this property because the dividend amount is absolute, not proportional. To maintain interpolation accuracy, multiple reference strikes (K_ref) are used. Each K_ref produces a separate segmented surface, and queries interpolate across K_ref values weighted by proximity to the actual strike.
 

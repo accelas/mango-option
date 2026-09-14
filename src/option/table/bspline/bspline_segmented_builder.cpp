@@ -277,20 +277,16 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
     auto expanded_log_m_grid = std::move(*grid_result);
 
     // =====================================================================
-    // Each sample belongs to one temporal regime. The existing inset topology
-    // excludes event sides not represented by the solver's single snapshot.
-    auto [sample_bounds, gaps] = compute_segment_boundaries(dividends, T, 0.0, T);
-    for (const auto& dividend : dividends) {
-        const double event_tau = T - dividend.calendar_time;
-        bool excluded = false;
-        for (size_t s = 0; s < gaps.size(); ++s) {
-            excluded |= gaps[s] && event_tau > sample_bounds[s]
-                && event_tau < sample_bounds[s + 1];
-        }
-        if (!excluded) return std::unexpected(
-            PriceTableError{PriceTableErrorCode::InvalidConfig});
-    }
-    auto split = make_tau_split_from_segments(sample_bounds, gaps, K_ref);
+    // Adjacent leaves share an event time, but not its value: the left
+    // (smaller-tau) leaf ends on the post-dividend calendar side, while the
+    // right leaf starts after the backward jump and exercise projection.
+    std::vector<double> starts(boundaries.begin(), boundaries.end() - 1);
+    std::vector<double> ends(boundaries.begin() + 1, boundaries.end());
+    std::vector<double> widths;
+    for (size_t s = 0; s < starts.size(); ++s) widths.push_back(ends[s] - starts[s]);
+    TauSegmentSplit split(starts, ends, std::vector<double>(starts.size(), 0.0),
+                          widths, K_ref);
+    const std::vector<double> event_times(boundaries.begin() + 1, boundaries.end() - 1);
 
     std::vector<std::vector<double>> segment_times;
     std::vector<double> requested_times;
@@ -300,26 +296,15 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
             0.0, split.tau_end()[s] - split.tau_start()[s],
             config.tau_points_per_segment, config.tau_target_dt,
             config.tau_points_min, config.tau_points_max, tau_cap_hits);
-        local.front() = split.tau_min()[s];
-        local.back() = split.tau_max()[s];
         std::vector<double> global;
         for (double t : local) global.push_back(split.tau_start()[s] + t);
-        const auto ordered = [&] {
-            return std::adjacent_find(global.begin(), global.end(),
-                                     std::greater_equal<double>{}) == global.end();
-
-        };
-        if (!ordered()) {
-            // Endpoint insets can overtake generated interior nodes in a
-            // short regime. Keep the requested count on its valid support.
-            const double lo = global.front(), hi = global.back();
-            for (size_t j = 0; j < global.size(); ++j) {
-                global[j] = std::lerp(lo, hi,
-                    static_cast<double>(j) / static_cast<double>(global.size() - 1));
-            }
+        // Preserve event coordinates exactly, including for very short leaves.
+        global.front() = starts[s];
+        global.back() = ends[s];
+        if (std::adjacent_find(global.begin(), global.end(),
+                              std::greater_equal<double>{}) != global.end()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
         }
-        if (!ordered()) return std::unexpected(
-            PriceTableError{PriceTableErrorCode::InvalidConfig});
         requested_times.insert(requested_times.end(), global.begin(), global.end());
         segment_times.push_back(std::move(global));
     }
@@ -347,7 +332,13 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
     grid->mandatory_times = requested_times;
     BatchAmericanOptionSolver solver;
     solver.set_snapshot_times(requested_times);
-    auto batch = solver.solve_batch(batch_params, true, nullptr, PDEGridSpec{*grid});
+    BatchAmericanOptionSolver::SetupCallback capture_events;
+    if (!event_times.empty()) {
+        capture_events = [&event_times](size_t, AmericanOptionSolver& option_solver) {
+            option_solver.set_before_event_snapshot_times(event_times);
+        };
+    }
+    auto batch = solver.solve_batch(batch_params, true, capture_events, PDEGridSpec{*grid});
 
     // Missing rows are counted before fitting. This path is strict, without
     // the previous implicit 50% repair allowance on chained segments.
@@ -360,6 +351,14 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
         const auto actual = result->snapshot_times();
         for (double time : requested_times) {
             if (!std::binary_search(actual.begin(), actual.end(), time)) ++missing_rows;
+        }
+        const auto before_times = result->grid()->before_event_snapshot_times();
+        for (double time : event_times) {
+            auto it = std::lower_bound(before_times.begin(), before_times.end(), time);
+            if (it == before_times.end() || *it != time ||
+                result->grid()->at_before_events(it - before_times.begin()).empty()) {
+                ++missing_rows;
+            }
         }
     }
     if (batch.results.size() != batch_params.size() || missing_rows != 0) {
@@ -394,6 +393,12 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
                 const size_t row = std::lower_bound(actual_times.begin(), actual_times.end(), time)
                     - actual_times.begin();
                 auto values = result.at_time(row);
+                if (j + 1 == segment_times[s].size() && s + 1 < segment_times.size()) {
+                    const auto before_times = result.grid()->before_event_snapshot_times();
+                    const size_t before_row = std::lower_bound(
+                        before_times.begin(), before_times.end(), time) - before_times.begin();
+                    values = result.grid()->at_before_events(before_row);
+                }
                 CubicSpline<double> spatial;
                 if (spatial.build(x, values)) return std::unexpected(
                     PriceTableError{PriceTableErrorCode::ExtractionFailed, 1, 1});
@@ -421,7 +426,8 @@ SegmentedPriceTableBuilder::build_with_diagnostics(const Config& config) {
             std::make_shared<const BSplineND<double, 4>>(std::move(*spline))),
             StandardTransform4D{}, K_ref);
     }
-    const size_t rows = requested_times.size() * batch_params.size();
+    // Each internal event contributes two distinct spatial rows at one time.
+    const size_t rows = (requested_times.size() + event_times.size()) * batch_params.size();
     return BuildResult{
         .surface = BSplineSegmentedSurface(std::move(leaves), std::move(split)),
         .pde_solves = batch.results.size(),

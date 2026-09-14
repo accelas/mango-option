@@ -164,6 +164,13 @@ contiguous while the leaf's actual sampled support excludes an event gap;
 admission. An unchecked scalar lookup in a gap returns NaN, and Greek/IV
 interfaces return domain errors instead of allowing the leaf to clamp time.
 
+B-spline construction instead supplies full-support leaves with separate
+endpoint values at each dividend. The smaller-tau leaf ends on the state
+captured before the backward jump; the larger-tau leaf begins on the ordinary
+after-jump snapshot. Equality selects the smaller-tau, post-dividend calendar
+leaf. The existing split metadata and persistence format retain this behavior
+without merging the two values or interpolating across the event.
+
 Chebyshev sampling keeps each row's exact physical time and segment owner.
 Generated CGL endpoints equal the supplied bounds exactly; a row outside all
 real segments fails extraction rather than being assigned to segment zero.

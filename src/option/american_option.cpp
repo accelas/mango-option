@@ -503,7 +503,8 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         grid_spec, time_domain,
         snapshot_times_.empty()
             ? std::span<const double>()
-            : std::span<const double>(snapshot_times_));
+            : std::span<const double>(snapshot_times_),
+        before_event_snapshot_times_);
 
     if (!grid_result.has_value()) {
         return std::unexpected(SolverError{

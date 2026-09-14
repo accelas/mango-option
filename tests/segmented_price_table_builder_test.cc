@@ -24,6 +24,66 @@ std::vector<double> log_m_grid(std::initializer_list<double> moneyness) {
 
 }  // namespace
 
+// Event-sided samples must support the exact ex-date (post-dividend calendar
+// side) and both neighboring times without smoothing across the cash jump.
+TEST(SegmentedPriceTableBuilderTest, PricesBothSidesOfDividendWithoutGap) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 100.0, .option_type = OptionType::PUT,
+        .dividends = {.discrete_dividends = {{0.5, 2.0}}},
+        .grid = {.moneyness = {-0.2, -0.1, 0.0, 0.1, 0.2},
+                 .vol = {0.1, 0.15, 0.2, 0.3},
+                 .rate = {0.02, 0.03, 0.05, 0.07}},
+        .maturity = 1.0,
+    };
+    auto result = SegmentedPriceTableBuilder::build(config);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    for (double tau : {0.4999, 0.5, 0.5001}) {
+        ASSERT_TRUE(result->contains_maturity(tau)) << "tau=" << tau;
+        PricingParams p(OptionSpec{.spot = 100.0, .strike = 100.0,
+            .maturity = tau, .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
+        if (tau > 0.5) p.discrete_dividends = {{tau - 0.5, 2.0}};
+        auto reference = solve_american_option(p);
+        ASSERT_TRUE(reference.has_value());
+        EXPECT_NEAR(result->price(100.0, 100.0, tau, 0.2, 0.05),
+                    reference->value(), 0.03) << "tau=" << tau;
+    }
+}
+
+TEST(SegmentedPriceTableBuilderTest, SupportsSubHourEndpointAndAdjacentEvents) {
+    for (const auto& dividends : std::vector<std::vector<Dividend>>{
+             {{0.0001, 0.5}}, {{0.0999, 0.5}},
+             {{0.05, 0.25}, {0.0501, 0.25}},
+             {{0.05, 0.25}, {0.05, 0.25}}}) {
+        SegmentedPriceTableBuilder::Config config{
+            .K_ref = 100.0, .option_type = OptionType::PUT,
+            .dividends = {.discrete_dividends = dividends},
+            .grid = {.moneyness = {-0.2, -0.1, 0.0, 0.1, 0.2},
+                     .vol = {0.1, 0.15, 0.2, 0.3},
+                     .rate = {0.02, 0.03, 0.05, 0.07}},
+            .maturity = 0.1,
+            .pde_accuracy = make_grid_accuracy(GridAccuracyProfile::High),
+        };
+        auto result = SegmentedPriceTableBuilder::build(config);
+        ASSERT_TRUE(result.has_value()) << result.error();
+        for (const auto& div : dividends) {
+            const double event_tau = config.maturity - div.calendar_time;
+            for (double tau : {event_tau - 0.00001, event_tau, event_tau + 0.00001}) {
+                ASSERT_TRUE(result->contains_maturity(tau));
+                PricingParams p(OptionSpec{.spot = 100, .strike = 100,
+                    .maturity = tau, .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
+                for (const auto& remaining : dividends) {
+                    const double event = config.maturity - remaining.calendar_time;
+                    if (tau > event) p.discrete_dividends.push_back({tau - event, remaining.amount});
+                }
+                auto reference = solve_american_option(p);
+                ASSERT_TRUE(reference.has_value());
+                EXPECT_NEAR(result->price(100, 100, tau, 0.2, 0.05), reference->value(), 0.03)
+                    << "event=" << event_tau << " tau=" << tau;
+            }
+        }
+    }
+}
+
 // Regression #488: a post-dividend backward-time segment must contain raw
 // end-to-end PDE samples, rather than evolution of a fitted initial state.
 
@@ -44,8 +104,8 @@ TEST(SegmentedPriceTableBuilderTest, DiagnosticsCountRawRowsAndSingleExpirySolve
     EXPECT_EQ(result->sample_rows, 3u * 4u * 16u);
     EXPECT_EQ(result->tau_point_cap_hits, 3u);
     EXPECT_EQ(result->surface.num_pieces(), 3u);
-    EXPECT_FALSE(result->surface.contains_maturity(0.5));
-    EXPECT_FALSE(result->surface.contains_maturity(0.75));
+    EXPECT_TRUE(result->surface.contains_maturity(0.5));
+    EXPECT_TRUE(result->surface.contains_maturity(0.75));
     EXPECT_TRUE(result->surface.contains_maturity(0.8));
 }
 
@@ -63,9 +123,8 @@ TEST(SegmentedPriceTableBuilderTest, RejectsUnsortedSampleAxesBeforeSolving) {
     EXPECT_EQ(result.error().axis_index, 2u);
 }
 
-// A five-node grid on [0,.002] ends at .0015 after the event inset, which
-// used to duplicate its fourth node. These are generated nodes: keep their
-// requested count and place them inside the actual supported interval.
+// A narrow regime retains all requested nodes up to its exact event
+// endpoint, with separate values on the neighboring regime.
 TEST(SegmentedPriceTableBuilderTest, NarrowRegimesRetainDistinctRequestedRows) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = 100.0, .option_type = OptionType::PUT,
@@ -80,7 +139,7 @@ TEST(SegmentedPriceTableBuilderTest, NarrowRegimesRetainDistinctRequestedRows) {
     EXPECT_EQ(result->sample_rows, 2u * 5u * 16u);
     EXPECT_EQ(result->pde_solves, 16u);
     EXPECT_TRUE(result->surface.contains_maturity(0.001));
-    EXPECT_FALSE(result->surface.contains_maturity(0.002));
+    EXPECT_TRUE(result->surface.contains_maturity(0.002));
     EXPECT_TRUE(result->surface.contains_maturity(0.003));
 }
 

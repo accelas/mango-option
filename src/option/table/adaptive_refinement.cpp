@@ -399,6 +399,10 @@ static SampleEval evaluate_fresh_samples(
         double sigma = sample[2];
         double rate = sample[3];
 
+        if (ctx.maturity_is_supported && !ctx.maturity_is_supported(tau)) {
+            continue;
+        }
+
         // Interpolated price from surface via callback
         double strike = ctx.spot * std::exp(-m);
         double interp_price = handle.price(ctx.spot, strike, tau, sigma, rate);
@@ -593,6 +597,9 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
     FinalValidationSet set;
     set.points.reserve(scaled.size());
     for (const auto& pt : scaled) {
+        if (ctx.maturity_is_supported && !ctx.maturity_is_supported(pt[1])) {
+            continue;
+        }
         const double strike = ctx.spot * std::exp(-pt[0]);
         ++set.ref_attempts;
         auto refs = prepare_refs(ctx.spot, strike, pt[1], pt[2], pt[3]);
@@ -800,6 +807,9 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     holdout.reserve(holdout_scaled.size());
     size_t holdout_invalid = 0;
     for (const auto& pt : holdout_scaled) {
+        if (ctx.maturity_is_supported && !ctx.maturity_is_supported(pt[1])) {
+            continue;
+        }
         double strike = ctx.spot * std::exp(-pt[0]);
         auto refs = prepare_refs(ctx.spot, strike, pt[1], pt[2], pt[3]);
         if (!refs.has_value() || !std::isfinite(refs->ref_price) ||

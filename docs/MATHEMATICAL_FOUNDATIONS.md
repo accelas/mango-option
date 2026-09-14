@@ -617,8 +617,10 @@ The fixed backward event coordinate is $\tau_i=T_0-d_i$.
 At equality the event has elapsed in calendar time; ordinary solver
 snapshots recorded after a backward jump instead represent the
 pre-dividend calendar side and cannot be used as that exact query value.
-Both segmented backends currently refuse their unsampled dividend neighborhoods rather
-than interpolating across the jump or clamping to a different time.
+B-spline construction retains the state before the backward jump as well,
+so each adjoining segment has its own endpoint value at the same time.
+The smaller-tau segment owns equality and supplies the post-dividend calendar
+value. Chebyshev still refuses its unsampled dividend neighborhoods.
 
 For constant coefficients without dated dividends, autonomous PDE evolution
 allows one long solve to supply shorter-maturity snapshots. For dated
@@ -698,11 +700,15 @@ segment's initial condition. Segment values are normalized raw American prices
 the exact payoff.
 
 Sample times are mandatory PDE time points and their returned labels are
-checked exactly. The current temporal topology excludes a neighborhood of
-half-width `5e-4` years around each dividend because one recorded state cannot
-represent both calendar sides. Unsupported event neighborhoods fail query
-admission instead of interpolating a jump or clamping to a different time.
-Missing requested raw rows cause construction failure before fitting.
+checked exactly. At each internal event, an optional pre-event snapshot
+captures the evolved state before the backward jump. The ordinary snapshot
+captures the state after the jump and the existing boundary/obstacle
+projections. The smaller-tau leaf uses the former as its right endpoint;
+the larger-tau leaf uses the latter as its left endpoint. No spline crosses
+the jump, and no fixed-width time gap is needed. A knot at a segment endpoint
+therefore refers to a `(time, side)` pair rather than time alone. Missing
+requested raw rows, including either event side, fail construction before
+fitting. Snapshot capture does not alter the PDE evolution or projections.
 
 ### Query-Time Evaluation
 

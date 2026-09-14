@@ -61,6 +61,13 @@ public:
         snapshot_times_.assign(times.begin(), times.end());
     }
 
+    /// Capture selected states before temporal events overwrite them. Times
+    /// use backward solver time; actual sampled times are reported by Grid.
+    /// Pair with ordinary snapshots to retain both sides of a cash dividend.
+    void set_before_event_snapshot_times(std::span<const double> times) {
+        before_event_snapshot_times_.assign(times.begin(), times.end());
+    }
+
     /// Set TR-BDF2 configuration (e.g., enable Rannacher startup)
     void set_trbdf2_config(const TRBDF2Config& config) {
         trbdf2_config_ = config;
@@ -96,6 +103,7 @@ private:
 
     // Snapshot times for Grid creation
     std::vector<double> snapshot_times_;
+    std::vector<double> before_event_snapshot_times_;
 
     // Resolved grid configuration (GridSpec + TimeDomain)
     // Always resolved at create() time — never empty
