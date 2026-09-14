@@ -5,7 +5,7 @@ builds. Baseline: `8ef8f5829b42d043f73c8109a9b4ee4da5cb8bd2`, which already
 contains PR #503's validation-domain fix. Candidate: the uncommitted
 event-sided snapshot implementation on `feature/dividend-event-snapshots`.
 The production patch hash, common harness hash, timed binary hashes, and
-machine details are in [environment.json](environment.json).
+machine details are in [environment.json](https://github.com/accelas/mango-option/blob/6ced24a01579b449d441d3bad7c2c9cd5b2a0d06/benchmarks/results/2026-09-14-event-snapshots/environment.json).
 
 The measurements show no material performance regression in these cases.
 Single-thread dividend-table construction is 3–6.5% faster. Ordinary PDE
@@ -37,7 +37,7 @@ control. These are fixture results, not a guarantee for all workloads.
   every result below. Single-thread runs were unaffected.
 - CPU frequency scaling remained enabled. Small changes around 1% should
   be treated cautiously; run ranges and paired deltas are in
-  [summary.json](summary.json). All [raw JSON results and logs](raw/) are retained.
+  [summary.json](https://github.com/accelas/mango-option/blob/6ced24a01579b449d441d3bad7c2c9cd5b2a0d06/benchmarks/results/2026-09-14-event-snapshots/summary.json). All [raw JSON results and logs](https://github.com/accelas/mango-option/tree/6ced24a01579b449d441d3bad7c2c9cd5b2a0d06/benchmarks/results/2026-09-14-event-snapshots/raw/) are archived in the linked measurement commit; generated output is excluded from this PR’s final diff.
 
 The existing `greek_latency` benchmark supplies the price/Greek cases.
 `component_performance` hit a system Arrow/zlib link error in both isolated
@@ -114,7 +114,7 @@ Exact shared event boundaries remove those extra time steps. This explains
 the observed benefit while the controlled capture cost is negligible.
 The inspection used separately rebuilt symbol-bearing binaries, and no
 measurements under the debugger enter the timing results.
-[Accounting data](grid-accounting.json) and the [inspection script](inspect_grid.gdb)
+[Accounting data](https://github.com/accelas/mango-option/blob/6ced24a01579b449d441d3bad7c2c9cd5b2a0d06/benchmarks/results/2026-09-14-event-snapshots/grid-accounting.json) and the [inspection script](inspect_grid.gdb)
 are included.
 
 ## Accuracy and work counters
@@ -166,3 +166,5 @@ revisions. It confirms nearly unchanged common-domain accuracy, successful
 IV solving throughout the tested former gaps, and substantial pre-existing
 short-remaining-life approximation errors. These findings are more
 informative about accuracy than the builders' own holdout scores above.
+
+Raw output can be regenerated with the scripts below and is ignored by Git.

@@ -129,13 +129,15 @@ python3 summarize.py
 ```
 
 Adjust the CPU mask for another machine. Put CSV files beside the summary
-script. [environment.json](environment.json) records binary, harness, and
-reference hashes. [summary.json](summary.json) includes counts, failures,
+script. [environment.json](https://github.com/accelas/mango-option/blob/6ced24a01579b449d441d3bad7c2c9cd5b2a0d06/benchmarks/results/2026-09-14-event-snapshots/accuracy/environment.json) records binary, harness, and
+reference hashes. [summary.json](https://github.com/accelas/mango-option/blob/6ced24a01579b449d441d3bad7c2c9cd5b2a0d06/benchmarks/results/2026-09-14-event-snapshots/accuracy/summary.json) includes counts, failures,
 pointwise movement, and reference sensitivity; [summarize.py](summarize.py)
-recomputes it from [references.csv](references.csv), [before.csv](before.csv),
-and [after.csv](after.csv). No production solver code was changed for this check.
+recomputes it from [references.csv](https://github.com/accelas/mango-option/blob/6ced24a01579b449d441d3bad7c2c9cd5b2a0d06/benchmarks/results/2026-09-14-event-snapshots/accuracy/references.csv), [before.csv](https://github.com/accelas/mango-option/blob/6ced24a01579b449d441d3bad7c2c9cd5b2a0d06/benchmarks/results/2026-09-14-event-snapshots/accuracy/before.csv),
+and [after.csv](https://github.com/accelas/mango-option/blob/6ced24a01579b449d441d3bad7c2c9cd5b2a0d06/benchmarks/results/2026-09-14-event-snapshots/accuracy/after.csv). No production solver code was changed for this check.
 
 Before publishing the PR update, the manual-fixture initializer was rewritten
 to avoid a GCC 14 warning. Both revisions then reproduced the stored evaluation
 CSVs byte-for-byte. The reference generator and its data were unchanged;
 `environment.json` retains the original reference-generation fingerprints.
+
+Recorded data links point to the immutable measurement commit; generated CSV/JSON/log files are excluded from the final PR diff.
