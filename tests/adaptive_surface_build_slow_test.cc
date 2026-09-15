@@ -25,6 +25,52 @@
 namespace mango {
 namespace {
 
+// Regression #500: the wide-band seed surface failed the final viability gate
+// at this low-vega point just beyond the backward-time dividend at tau=.25.
+// The old blend held spot fixed while normalizing by each reference strike.
+// Keep the original parameter domain and timeline, but build only the two
+// reference strikes that contribute to this query; no adaptive search needed.
+TEST(SegmentedFinalContract, WideBandDividendBracketRemainsViable) {
+    const AdaptiveGridParams params{.target_iv_error = 5e-4};
+    const SegmentedAdaptiveConfig config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {{0.25, 0.5}, {0.5, 0.5}, {0.75, 0.5}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {110.0, 115.0}},
+    };
+    const IVGrid domain{
+        .moneyness = {std::log(100.0 / 120.0), std::log(100.0 / 80.0)},
+        .vol = {0.10, 0.50},
+        .rate = {0.03, 0.07},
+    };
+    auto builder = ChebyshevSegmentedBuilder::create(config, domain);
+    ASSERT_TRUE(builder.has_value()) << builder.error();
+    auto surface = builder->build({5, 3, 2, 1});
+    ASSERT_TRUE(surface.has_value()) << surface.error();
+
+    // The offending point from the original 64-point LHS holdout (seed 1041).
+    constexpr double strike = 113.71897954276989;
+    constexpr double tau = 0.27191459370080351;
+    constexpr double sigma = 0.1396857726802572;
+    constexpr double rate = 0.055127327935524113;
+    const auto prepare_refs = make_fd_vega_refs_fn(params, make_validate_fn(
+        config.dividend_yield, config.option_type,
+        config.discrete_dividends, config.maturity));
+    auto refs = prepare_refs(config.spot, strike, tau, sigma, rate);
+    ASSERT_TRUE(refs.has_value());
+    const double price = surface->price(config.spot, strike, tau, sigma, rate);
+    auto error = make_iv_score_fn(params, config.option_type)(
+        price, *refs, config.spot, strike, tau, sigma, rate);
+    ASSERT_TRUE(error.has_value()) << "The regression point must remain measured";
+    ASSERT_TRUE(std::isfinite(*error));
+    EXPECT_LE(*error, kViabilityBound)
+        << "max IV error (bps): " << *error * 1e4
+        << "; surface=" << price << "; reference=" << refs->ref_price
+        << "; vega=" << refs->vega;
+}
+
 /// Convert S/K moneyness to log-moneyness for internal builder APIs.
 std::vector<double> to_log_m(std::initializer_list<double> sk) {
     std::vector<double> v;
