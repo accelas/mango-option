@@ -1044,6 +1044,16 @@ cc_test(
 )
 
 cc_test(
+    name = "surface_inversion_test",
+    size = "small",
+    srcs = ["surface_inversion_test.cc"],
+    deps = [
+        "//src/option:surface_inversion",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "interpolated_iv_solver_test",
     size = "medium",
     srcs = ["interpolated_iv_solver_test.cc"],

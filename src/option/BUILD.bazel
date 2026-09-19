@@ -151,6 +151,31 @@ cc_library(
 )
 
 cc_library(
+    name = "surface_inversion",
+    srcs = ["surface_inversion.cpp"],
+    hdrs = ["surface_inversion.hpp"],
+    deps = [
+        ":iv_result",
+        ":option_spec",
+        "//src/math:root_finding",
+        "//src/support:error_types",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-O3",
+        # Must match interpolated_iv_solver_core: the inversion moved out of
+        # that TU and -march=x86-64-v3 enables FMA contraction, so a
+        # different -march here would perturb the solver's results.
+        "-march=x86-64-v3",
+    ],
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option",
+    include_prefix = "mango/option",
+)
+
+cc_library(
     name = "interpolated_iv_solver_core",
     srcs = ["interpolated_iv_solver.cpp"],
     hdrs = ["interpolated_iv_solver.hpp"],
@@ -158,6 +183,7 @@ cc_library(
         ":dividend_utils",
         ":iv_result",
         ":option_spec",
+        ":surface_inversion",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:price_table",
         "//src/option/table/bspline:bspline_3d_surface",
@@ -165,7 +191,6 @@ cc_library(
         "//src/option/table/chebyshev:chebyshev_3d_surface",
         "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option/table/chebyshev:chebyshev_surface",
-        "//src/math:root_finding",
         "//src/support:parallel",
         "//src/support:error_types",
     ],
