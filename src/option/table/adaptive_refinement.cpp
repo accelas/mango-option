@@ -42,6 +42,10 @@ struct SampleEval {
     /// Samples where `is_surface_failure()` held: an outcome of the shipped
     /// inversion on this surface, never converted into an error number.
     size_t surface_failures = 0;
+    /// Samples with a non-finite or negative evaluation.  What the loop acts
+    /// on is `all_finite`; the count is kept so this evaluation and
+    /// `detail::FinalScore` accumulate the same shape (`apply_point_score`).
+    size_t skipped = 0;
     /// Samples scored through the edge-band rescue path (diagnostic, D3).
     size_t edge_band_rescues = 0;
     /// Largest |S - V̂|/K residual, over every point that produced one.
@@ -115,6 +119,54 @@ std::array<double, 4> normalized_position(const std::array<double, 4>& coords,
 /// `x` when finite, 0 otherwise -- for running maxima over estimates that are
 /// routinely absent (spec D1 partial stencils).
 double finite_or_zero(double x) { return std::isfinite(x) ? x : 0.0; }
+
+/// Fold one scored point into an evaluation (spec D4).
+///
+/// Shared by the fresh pass and `detail::score_final_surface` so the two
+/// cannot drift apart: `Eval` is `SampleEval` or `detail::FinalScore`, which
+/// carry the same counters.  What stays with the caller is what genuinely
+/// differs -- the maturity-support check, the non-finite price veto that runs
+/// *before* the score, and which bins a measured error belongs in.
+///
+/// @return true when the point measured, so the caller can bin its error.
+template <typename Eval>
+bool apply_point_score(const PointScore& ps, const ErrorRefs& refs,
+                       const std::array<double, 4>& norm_pos,
+                       ErrorBins& failure_bins, Eval& ev, double& sum_error) {
+    count_status(ev.status_counts, ps.status);
+    if (std::isfinite(ps.price_residual)) {
+        ev.max_price_residual =
+            std::max(ev.max_price_residual, ps.price_residual);
+    }
+    ev.max_delta = std::max(ev.max_delta, finite_or_zero(refs.delta));
+    if (ps.edge_band_rescue) ++ev.edge_band_rescues;
+
+    if (ps.status == PointStatus::ReferenceUnresolved) {
+        // The reference never resolved: no evidence either way, so the point
+        // enters no statistic and cannot certify the surface.
+        ++ev.unresolved;
+        return false;
+    }
+    if (is_surface_failure(ps.status)) {
+        // An outcome of the shipped inversion on this surface: recorded and
+        // attributed to a bin, never turned into an error number.
+        ++ev.surface_failures;
+        failure_bins.record_failure(norm_pos);
+        return false;
+    }
+    if (!std::isfinite(ps.iv_error) || ps.iv_error < 0.0) {
+        ev.all_finite = false;
+        ++ev.skipped;
+        return false;
+    }
+    ev.max_error = std::max(ev.max_error, ps.iv_error);
+    sum_error += ps.iv_error;
+    // Every measured point counts -- a zero error is a measurement, not a
+    // missing one, and using it as the avg denominator's gate produced a
+    // spurious "target met" for a surface nobody had measured.
+    ++ev.measured;
+    return true;
+}
 
 }  // namespace
 
@@ -498,36 +550,15 @@ static SampleEval evaluate_fresh_samples(
 
         const auto ps = score(handle, refs_result.value(),
                               ctx.spot, strike, tau, sigma, rate);
-        count_status(ev.status_counts, ps.status);
-        if (std::isfinite(ps.price_residual)) {
-            ev.max_price_residual =
-                std::max(ev.max_price_residual, ps.price_residual);
-        }
-        ev.max_delta = std::max(ev.max_delta, finite_or_zero(refs_result->delta));
-        if (ps.edge_band_rescue) ++ev.edge_band_rescues;
 
         // Bins are normalized over the SAMPLE domain (spec D2) -- they must
-        // line up with the domain the samples came from.
+        // line up with the domain the samples came from.  Measured errors and
+        // failures share one set of bins on this pass.
         const auto norm_pos = normalized_position(sample, ctx.sample_bounds);
-
-        if (ps.status == PointStatus::ReferenceUnresolved) {
-            ++ev.unresolved;
-            continue;
+        if (apply_point_score(ps, refs_result.value(), norm_pos,
+                              ev.error_bins, ev, sum_error)) {
+            ev.error_bins.record_error(norm_pos, ps.iv_error, target_iv_error);
         }
-        if (is_surface_failure(ps.status)) {
-            ++ev.surface_failures;
-            ev.error_bins.record_failure(norm_pos);
-            continue;
-        }
-        if (!std::isfinite(ps.iv_error) || ps.iv_error < 0.0) {
-            ev.all_finite = false;
-            continue;
-        }
-
-        ev.max_error = std::max(ev.max_error, ps.iv_error);
-        sum_error += ps.iv_error;
-        ev.measured++;
-        ev.error_bins.record_error(norm_pos, ps.iv_error, target_iv_error);
     }
 
     ev.avg_error = ev.measured > 0
@@ -758,39 +789,11 @@ detail::FinalScore detail::score_final_surface(
         }
         const auto ps = score(handle, pt.refs, ctx.spot, pt.strike,
                               tau, sigma, rate);
-        count_status(ev.status_counts, ps.status);
-        if (std::isfinite(ps.price_residual)) {
-            ev.max_price_residual =
-                std::max(ev.max_price_residual, ps.price_residual);
-        }
-        ev.max_delta = std::max(ev.max_delta, finite_or_zero(pt.refs.delta));
-        if (ps.edge_band_rescue) ++ev.edge_band_rescues;
-
-        if (ps.status == PointStatus::ReferenceUnresolved) {
-            // The reference never resolved: no evidence either way, so the
-            // point enters no statistic and cannot certify the surface.
-            ++ev.unresolved;
-            continue;
-        }
-        if (is_surface_failure(ps.status)) {
-            // An outcome of the shipped inversion on this surface, recorded
-            // and attributed -- never turned into an error number.
-            ++ev.surface_failures;
-            ev.failure_bins.record_failure(
-                normalized_position(pt.coords, ctx.sample_bounds));
-            continue;
-        }
-        if (!std::isfinite(ps.iv_error) || ps.iv_error < 0.0) {
-            ev.all_finite = false;
-            ++ev.skipped;
-            continue;
-        }
-        ev.max_error = std::max(ev.max_error, ps.iv_error);
-        sum_error += ps.iv_error;
-        // Every measured point counts -- a zero error is a measurement, not a
-        // missing one, and using it as the avg denominator's gate produced a
-        // spurious "target met" for a surface nobody had measured.
-        ++ev.measured;
+        // Only failures are binned here: refinement bins for measured errors
+        // come from the loop's fresh samples (spec D4).
+        apply_point_score(ps, pt.refs,
+                          normalized_position(pt.coords, ctx.sample_bounds),
+                          ev.failure_bins, ev, sum_error);
     }
 
     if (!ev.all_finite) {

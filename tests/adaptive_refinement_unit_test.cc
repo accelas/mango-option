@@ -836,9 +836,10 @@ TEST(RunRefinementTest, ViabilityIsIndependentOfTarget) {
 // Point statuses in the loop (spec D2/D4)
 // ---------------------------------------------------------------------------
 
-// Spec D4: a resolved surface failure makes the candidate non-viable; a later
-// candidate with zero failures but a worse max is picked.
-TEST(RunRefinementTest, HoldoutFailureRejectsCandidateAndFailuresRankFirst) {
+// Spec D4: a surface failure on a *fresh* sample makes the candidate
+// non-viable; a later candidate with zero failures but a worse max is picked.
+// The failure lands on a fresh sample because the fresh pass is scored first.
+TEST(RunRefinementTest, FreshFailureRejectsMostAccurateCandidate) {
     Harness h;
     h.script = [](const GridSizes&, size_t call) {
         SurfaceScript s;
@@ -855,7 +856,7 @@ TEST(RunRefinementTest, HoldoutFailureRejectsCandidateAndFailuresRankFirst) {
             .status = mango::PointStatus::Measured,
             .iv_error = std::abs(interp - refs.ref_price),
             .price_residual = std::abs(interp - refs.ref_price) / strike};
-        // First build only: one point fails.
+        // First build only: its first fresh sample fails.
         if (scored++ == 0) p.status = mango::PointStatus::SurfaceNoRoot;
         return p;
     };
@@ -866,6 +867,85 @@ TEST(RunRefinementTest, HoldoutFailureRejectsCandidateAndFailuresRankFirst) {
         << "the most accurate candidate failed, so it must not be returned";
     EXPECT_EQ(r->diagnostics.surface_failures, 0u);
     EXPECT_NEAR(r->achieved_max_error, 5e-4, 1e-12);
+}
+
+namespace {
+/// A score that fails the first `failures_for(build)` points of each build's
+/// **holdout** pass and measures `error_for(build)` on the rest; every fresh
+/// sample measures exactly zero.  The holdout is scored contiguously once per
+/// build, so counting within a build identifies its points.
+mango::ScoreErrorFn holdout_failure_script(
+    Harness& h,
+    std::function<size_t(size_t build)> failures_for,
+    std::function<double(size_t build)> error_for) {
+    auto last_build = std::make_shared<size_t>(
+        std::numeric_limits<size_t>::max());
+    auto seen = std::make_shared<size_t>(0);
+    return [&h, failures_for = std::move(failures_for),
+            error_for = std::move(error_for), last_build, seen](
+               const mango::SurfaceHandle&, const mango::ErrorRefs&, double,
+               double strike, double tau, double sigma,
+               double rate) -> mango::PointScore {
+        if (h.holdout_keys.count({strike, tau, sigma, rate}) == 0) {
+            return mango::PointScore{.status = mango::PointStatus::Measured,
+                                     .iv_error = 0.0,
+                                     .price_residual = 0.0};
+        }
+        const size_t build = h.build_calls - 1;
+        if (build != *last_build) {
+            *last_build = build;
+            *seen = 0;
+        }
+        if ((*seen)++ < failures_for(build)) {
+            return mango::PointScore{
+                .status = mango::PointStatus::SurfaceNoRoot};
+        }
+        return mango::PointScore{.status = mango::PointStatus::Measured,
+                                 .iv_error = error_for(build),
+                                 .price_residual = 0.0};
+    };
+}
+}  // namespace
+
+// The inverse of FreshFailureVetoesViability: the failure is on the fixed
+// holdout, and the candidate that carries it is refused however accurate its
+// measured points are (spec D4 viability).
+TEST(RunRefinementTest, HoldoutFailureRejectsMostAccurateCandidate) {
+    Harness h;
+    h.score_override = holdout_failure_script(
+        h,
+        [](size_t build) { return build == 0 ? 1u : 0u; },
+        [](size_t build) { return build == 0 ? 1e-5 : 5e-4; });
+
+    auto r = h.run();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->diagnostics.picked_iteration, 1u)
+        << "the seed's holdout failure outranks its smaller error";
+    EXPECT_EQ(r->diagnostics.surface_failures, 0u);
+    EXPECT_NEAR(r->achieved_max_error, 5e-4, 1e-12);
+}
+
+// `better_candidate`'s primary key as an exploration-base choice: a candidate
+// with fewer holdout failures becomes the base even though its measured error
+// is far worse, and a run where no candidate is failure-free is refused.
+TEST(RunRefinementTest, FewerHoldoutFailuresWinsTheExplorationBase) {
+    Harness h;
+    h.params.max_iter = 3;
+    h.score_override = holdout_failure_script(
+        h,
+        [](size_t build) { return build == 0 ? 2u : 1u; },
+        [](size_t build) { return build == 0 ? 1e-5 : 0.5; });
+
+    auto r = h.run();
+    ASSERT_FALSE(r.has_value()) << "every candidate failed somewhere";
+    EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::NoViableSurface);
+
+    // Iteration 2 refined from iteration 1's grids, not the seed's: one
+    // holdout failure beats two, whatever the error numbers say.
+    ASSERT_GE(h.refine_input_sizes.size(), 2u);
+    ASSERT_GE(h.built_sizes.size(), 2u);
+    EXPECT_EQ(h.refine_input_sizes[1], h.built_sizes[1]);
+    EXPECT_NE(h.built_sizes[1], kSeedSizes);
 }
 
 // A fresh-sample failure vetoes viability even when the holdout is clean.

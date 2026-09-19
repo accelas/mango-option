@@ -100,9 +100,18 @@ enum class PointStatus : uint8_t {
     /// budget.
     SurfaceNonConvergent,
     /// The surface produced a non-finite price or derivative during the
-    /// round-trip inversion.
+    /// round-trip inversion.  Keep this enumerator last: `kPointStatusCount`
+    /// is derived from it.
     SurfaceNonFinite,
 };
+
+/// Number of `PointStatus` enumerators, for fixed-size per-status tallies
+/// (`PointStatusCounts`, the D7 refusal probe).
+inline constexpr size_t kPointStatusCount = 7;
+static_assert(static_cast<size_t>(PointStatus::SurfaceNonFinite) + 1 ==
+                  kPointStatusCount,
+              "PointStatus gained or lost an enumerator: update "
+              "kPointStatusCount and every per-status tally that reports it");
 
 /// True for every Surface* status: an operational failure of the shipped
 /// inversion at this point, as opposed to a reference that never resolved.
@@ -164,9 +173,10 @@ struct BuildDiagnostics {
     /// returned surface was non-finite.
     size_t holdout_points_invalid = 0;
     /// Of `holdout_points`, those that actually produced an error for the
-    /// returned surface.  The rest were filtered out by the score function
-    /// (TV/K or vega floor), where the IV-error metric is undefined; a build
-    /// with `holdout_points_measured == 0` is refused, never certified.
+    /// returned surface.  The rest are the unresolved references, the points
+    /// where the shipped inversion failed on the surface's own price, and the
+    /// non-finite evaluations; a build with `holdout_points_measured == 0` is
+    /// refused, never certified.
     size_t holdout_points_measured = 0;
     /// Holdout points whose FD reference never resolved (PointStatus::ReferenceUnresolved).
     size_t holdout_points_unresolved = 0;

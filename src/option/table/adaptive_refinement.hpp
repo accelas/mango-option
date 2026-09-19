@@ -245,8 +245,10 @@ struct ErrorBins {
 
 /// One counter per `PointStatus` enumerator, indexed by its underlying value
 /// (spec D7).  Kept as a plain array so an evaluation can be summed across
-/// candidates without naming each outcome.
-using PointStatusCounts = std::array<size_t, 7>;
+/// candidates without naming each outcome.  `kPointStatusCount` is asserted
+/// against the enum, so a new outcome fails the build instead of quietly
+/// dropping out of the refusal probe.
+using PointStatusCounts = std::array<size_t, kPointStatusCount>;
 
 /// Add `status` to `counts`, ignoring an out-of-range value rather than
 /// writing past the array.
@@ -558,7 +560,12 @@ struct FinalScore {
     size_t measured = 0;    ///< points that produced a usable error
     size_t unresolved = 0;  ///< points whose reference did not resolve (D2)
     size_t skipped = 0;     ///< points with a non-finite/negative evaluation
-    size_t unsupported = 0; ///< points excluded by maturity support (D4)
+    /// Points excluded by maturity support (spec D4).  Structurally zero
+    /// here: this score runs over points that were already admitted at
+    /// preparation, which is where unsupported maturities are dropped.  The
+    /// field exists so both passes accumulate the same shape; the loop's
+    /// `holdout_points_unsupported` comes from that preparation, not here.
+    size_t unsupported = 0;
     size_t surface_failures = 0;   ///< points where is_surface_failure() held
     size_t edge_band_rescues = 0;  ///< points scored via the rescue path (D3)
     /// Largest |S - V̂|/K residual seen over the points, measured or not.
