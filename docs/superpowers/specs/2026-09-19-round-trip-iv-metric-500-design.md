@@ -405,9 +405,12 @@ reference whose surface price is finite, resolved or not.
 ### D4. Loop consumption: support, fresh and holdout, ranking, viability, refinement
 
 **Maturity support.** `RefinementContext::maturity_is_supported` is
-populated for the segmented Chebyshev sizing loop and its final validation
-(from `seg_bounds_`/`seg_is_gap_`: unsupported inside a gap), as the
-segmented B-spline path already does. Unsupported samples are excluded before
+populated for **both** segmented paths (no builder sets it today; only tests
+do): the Chebyshev loop and final validation from `seg_bounds_`/`seg_is_gap_`,
+the B-spline loop and final validation from `compute_segment_boundaries` on
+the same schedule, maturity and τ domain, so the predicate matches the
+`TauSegmentSplit::contains_maturity` the product enforces (unsupported
+inside a ±5e-4 gap). Unsupported samples are excluded before
 preparation and counted (`unsupported`); they are not references, not
 unresolved points, and not candidate defects. At supported maturities the
 non-finite veto stands. (Moved from §3 non-goals: leaving it unset would make
