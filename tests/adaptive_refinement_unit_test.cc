@@ -47,8 +47,13 @@ TEST(PointStatusTest, SurfaceFailureClassification) {
 TEST(ScoreFnTest, MatchesComputeIvError) {
     mango::AdaptiveGridParams p;  // target 2e-5, floor 1e-4
     auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
-    mango::ErrorRefs refs{.ref_price = 5.0, .vega = 20.0};
-    // price_error 0.01 / vega 20 = 5e-4
+    // The bridge divides by the stencil's bracket secant in place of the
+    // vega the refs no longer carry: (5.2 - 4.8) / (0.21 - 0.19) = 20.
+    mango::ErrorRefs refs{.ref_price = 5.0, .bracket_lo_price = 4.8,
+                          .bracket_hi_price = 5.2, .sigma_lo = 0.19,
+                          .sigma_hi = 0.21, .delta = 0.0, .delta_lo = 0.0,
+                          .delta_hi = 0.0, .resolved = true};
+    // price_error 0.01 / secant 20 = 5e-4
     auto err = score(5.01, refs, 100.0, 100.0, 1.0, 0.2, 0.05);
     ASSERT_TRUE(err.has_value());
     EXPECT_NEAR(*err, 5e-4, 1e-12);
@@ -61,17 +66,32 @@ TEST(ScoreFnTest, TvkFilterSkipsDeepItm) {
     mango::AdaptiveGridParams p;
     auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
     // K=100, S=100 put ref 0.005 -> TV/K = 5e-5 < 1e-4 -> filtered
-    mango::ErrorRefs refs{.ref_price = 0.005, .vega = 1.0};
+    mango::ErrorRefs refs{.ref_price = 0.005, .bracket_lo_price = 0.004,
+                          .bracket_hi_price = 0.006, .sigma_lo = 0.19,
+                          .sigma_hi = 0.21, .delta = 0.0, .delta_lo = 0.0,
+                          .delta_hi = 0.0, .resolved = true};
     EXPECT_FALSE(score(1.0, refs, 100.0, 100.0, 0.01, 0.2, 0.05).has_value());
 }
 
-TEST(ScoreFnTest, VegaFloorFilterSkipsPoint) {
+TEST(ScoreFnTest, UnresolvedRefsAreSkipped) {
+    mango::AdaptiveGridParams p;
+    auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
+    // Ample time value, but the stencil did not resolve: there is no slope to
+    // turn a price error into an IV error, so the point is skipped like any
+    // other IV-undefined one.
+    mango::ErrorRefs refs{.ref_price = 5.0};  // resolved = false, brackets NaN
+    EXPECT_FALSE(score(5.5, refs, 100.0, 100.0, 1.0, 0.2, 0.05).has_value());
+}
+
+// The complement of the removed vega-floor filter: a resolved stencil whose
+// bracket secant is below the floor still carries no volatility information.
+TEST(ScoreFnTest, FlatBracketSecantIsSkipped) {
     mango::AdaptiveGridParams p;  // vega floor 1e-4
     auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
-    // Ample time value, but vega below the floor: price error carries no
-    // volatility information, so the point is skipped like any other
-    // IV-undefined one.
-    mango::ErrorRefs refs{.ref_price = 5.0, .vega = 1e-6};
+    mango::ErrorRefs refs{.ref_price = 5.0, .bracket_lo_price = 5.0 - 1e-9,
+                          .bracket_hi_price = 5.0 + 1e-9, .sigma_lo = 0.19,
+                          .sigma_hi = 0.21, .delta = 0.0, .delta_lo = 0.0,
+                          .delta_hi = 0.0, .resolved = true};
     EXPECT_FALSE(score(5.5, refs, 100.0, 100.0, 1.0, 0.2, 0.05).has_value());
 }
 
@@ -268,7 +288,12 @@ TEST(RunRefinementDomainTest, ValidationSamplesStayInSampleBounds) {
     mango::PrepareRefsFn prepare_refs =
         [](double, double, double, double, double)
         -> std::expected<mango::ErrorRefs, mango::SolverError> {
-        return mango::ErrorRefs{.ref_price = 1.0, .vega = 20.0};
+        return mango::ErrorRefs{.ref_price = 1.0,
+                                .bracket_lo_price = 0.8,
+                                .bracket_hi_price = 1.2,
+                                .sigma_lo = 0.19, .sigma_hi = 0.21,
+                                .delta = 0.0, .delta_lo = 0.0, .delta_hi = 0.0,
+                                .resolved = true};
     };
     mango::ScoreErrorFn score =
         [](double, const mango::ErrorRefs&, double, double, double,
@@ -414,9 +439,15 @@ public:
                 }
                 holdout_keys.insert({strike, tau, sigma, rate});
             }
+            const double base = analytic_ref(spot, strike, tau, rate);
             return mango::ErrorRefs{
-                .ref_price = analytic_ref(spot, strike, tau, rate),
-                .vega = 1.0};
+                .ref_price = base,
+                .bracket_lo_price = base - 0.01,
+                .bracket_hi_price = base + 0.01,
+                .sigma_lo = sigma - params.target_iv_error,
+                .sigma_hi = sigma + params.target_iv_error,
+                .delta = 0.0, .delta_lo = 0.0, .delta_hi = 0.0,
+                .resolved = true};
         };
     }
 

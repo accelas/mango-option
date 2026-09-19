@@ -782,8 +782,8 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         // discrete dividends are not scaled by lambda, so
         // scale * P(S/scale, K_ref; D) is P(S, K; scale * D), and the
         // (scale - 1) * D * dP/dD residual would be scored as interpolation
-        // error.  Price and vega scale together, so the IV error the loop
-        // sees is unaffected by the scaling itself.
+        // error.  Every monetary term of the stencil scales together, so the
+        // error the loop sees is unaffected by the scaling itself.
         auto base_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
         PrepareRefsFn prepare_refs_fn =
             [base_refs_fn, probe_ref](double spot, double strike, double tau,
@@ -792,8 +792,16 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             const double scale = (strike > 0.0) ? strike / probe_ref : 1.0;
             auto refs = base_refs_fn(spot / scale, probe_ref, tau, sigma, rate);
             if (!refs) return std::unexpected(refs.error());
-            return ErrorRefs{.ref_price = scale * refs->ref_price,
-                             .vega = scale * refs->vega};
+            // Spec L6: every monetary quantity of the probe's stencil
+            // scales alike; the sigma coordinates and `resolved` do not.
+            ErrorRefs scaled = *refs;
+            scaled.ref_price = scale * refs->ref_price;
+            scaled.bracket_lo_price = scale * refs->bracket_lo_price;
+            scaled.bracket_hi_price = scale * refs->bracket_hi_price;
+            scaled.delta = scale * refs->delta;
+            scaled.delta_lo = scale * refs->delta_lo;
+            scaled.delta_hi = scale * refs->delta_hi;
+            return scaled;
         };
         auto score_fn = make_iv_score_fn(params, config_.option_type);
 

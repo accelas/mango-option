@@ -604,8 +604,11 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
         const double strike = ctx.spot * std::exp(-pt[0]);
         ++set.ref_attempts;
         auto refs = prepare_refs(ctx.spot, strike, pt[1], pt[2], pt[3]);
-        if (!refs.has_value() || !std::isfinite(refs->ref_price) ||
-            !std::isfinite(refs->vega)) {
+        // Spec D1 partial-stencil contract: preparation validity is "a finite
+        // base price exists".  An incomplete stencil leaves the point
+        // unresolved, which is a separate fact decided at preparation and
+        // recorded in `ErrorRefs::resolved` -- not an invalid point.
+        if (!refs.has_value() || !std::isfinite(refs->ref_price)) {
             ++set.invalid;
             continue;
         }
@@ -813,8 +816,10 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
         }
         double strike = ctx.spot * std::exp(-pt[0]);
         auto refs = prepare_refs(ctx.spot, strike, pt[1], pt[2], pt[3]);
-        if (!refs.has_value() || !std::isfinite(refs->ref_price) ||
-            !std::isfinite(refs->vega)) {
+        // Spec D1 partial-stencil contract, as in prepare_final_validation:
+        // a finite base price is what makes the point prepared; resolution is
+        // a separate fact.
+        if (!refs.has_value() || !std::isfinite(refs->ref_price)) {
             ++holdout_invalid;
             continue;
         }

@@ -1218,7 +1218,9 @@ cc_test(
     srcs = ["reference_oracle_test.cc"],
     deps = [
         "//src/option:grid_spec_types",
+        "//src/option:option_spec",
         "//src/option/table:adaptive_metrics",
+        "//src/option/table:adaptive_refinement",
         "@googletest//:gtest_main",
     ],
 )

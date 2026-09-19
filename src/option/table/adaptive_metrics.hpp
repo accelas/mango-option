@@ -7,17 +7,19 @@
 /// `run_refinement` (adaptive_refinement.hpp) is deliberately ignorant of
 /// American options: every domain specific enters through its callbacks.
 /// This header owns the mango-side implementations of those callbacks --
-/// the FD reference solver, the FD-vega reference generator, and the
-/// IV-error scoring metric -- so the loop itself never links the PDE
-/// solver.
+/// the FD reference solver, the six-solve reference stencil, and the
+/// error-scoring metric -- so the loop itself never links the PDE solver.
 
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include <atomic>
-#include <vector>
+#include <expected>
+#include <functional>
+#include <memory>
 #include <optional>
+#include <vector>
 
 namespace mango {
 
@@ -25,16 +27,22 @@ namespace mango {
 double compute_iv_error(double price_error, double vega,
                         double vega_floor, double target_iv_error);
 
-/// Produce ErrorRefs (FD American price + FD central-difference vega) for
-/// one point: base solve + two sigma-bump solves.
-/// 2 extra PDE solves per point — acceptable at build time.
+/// Legacy reference generator, superseded by `make_stencil_refs_fn`.
+///
+/// It fills only `ErrorRefs::ref_price` and leaves `resolved = false` with
+/// every other field NaN: the vega it used to report no longer has a home in
+/// `ErrorRefs`. Callers still on this factory therefore measure nothing.
+/// Kept only so the tree compiles while the round-trip metric lands; deleted
+/// once every call site is on the stencil factory.
 /// Any failed or non-finite solve => unexpected.
 PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& params,
                                     const ValidateFn& validate_fn);
 
-/// Score an interpolated price against cached ErrorRefs using the TV/K
-/// filter (skips points where TV/K < 1e-4; IV undefined there) and
-/// `compute_iv_error` arithmetic (vega floor + target-level noise clamp).
+/// Legacy scorer, superseded by the round-trip score.
+///
+/// Temporary bridge: `vega` is gone from `ErrorRefs`, so this skips every
+/// point whose refs are unresolved and otherwise divides the price residual
+/// by the stencil's bracket secant. Deleted with `make_fd_vega_refs_fn`.
 /// Filtered points return `std::nullopt`, never 0.0: a skip is the absence of
 /// a measurement, not a perfect one.
 ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
@@ -123,5 +131,34 @@ struct ReferenceOracle {
     /// family in hand.
     std::expected<double, SolverError> solve_estimated(const PricingParams& p) const;
 };
+
+/// Solves at one sigma on one grid; injectable for tests.
+using StencilSolveFn = std::function<std::expected<double, SolverError>(
+    const PricingParams&, const PDEGridConfig&)>;
+
+/// Prepare the six-solve reference stencil for one point (spec D1).
+///
+/// One `ReferenceGridFamily` is built per preparation, at the widest stencil
+/// member (sigma0 + target_iv_error), and all six solves run on that single
+/// fine/coarse pair (L2). The order is `[y, y-half, lo, lo-half, hi,
+/// hi-half]`; `counter` records fine and coarse attempts and failures.
+///
+/// The base fine solve failing yields `unexpected` -- the point is invalid.
+/// Everything else (sigma0 - target_iv_error <= 0, a failed bracket or coarse
+/// solve, a stencil that does not separate, a target the product's query
+/// validation rejects) yields a successful `ErrorRefs` with the base price
+/// present and `resolved = false`.
+///
+/// `solve` defaults to `oracle.solve`; tests inject a fake.
+PrepareRefsFn make_stencil_refs_fn(const AdaptiveGridParams& params,
+                                   ReferenceOracle oracle,
+                                   std::shared_ptr<ReferenceSolveCounter> counter,
+                                   StencilSolveFn solve = {});
+
+/// The D2 separation inequalities alone, on already-prepared refs: all six
+/// numbers finite and the three estimated price intervals separated in the
+/// expected order. Target validity (`validate_iv_query`) is checked
+/// separately, at preparation, because it needs the contract.
+bool stencil_resolved(const ErrorRefs& r) noexcept;
 
 }  // namespace mango

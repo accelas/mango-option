@@ -3,6 +3,10 @@
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include <cmath>
+#include <memory>
+#include <optional>
+#include <utility>
+#include <vector>
 
 using namespace mango;
 
@@ -91,4 +95,171 @@ TEST(ReferenceOracle, SolvesOnGivenGridAndMatchesValidateFn) {
     auto half = oracle.solve(p, fam->levels[1]);
     ASSERT_TRUE(half.has_value());
     EXPECT_NE(*half, *v);
+}
+
+// ===========================================================================
+// Stencil references and resolution (spec D1 / D2)
+// ===========================================================================
+
+// A fake oracle: price(sigma) = base + slope*(sigma-0.2) on the fine grid,
+// plus `coarse_bias` on any grid whose point count is below the fine count.
+struct FakeStencil {
+    double slope = 40.0, coarse_bias = 1e-4;
+    std::vector<std::pair<size_t, size_t>> calls;  // (n_points, n_time)
+    StencilSolveFn fn() {
+        return [this](const PricingParams& p, const PDEGridConfig& g) -> std::expected<double, SolverError> {
+            calls.emplace_back(g.grid_spec.n_points(), g.n_time);
+            const bool coarse = g.grid_spec.n_points() < calls.front().first;
+            return 10.0 + slope * (p.volatility - 0.2) + (coarse ? coarse_bias : 0.0);
+        };
+    }
+};
+
+static ReferenceOracle plain_oracle() {
+    return ReferenceOracle{.dividend_yield = 0.0, .option_type = OptionType::PUT,
+                           .discrete_dividends = {}, .reference_maturity = std::nullopt,
+                           .accuracy = make_grid_accuracy(kReferenceAccuracy)};
+}
+
+// Spec D1/L2: six solves, three identical fine configs, three identical coarse
+// configs, coarse = every-other-node of fine.
+TEST(StencilRefs, SixSolvesOnOneNestedGridPair) {
+    FakeStencil fake;
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    auto counter = std::make_shared<ReferenceSolveCounter>();
+    auto prep = make_stencil_refs_fn(params, plain_oracle(), counter, fake.fn());
+    auto refs = prep(100.0, 100.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(refs.has_value());
+    ASSERT_EQ(fake.calls.size(), 6u);
+    EXPECT_EQ(fake.calls[0], fake.calls[2]); EXPECT_EQ(fake.calls[0], fake.calls[4]);
+    EXPECT_EQ(fake.calls[1], fake.calls[3]); EXPECT_EQ(fake.calls[1], fake.calls[5]);
+    EXPECT_EQ(fake.calls[1].first, (fake.calls[0].first - 1) / 2 + 1);
+    EXPECT_EQ(counter->fine_attempts.load(), 3u);
+    EXPECT_EQ(counter->coarse_attempts.load(), 3u);
+    EXPECT_TRUE(refs->resolved);
+    EXPECT_DOUBLE_EQ(refs->sigma_lo, 0.2 - 5e-4);
+    EXPECT_DOUBLE_EQ(refs->sigma_hi, 0.2 + 5e-4);
+    // delta = F_s * |bias| / (2^p - 1)
+    EXPECT_NEAR(refs->delta, kRichardsonSafetyFactor * 1e-4 / (std::pow(2.0, kReferenceConvergenceOrder) - 1.0), 1e-15);
+    // Achieved time steps are recorded for both levels (record only).
+    EXPECT_EQ(refs->fine_steps, static_cast<uint32_t>(fake.calls[0].second));
+    EXPECT_EQ(refs->coarse_steps, static_cast<uint32_t>(fake.calls[1].second));
+}
+
+// Spec D2, reviewer example: y=10, lo=9.85, hi=10.15, delta=0.10 at every
+// point -> intervals overlap -> unresolved.
+TEST(StencilRefs, OverlappingEndpointIntervalsAreUnresolved) {
+    ErrorRefs r{.ref_price = 10.0, .bracket_lo_price = 9.85, .bracket_hi_price = 10.15,
+                .sigma_lo = 0.1, .sigma_hi = 0.3, .delta = 0.10, .delta_lo = 0.10, .delta_hi = 0.10};
+    EXPECT_FALSE(stencil_resolved(r));
+    r.delta = r.delta_lo = r.delta_hi = 0.07;   // 10-0.07 > 9.85+0.07 and 10.15-0.07 > 10+0.07
+    EXPECT_TRUE(stencil_resolved(r));
+    r.bracket_lo_price = 10.02;                  // reversed ordering
+    EXPECT_FALSE(stencil_resolved(r));
+}
+
+// Flat reference (exercise region): lo == y == hi -> unresolved even with zero delta.
+TEST(StencilRefs, FlatReferenceIsUnresolved) {
+    FakeStencil fake; fake.slope = 0.0; fake.coarse_bias = 0.0;
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    auto prep = make_stencil_refs_fn(params, plain_oracle(), std::make_shared<ReferenceSolveCounter>(), fake.fn());
+    auto refs = prep(100.0, 100.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(refs.has_value());
+    EXPECT_FALSE(refs->resolved);
+    EXPECT_DOUBLE_EQ(refs->ref_price, 10.0);   // base price still present (partial stencil contract)
+}
+
+// sigma0 - tau <= 0 -> unresolved with the base price present, one fine solve only.
+TEST(StencilRefs, SigmaBelowToleranceIsUnresolvedWithBase) {
+    FakeStencil fake;
+    AdaptiveGridParams params; params.target_iv_error = 0.5;
+    auto counter = std::make_shared<ReferenceSolveCounter>();
+    auto prep = make_stencil_refs_fn(params, plain_oracle(), counter, fake.fn());
+    auto refs = prep(100.0, 100.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(refs.has_value());
+    EXPECT_FALSE(refs->resolved);
+    EXPECT_TRUE(std::isnan(refs->bracket_lo_price));
+    EXPECT_EQ(counter->fine_attempts.load(), 1u);
+}
+
+// A failed bracket solve -> unresolved (base present); a failed base solve -> unexpected.
+TEST(StencilRefs, PartialAndBaseFailures) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    size_t n = 0;
+    StencilSolveFn fail_third = [&](const PricingParams&, const PDEGridConfig&) -> std::expected<double, SolverError> {
+        if (++n == 3) return std::unexpected(SolverError{});
+        return 10.0;
+    };
+    auto counter = std::make_shared<ReferenceSolveCounter>();
+    auto prep = make_stencil_refs_fn(params, plain_oracle(), counter, fail_third);
+    auto refs = prep(100.0, 100.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(refs.has_value()); EXPECT_FALSE(refs->resolved);
+    EXPECT_EQ(counter->fine_failures.load() + counter->coarse_failures.load(), 1u);
+    StencilSolveFn fail_first = [](const PricingParams&, const PDEGridConfig&) -> std::expected<double, SolverError> {
+        return std::unexpected(SolverError{}); };
+    auto prep2 = make_stencil_refs_fn(params, plain_oracle(), std::make_shared<ReferenceSolveCounter>(), fail_first);
+    EXPECT_FALSE(prep2(100.0, 100.0, 1.0, 0.2, 0.05).has_value());
+}
+
+// Spec D2: every target y, y±delta must pass validate_iv_query, including the
+// upper no-arbitrage bound.  A call priced above spot at y+delta is unresolved.
+TEST(StencilRefs, TargetsAboveUpperBoundAreUnresolved) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    size_t n = 0;
+    // Fine solves return 99.99 for a call on S=100 (valid), coarse solves 99.5 -> delta = 3*0.49/(2^p-1) pushes y+delta above 100.
+    StencilSolveFn near_cap = [&](const PricingParams& p, const PDEGridConfig& g) -> std::expected<double, SolverError> {
+        (void)p; (void)g; return (++n % 2 == 1) ? 99.99 : 99.5; };
+    auto oracle = plain_oracle(); oracle.option_type = OptionType::CALL;
+    auto prep = make_stencil_refs_fn(params, oracle, std::make_shared<ReferenceSolveCounter>(), near_cap);
+    auto refs = prep(100.0, 90.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(refs.has_value());
+    EXPECT_FALSE(refs->resolved);
+}
+
+// Same rule, isolated: the D2 inequalities pass and the ONLY thing that fails
+// is the upper no-arbitrage bound on the target y + delta.  Fine prices are
+// lo = 99.00, y = 99.99, hi = 100.50 on a call with S = 100; every coarse
+// solve sits `kDiff` below its fine partner so all three estimates are 0.02.
+// Then y - d = 99.97 > lo + d_lo = 99.02 and hi - d_hi = 100.48 > y + d =
+// 100.01, so the point is separated -- but y + d = 100.01 exceeds the call's
+// upper bound (spot), so the target set is not priceable and the point is
+// unresolved.  (hi itself is never a validated target, only y and y +- d.)
+TEST(StencilRefs, SeparatedStencilStillFailsOnUpperBoundTarget) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    const double kDelta = 0.02;
+    const double kDiff = kDelta * (std::pow(2.0, kReferenceConvergenceOrder) - 1.0)
+                       / kRichardsonSafetyFactor;
+    const double fine[3] = {99.99, 99.00, 100.50};  // y, lo, hi in solve order
+    size_t n = 0;
+    StencilSolveFn stencil = [&](const PricingParams&, const PDEGridConfig&)
+        -> std::expected<double, SolverError> {
+        const size_t i = n++;
+        const double base = fine[i / 2];
+        return (i % 2 == 0) ? base : base - kDiff;  // fine, then its coarse partner
+    };
+    auto oracle = plain_oracle(); oracle.option_type = OptionType::CALL;
+    auto prep = make_stencil_refs_fn(params, oracle, std::make_shared<ReferenceSolveCounter>(), stencil);
+    auto refs = prep(100.0, 90.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(refs.has_value());
+    EXPECT_EQ(n, 6u);
+    EXPECT_NEAR(refs->delta, kDelta, 1e-12);
+    // The separation inequalities alone admit this stencil ...
+    EXPECT_TRUE(stencil_resolved(*refs));
+    // ... but the upper-bound check on y + delta does not.
+    EXPECT_FALSE(refs->resolved);
+    // The complement: the same stencil with a tenth of the two-grid
+    // difference keeps the separation and puts y + delta back under spot.
+    const double kSmallDiff = kDiff / 10.0;
+    n = 0;
+    StencilSolveFn tight = [&](const PricingParams&, const PDEGridConfig&)
+        -> std::expected<double, SolverError> {
+        const size_t i = n++;
+        const double base = fine[i / 2];
+        return (i % 2 == 0) ? base : base - kSmallDiff;
+    };
+    auto prep_tight = make_stencil_refs_fn(params, oracle, std::make_shared<ReferenceSolveCounter>(), tight);
+    auto tight_refs = prep_tight(100.0, 90.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(tight_refs.has_value());
+    EXPECT_NEAR(tight_refs->delta, kDelta / 10.0, 1e-12);
+    EXPECT_TRUE(tight_refs->resolved);
 }

@@ -898,7 +898,7 @@ std::vector<detail::ValidationPoint> make_points(size_t n) {
         pts.push_back(detail::ValidationPoint{
             .coords = {0.0, 0.5, 0.20 + 0.01 * static_cast<double>(i), 0.05},
             .strike = 100.0,
-            .refs = {.ref_price = 10.0, .vega = 1.0}});
+            .refs = {.ref_price = 10.0}});
     }
     return pts;
 }
@@ -1004,7 +1004,7 @@ TEST(SegmentedFinalContract, SparseReferencesFailValidation) {
     PrepareRefsFn mostly_failing =
         [&calls](double, double, double, double, double)
         -> std::expected<ErrorRefs, SolverError> {
-        if (calls++ < 3) return ErrorRefs{.ref_price = 10.0, .vega = 1.0};
+        if (calls++ < 3) return ErrorRefs{.ref_price = 10.0};
         return std::unexpected(SolverError{SolverErrorCode::ConvergenceFailure});
     };
 
@@ -1017,7 +1017,7 @@ TEST(SegmentedFinalContract, SparseReferencesFailValidation) {
     calls = 0;
     PrepareRefsFn four_ok = [&calls](double, double, double, double, double)
         -> std::expected<ErrorRefs, SolverError> {
-        if (calls++ < 4) return ErrorRefs{.ref_price = 10.0, .vega = 1.0};
+        if (calls++ < 4) return ErrorRefs{.ref_price = 10.0};
         return std::unexpected(SolverError{SolverErrorCode::ConvergenceFailure});
     };
     auto ok = detail::prepare_final_validation(params, ctx, four_ok,
@@ -1039,7 +1039,7 @@ TEST(SegmentedFinalContract, ReferencesExcludeUnsupportedMaturities) {
         -> std::expected<ErrorRefs, SolverError> {
         EXPECT_GE(tau, 0.3);
         ++calls;
-        return ErrorRefs{.ref_price = 10.0, .vega = 1.0};
+        return ErrorRefs{.ref_price = 10.0};
     };
     auto set = detail::prepare_final_validation(params, ctx, refs,
                                                params.lhs_seed + 999);

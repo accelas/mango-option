@@ -256,14 +256,43 @@ using ValidateFn = std::function<std::expected<double, SolverError>(
     double spot, double strike, double tau,
     double sigma, double rate)>;
 
-/// Per-point reference data, computed once per validation/holdout point.
+/// Per-point reference data from the six-solve stencil (spec D1), computed
+/// once per validation/holdout point.
+///
+/// The stencil prices sigma0 and sigma0 +- target_iv_error on one nested
+/// grid pair; each `delta*` is the two-grid Richardson *estimate* of that
+/// price's discretisation error (an estimate, never a certificate: a two-grid
+/// difference cannot see bias the two grids share).
+///
+/// Partial stencils are normal.  Only `ref_price` is always present; every
+/// other numeric field is NaN when its solve did not happen or did not
+/// succeed, and `resolved` is then false.
 struct ErrorRefs {
-    double ref_price = 0.0;  ///< FD American price
-    double vega = 0.0;       ///< FD central-difference American vega
+    /// y: the fine-grid reference price at sigma0. Always present.
+    double ref_price = std::numeric_limits<double>::quiet_NaN();
+    /// lo / hi: fine-grid prices at `sigma_lo` / `sigma_hi`. NaN when unavailable.
+    double bracket_lo_price = std::numeric_limits<double>::quiet_NaN();
+    double bracket_hi_price = std::numeric_limits<double>::quiet_NaN();
+    /// sigma0 -+ target_iv_error, as actually solved.
+    double sigma_lo = std::numeric_limits<double>::quiet_NaN();
+    double sigma_hi = std::numeric_limits<double>::quiet_NaN();
+    /// Richardson error estimates for `ref_price`, `bracket_lo_price` and
+    /// `bracket_hi_price`. NaN when unavailable.
+    double delta = std::numeric_limits<double>::quiet_NaN();
+    double delta_lo = std::numeric_limits<double>::quiet_NaN();
+    double delta_hi = std::numeric_limits<double>::quiet_NaN();
+    /// Spec D2: the stencil separates in the expected order *and* all three
+    /// targets pass the product's query validation.
+    bool resolved = false;
+    /// Achieved time-step counts of the two grid levels (record only).
+    uint32_t fine_steps = 0;
+    uint32_t coarse_steps = 0;
 };
 
-/// Produce refs for one point (base solve + two sigma-bump solves).
-/// Any failed or non-finite solve => unexpected.
+/// Produce refs for one point (the six-solve stencil of spec D1).
+/// A failed or non-finite *base* solve => unexpected (the point is invalid).
+/// Any other missing piece => success with `resolved = false` and the base
+/// price present.
 using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
     double spot, double strike, double tau, double sigma, double rate)>;
 

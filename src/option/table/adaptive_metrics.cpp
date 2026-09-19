@@ -4,6 +4,7 @@
 #include "mango/option/dividend_utils.hpp"
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <optional>
 
 namespace mango {
@@ -126,6 +127,10 @@ double compute_iv_error(double price_error, double vega,
 
 PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& /*params*/,
                                     const ValidateFn& validate_fn) {
+    // Legacy factory kept only so the tree compiles while the round-trip
+    // metric lands (see the header).  `ErrorRefs` no longer carries a vega
+    // field, so the two sigma-bump solves this used to run have nothing to
+    // report: only the base price is filled and `resolved` stays false.
     // Copy validate_fn by value so the returned lambda is self-contained.
     return [validate_fn](
         double spot, double strike, double tau,
@@ -137,33 +142,12 @@ PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& /*params*/,
         }
         double ref_price = fd_base.value();
         if (!std::isfinite(ref_price)) {
-            return std::unexpected(SolverError{});
+            return std::unexpected(
+                SolverError{.code = SolverErrorCode::NonFiniteSolution});
         }
-
-        // FD American vega via central difference
-        double eps = std::max(1e-4, 0.01 * sigma);
-        double sigma_dn = std::max(1e-4, sigma - eps);
-        double sigma_up = sigma + eps;
-        double effective_eps = (sigma_up - sigma_dn) / 2.0;
-
-        auto fd_up = validate_fn(spot, strike, tau, sigma_up, rate);
-        if (!fd_up.has_value()) {
-            return std::unexpected(fd_up.error());
-        }
-        auto fd_dn = validate_fn(spot, strike, tau, sigma_dn, rate);
-        if (!fd_dn.has_value()) {
-            return std::unexpected(fd_dn.error());
-        }
-
-        double vega = 0.0;
-        if (effective_eps > 1e-6) {
-            vega = (fd_up.value() - fd_dn.value()) / (2.0 * effective_eps);
-        }
-        if (!std::isfinite(vega)) {
-            return std::unexpected(SolverError{});
-        }
-
-        return ErrorRefs{.ref_price = ref_price, .vega = vega};
+        ErrorRefs refs;         // every other field NaN / false / 0
+        refs.ref_price = ref_price;
+        return refs;
     };
 }
 
@@ -185,23 +169,132 @@ ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
             return std::nullopt;
         }
 
-        // Vega floor: below it the price carries no volatility information,
-        // so `price_error / vega_floor` is a price error in units of the
-        // floor -- not an IV error.  Left unfiltered it reads as thousands
-        // of IV points from a sub-cent price wobble (measured: a deep-ITM
-        // put with vega = -3.5e-5 scoring 9,700 on a surface whose worst
-        // *measurable* point scored 0.15), which the D5 viability gate then
-        // condemns.  This is the documented meaning of `vega_floor` --
-        // "when vega < floor, fall back to price-based tolerance" -- and
-        // there is no IV tolerance to fall back to, so the point is skipped
-        // like any other IV-undefined one.  Price accuracy where vega ~ 0
-        // is not what the IV-error metric (or kViabilityBound) measures.
-        if (std::abs(refs.vega) < vega_floor) {
+        // Temporary bridge, deleted with this factory: `ErrorRefs` no longer
+        // carries a vega, so a point whose stencil did not resolve has no
+        // slope to divide by and is skipped like any other IV-undefined one.
+        // Where the stencil did resolve, the bracket secant
+        // (hi - lo) / (sigma_hi - sigma_lo) stands in for the vega the old
+        // central difference supplied.
+        if (!refs.resolved) {
+            return std::nullopt;
+        }
+        const double secant = (refs.bracket_hi_price - refs.bracket_lo_price)
+                            / (refs.sigma_hi - refs.sigma_lo);
+        if (!std::isfinite(secant) || std::abs(secant) < vega_floor) {
             return std::nullopt;
         }
 
         double price_error = std::abs(interp - refs.ref_price);
-        return compute_iv_error(price_error, refs.vega, vega_floor, target);
+        return compute_iv_error(price_error, secant, vega_floor, target);
+    };
+}
+
+bool stencil_resolved(const ErrorRefs& r) noexcept {
+    const double v[] = {r.ref_price, r.bracket_lo_price, r.bracket_hi_price,
+                        r.delta, r.delta_lo, r.delta_hi};
+    for (double x : v) {
+        if (!std::isfinite(x)) return false;
+    }
+    return (r.ref_price - r.delta > r.bracket_lo_price + r.delta_lo) &&
+           (r.bracket_hi_price - r.delta_hi > r.ref_price + r.delta);
+}
+
+namespace {
+
+// Two-grid Richardson error estimate (spec D1).  An estimate, never a
+// certificate: a difference between two grids cannot see bias they share.
+double richardson_estimate(double fine, double coarse) {
+    return kRichardsonSafetyFactor * std::abs(fine - coarse)
+         / (std::pow(2.0, kReferenceConvergenceOrder) - 1.0);
+}
+
+// Spec D2: each of the three targets must pass the product's own query
+// validation -- finite, positive, at or above intrinsic, at or below the
+// upper no-arbitrage limit.
+bool target_is_valid_query(const PricingParams& p, double target) {
+    IVQuery q;
+    // PricingParams and IVQuery both derive from OptionSpec: copy spot,
+    // strike, maturity, rate, dividend_yield and option_type in one move.
+    static_cast<OptionSpec&>(q) = static_cast<const OptionSpec&>(p);
+    q.market_price = target;
+    q.discrete_dividends = p.discrete_dividends;
+    return validate_iv_query(q).has_value();
+}
+
+}  // namespace
+
+PrepareRefsFn make_stencil_refs_fn(const AdaptiveGridParams& params,
+                                   ReferenceOracle oracle,
+                                   std::shared_ptr<ReferenceSolveCounter> counter,
+                                   StencilSolveFn solve) {
+    if (!solve) {
+        solve = [oracle](const PricingParams& p, const PDEGridConfig& g) {
+            return oracle.solve(p, g);
+        };
+    }
+    if (!counter) counter = std::make_shared<ReferenceSolveCounter>();
+    const double tau_iv = params.target_iv_error;
+    return [oracle, counter, solve, tau_iv](
+        double spot, double strike, double tau, double sigma, double rate)
+        -> std::expected<ErrorRefs, SolverError> {
+        ErrorRefs out;                  // all-NaN, resolved = false
+        out.sigma_lo = sigma - tau_iv;
+        out.sigma_hi = sigma + tau_iv;
+
+        // One family per preparation, chosen at the widest stencil member
+        // (spec D1/L2): all six solves share this one fine/coarse pair.
+        const PricingParams widest =
+            oracle.contract(spot, strike, tau, out.sigma_hi, rate);
+        auto fam = make_reference_grid_family(widest, oracle.accuracy, 1);
+        if (!fam) {
+            return std::unexpected(
+                SolverError{.code = SolverErrorCode::InvalidConfiguration});
+        }
+        const PDEGridConfig& fine = fam->levels[0];
+        const PDEGridConfig& coarse = fam->levels[1];
+        out.fine_steps = static_cast<uint32_t>(fam->time_steps[0]);
+        out.coarse_steps = static_cast<uint32_t>(fam->time_steps[1]);
+
+        auto run = [&](double s, const PDEGridConfig& g,
+                       bool is_fine) -> std::optional<double> {
+            (is_fine ? counter->fine_attempts
+                     : counter->coarse_attempts).fetch_add(1);
+            auto r = solve(oracle.contract(spot, strike, tau, s, rate), g);
+            if (!r || !std::isfinite(*r)) {
+                (is_fine ? counter->fine_failures
+                         : counter->coarse_failures).fetch_add(1);
+                return std::nullopt;
+            }
+            return *r;
+        };
+
+        auto y = run(sigma, fine, true);
+        if (!y) return std::unexpected(SolverError{});  // invalid point
+        out.ref_price = *y;
+        if (!(out.sigma_lo > 0.0) || !std::isfinite(out.sigma_hi)) {
+            return out;                                 // unresolved, base present
+        }
+        auto y2 = run(sigma, coarse, false);
+        auto lo = run(out.sigma_lo, fine, true);
+        auto lo2 = lo ? run(out.sigma_lo, coarse, false) : std::nullopt;
+        auto hi = run(out.sigma_hi, fine, true);
+        auto hi2 = hi ? run(out.sigma_hi, coarse, false) : std::nullopt;
+        if (!y2 || !lo || !lo2 || !hi || !hi2) return out;
+        out.bracket_lo_price = *lo;
+        out.bracket_hi_price = *hi;
+        out.delta = richardson_estimate(*y, *y2);
+        out.delta_lo = richardson_estimate(*lo, *lo2);
+        out.delta_hi = richardson_estimate(*hi, *hi2);
+        if (!stencil_resolved(out)) return out;
+        const PricingParams base = oracle.contract(spot, strike, tau, sigma, rate);
+        for (double target : {out.ref_price - out.delta, out.ref_price,
+                              out.ref_price + out.delta}) {
+            if (!target_is_valid_query(base, target)) {
+                return out;             // reference limitation, not a candidate's
+            }
+        }
+        out.resolved = true;
+        return out;
     };
 }
 

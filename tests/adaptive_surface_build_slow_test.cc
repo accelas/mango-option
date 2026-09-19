@@ -68,7 +68,7 @@ TEST(SegmentedFinalContract, WideBandDividendBracketRemainsViable) {
     EXPECT_LE(*error, kViabilityBound)
         << "max IV error (bps): " << *error * 1e4
         << "; surface=" << price << "; reference=" << refs->ref_price
-        << "; vega=" << refs->vega;
+        << "; resolved=" << refs->resolved;
 }
 
 /// Convert S/K moneyness to log-moneyness for internal builder APIs.
