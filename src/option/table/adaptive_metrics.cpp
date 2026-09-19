@@ -221,6 +221,9 @@ int severity(PointStatus s) {
 
 }  // namespace
 
+// `ctx.option_type` is deliberately not read: `option_type` is the
+// authoritative one, so a caller can score a surface for an option type the
+// refinement context was not built around.
 ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
                                       const RefinementContext& ctx,
                                       OptionType option_type) {
@@ -232,12 +235,21 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
         double spot, double strike, double tau, double sigma, double rate) -> PointScore
     {
         PointScore out;
-        const double surface_price = surface.price(spot, strike, tau, sigma, rate);
-        if (std::isfinite(surface_price) && std::isfinite(refs.ref_price)) {
-            out.price_residual = std::abs(surface_price - refs.ref_price) / strike;
+        if (surface.price) {
+            const double surface_price = surface.price(spot, strike, tau, sigma, rate);
+            if (std::isfinite(surface_price) && std::isfinite(refs.ref_price)) {
+                out.price_residual = std::abs(surface_price - refs.ref_price) / strike;
+            }
         }
         if (!refs.resolved) {
             out.status = PointStatus::ReferenceUnresolved;
+            return out;
+        }
+        // A handle missing either callable cannot be round-tripped: calling an
+        // empty std::function throws, and library code here does not throw.
+        // The residual above needs only `price`, so it survives a missing vega.
+        if (!surface.price || !surface.vega) {
+            out.status = PointStatus::SurfaceNonFinite;
             return out;
         }
 
@@ -256,9 +268,18 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
             const auto inverted =
                 invert_price_on_surface(price_of, vega_of, target, bracket, spot, policy);
             if (!inverted) return std::unexpected(status_of(inverted.error()));
+            // A non-finite root would otherwise leave the point Measured with
+            // an understated error, since NaN loses every std::max against it.
+            if (!std::isfinite(inverted->implied_vol)) {
+                return std::unexpected(PointStatus::SurfaceNonFinite);
+            }
             return inverted->implied_vol;
         };
 
+        // `refs.resolved` implies all three targets are positive:
+        // `stencil_resolved` requires y - delta > lo + delta_lo, and a price
+        // is never negative, so `effective_sigma_bracket`'s `target_price > 0`
+        // precondition holds for every one of them.
         const double targets[3] = {refs.ref_price - refs.delta, refs.ref_price,
                                    refs.ref_price + refs.delta};
         double worst = 0.0;

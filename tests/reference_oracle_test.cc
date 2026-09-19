@@ -363,9 +363,24 @@ TEST(RoundTripScore, MapsEveryFailureKind) {
     SurfaceHandle falling{.price = [](double, double, double, double s, double) { return 10.0 - 40.0 * (s - 0.3); },
                           .vega = [](double, double, double, double, double) { return 40.0; }};
     auto f = score(falling, refs, 100, 100, 0.5, 0.3, 0.05);
-    EXPECT_TRUE(f.status == PointStatus::SurfaceAmbiguous || f.status == PointStatus::SurfaceNoRoot);
+    EXPECT_EQ(f.status, PointStatus::SurfaceAmbiguous);
     // y+delta straddles the top of the surface's range -> the worst of the three targets wins.
     SurfaceHandle capped{.price = [](double, double, double, double s, double) { return std::min(10.0 + 40.0 * (s - 0.3), 10.00005); },
                          .vega = [](double, double, double, double, double) { return 40.0; }};
     EXPECT_EQ(score(capped, refs, 100, 100, 0.5, 0.3, 0.05).status, PointStatus::SurfaceNoRoot);
+}
+
+// A handle without `vega` cannot be round-tripped: calling an empty
+// std::function would throw, and library code here does not throw.  The
+// residual needs only `price`, so it is still recorded.
+TEST(RoundTripScore, HandleWithoutVegaScoresNonFiniteAndKeepsResidual) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    auto score = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);
+    SurfaceHandle price_only{
+        .price = [](double, double, double, double s, double) { return 10.0 + 40.0 * (s - 0.3) + 0.04; }};
+    auto s = score(price_only, resolved_refs(10.0), 100.0, 100.0, 0.5, 0.3, 0.05);
+    EXPECT_EQ(s.status, PointStatus::SurfaceNonFinite);
+    EXPECT_TRUE(std::isfinite(s.price_residual));
+    EXPECT_NEAR(s.price_residual, 4e-4, 1e-12);
+    EXPECT_TRUE(std::isnan(s.iv_error));
 }

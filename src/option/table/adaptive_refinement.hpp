@@ -328,6 +328,9 @@ using LegacyScoreErrorFn = std::function<std::optional<double>(
 /// The returned `PointScore::status` therefore describes an operational
 /// outcome of that inversion at this point, and `iv_error` is an estimate of
 /// the surface's IV error there.
+///
+/// Precondition: handles must supply `vega` as well as `price`; a handle
+/// without it scores `SurfaceNonFinite`.
 using ScoreErrorFn = std::function<PointScore(
     const SurfaceHandle& surface, const ErrorRefs& refs,
     double spot, double strike, double tau,
