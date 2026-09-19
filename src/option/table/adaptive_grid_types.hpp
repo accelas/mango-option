@@ -6,6 +6,7 @@
 #include <vector>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace mango {
 
@@ -58,8 +59,8 @@ struct AdaptiveGridParams {
     /// Random seed for Latin Hypercube sampling (default: 42)
     uint64_t lhs_seed = 42;
 
-    /// Vega floor for error metric (default: 1e-4)
-    /// When vega < floor, fall back to price-based tolerance
+    /// Deprecated and ignored since the round-trip metric (spec 2026-09-19
+    /// D6); kept for C ABI layout stability until #463 removes it.
     double vega_floor = 1e-4;
 
     /// Maximum tolerable PDE solve failure rate (default: 0.5 = 50%)
@@ -75,6 +76,51 @@ struct SegmentedAdaptiveConfig {
     std::vector<Dividend> discrete_dividends;
     double maturity;
     MultiKRefConfig kref_config;
+};
+
+/// Outcome of scoring one holdout point under the round-trip IV metric:
+/// price the reference IV off the built surface, then re-invert the
+/// surface's own price back to an IV and compare against the reference.
+enum class PointStatus : uint8_t {
+    /// The round trip completed and produced an IV error.
+    Measured,
+    /// The FD reference for this point could not be established, so no
+    /// round trip was attempted.  Not charged against the surface.
+    ReferenceUnresolved,
+    /// The surface's local vega at this point was too small for the
+    /// round-trip inversion to recover an IV from the surface's price.
+    SurfaceVegaTooSmall,
+    /// The round-trip inversion found no root: no surface IV reproduced
+    /// the surface's own price within the solver's search bounds.
+    SurfaceNoRoot,
+    /// The round-trip inversion found more than one candidate root,
+    /// so the recovered IV is ambiguous.
+    SurfaceAmbiguous,
+    /// The round-trip inversion did not converge within its iteration
+    /// budget.
+    SurfaceNonConvergent,
+    /// The surface produced a non-finite price or derivative during the
+    /// round-trip inversion.
+    SurfaceNonFinite,
+};
+
+/// True for every Surface* status: an operational failure of the shipped
+/// inversion at this point, as opposed to a reference that never resolved.
+constexpr bool is_surface_failure(PointStatus s) noexcept {
+    return s != PointStatus::Measured && s != PointStatus::ReferenceUnresolved;
+}
+
+/// Result of scoring one holdout point under the round-trip IV metric.
+struct PointScore {
+    PointStatus status = PointStatus::ReferenceUnresolved;
+    /// Round-trip IV error; only meaningful when `status == Measured`.
+    double iv_error = std::numeric_limits<double>::quiet_NaN();
+    /// |S - V̂|/K between the reference price and the surface's price,
+    /// when finite; a diagnostic, not part of the error metric.
+    double price_residual = std::numeric_limits<double>::quiet_NaN();
+    /// Whether the edge-band rescue path was used for this point; a
+    /// diagnostic only, does not affect `status` or `iv_error`.
+    bool edge_band_rescue = false;
 };
 
 /// Per-iteration diagnostics
@@ -98,6 +144,9 @@ struct IterationStats {
     int refined_dim = -1;                    ///< Refined dim, or -1/-2/-3 (above)
     double elapsed_seconds = 0.0;            ///< Wall-clock time for this iteration
     bool build_failed = false;               ///< Refinement trial build failed (D5)
+    size_t unresolved = 0;                   ///< Points with PointStatus::ReferenceUnresolved
+    size_t surface_failures = 0;             ///< Points where is_surface_failure() held
+    size_t edge_band_rescues = 0;            ///< Points scored with PointScore::edge_band_rescue set
 };
 
 /// Adaptive refinement build diagnostics
@@ -119,6 +168,25 @@ struct BuildDiagnostics {
     /// (TV/K or vega floor), where the IV-error metric is undefined; a build
     /// with `holdout_points_measured == 0` is refused, never certified.
     size_t holdout_points_measured = 0;
+    /// Holdout points whose FD reference never resolved (PointStatus::ReferenceUnresolved).
+    size_t holdout_points_unresolved = 0;
+    /// Holdout points whose reference resolved but the round-trip metric
+    /// found no supported inversion for them (e.g. vega floor).
+    size_t holdout_points_unsupported = 0;
+    /// Holdout points where the round-trip inversion of the returned
+    /// surface's own price failed (is_surface_failure() held).
+    size_t surface_failures = 0;
+    /// Holdout points scored via the edge-band rescue path; a diagnostic
+    /// count, not part of any pass/fail decision.
+    size_t edge_band_rescues = 0;
+    /// Largest |S - V̂|/K price residual observed among measured points.
+    double max_price_residual = 0.0;
+    /// Largest estimated uncertainty in an FD reference used as ground truth.
+    double reference_uncertainty_max = 0.0;
+    /// Reference solves that used the fine grid.
+    size_t reference_solves_fine = 0;
+    /// Reference solves that used the coarse grid.
+    size_t reference_solves_coarse = 0;
     /// Rows/points from successful segmented sampling builds, including payoff
     /// rows, refinement probes, and final/retry assemblies. Other backends leave zero.
     size_t sample_rows = 0;

@@ -28,6 +28,15 @@ TEST(BuildDiagnosticsTest, DefaultsAreEmpty) {
     mango::BuildDiagnostics d;
     EXPECT_FALSE(d.target_met);
     EXPECT_EQ(d.holdout_points, 0u);
+    EXPECT_EQ(d.surface_failures, 0u);
+    EXPECT_EQ(d.holdout_points_unresolved, 0u);
+    EXPECT_EQ(d.reference_solves_fine, 0u);
+}
+
+TEST(PointStatusTest, SurfaceFailureClassification) {
+    EXPECT_FALSE(mango::is_surface_failure(mango::PointStatus::Measured));
+    EXPECT_FALSE(mango::is_surface_failure(mango::PointStatus::ReferenceUnresolved));
+    EXPECT_TRUE(mango::is_surface_failure(mango::PointStatus::SurfaceNoRoot));
 }
 
 // ===========================================================================
