@@ -38,12 +38,26 @@ struct SurfaceInversionPolicy {
     double published_sigma_min = 0.0;  ///< Surface's minimum volatility
     double published_sigma_max = 0.0;  ///< Surface's maximum volatility
 
-    /// Minimum signed surface vega to attempt the inversion; 0 disables the
-    /// pre-check.  See `InterpolatedIVSolverConfig::vega_threshold`.
+    /// Minimum surface vega to attempt the inversion; 0 disables the check.
+    ///
+    /// Vega is probed at the quartiles of the *actual* bracket and the
+    /// **signed** maximum is compared against this: a uniformly negative vega
+    /// is a broken surface, not a healthy one, so no absolute value is taken.
+    /// Below the threshold the option has no usable sensitivity to volatility
+    /// and IV is effectively undefined, so the inversion refuses with
+    /// `VegaTooSmall` (~600 ns) rather than running a doomed Brent search; a
+    /// non-finite probe gives `NumericalInstability`.
     double vega_threshold = 1e-4;
 
     /// Screen the bracket for multiple roots before inverting.
-    /// See `InterpolatedIVSolverConfig::detect_multiple_roots`.
+    ///
+    /// When true, the objective is sampled at 17 equally spaced volatilities
+    /// across the bracket and the inversion refuses (`MultipleRoots`) when
+    /// those samples show more than one root feature; a single sign change
+    /// narrows the interval handed to Brent.  Costs 17 surface evaluations
+    /// (~4 us) on top of a ~3.5 us inversion.  False restores the unscreened
+    /// path exactly; the vega pre-check applies either way.  See
+    /// `detail::screen_bracket` for what the screen does and does not catch.
     bool detect_multiple_roots = true;
 
     double tolerance = 1e-6;  ///< Price convergence tolerance
@@ -59,6 +73,9 @@ namespace detail {
 /// captures more than the small-object buffer holds) and so introduce a
 /// `std::bad_alloc` that would terminate.  The view must not outlive the
 /// callable it wraps; the screen only calls it during the scan.
+///
+/// The context is a `const void*`, so a plain function does not convert:
+/// wrap a free function in a lambda (`[](double s) { return f(s); }`).
 class ObjectiveRef {
 public:
     template <typename F>
@@ -105,9 +122,14 @@ struct BracketScreen {
 /// between opposite signs is a transition, between equal signs a tangency
 /// (counted as two features — an even-multiplicity contact is at least a
 /// double root), at an endpoint a boundary root.  More than one feature is
-/// ambiguous by construction.  Pure function of its arguments; the
-/// guarantees and blind spots are documented on
-/// `InterpolatedIVSolverConfig::detect_multiple_roots`.
+/// ambiguous by construction.  Pure function of its arguments.
+///
+/// **This is a screen, not a proof of uniqueness.**  It catches any objective
+/// sign excursion spanning at least one bracket/16 cell, and any tangency
+/// landing within `zero_tol` of zero at a scan point.  A fold narrower than
+/// one cell that also evades the caller's post-hoc slope check can still pass
+/// undetected.  Certified-monotone surfaces are the complete answer to root
+/// uniqueness; this screen is an explicit interim measure.
 [[nodiscard]] BracketScreen screen_bracket(
     ObjectiveRef objective,
     double sigma_min, double sigma_max,
@@ -122,6 +144,10 @@ struct BracketScreen {
 /// quote does not), intersects that with the caller's and the surface's
 /// limits, and falls back to the published range when the intersection is
 /// empty.
+///
+/// Precondition: `target_price > 0`.  The time-value fraction divides by it,
+/// so a zero or negative quote yields a meaningless cap.  Callers reject such
+/// quotes before they get here (the solver's query validation does).
 [[nodiscard]] std::pair<double, double> effective_sigma_bracket(
     double spot, double strike, OptionType type, double target_price,
     const SurfaceInversionPolicy& policy) noexcept;
@@ -137,6 +163,15 @@ struct BracketScreen {
 /// then Brent, then the post-hoc slope check on a narrowed bracket.
 /// `IVSuccess::used_rate_approximation` is left `false`: only the caller
 /// knows whether a yield curve was collapsed to a zero rate.
+///
+/// This is the product inversion: `InterpolatedIVSolver::solve` runs no other
+/// path, and build-time validation calls the same function.  Code path and
+/// thresholds are identical for both callers.  Results are *not* guaranteed
+/// bit-identical to the pre-extraction solver: this is a separate translation
+/// unit, so the compiler may contract expressions differently and answers can
+/// move at the last ulp.  Nothing about the algorithm or its tolerances
+/// changed.  `tests/interpolated_iv_solver_test.cc` pins two golden implied
+/// vols to make any larger drift visible.
 [[nodiscard]] std::expected<IVSuccess, IVError> invert_price_on_surface(
     detail::ObjectiveRef price, detail::ObjectiveRef vega,
     double target_price, std::pair<double, double> bracket,

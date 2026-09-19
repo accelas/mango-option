@@ -31,6 +31,28 @@ TEST(SurfaceInversion, EffectiveBracketAppliesCapConfigPublishedAndFallback) {
     EXPECT_DOUBLE_EQ(b.second, 0.5);
 }
 
+// The cap ladder only shows up when neither the caller's nor the surface's
+// limits bind, so open both out to 5.0 and vary the time-value fraction.
+TEST(SurfaceInversion, TimeValueCapLadderSetsTheUpperBound) {
+    SurfaceInversionPolicy pol{.config_sigma_min = 0.01, .config_sigma_max = 5.0,
+                               .published_sigma_min = 0.1, .published_sigma_max = 5.0};
+
+    // ATM put, all time value: (12-0)/12 = 1 > 0.5 -> 3.0.
+    auto b = effective_sigma_bracket(100.0, 100.0, OptionType::PUT, 12.0, pol);
+    EXPECT_DOUBLE_EQ(b.first, 0.1);
+    EXPECT_DOUBLE_EQ(b.second, 3.0);
+
+    // ITM put worth 16 on 10 of intrinsic: 6/16 = 0.375 in (0.2, 0.5] -> 2.0.
+    b = effective_sigma_bracket(90.0, 100.0, OptionType::PUT, 16.0, pol);
+    EXPECT_DOUBLE_EQ(b.first, 0.1);
+    EXPECT_DOUBLE_EQ(b.second, 2.0);
+
+    // Same put worth 12: 2/12 = 0.1667 < 0.2 -> 1.5.
+    b = effective_sigma_bracket(90.0, 100.0, OptionType::PUT, 12.0, pol);
+    EXPECT_DOUBLE_EQ(b.first, 0.1);
+    EXPECT_DOUBLE_EQ(b.second, 1.5);
+}
+
 TEST(SurfaceInversion, InvertsMonotoneSurface) {
     SurfaceInversionPolicy pol{.published_sigma_min = 0.1, .published_sigma_max = 0.5};
     auto r = invert_price_on_surface(lin_price, lin_vega, lin_price(0.31),
@@ -61,10 +83,11 @@ TEST(SurfaceInversion, ReportsProductErrorCodes) {
         return 10.0 + 40.0 * (s - 0.2) - 30.0 * (s - 0.2) * (s - 0.2) * 10.0;
     };
     auto unit_vega = [](double) { return 1.0; };
+    // Both roots (sigma ~ 0.2140 and ~ 0.3194) lie inside [0.1, 0.5], so the
+    // 17-point screen must refuse rather than pick one.
     auto multi = invert_price_on_surface(bump, unit_vega, 10.5, {0.1, 0.5}, 100.0, pol);
-    if (!multi.has_value()) {
-        EXPECT_EQ(multi.error().code, IVErrorCode::MultipleRoots);
-    }
+    ASSERT_FALSE(multi.has_value());
+    EXPECT_EQ(multi.error().code, IVErrorCode::MultipleRoots);
 
     // NaN interior -> NumericalInstability.
     auto nan_price = [](double s) { return s > 0.3 ? std::nan("") : lin_price(s); };
