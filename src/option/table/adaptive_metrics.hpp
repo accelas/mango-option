@@ -16,7 +16,6 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include <atomic>
-#include <memory>
 #include <vector>
 #include <optional>
 
@@ -74,7 +73,8 @@ struct ReferenceGridFamily {
     std::vector<size_t> time_steps;
     /// True when the fine level's point count had to be rounded down to fit
     /// `accuracy.max_spatial_points` instead of up to the next `1 (mod 16)`
-    /// count -- an estimate, not a certified bound on the resulting error.
+    /// count -- the family's own accuracy is then an estimate, not a
+    /// validated one.
     bool rounded_down = false;
 };
 
@@ -116,6 +116,12 @@ struct ReferenceOracle {
     /// Solve `p` on the explicit `grid`.
     std::expected<double, SolverError> solve(const PricingParams& p,
                                              const PDEGridConfig& grid) const;
+
+    /// Solve `p` at the oracle's accuracy profile without a fixed explicit
+    /// grid (an auto-estimated grid per `accuracy`). For single-price
+    /// callers, such as `make_validate_fn`, that have no reference grid
+    /// family in hand.
+    std::expected<double, SolverError> solve_estimated(const PricingParams& p) const;
 };
 
 }  // namespace mango

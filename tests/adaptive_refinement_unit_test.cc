@@ -1324,17 +1324,14 @@ TEST(MakeValidateFnTest, DropsDividendsBeyondSampledMaturity) {
 // calendar .25 has elapsed. A newly issued .6y contract is a different oracle.
 TEST(MakeValidateFnTest, FixedExpiryRollsCalendarInsteadOfChangingExpiry) {
     // make_validate_fn now solves at kReferenceAccuracy (High): compare
-    // against a solver built on the same explicit High-accuracy grid rather
-    // than solve_american_option's default profile.
-    auto reference_solve = [](const mango::PricingParams& params)
-        -> std::expected<mango::AmericanOptionResult, mango::SolverError> {
-        auto solver = mango::AmericanOptionSolver::create(
-            params, mango::PDEGridSpec{mango::make_grid_accuracy(mango::kReferenceAccuracy)});
-        if (!solver) {
-            return std::unexpected(mango::SolverError{
-                .code = mango::SolverErrorCode::InvalidConfiguration});
-        }
-        return solver->solve();
+    // against ReferenceOracle::solve_estimated on the same profile rather
+    // than solve_american_option's default profile. reference_solve takes
+    // an already-built (possibly manually rolled) PricingParams directly, so
+    // the oracle's own dividend fields are irrelevant here -- only its
+    // accuracy profile matters.
+    mango::ReferenceOracle raw_oracle{.accuracy = mango::make_grid_accuracy(mango::kReferenceAccuracy)};
+    auto reference_solve = [&raw_oracle](const mango::PricingParams& params) {
+        return raw_oracle.solve_estimated(params);
     };
     auto validate = mango::make_validate_fn(0.0, mango::OptionType::PUT,
         {{0.25, 3.0}}, 1.0);
@@ -1344,11 +1341,11 @@ TEST(MakeValidateFnTest, FixedExpiryRollsCalendarInsteadOfChangingExpiry) {
     ASSERT_TRUE(direct.has_value());
     auto fixed = validate(100.0, 100.0, 0.6, 0.2, 0.05);
     ASSERT_TRUE(fixed.has_value());
-    EXPECT_DOUBLE_EQ(*fixed, direct->value());
+    EXPECT_DOUBLE_EQ(*fixed, *direct);
     p.discrete_dividends = {{0.25, 3.0}};
     auto chain = reference_solve(p);
     ASSERT_TRUE(chain.has_value());
-    EXPECT_GT(chain->value() - *fixed, 1.0);
+    EXPECT_GT(*chain - *fixed, 1.0);
 
     // At tau=.75 the event has elapsed; just above it the rolled offset is
     // positive. This tests the reference side independently of gap admission.
@@ -1358,7 +1355,7 @@ TEST(MakeValidateFnTest, FixedExpiryRollsCalendarInsteadOfChangingExpiry) {
     ASSERT_TRUE(direct.has_value());
     fixed = validate(100.0, 100.0, 0.75, 0.2, 0.05);
     ASSERT_TRUE(fixed.has_value());
-    EXPECT_DOUBLE_EQ(*fixed, direct->value());
+    EXPECT_DOUBLE_EQ(*fixed, *direct);
     auto before = validate(100.0, 100.0, 0.750001, 0.2, 0.05);
     ASSERT_TRUE(before.has_value());
     EXPECT_GT(*before - *fixed, 1.0);

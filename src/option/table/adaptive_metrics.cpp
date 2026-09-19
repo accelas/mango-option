@@ -37,6 +37,18 @@ resample(const GridSpec<double>& spec, size_t n) {
 
 constexpr size_t kFamilyModulus = 16;  // odd through three coarsenings (spec D1)
 
+// Shared create -> check -> solve -> check sequence for both ReferenceOracle
+// solve variants (explicit grid and auto-estimated grid).
+std::expected<double, SolverError> solve_pde_grid_spec(const PricingParams& p, PDEGridSpec spec) {
+    auto solver = AmericanOptionSolver::create(p, std::move(spec));
+    if (!solver) return std::unexpected(SolverError{.code = SolverErrorCode::InvalidConfiguration});
+    auto r = solver->solve();
+    if (!r) return std::unexpected(r.error());
+    const double v = r->value();
+    if (!std::isfinite(v)) return std::unexpected(SolverError{.code = SolverErrorCode::NonFiniteSolution});
+    return v;
+}
+
 }  // namespace
 
 std::expected<ReferenceGridFamily, ValidationError>
@@ -55,7 +67,7 @@ make_reference_grid_family(const PricingParams& params,
     if (n > cap) {
         // Largest n <= cap with n = 1 (mod 16) that is still >= floor.
         n = cap - ((cap % kFamilyModulus) + kFamilyModulus - 1) % kFamilyModulus;
-        if (n < floor || n < 17) {
+        if (n < floor || n < kFamilyModulus + 1) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::InvalidGridSize, static_cast<double>(cap)));
         }
@@ -93,13 +105,12 @@ PricingParams ReferenceOracle::contract(double spot, double strike, double tau,
 
 std::expected<double, SolverError>
 ReferenceOracle::solve(const PricingParams& p, const PDEGridConfig& grid) const {
-    auto solver = AmericanOptionSolver::create(p, PDEGridSpec{grid});
-    if (!solver) return std::unexpected(SolverError{.code = SolverErrorCode::InvalidConfiguration});
-    auto r = solver->solve();
-    if (!r) return std::unexpected(r.error());
-    const double v = r->value();
-    if (!std::isfinite(v)) return std::unexpected(SolverError{});
-    return v;
+    return solve_pde_grid_spec(p, PDEGridSpec{grid});
+}
+
+std::expected<double, SolverError>
+ReferenceOracle::solve_estimated(const PricingParams& p) const {
+    return solve_pde_grid_spec(p, PDEGridSpec{accuracy});
 }
 
 double compute_iv_error(double price_error, double vega,
@@ -198,31 +209,17 @@ ValidateFn make_validate_fn(double dividend_yield,
                             OptionType option_type,
                             const std::vector<Dividend>& discrete_dividends,
                             std::optional<double> reference_maturity) {
-    return [dividend_yield, option_type, discrete_dividends, reference_maturity](
-        double spot, double strike, double tau,
-        double sigma, double rate) -> std::expected<double, SolverError>
-    {
-        PricingParams p;
-        p.spot = spot;
-        p.strike = strike;
-        p.maturity = tau;
-        p.rate = rate;
-        p.dividend_yield = dividend_yield;
-        p.option_type = option_type;
-        p.volatility = sigma;
-        // Segmented surfaces follow one fixed expiry across remaining life.
-        // Ordinary callers without an anchor describe a contract from now.
-        p.discrete_dividends = reference_maturity
-            ? rolled_dividends(discrete_dividends, *reference_maturity, tau)
-            : filter_and_merge_dividends(discrete_dividends, tau);
-        auto solver = AmericanOptionSolver::create(
-            p, PDEGridSpec{make_grid_accuracy(kReferenceAccuracy)});
-        if (!solver) {
-            return std::unexpected(SolverError{.code = SolverErrorCode::InvalidConfiguration});
-        }
-        auto fd = solver->solve();
-        if (!fd.has_value()) return std::unexpected(fd.error());
-        return fd->value();
+    // Segmented surfaces follow one fixed expiry across remaining life
+    // (oracle.contract rolls dividends onto it); ordinary callers without an
+    // anchor describe a contract from now (contract() filters to tau
+    // directly). Single-price callers have no reference grid family in
+    // hand, so this solves at the oracle's accuracy profile on an
+    // auto-estimated grid rather than a fixed explicit one.
+    ReferenceOracle oracle{dividend_yield, option_type, discrete_dividends,
+                          reference_maturity, make_grid_accuracy(kReferenceAccuracy)};
+    return [oracle](double spot, double strike, double tau, double sigma,
+                    double rate) -> std::expected<double, SolverError> {
+        return oracle.solve_estimated(oracle.contract(spot, strike, tau, sigma, rate));
     };
 }
 
