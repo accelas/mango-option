@@ -91,7 +91,7 @@ enum class PointStatus : uint8_t {
     /// round-trip inversion to recover an IV from the surface's price.
     SurfaceVegaTooSmall,
     /// The round-trip inversion found no root: no surface IV reproduced
-    /// the surface's own price within the solver's search bounds.
+    /// the surface's own price within the solver's search range.
     SurfaceNoRoot,
     /// The round-trip inversion found more than one candidate root,
     /// so the recovered IV is ambiguous.
