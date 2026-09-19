@@ -20,7 +20,6 @@
 #include "mango/support/ivcalc_trace.h"
 #include <algorithm>
 #include <cmath>
-#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -720,19 +719,6 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     };
     auto user_refs_fn = make_stencil_refs_fn(params, oracle, ref_counter);
 
-    // Spec D4: an event neighborhood has no sampled representation, so a
-    // sample inside a gap segment is excluded before any reference is drawn
-    // -- it is neither a reference nor a defect of the candidate.
-    const auto segments = compute_segment_boundaries(
-        config_.discrete_dividends, config_.maturity,
-        fit_domain.tau_min, fit_domain.tau_max);
-    const std::function<bool(double)> maturity_is_supported =
-        [b = segments.bounds, g = segments.is_gap](double tau) {
-            for (size_t s = 0; s + 1 < b.size(); ++s)
-                if (g[s] && tau > b[s] && tau < b[s + 1]) return false;
-            return true;
-        };
-
     std::vector<RefinementResult> probe_results;
     for (double probe_ref : probes) {
         // Measurement domain for this probe: the user's tau/vol/rate ranges,
@@ -832,36 +818,10 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             };
         };
 
-        // The probe's references live on the probe's own problem.  A query
-        // (S, K) reaches the surface as scale * probe(S/scale, K_ref) with
-        // scale = K/K_ref, so the reference is the FD solve at
-        // (S/scale, K_ref) under the same dividend schedule, scaled the same
-        // way.  Rescaling the *option* rather than the query -- pricing
-        // (S, K) and comparing against a K_ref-struck surface, or leaning on
-        // P(lambda S, lambda K) homogeneity -- does not hold here: absolute
-        // discrete dividends are not scaled by lambda, so
-        // scale * P(S/scale, K_ref; D) is P(S, K; scale * D), and the
-        // (scale - 1) * D * dP/dD residual would be scored as interpolation
-        // error.  Every monetary term of the stencil scales together, so the
-        // error the loop sees is unaffected by the scaling itself.
+        // A probe surface is measured on its own contract: the loop scores
+        // this probe's interpolation error and nothing else (spec D1/L6).
         PrepareRefsFn prepare_refs_fn =
-            [user_refs_fn, probe_ref](double spot, double strike, double tau,
-                                      double sigma, double rate)
-            -> std::expected<ErrorRefs, SolverError> {
-            const double scale = (strike > 0.0) ? strike / probe_ref : 1.0;
-            auto refs = user_refs_fn(spot / scale, probe_ref, tau, sigma, rate);
-            if (!refs) return std::unexpected(refs.error());
-            // Spec L6: every monetary quantity of the probe's stencil
-            // scales alike; the sigma coordinates and `resolved` do not.
-            ErrorRefs scaled = *refs;
-            scaled.ref_price = scale * refs->ref_price;
-            scaled.bracket_lo_price = scale * refs->bracket_lo_price;
-            scaled.bracket_hi_price = scale * refs->bracket_hi_price;
-            scaled.delta = scale * refs->delta;
-            scaled.delta_lo = scale * refs->delta_lo;
-            scaled.delta_hi = scale * refs->delta_hi;
-            return scaled;
-        };
+            make_probe_scaled_refs_fn(user_refs_fn, probe_ref);
 
         // Grids still span the whole fit domain; only the *measurement* is
         // band-scoped (spec D2: measure where the surface is used).
@@ -871,7 +831,11 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             .option_type = config_.option_type,
             .bounds = fit_domain,
             .sample_bounds = probe_sample,
-            .maturity_is_supported = maturity_is_supported,
+            // No maturity-support predicate (spec D4, law L4): this backend's
+            // segments are contiguous, so `TauSegmentSplit::contains_maturity`
+            // admits every tau in the domain, event neighborhoods included.
+            // Excluding them here would stop measuring maturities the surface
+            // actually serves.
         };
         auto score_fn = make_round_trip_score_fn(params, ctx,
                                                  config_.option_type);
@@ -928,7 +892,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         // Final validation measures the user-facing domain (spec D2), not
         // the interpolation support band.
         .sample_bounds = sample_domain_,
-        .maturity_is_supported = maturity_is_supported,
+        // No maturity-support predicate; see the probe context above.
     };
 
     auto final_score_fn = make_round_trip_score_fn(params, final_ctx,
@@ -1012,24 +976,27 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     const auto pick = detail::select_final_surface(orig_score, retry_score);
     if (pick == detail::FinalPick::None) {
         // The returned error has no room for the outcomes that produced the
-        // refusal, so the probe carries them, summed over both assembled
-        // surfaces the gate considered (spec D7).
-        PointStatusCounts totals = orig_score.status_counts;
-        size_t rescues = orig_score.edge_band_rescues;
-        if (retry_score) {
-            for (size_t i = 0; i < totals.size(); ++i) {
-                totals[i] += retry_score->status_counts[i];
-            }
-            rescues += retry_score->edge_band_rescues;
-        }
-        MANGO_TRACE_ADAPTIVE_NO_VIABLE_SURFACE(
-            ADAPTIVE_STAGE_FINAL, retry_score ? 2u : 1u,
-            totals[static_cast<size_t>(PointStatus::SurfaceNoRoot)],
-            totals[static_cast<size_t>(PointStatus::SurfaceAmbiguous)],
-            totals[static_cast<size_t>(PointStatus::SurfaceNonConvergent)],
-            totals[static_cast<size_t>(PointStatus::SurfaceNonFinite)],
-            totals[static_cast<size_t>(PointStatus::SurfaceVegaTooSmall)],
-            rescues);
+        // refusal, so the probe carries them (spec D7).  The two assembled
+        // surfaces are different candidates built on different grids, so
+        // each reports under its own stage rather than as one pooled count.
+        const auto trace_refusal = [](int stage,
+                                      const detail::FinalScore& score) {
+            MANGO_TRACE_ADAPTIVE_NO_VIABLE_SURFACE(
+                stage, 1u,
+                score.status_counts[
+                    static_cast<size_t>(PointStatus::SurfaceNoRoot)],
+                score.status_counts[
+                    static_cast<size_t>(PointStatus::SurfaceAmbiguous)],
+                score.status_counts[
+                    static_cast<size_t>(PointStatus::SurfaceNonConvergent)],
+                score.status_counts[
+                    static_cast<size_t>(PointStatus::SurfaceNonFinite)],
+                score.status_counts[
+                    static_cast<size_t>(PointStatus::SurfaceVegaTooSmall)],
+                score.edge_band_rescues);
+        };
+        trace_refusal(ADAPTIVE_STAGE_FINAL, orig_score);
+        if (retry_score) trace_refusal(ADAPTIVE_STAGE_RETRY, *retry_score);
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::NoViableSurface});
     }

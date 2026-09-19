@@ -155,6 +155,22 @@ PrepareRefsFn make_stencil_refs_fn(const AdaptiveGridParams& params,
                                    std::shared_ptr<ReferenceSolveCounter> counter,
                                    StencilSolveFn solve = {});
 
+/// Adapt a reference factory to a single-K_ref probe surface (spec D1/L6).
+///
+/// A sizing handle that prices a `K_ref` probe reaches a query `(S, K)` as
+/// `a * probe(S/a, K_ref)` with `a = K/K_ref`, so it approximates
+/// `V(S, K; a*D)`, not `V(S, K; D)`: absolute cash dividends do not scale
+/// with `a`.  Measuring it against a reference on the user's contract would
+/// charge the `(a - 1) * D * dP/dD` residual to the interpolation.
+///
+/// The returned factory therefore solves the probe's own contract at
+/// `(spot/a, K_ref)` through `base` and scales every monetary field --
+/// `ref_price`, both bracket prices, all three delta estimates -- by `a`.
+/// The sigma coordinates, `resolved` and the step counts are unchanged:
+/// every term of the D2 separation test scales alike, so resolution is
+/// invariant under the scaling.  A non-positive strike leaves `a = 1`.
+PrepareRefsFn make_probe_scaled_refs_fn(PrepareRefsFn base, double K_ref);
+
 /// The D2 separation inequalities alone, on already-prepared refs: all three
 /// prices and all three estimates finite, and the three estimated price
 /// intervals separated in the expected order. Target validity

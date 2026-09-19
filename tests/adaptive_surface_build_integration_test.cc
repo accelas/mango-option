@@ -219,9 +219,9 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
     OptionGrid chain2 = chain1;
     // Different spot => cache must not reuse chain1 slices.  90, not 50: at a
     // spot of 50 against strikes of 90-110 every holdout point is a deep-ITM
-    // put whose time value is below the TV/K filter, so the build is measured
-    // nowhere and now refuses (spec D4/D5) -- a real contract, but not the
-    // one this test is about.
+    // put whose reference stencil cannot separate, so no point resolves, the
+    // build is measured nowhere and refuses (spec D2/D4) -- a real contract,
+    // but not the one this test is about.
     chain2.spot = 90.0;
 
     AdaptiveGridParams params;
@@ -1217,12 +1217,12 @@ IVGrid probe_contract_domain() {
     };
 }
 
-// Regression: the segmented Chebyshev sizing loop scored a K_ref-scaled leaf
-// against a reference solved on the user's contract, so with a non-ATM strike
-// and a cash dividend the loop chased a dividend-scaling residual.
-// Bug: no probe adapter on the Chebyshev sizing path (the B-spline probe loop
-// had one).
-TEST(SegmentedChebyshevAdaptive, SizingReferencesLiveOnProbeContract) {
+// The sizing loop must get through an off-ATM reference-strike pair with a
+// cash dividend: no K_ref sits at the spot here, so every sample is scored on
+// a scaled probe.  What the scaling does to the references is pinned directly
+// by `ProbeScaledRefs.*` in reference_oracle_test.cc; this covers the build
+// end to end, including that the stencil actually ran.
+TEST(SegmentedChebyshevAdaptive, SizingLoopBuildsWithOffAtmKrefAndDividend) {
     AdaptiveGridParams params{.target_iv_error = 1e-3, .max_iter = 2,
                               .validation_samples = 16};
     const auto cfg = probe_contract_config();

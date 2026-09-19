@@ -147,7 +147,11 @@ struct IterationStats {
     size_t iteration = 0;                    ///< Iteration number (0-indexed)
     std::array<size_t, 4> grid_sizes = {};   ///< [m, tau, sigma, r] sizes
     size_t pde_solves_table = 0;             ///< Slices computed for table
-    size_t pde_solves_validation = 0;        ///< Fresh solves for validation
+    /// Successful reference preparations for the fresh validation pass.
+    /// One per sample whose reference came back, not the PDE solves it cost:
+    /// what a preparation runs is the reference factory's business, and
+    /// `BuildDiagnostics::reference_solves_*` is what records those.
+    size_t pde_solves_validation = 0;
     double max_error = 0.0;                  ///< Max IV error observed
     double avg_error = 0.0;                  ///< Mean IV error
     int refined_dim = -1;                    ///< Refined dim, or -1/-2/-3 (above)
@@ -180,8 +184,15 @@ struct BuildDiagnostics {
     size_t holdout_points_measured = 0;
     /// Holdout points whose FD reference never resolved (PointStatus::ReferenceUnresolved).
     size_t holdout_points_unresolved = 0;
-    /// Holdout samples excluded by the maturity-support predicate before any
+    /// Samples of the *sizing loop's* fixed holdout that its
+    /// `RefinementContext::maturity_is_supported` excluded before any
     /// reference was drawn (spec D4): not references, and not defects.
+    ///
+    /// Deliberately the loop's set, not the builders' final validation set:
+    /// spec D7's "holdout" is the loop's, and `FinalValidationSet` carries no
+    /// such counter.  A backend whose surface admits every maturity -- the
+    /// segmented B-spline, whose tau segments are contiguous -- sets no
+    /// predicate and reads 0 here by construction.
     size_t holdout_points_unsupported = 0;
     /// Holdout points where the round-trip inversion of the returned
     /// surface's own price failed (is_surface_failure() held).

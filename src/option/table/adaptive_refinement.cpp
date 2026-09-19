@@ -1003,8 +1003,9 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     // `holdout_points` is the size of the *usable reference set*: points whose
     // FD refs were produced and finite.  How many of them actually measured
     // the returned surface is `holdout_points_measured`, filled in from the
-    // picked candidate below -- the two differ by the points the score fn
-    // filters out (TV/K, vega floor).
+    // picked candidate below -- the two differ by the unresolved references,
+    // the points where the shipped inversion failed on the surface's own
+    // price, and the non-finite evaluations.
     diag.holdout_points = holdout.size();
     diag.holdout_points_invalid = holdout_invalid;
 

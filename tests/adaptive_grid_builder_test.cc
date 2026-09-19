@@ -889,8 +889,8 @@ TEST(SegmentedChebyshevRefineFn, HonorsRequestedAxisAndCap) {
 // ===========================================================================
 
 /// A validation set of `n` points, all at the same coordinates, whose refs
-/// carry a price and a vega large enough that the score is dominated by the
-/// price error rather than the vega floor.
+/// carry a resolved stencil, so the injected score decides each point's
+/// outcome and nothing upstream of it does.
 std::vector<detail::ValidationPoint> make_points(size_t n) {
     std::vector<detail::ValidationPoint> pts;
     pts.reserve(n);
@@ -1143,11 +1143,11 @@ TEST(SegmentedFinalContract, NoMeasuredPointsIsNotViable) {
 }
 
 // Regression: unresolved points are not measurements.
-// Bug: the score fn returned 0.0 where the TV/K or vega-floor filter fired,
-// so an unmeasurable point entered the average as a perfect score and counted
-// toward "at least one measurement".  A surface unmeasured everywhere reported
-// max 0 / avg 0 and passed the viability gate having been measured nowhere
-// (final-review amendment 2026-08-29).
+// Bug: the score fn returned 0.0 for a point it could not measure, so an
+// unresolved reference entered the average as a perfect score and counted
+// toward "at least one measurement".  A surface unmeasured everywhere
+// reported max 0 / avg 0 and passed the viability gate having been measured
+// nowhere (final-review amendment 2026-08-29).
 TEST(SegmentedFinalContract, UnresolvedPointsEnterNoStatistic) {
     const auto pts = make_points(8);
     const auto ctx = make_score_ctx();

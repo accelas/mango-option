@@ -646,8 +646,6 @@ static BuildFn make_segmented_chebyshev_build_fn(
                     break;
                 }
             }
-            if (tau <= bounds.front()) seg_idx = 0;
-            else if (tau >= bounds.back()) seg_idx = n_seg - 1;
             if (!supported) return std::nullopt;
             const double origin = seg_idx > 0 && is_gap[seg_idx - 1]
                 ? (bounds[seg_idx - 1] + bounds[seg_idx]) * 0.5 : bounds[seg_idx];
@@ -1138,33 +1136,10 @@ ChebyshevSegmentedBuilder::build_adaptive(
     };
     auto user_refs_fn = make_stencil_refs_fn(params, oracle, ref_counter);
 
-    // The sizing loop measures a single-K_ref probe at K_ref = spot, which
-    // reaches a query (S, K) as a * probe(S/a, K_ref) with a = K/K_ref.  Its
-    // references therefore live on the probe's own contract: solve the whole
-    // stencil at (S/a, K_ref) under the same schedule and scale every
-    // monetary term by a (spec D1/L6).  Rescaling the option instead --
-    // pricing (S, K) against a K_ref-struck probe -- would score
-    // a * P(S/a, K_ref; D) = P(S, K; a * D) against P(S, K; D), and the
-    // (a - 1) * D * dP/dD residual would be charged to the interpolation.
-    const double probe_ref = config_.spot;
+    // The sizing loop measures a single-K_ref probe at K_ref = spot, so its
+    // references live on that probe's own contract (spec D1/L6).
     PrepareRefsFn prepare_refs_fn =
-        [user_refs_fn, probe_ref](double spot, double strike, double tau,
-                                  double sigma, double rate)
-        -> std::expected<ErrorRefs, SolverError> {
-        const double scale = (strike > 0.0) ? strike / probe_ref : 1.0;
-        auto refs = user_refs_fn(spot / scale, probe_ref, tau, sigma, rate);
-        if (!refs) return std::unexpected(refs.error());
-        // Every monetary quantity of the stencil scales alike; the sigma
-        // coordinates and `resolved` do not.
-        ErrorRefs scaled = *refs;
-        scaled.ref_price = scale * refs->ref_price;
-        scaled.bracket_lo_price = scale * refs->bracket_lo_price;
-        scaled.bracket_hi_price = scale * refs->bracket_hi_price;
-        scaled.delta = scale * refs->delta;
-        scaled.delta_lo = scale * refs->delta_lo;
-        scaled.delta_hi = scale * refs->delta_hi;
-        return scaled;
-    };
+        make_probe_scaled_refs_fn(user_refs_fn, config_.spot);
     auto score_fn = make_round_trip_score_fn(params, ctx, config_.option_type);
 
     // Level counters roll back with the grids on every backtracking reset
@@ -1247,6 +1222,9 @@ ChebyshevSegmentedBuilder::build_adaptive(
     diagnostics.holdout_points_invalid =
         validation->invalid + final_score.skipped;
     diagnostics.holdout_points_unresolved = final_score.unresolved;
+    // `holdout_points_unsupported` is deliberately NOT overwritten here: it
+    // is defined as the sizing loop's fixed-holdout exclusion count (spec
+    // D7), and the final validation set carries no such counter.
     diagnostics.surface_failures = final_score.surface_failures;
     diagnostics.edge_band_rescues = final_score.edge_band_rescues;
     diagnostics.max_price_residual = final_score.max_price_residual;

@@ -242,6 +242,24 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
     };
 }
 
+PrepareRefsFn make_probe_scaled_refs_fn(PrepareRefsFn base, double K_ref) {
+    return [base = std::move(base), K_ref](
+        double spot, double strike, double tau, double sigma, double rate)
+        -> std::expected<ErrorRefs, SolverError> {
+        const double a = (strike > 0.0) ? strike / K_ref : 1.0;
+        auto refs = base(spot / a, K_ref, tau, sigma, rate);
+        if (!refs) return std::unexpected(refs.error());
+        ErrorRefs scaled = *refs;
+        scaled.ref_price = a * refs->ref_price;
+        scaled.bracket_lo_price = a * refs->bracket_lo_price;
+        scaled.bracket_hi_price = a * refs->bracket_hi_price;
+        scaled.delta = a * refs->delta;
+        scaled.delta_lo = a * refs->delta_lo;
+        scaled.delta_hi = a * refs->delta_hi;
+        return scaled;
+    };
+}
+
 bool stencil_resolved(const ErrorRefs& r) noexcept {
     const double v[] = {r.ref_price, r.bracket_lo_price, r.bracket_hi_price,
                         r.delta, r.delta_lo, r.delta_hi};

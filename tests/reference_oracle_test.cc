@@ -384,3 +384,92 @@ TEST(RoundTripScore, HandleWithoutVegaScoresNonFiniteAndKeepsResidual) {
     EXPECT_NEAR(s.price_residual, 4e-4, 1e-12);
     EXPECT_TRUE(std::isnan(s.iv_error));
 }
+
+// ===========================================================================
+// Probe adapter (spec D1/L6)
+// ===========================================================================
+
+namespace {
+
+// Records the coordinates the adapter forwarded and hands back a stencil with
+// distinct values in every field, so a scaling applied to the wrong one shows.
+struct RecordingBase {
+    std::shared_ptr<std::pair<double, double>> seen =
+        std::make_shared<std::pair<double, double>>(0.0, 0.0);
+
+    PrepareRefsFn fn() const {
+        auto seen_ = seen;
+        return [seen_](double spot, double strike, double /*tau*/,
+                       double sigma, double /*rate*/)
+            -> std::expected<ErrorRefs, SolverError> {
+            *seen_ = {spot, strike};
+            ErrorRefs r;
+            r.ref_price = 5.0;
+            r.bracket_lo_price = 4.0;
+            r.bracket_hi_price = 6.0;
+            r.sigma_lo = sigma - 1e-3;
+            r.sigma_hi = sigma + 1e-3;
+            r.delta = 0.25;
+            r.delta_lo = 0.125;
+            r.delta_hi = 0.5;
+            r.resolved = true;
+            r.fine_steps = 512;
+            r.coarse_steps = 256;
+            return r;
+        };
+    }
+};
+
+}  // namespace
+
+// The probe's reference must be solved on the probe's own contract, at
+// (spot/a, K_ref), with every monetary field scaled by a = strike/K_ref and
+// nothing else touched.
+TEST(ProbeScaledRefs, SolvesProbeContractAndScalesMonetaryFields) {
+    RecordingBase base;
+    const double K_ref = 100.0;
+    const double strike = 125.0;
+    const double a = strike / K_ref;  // 1.25
+    auto adapted = make_probe_scaled_refs_fn(base.fn(), K_ref);
+
+    auto refs = adapted(100.0, strike, 0.5, 0.2, 0.04);
+    ASSERT_TRUE(refs.has_value());
+
+    // The base saw the probe's coordinates, not the query's.
+    EXPECT_DOUBLE_EQ(base.seen->first, 100.0 / a);
+    EXPECT_DOUBLE_EQ(base.seen->second, K_ref);
+
+    EXPECT_DOUBLE_EQ(refs->ref_price, a * 5.0);
+    EXPECT_DOUBLE_EQ(refs->bracket_lo_price, a * 4.0);
+    EXPECT_DOUBLE_EQ(refs->bracket_hi_price, a * 6.0);
+    EXPECT_DOUBLE_EQ(refs->delta, a * 0.25);
+    EXPECT_DOUBLE_EQ(refs->delta_lo, a * 0.125);
+    EXPECT_DOUBLE_EQ(refs->delta_hi, a * 0.5);
+
+    // Volatility is not a price: the stencil's sigma coordinates, its
+    // resolution and its step counts are scale-invariant.
+    EXPECT_DOUBLE_EQ(refs->sigma_lo, 0.2 - 1e-3);
+    EXPECT_DOUBLE_EQ(refs->sigma_hi, 0.2 + 1e-3);
+    EXPECT_TRUE(refs->resolved);
+    EXPECT_EQ(refs->fine_steps, 512u);
+    EXPECT_EQ(refs->coarse_steps, 256u);
+}
+
+// At the reference strike the probe *is* the query, so the adapter is the
+// identity and forwards the query untouched.
+TEST(ProbeScaledRefs, IsIdentityAtTheReferenceStrike) {
+    RecordingBase base;
+    const double K_ref = 100.0;
+    auto adapted = make_probe_scaled_refs_fn(base.fn(), K_ref);
+
+    auto refs = adapted(97.0, K_ref, 0.5, 0.2, 0.04);
+    ASSERT_TRUE(refs.has_value());
+    EXPECT_DOUBLE_EQ(base.seen->first, 97.0);
+    EXPECT_DOUBLE_EQ(base.seen->second, K_ref);
+    EXPECT_DOUBLE_EQ(refs->ref_price, 5.0);
+    EXPECT_DOUBLE_EQ(refs->bracket_lo_price, 4.0);
+    EXPECT_DOUBLE_EQ(refs->bracket_hi_price, 6.0);
+    EXPECT_DOUBLE_EQ(refs->delta, 0.25);
+    EXPECT_DOUBLE_EQ(refs->delta_lo, 0.125);
+    EXPECT_DOUBLE_EQ(refs->delta_hi, 0.5);
+}
