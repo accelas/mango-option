@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/grid_spec_types.hpp"
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -282,4 +283,89 @@ TEST(StencilRefs, SeparatedStencilStillFailsOnUpperBoundTarget) {
     ASSERT_TRUE(tight_refs.has_value());
     EXPECT_NEAR(tight_refs->delta, kDelta / 10.0, 1e-12);
     EXPECT_TRUE(tight_refs->resolved);
+}
+
+// ===========================================================================
+// Round-trip scorer (spec D3)
+// ===========================================================================
+
+static RefinementContext score_ctx() {
+    return RefinementContext{
+        .spot = 100.0, .dividend_yield = 0.0, .option_type = OptionType::PUT,
+        .bounds = {.m_min = -0.5, .m_max = 0.5, .tau_min = 0.05, .tau_max = 2.0,
+                   .sigma_min = 0.05, .sigma_max = 0.6, .rate_min = 0.0, .rate_max = 0.1},
+        .sample_bounds = {.m_min = -0.3, .m_max = 0.3, .tau_min = 0.1, .tau_max = 1.0,
+                          .sigma_min = 0.1, .sigma_max = 0.5, .rate_min = 0.01, .rate_max = 0.09}};
+}
+
+static ErrorRefs resolved_refs(double y) {
+    return ErrorRefs{.ref_price = y, .bracket_lo_price = y - 0.02, .bracket_hi_price = y + 0.02,
+                     .sigma_lo = 0.2995, .sigma_hi = 0.3005,
+                     .delta = 1e-4, .delta_lo = 1e-4, .delta_hi = 1e-4, .resolved = true};
+}
+
+// Surface: price = 10 + 40*(sigma-0.3) + bias; vega = 40.
+static SurfaceHandle linear_handle(double bias) {
+    return SurfaceHandle{
+        .price = [bias](double, double, double, double s, double) { return 10.0 + 40.0 * (s - 0.3) + bias; },
+        .vega = [](double, double, double, double, double) { return 40.0; }};
+}
+
+TEST(RoundTripScore, MeasuresBiasAsSigmaDistanceOverThreeTargets) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    auto score = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);
+    // bias 0.04 -> root at 0.3 - 0.001; targets y +- 1e-4 add +- 2.5e-6.
+    auto s = score(linear_handle(0.04), resolved_refs(10.0), 100.0, 100.0, 0.5, 0.3, 0.05);
+    EXPECT_EQ(s.status, PointStatus::Measured);
+    EXPECT_NEAR(s.iv_error, 0.001 + 2.5e-6, 1e-7);
+    EXPECT_NEAR(s.price_residual, 0.04 / 100.0, 1e-12);
+    EXPECT_FALSE(s.edge_band_rescue);
+}
+
+TEST(RoundTripScore, UnresolvedReferenceStillRecordsResidual) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    auto score = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);
+    auto refs = resolved_refs(10.0); refs.resolved = false;
+    auto s = score(linear_handle(0.04), refs, 100.0, 100.0, 0.5, 0.3, 0.05);
+    EXPECT_EQ(s.status, PointStatus::ReferenceUnresolved);
+    EXPECT_NEAR(s.price_residual, 4e-4, 1e-12);
+    EXPECT_TRUE(std::isnan(s.iv_error));
+}
+
+// Root beyond the published edge: NoRoot under the exact product bracket;
+// the tau_iv edge band rescues it only as a diagnostic flag.
+TEST(RoundTripScore, EdgeMissIsNoRootWithRescueFlag) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-3;   // band 50 bps
+    auto score = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);
+    // Surface overprices by 0.04 at sigma=0.1 -> root at 0.099 (1e-3 below the edge, inside the band)
+    auto refs = resolved_refs(10.0 + 40.0 * (0.1 - 0.3));
+    auto s = score(linear_handle(0.04), refs, 100.0, 100.0, 0.5, 0.1, 0.05);
+    EXPECT_EQ(s.status, PointStatus::SurfaceNoRoot);
+    EXPECT_TRUE(s.edge_band_rescue);
+    params.target_iv_error = 5e-4;   // band 5 bps: root is 10 bps outside -> no rescue
+    auto score2 = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);
+    auto s2 = score2(linear_handle(0.04), refs, 100.0, 100.0, 0.5, 0.1, 0.05);
+    EXPECT_EQ(s2.status, PointStatus::SurfaceNoRoot);
+    EXPECT_FALSE(s2.edge_band_rescue);
+}
+
+TEST(RoundTripScore, MapsEveryFailureKind) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    auto score = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);
+    const auto refs = resolved_refs(10.0);
+    SurfaceHandle flat{.price = [](double, double, double, double, double) { return 10.0; },
+                       .vega = [](double, double, double, double, double) { return 0.0; }};
+    EXPECT_EQ(score(flat, refs, 100, 100, 0.5, 0.3, 0.05).status, PointStatus::SurfaceVegaTooSmall);
+    SurfaceHandle nan_mid{.price = [](double, double, double, double s, double) { return s > 0.35 ? std::nan("") : 10.0 + 40.0 * (s - 0.3); },
+                          .vega = [](double, double, double, double, double) { return 40.0; }};
+    EXPECT_EQ(score(nan_mid, refs, 100, 100, 0.5, 0.3, 0.05).status, PointStatus::SurfaceNonFinite);
+    // Decreasing crossing: MultipleRoots via the post-Brent slope check.
+    SurfaceHandle falling{.price = [](double, double, double, double s, double) { return 10.0 - 40.0 * (s - 0.3); },
+                          .vega = [](double, double, double, double, double) { return 40.0; }};
+    auto f = score(falling, refs, 100, 100, 0.5, 0.3, 0.05);
+    EXPECT_TRUE(f.status == PointStatus::SurfaceAmbiguous || f.status == PointStatus::SurfaceNoRoot);
+    // y+delta straddles the top of the surface's range -> the worst of the three targets wins.
+    SurfaceHandle capped{.price = [](double, double, double, double s, double) { return std::min(10.0 + 40.0 * (s - 0.3), 10.00005); },
+                         .vega = [](double, double, double, double, double) { return 40.0; }};
+    EXPECT_EQ(score(capped, refs, 100, 100, 0.5, 0.3, 0.05).status, PointStatus::SurfaceNoRoot);
 }

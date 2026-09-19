@@ -2,6 +2,7 @@
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/dividend_utils.hpp"
+#include "mango/option/surface_inversion.hpp"
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -151,7 +152,7 @@ PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& /*params*/,
     };
 }
 
-ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
+LegacyScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
                               OptionType option_type) {
     double vega_floor = params.vega_floor;
     double target = params.target_iv_error;
@@ -186,6 +187,110 @@ ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
 
         double price_error = std::abs(interp - refs.ref_price);
         return compute_iv_error(price_error, secant, vega_floor, target);
+    };
+}
+
+namespace {
+
+// The inversion's own failure codes, restated as per-point outcomes of the
+// shipped inversion (spec D3).
+PointStatus status_of(const IVError& e) {
+    switch (e.code) {
+        case IVErrorCode::VegaTooSmall:          return PointStatus::SurfaceVegaTooSmall;
+        case IVErrorCode::BracketingFailed:      return PointStatus::SurfaceNoRoot;
+        case IVErrorCode::MultipleRoots:         return PointStatus::SurfaceAmbiguous;
+        case IVErrorCode::MaxIterationsExceeded: return PointStatus::SurfaceNonConvergent;
+        // NumericalInstability and any invariant violation: the surface
+        // produced something the inversion could not use as a number.
+        default:                                 return PointStatus::SurfaceNonFinite;
+    }
+}
+
+// Reporting order across the three targets (spec D3): the worst outcome is
+// the one the point is recorded under.  Higher wins.
+int severity(PointStatus s) {
+    switch (s) {
+        case PointStatus::SurfaceNonFinite:     return 5;
+        case PointStatus::SurfaceNonConvergent: return 4;
+        case PointStatus::SurfaceAmbiguous:     return 3;
+        case PointStatus::SurfaceNoRoot:        return 2;
+        case PointStatus::SurfaceVegaTooSmall:  return 1;
+        default:                                return 0;
+    }
+}
+
+}  // namespace
+
+ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
+                                      const RefinementContext& ctx,
+                                      OptionType option_type) {
+    const double tau_iv = params.target_iv_error;
+    const SurfaceBounds sample = ctx.sample_bounds;
+    const SurfaceBounds fit = ctx.bounds;
+    return [tau_iv, sample, fit, option_type](
+        const SurfaceHandle& surface, const ErrorRefs& refs,
+        double spot, double strike, double tau, double sigma, double rate) -> PointScore
+    {
+        PointScore out;
+        const double surface_price = surface.price(spot, strike, tau, sigma, rate);
+        if (std::isfinite(surface_price) && std::isfinite(refs.ref_price)) {
+            out.price_residual = std::abs(surface_price - refs.ref_price) / strike;
+        }
+        if (!refs.resolved) {
+            out.status = PointStatus::ReferenceUnresolved;
+            return out;
+        }
+
+        // Bind every coordinate but sigma, exactly as the shipped solver does.
+        const auto price_of = [&](double s) { return surface.price(spot, strike, tau, s, rate); };
+        const auto vega_of = [&](double s) { return surface.vega(spot, strike, tau, s, rate); };
+
+        const auto invert = [&](double target, double published_lo, double published_hi)
+            -> std::expected<double, PointStatus>
+        {
+            SurfaceInversionPolicy policy;
+            policy.published_sigma_min = published_lo;
+            policy.published_sigma_max = published_hi;
+            const auto bracket =
+                effective_sigma_bracket(spot, strike, option_type, target, policy);
+            const auto inverted =
+                invert_price_on_surface(price_of, vega_of, target, bracket, spot, policy);
+            if (!inverted) return std::unexpected(status_of(inverted.error()));
+            return inverted->implied_vol;
+        };
+
+        const double targets[3] = {refs.ref_price - refs.delta, refs.ref_price,
+                                   refs.ref_price + refs.delta};
+        double worst = 0.0;
+        PointStatus status = PointStatus::Measured;
+        for (double target : targets) {
+            const auto inverted = invert(target, sample.sigma_min, sample.sigma_max);
+            if (!inverted) {
+                if (severity(inverted.error()) > severity(status)) status = inverted.error();
+                continue;
+            }
+            worst = std::max(worst, std::abs(*inverted - sigma));
+        }
+
+        out.status = status;
+        if (status == PointStatus::Measured) {
+            out.iv_error = worst;
+            return out;
+        }
+        if (status == PointStatus::SurfaceNoRoot) {
+            // Diagnostic only (spec D3): would a bracket widened by one
+            // target_iv_error per side, clipped to the fit domain, have found
+            // the root the published bracket missed?  The answer is recorded,
+            // never substituted for the outcome above.
+            const double lo = std::max(sample.sigma_min - tau_iv, fit.sigma_min);
+            const double hi = std::min(sample.sigma_max + tau_iv, fit.sigma_max);
+            bool all_inverted = true;
+            for (double target : targets) {
+                if (!invert(target, lo, hi)) { all_inverted = false; break; }
+            }
+            out.edge_band_rescue = all_inverted;
+        }
+        return out;
     };
 }
 

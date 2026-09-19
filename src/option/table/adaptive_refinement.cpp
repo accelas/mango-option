@@ -388,7 +388,7 @@ static SampleEval evaluate_fresh_samples(
     const std::vector<std::array<double, 4>>& samples,
     const SurfaceHandle& handle,
     const PrepareRefsFn& prepare_refs,
-    const ScoreErrorFn& score,
+    const LegacyScoreErrorFn& score,
     const RefinementContext& ctx,
     double target_iv_error) {
     SampleEval ev;
@@ -480,7 +480,7 @@ static SampleEval evaluate_fresh_samples(
 static SampleEval evaluate_holdout(
     const std::vector<HoldoutPoint>& holdout,
     const SurfaceHandle& handle,
-    const ScoreErrorFn& score,
+    const LegacyScoreErrorFn& score,
     const RefinementContext& ctx) {
     const auto scored = detail::score_final_surface(holdout, handle, score, ctx);
     SampleEval ev;
@@ -628,7 +628,7 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
 detail::FinalScore detail::score_final_surface(
     const std::vector<ValidationPoint>& points,
     const SurfaceHandle& handle,
-    const ScoreErrorFn& score,
+    const LegacyScoreErrorFn& score,
     const RefinementContext& ctx) {
     FinalScore ev;
     double sum_error = 0.0;
@@ -744,7 +744,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     RefineFn refine_fn,
     const RefinementContext& ctx,
     const PrepareRefsFn& prepare_refs,
-    const ScoreErrorFn& score,
+    const LegacyScoreErrorFn& score,
     const InitialGrids& initial_grids,
     const RefineStateHooks& hooks)
 {

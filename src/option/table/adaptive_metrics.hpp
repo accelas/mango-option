@@ -45,8 +45,33 @@ PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& params,
 /// by the stencil's bracket secant. Deleted with `make_fd_vega_refs_fn`.
 /// Filtered points return `std::nullopt`, never 0.0: a skip is the absence of
 /// a measurement, not a perfect one.
-ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
-                              OptionType option_type);
+LegacyScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
+                                    OptionType option_type);
+
+/// Round-trip score for one validation point (spec D3).
+///
+/// Runs the product inversion (`invert_price_on_surface`) on the candidate
+/// surface at the three stencil targets -- `refs.ref_price` and
+/// `refs.ref_price +- refs.delta` -- over the bracket
+/// `effective_sigma_bracket` derives from `ctx.sample_bounds`, and reports
+/// the largest distance between a recovered volatility and `sigma`.  Both
+/// domains of `ctx` are copied into the returned callable.
+///
+/// Outcomes, not verdicts about the surface as a whole:
+///  - every target inverted => `PointStatus::Measured` and `iv_error` set;
+///  - `refs.resolved == false` => `ReferenceUnresolved`, nothing attempted;
+///  - otherwise the most severe inversion failure across the three targets,
+///    mapped to the matching `Surface*` status.
+///
+/// `price_residual` (|surface price - reference price| / strike) is recorded
+/// whenever both prices are finite, including on the unresolved path.  When
+/// the outcome is `SurfaceNoRoot`, the three targets are re-inverted over the
+/// bracket widened by `params.target_iv_error` per side (clipped to
+/// `ctx.bounds`); success there only sets `edge_band_rescue`, a diagnostic
+/// that changes neither `status` nor `iv_error`.
+ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
+                                      const RefinementContext& ctx,
+                                      OptionType option_type);
 
 /// Create a direct FD reference. With reference_maturity, the dividends are
 /// anchored to one fixed expiry and rolled to each query's remaining life.

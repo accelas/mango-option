@@ -917,17 +917,17 @@ RefinementContext make_score_ctx() {
     };
 }
 
-/// A ScoreErrorFn that returns |interp| verbatim, so a test can dictate the
-/// exact error at every point through the surface handle.
-ScoreErrorFn passthrough_score() {
+/// A LegacyScoreErrorFn that returns |interp| verbatim, so a test can dictate
+/// the exact error at every point through the surface handle.
+LegacyScoreErrorFn passthrough_score() {
     return [](double interp, const ErrorRefs&, double, double, double,
               double, double) -> std::optional<double> { return interp; };
 }
 
 /// Like `passthrough_score`, but skips every `period`-th point the way the
 /// TV/K and vega-floor filters do (spec D4: nullopt, not zero).
-ScoreErrorFn filtering_score(size_t period,
-                             const std::shared_ptr<size_t>& calls) {
+LegacyScoreErrorFn filtering_score(size_t period,
+                                   const std::shared_ptr<size_t>& calls) {
     return [period, calls](double interp, const ErrorRefs&, double, double,
                            double, double, double) -> std::optional<double> {
         if ((*calls)++ % period == 0) return std::nullopt;

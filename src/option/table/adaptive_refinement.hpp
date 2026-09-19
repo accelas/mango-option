@@ -33,6 +33,11 @@ namespace mango {
 struct SurfaceHandle {
     std::function<double(double spot, double strike, double tau,
                          double sigma, double rate)> price;
+    /// Surface vega at the same coordinates. The round-trip scorer feeds it to
+    /// the shipped inversion's vega pre-check, so a candidate is judged by the
+    /// same sensitivity the product would see.
+    std::function<double(double spot, double strike, double tau,
+                         double sigma, double rate)> vega;
     size_t pde_solves = 0;
 };
 
@@ -298,6 +303,9 @@ using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
 
 /// Score one point from interpolated price + cached refs. Pure arithmetic.
 ///
+/// Superseded by `ScoreErrorFn` below; kept only until the refinement loop
+/// and the builders move over to the round-trip score.
+///
 /// Contract (spec D4, final-review amendment 2026-08-29):
 ///  - `std::nullopt` means the point was **deliberately skipped**: its
 ///    reference is unresolved (or, on the temporary TV/K bridge, the point
@@ -307,8 +315,21 @@ using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
 ///    surface nor condemn it.
 ///  - An engaged value must be finite and nonnegative; anything else is a
 ///    non-viable evaluation and disqualifies the candidate (D5).
-using ScoreErrorFn = std::function<std::optional<double>(
+using LegacyScoreErrorFn = std::function<std::optional<double>(
     double interp, const ErrorRefs& refs,
+    double spot, double strike, double tau,
+    double sigma, double rate)>;
+
+/// Score one point by round-tripping the candidate surface (spec D3).
+///
+/// The scorer prices nothing itself: it hands `surface` to the *shipped*
+/// inversion at the three stencil targets (`ref_price` and `ref_price +-
+/// delta`) and reports how far the recovered volatilities land from `sigma`.
+/// The returned `PointScore::status` therefore describes an operational
+/// outcome of that inversion at this point, and `iv_error` is an estimate of
+/// the surface's IV error there.
+using ScoreErrorFn = std::function<PointScore(
+    const SurfaceHandle& surface, const ErrorRefs& refs,
     double spot, double strike, double tau,
     double sigma, double rate)>;
 
@@ -348,7 +369,8 @@ TauSegmentSplit make_tau_split_from_segments(
     double K_ref);
 
 // The option-aware implementations of ValidateFn / PrepareRefsFn /
-// ScoreErrorFn (`make_validate_fn`, `make_fd_vega_refs_fn`,
+// ScoreErrorFn (`make_validate_fn`, `make_stencil_refs_fn`,
+// `make_round_trip_score_fn`, and the legacy `make_fd_vega_refs_fn` /
 // `make_iv_score_fn`) live in adaptive_metrics.hpp: the loop consumes the
 // callback types declared above but never depends on the American solver
 // behind them.
@@ -411,7 +433,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     RefineFn refine_fn,
     const RefinementContext& ctx,
     const PrepareRefsFn& prepare_refs,
-    const ScoreErrorFn& score,
+    const LegacyScoreErrorFn& score,
     const InitialGrids& initial_grids = {},
     const RefineStateHooks& hooks = {});
 
@@ -472,8 +494,8 @@ prepare_final_validation(const AdaptiveGridParams& params,
 /// `measured` counts every point whose score *engaged* and produced a finite,
 /// nonnegative error -- including exact zeros -- so `avg_error`'s denominator
 /// matches its numerator even for a surface that reproduces every reference
-/// exactly.  Points the `ScoreErrorFn` deliberately skipped are counted in
-/// `filtered` and enter no statistic: the metric is undefined there.
+/// exactly.  Points the `LegacyScoreErrorFn` deliberately skipped are counted
+/// in `filtered` and enter no statistic: the metric is undefined there.
 struct FinalScore {
     double max_error = 0.0;
     double avg_error = 0.0;
@@ -499,7 +521,7 @@ struct FinalScore {
 [[nodiscard]] FinalScore score_final_surface(
     const std::vector<ValidationPoint>& points,
     const SurfaceHandle& handle,
-    const ScoreErrorFn& score,
+    const LegacyScoreErrorFn& score,
     const RefinementContext& ctx);
 
 /// Retry trigger (spec D9 step 2): the original assembled surface misses the

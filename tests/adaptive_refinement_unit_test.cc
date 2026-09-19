@@ -40,7 +40,7 @@ TEST(PointStatusTest, SurfaceFailureClassification) {
 }
 
 // ===========================================================================
-// Reference/score split: PrepareRefsFn and ScoreErrorFn (spec D4)
+// Reference/score split: PrepareRefsFn and LegacyScoreErrorFn (spec D4)
 // ===========================================================================
 
 // Score equivalence with the old arithmetic:
@@ -295,7 +295,7 @@ TEST(RunRefinementDomainTest, ValidationSamplesStayInSampleBounds) {
                                 .delta = 0.0, .delta_lo = 0.0, .delta_hi = 0.0,
                                 .resolved = true};
     };
-    mango::ScoreErrorFn score =
+    mango::LegacyScoreErrorFn score =
         [](double, const mango::ErrorRefs&, double, double, double,
            double, double) { return 0.0; };
 
@@ -402,7 +402,7 @@ public:
     std::set<size_t> fail_setup_refs;  ///< holdout setup indices that fail
     std::set<size_t> noop_axes;        ///< axes whose refine is a no-op
     std::function<double(double, double, double, double, double)> price_override;
-    mango::ScoreErrorFn score_override;  ///< replaces the |interp - ref| score
+    mango::LegacyScoreErrorFn score_override;  ///< replaces the |interp - ref| score
     bool use_levels = false;           ///< emulate Chebyshev level counters
 
     // ---- observations -------------------------------------------------
@@ -451,7 +451,7 @@ public:
         };
     }
 
-    mango::ScoreErrorFn score_fn() {
+    mango::LegacyScoreErrorFn score_fn() {
         if (score_override) return score_override;
         return [](double interp, const mango::ErrorRefs& refs, double, double,
                   double, double, double) -> std::optional<double> {
