@@ -63,6 +63,9 @@ TEST(SegmentedFinalContract, WideBandDividendBracketRemainsViable) {
     const double price = surface->price(config.spot, strike, tau, sigma, rate);
     auto error = make_iv_score_fn(params, config.option_type)(
         price, *refs, config.spot, strike, tau, sigma, rate);
+    // Fails at runtime until the builders switch to make_stencil_refs_fn /
+    // make_round_trip_score_fn (plan Task 7); the bridged legacy score skips
+    // unresolved refs.
     ASSERT_TRUE(error.has_value()) << "The regression point must remain measured";
     ASSERT_TRUE(std::isfinite(*error));
     EXPECT_LE(*error, kViabilityBound)
@@ -192,6 +195,9 @@ TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridPassesCorrectedOracle) {
     const double price = result->surface.price(100.0, 112.5, 0.75, 0.225, 0.04);
     auto error = make_iv_score_fn(params, OptionType::PUT)(
         price, *refs, 100.0, 112.5, 0.75, 0.225, 0.04);
+    // Fails at runtime until the builders switch to make_stencil_refs_fn /
+    // make_round_trip_score_fn (plan Task 7); the bridged legacy score skips
+    // unresolved refs.
     ASSERT_TRUE(error.has_value());
     EXPECT_LE(*error, kViabilityBound);
 }

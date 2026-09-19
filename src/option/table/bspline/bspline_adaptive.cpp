@@ -880,7 +880,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
 
     // The final validation is not free: every reference is a base solve plus
     // two sigma bumps, and the caller's PDE budget should say so.
-    total_pde += validation->ref_attempts * 3;
+    total_pde += validation->ref_attempts * 3;  // Task 7: replaced by ReferenceSolveCounter
 
     // The lambda captures the surface by pointer, not by reference to the
     // parameter: a reference capture would dangle the moment `handle_for`

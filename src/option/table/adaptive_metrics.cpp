@@ -255,12 +255,17 @@ PrepareRefsFn make_stencil_refs_fn(const AdaptiveGridParams& params,
         out.fine_steps = static_cast<uint32_t>(fam->time_steps[0]);
         out.coarse_steps = static_cast<uint32_t>(fam->time_steps[1]);
 
+        // Kept so the base solve's `unexpected` carries the solver's own
+        // code rather than a bare default one.
+        SolverError last_error{};
         auto run = [&](double s, const PDEGridConfig& g,
                        bool is_fine) -> std::optional<double> {
             (is_fine ? counter->fine_attempts
                      : counter->coarse_attempts).fetch_add(1);
             auto r = solve(oracle.contract(spot, strike, tau, s, rate), g);
             if (!r || !std::isfinite(*r)) {
+                last_error = r ? SolverError{.code = SolverErrorCode::NonFiniteSolution}
+                               : r.error();
                 (is_fine ? counter->fine_failures
                          : counter->coarse_failures).fetch_add(1);
                 return std::nullopt;
@@ -269,7 +274,7 @@ PrepareRefsFn make_stencil_refs_fn(const AdaptiveGridParams& params,
         };
 
         auto y = run(sigma, fine, true);
-        if (!y) return std::unexpected(SolverError{});  // invalid point
+        if (!y) return std::unexpected(last_error);  // invalid point
         out.ref_price = *y;
         if (!(out.sigma_lo > 0.0) || !std::isfinite(out.sigma_hi)) {
             return out;                                 // unresolved, base present

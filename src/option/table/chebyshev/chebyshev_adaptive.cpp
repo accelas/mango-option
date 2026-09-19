@@ -1147,6 +1147,7 @@ ChebyshevSegmentedBuilder::build_adaptive(
         // The final validation is not free: every reference is a base solve
         // plus two sigma bumps, and the caller's PDE budget should say so.
         .total_pde_solves = pde_cache.total_pde_solves() + surface->pde_solves
+                          // Task 7: replaced by ReferenceSolveCounter
                           + validation->ref_attempts * 3,
         .diagnostics = std::move(diagnostics),
         .sample_bounds = sample_domain_,

@@ -3,6 +3,7 @@
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -195,18 +196,37 @@ TEST(StencilRefs, PartialAndBaseFailures) {
     auto refs = prep(100.0, 100.0, 1.0, 0.2, 0.05);
     ASSERT_TRUE(refs.has_value()); EXPECT_FALSE(refs->resolved);
     EXPECT_EQ(counter->fine_failures.load() + counter->coarse_failures.load(), 1u);
+    // The base failure propagates the solver's own code, not a default one.
     StencilSolveFn fail_first = [](const PricingParams&, const PDEGridConfig&) -> std::expected<double, SolverError> {
-        return std::unexpected(SolverError{}); };
-    auto prep2 = make_stencil_refs_fn(params, plain_oracle(), std::make_shared<ReferenceSolveCounter>(), fail_first);
-    EXPECT_FALSE(prep2(100.0, 100.0, 1.0, 0.2, 0.05).has_value());
+        return std::unexpected(SolverError{SolverErrorCode::ConvergenceFailure}); };
+    auto counter2 = std::make_shared<ReferenceSolveCounter>();
+    auto prep2 = make_stencil_refs_fn(params, plain_oracle(), counter2, fail_first);
+    auto base_failed = prep2(100.0, 100.0, 1.0, 0.2, 0.05);
+    ASSERT_FALSE(base_failed.has_value());
+    EXPECT_EQ(base_failed.error().code, SolverErrorCode::ConvergenceFailure);
+    // The base solve is the only one attempted: nothing follows an invalid point.
+    EXPECT_EQ(counter2->fine_attempts.load(), 1u);
+    EXPECT_EQ(counter2->fine_failures.load(), 1u);
+    EXPECT_EQ(counter2->coarse_attempts.load(), 0u);
+
+    // A non-finite base price is a failure of its own kind.
+    StencilSolveFn nan_first = [](const PricingParams&, const PDEGridConfig&) -> std::expected<double, SolverError> {
+        return std::numeric_limits<double>::quiet_NaN(); };
+    auto prep3 = make_stencil_refs_fn(params, plain_oracle(),
+                                      std::make_shared<ReferenceSolveCounter>(), nan_first);
+    auto nan_base = prep3(100.0, 100.0, 1.0, 0.2, 0.05);
+    ASSERT_FALSE(nan_base.has_value());
+    EXPECT_EQ(nan_base.error().code, SolverErrorCode::NonFiniteSolution);
 }
 
-// Spec D2: every target y, y±delta must pass validate_iv_query, including the
-// upper no-arbitrage bound.  A call priced above spot at y+delta is unresolved.
-TEST(StencilRefs, TargetsAboveUpperBoundAreUnresolved) {
+// A flat near-cap stencil is unresolved: the fake returns the same fine price
+// at all three sigmas, so lo == y == hi and the separation inequalities reject
+// the point before target validity is ever consulted.  The upper-limit rule
+// itself is pinned by SeparatedStencilStillFailsOnUpperBoundTarget below.
+TEST(StencilRefs, FlatNearCapStencilIsUnresolved) {
     AdaptiveGridParams params; params.target_iv_error = 5e-4;
     size_t n = 0;
-    // Fine solves return 99.99 for a call on S=100 (valid), coarse solves 99.5 -> delta = 3*0.49/(2^p-1) pushes y+delta above 100.
+    // Fine solves return 99.99 for a call on S = 100, coarse solves 99.5.
     StencilSolveFn near_cap = [&](const PricingParams& p, const PDEGridConfig& g) -> std::expected<double, SolverError> {
         (void)p; (void)g; return (++n % 2 == 1) ? 99.99 : 99.5; };
     auto oracle = plain_oracle(); oracle.option_type = OptionType::CALL;

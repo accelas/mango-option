@@ -408,11 +408,11 @@ static SampleEval evaluate_fresh_samples(
         double strike = ctx.spot * std::exp(-m);
         double interp_price = handle.price(ctx.spot, strike, tau, sigma, rate);
 
-        // Fresh FD refs (price + vega) for reference via callback.
-        // Note: prepare_refs performs 3 PDE solves internally (base + two
-        // sigma-bump solves), but we count 1 per successful sample here to
-        // preserve pre-existing pde_solves_validation accounting -- callers
-        // (e.g. bspline_adaptive.cpp) multiply this count by 3 downstream.
+        // Fresh reference stencil for this point via callback.
+        // `pde_solves_validation` counts one *preparation* per successful
+        // sample, not the PDE solves it runs: how many solves a preparation
+        // costs is the factory's business, and `ReferenceSolveCounter` is
+        // what tracks fine and coarse attempts and failures.
         auto refs_result = prepare_refs(ctx.spot, strike, tau, sigma, rate);
 
         if (!refs_result.has_value()) {

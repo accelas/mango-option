@@ -299,9 +299,10 @@ using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
 /// Score one point from interpolated price + cached refs. Pure arithmetic.
 ///
 /// Contract (spec D4, final-review amendment 2026-08-29):
-///  - `std::nullopt` means the point was **deliberately skipped** by a filter
-///    (TV/K or vega floor): the error metric is undefined there, so the point
-///    carries no evidence either way.  Skipped points are excluded from the
+///  - `std::nullopt` means the point was **deliberately skipped**: its
+///    reference is unresolved (or, on the temporary TV/K bridge, the point
+///    has no time value), so the error metric is undefined there and the
+///    point carries no evidence either way.  Skipped points are excluded from the
 ///    max, the average, and the measured count -- they neither certify a
 ///    surface nor condemn it.
 ///  - An engaged value must be finite and nonnegative; anything else is a
@@ -440,10 +441,10 @@ struct ValidationPoint {
 struct FinalValidationSet {
     std::vector<ValidationPoint> points;
     size_t invalid = 0;
-    /// `PrepareRefsFn` invocations made, valid and invalid alike.  Each costs
-    /// up to three FD solves (base plus two sigma bumps); an attempt that
-    /// fails on the base solve costs fewer, so `3 * ref_attempts` is an upper
-    /// bound on the build's validation cost.
+    /// `PrepareRefsFn` invocations made, valid and invalid alike.  This
+    /// counts preparations, not PDE solves: how many solves one preparation
+    /// runs depends on the factory, and an attempt that stops at the base
+    /// solve runs fewer.  `ReferenceSolveCounter` is what records the solves.
     size_t ref_attempts = 0;
 };
 

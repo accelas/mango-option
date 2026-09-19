@@ -155,10 +155,11 @@ PrepareRefsFn make_stencil_refs_fn(const AdaptiveGridParams& params,
                                    std::shared_ptr<ReferenceSolveCounter> counter,
                                    StencilSolveFn solve = {});
 
-/// The D2 separation inequalities alone, on already-prepared refs: all six
-/// numbers finite and the three estimated price intervals separated in the
-/// expected order. Target validity (`validate_iv_query`) is checked
-/// separately, at preparation, because it needs the contract.
+/// The D2 separation inequalities alone, on already-prepared refs: all three
+/// prices and all three estimates finite, and the three estimated price
+/// intervals separated in the expected order. Target validity
+/// (`validate_iv_query`) is checked separately, at preparation, because it
+/// needs the contract.
 bool stencil_resolved(const ErrorRefs& r) noexcept;
 
 }  // namespace mango
