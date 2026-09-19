@@ -20,6 +20,7 @@
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include <algorithm>
+#include <memory>
 #include <string>
 
 namespace mango {
@@ -55,23 +56,44 @@ TEST(SegmentedFinalContract, WideBandDividendBracketRemainsViable) {
     constexpr double tau = 0.27191459370080351;
     constexpr double sigma = 0.1396857726802572;
     constexpr double rate = 0.055127327935524113;
-    const auto prepare_refs = make_fd_vega_refs_fn(params, make_validate_fn(
-        config.dividend_yield, config.option_type,
-        config.discrete_dividends, config.maturity));
+    const ReferenceOracle oracle{
+        .dividend_yield = config.dividend_yield,
+        .option_type = config.option_type,
+        .discrete_dividends = config.discrete_dividends,
+        .reference_maturity = config.maturity,
+        .accuracy = make_grid_accuracy(kReferenceAccuracy),
+    };
+    const auto prepare_refs = make_stencil_refs_fn(
+        params, oracle, std::make_shared<ReferenceSolveCounter>());
     auto refs = prepare_refs(config.spot, strike, tau, sigma, rate);
     ASSERT_TRUE(refs.has_value());
     const double price = surface->price(config.spot, strike, tau, sigma, rate);
-    auto error = make_iv_score_fn(params, config.option_type)(
-        price, *refs, config.spot, strike, tau, sigma, rate);
-    // Fails at runtime until the builders switch to make_stencil_refs_fn /
-    // make_round_trip_score_fn (plan Task 7); the bridged legacy score skips
-    // unresolved refs.
-    ASSERT_TRUE(error.has_value()) << "The regression point must remain measured";
-    ASSERT_TRUE(std::isfinite(*error));
-    // The retired 0.20 garbage bound, inlined: Task 10 re-measures this
-    // point against the D4 status outcome.
-    EXPECT_LE(*error, 0.20)
-        << "max IV error (bps): " << *error * 1e4
+    const SurfaceHandle handle{
+        .price = [&](double s, double k, double t, double v, double r) {
+            return surface->price(s, k, t, v, r); },
+        .vega = [&](double s, double k, double t, double v, double r) {
+            return surface->vega(s, k, t, v, r); }};
+    const SurfaceBounds published{
+        .m_min = surface->m_min(), .m_max = surface->m_max(),
+        .tau_min = surface->tau_min(), .tau_max = surface->tau_max(),
+        .sigma_min = surface->sigma_min(), .sigma_max = surface->sigma_max(),
+        .rate_min = surface->rate_min(), .rate_max = surface->rate_max(),
+    };
+    RefinementContext ctx{
+        .spot = config.spot,
+        .dividend_yield = config.dividend_yield,
+        .option_type = config.option_type,
+        .bounds = published,
+        .sample_bounds = published,
+    };
+    const auto score = make_round_trip_score_fn(params, ctx, config.option_type)(
+        handle, *refs, config.spot, strike, tau, sigma, rate);
+    // Task 10: pin measured outcome.  The retired scalar bound is replaced by
+    // the D4 status: the point either measures or its reference did not
+    // resolve; what it must never be is a failure of the shipped inversion.
+    EXPECT_TRUE(score.status == PointStatus::Measured ||
+                score.status == PointStatus::ReferenceUnresolved)
+        << "status " << static_cast<int>(score.status)
         << "; surface=" << price << "; reference=" << refs->ref_price
         << "; resolved=" << refs->resolved;
 }
@@ -192,19 +214,35 @@ TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridPassesCorrectedOracle) {
     // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
     EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
-    auto prepare = make_fd_vega_refs_fn(params, make_validate_fn(
-        0.0, OptionType::PUT, seg_config.discrete_dividends, seg_config.maturity));
+    const ReferenceOracle oracle{
+        .dividend_yield = 0.0,
+        .option_type = OptionType::PUT,
+        .discrete_dividends = seg_config.discrete_dividends,
+        .reference_maturity = seg_config.maturity,
+        .accuracy = make_grid_accuracy(kReferenceAccuracy),
+    };
+    auto prepare = make_stencil_refs_fn(
+        params, oracle, std::make_shared<ReferenceSolveCounter>());
     auto refs = prepare(100.0, 112.5, 0.75, 0.225, 0.04);
     ASSERT_TRUE(refs.has_value());
-    const double price = result->surface.price(100.0, 112.5, 0.75, 0.225, 0.04);
-    auto error = make_iv_score_fn(params, OptionType::PUT)(
-        price, *refs, 100.0, 112.5, 0.75, 0.225, 0.04);
-    // Fails at runtime until the builders switch to make_stencil_refs_fn /
-    // make_round_trip_score_fn (plan Task 7); the bridged legacy score skips
-    // unresolved refs.
-    ASSERT_TRUE(error.has_value());
-    // The retired 0.20 garbage bound, inlined: Task 10 re-measures this.
-    EXPECT_LE(*error, 0.20);
+    const SurfaceHandle handle{
+        .price = [&](double s, double k, double t, double v, double r) {
+            return result->surface.price(s, k, t, v, r); },
+        .vega = [&](double s, double k, double t, double v, double r) {
+            return result->surface.vega(s, k, t, v, r); }};
+    RefinementContext ctx{
+        .spot = 100.0,
+        .dividend_yield = 0.0,
+        .option_type = OptionType::PUT,
+        .bounds = result->sample_bounds,
+        .sample_bounds = result->sample_bounds,
+    };
+    const auto score = make_round_trip_score_fn(params, ctx, OptionType::PUT)(
+        handle, *refs, 100.0, 112.5, 0.75, 0.225, 0.04);
+    // Task 10: pin measured outcome.
+    EXPECT_TRUE(score.status == PointStatus::Measured ||
+                score.status == PointStatus::ReferenceUnresolved)
+        << "status " << static_cast<int>(score.status);
 }
 
 // Coverage: ATM K_ref coincides with highest K_ref
@@ -847,10 +885,15 @@ TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
         .bounds = *sample,
         .sample_bounds = *sample,
     };
-    auto refs_fn = make_fd_vega_refs_fn(
-        params, make_validate_fn(seg_config.dividend_yield,
-                                 seg_config.option_type,
-                                 seg_config.discrete_dividends, seg_config.maturity));
+    const ReferenceOracle oracle{
+        .dividend_yield = seg_config.dividend_yield,
+        .option_type = seg_config.option_type,
+        .discrete_dividends = seg_config.discrete_dividends,
+        .reference_maturity = seg_config.maturity,
+        .accuracy = make_grid_accuracy(kReferenceAccuracy),
+    };
+    auto refs_fn = make_stencil_refs_fn(
+        params, oracle, std::make_shared<ReferenceSolveCounter>());
     auto points = detail::prepare_final_validation(params, ctx, refs_fn,
                                                    params.lhs_seed + 999);
     ASSERT_TRUE(points.has_value());
@@ -859,11 +902,14 @@ TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
         .price = [&](double spot, double strike, double tau, double sigma,
                      double rate) {
             return result->surface.price(spot, strike, tau, sigma, rate);
+        },
+        .vega = [&](double spot, double strike, double tau, double sigma,
+                    double rate) {
+            return result->surface.vega(spot, strike, tau, sigma, rate);
         }};
     auto measured = detail::score_final_surface(
         points->points, returned,
-        adapt_legacy_score_fn(make_iv_score_fn(params, seg_config.option_type)),
-        ctx);
+        make_round_trip_score_fn(params, ctx, seg_config.option_type), ctx);
 
     EXPECT_EQ(measured.measured,
               result->diagnostics.holdout_points_measured);

@@ -18,6 +18,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <memory>
 
 namespace mango {
 namespace {
@@ -765,10 +766,15 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
         .bounds = *sample,
         .sample_bounds = *sample,
     };
-    auto validate_fn = make_validate_fn(seg_config.dividend_yield,
-                                        seg_config.option_type,
-                                        seg_config.discrete_dividends, seg_config.maturity);
-    auto refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+    const ReferenceOracle oracle{
+        .dividend_yield = seg_config.dividend_yield,
+        .option_type = seg_config.option_type,
+        .discrete_dividends = seg_config.discrete_dividends,
+        .reference_maturity = seg_config.maturity,
+        .accuracy = make_grid_accuracy(kReferenceAccuracy),
+    };
+    auto refs_fn = make_stencil_refs_fn(
+        params, oracle, std::make_shared<ReferenceSolveCounter>());
     auto points = detail::prepare_final_validation(params, ctx, refs_fn,
                                                    params.lhs_seed + 999);
     ASSERT_TRUE(points.has_value());
@@ -777,11 +783,14 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
         .price = [&](double spot, double strike, double tau, double sigma,
                      double rate) {
             return result->surface.price(spot, strike, tau, sigma, rate);
+        },
+        .vega = [&](double spot, double strike, double tau, double sigma,
+                    double rate) {
+            return result->surface.vega(spot, strike, tau, sigma, rate);
         }};
     auto measured = detail::score_final_surface(
         points->points, returned,
-        adapt_legacy_score_fn(make_iv_score_fn(params, seg_config.option_type)),
-        ctx);
+        make_round_trip_score_fn(params, ctx, seg_config.option_type), ctx);
 
     EXPECT_EQ(measured.measured,
               result->diagnostics.holdout_points_measured);
@@ -1179,6 +1188,80 @@ TEST(SegmentedKnotRetention, ReturnedGridKeepsSeedKnotPositions) {
         EXPECT_TRUE(contains(result->grid.moneyness, m))
             << "moneyness seed knot " << m << " was lost by aggregation";
     }
+}
+
+// ===========================================================================
+// Segmented Chebyshev sizing loop: probe contract and maturity support
+// ===========================================================================
+
+// One off-ATM reference-strike pair and one cash dividend, shared by the two
+// tests below.  No K_ref sits at the spot, so a sizing handle scored on the
+// user's contract would carry the dividend-scaling residual described in
+// spec D1/L6.
+SegmentedAdaptiveConfig probe_contract_config() {
+    return SegmentedAdaptiveConfig{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 1.50}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {95.0, 105.0}},
+    };
+}
+
+IVGrid probe_contract_domain() {
+    return IVGrid{
+        .moneyness = {std::log(100.0 / 108.0), std::log(100.0 / 92.0)},
+        .vol = {0.15, 0.35},
+        .rate = {0.02, 0.06},
+    };
+}
+
+// Regression: the segmented Chebyshev sizing loop scored a K_ref-scaled leaf
+// against a reference solved on the user's contract, so with a non-ATM strike
+// and a cash dividend the loop chased a dividend-scaling residual.
+// Bug: no probe adapter on the Chebyshev sizing path (the B-spline probe loop
+// had one).
+TEST(SegmentedChebyshevAdaptive, SizingReferencesLiveOnProbeContract) {
+    AdaptiveGridParams params{.target_iv_error = 1e-3, .max_iter = 2,
+                              .validation_samples = 16};
+    const auto cfg = probe_contract_config();
+    const auto domain = probe_contract_domain();
+
+    auto result = build_adaptive_chebyshev_segmented(params, cfg, domain);
+    ASSERT_TRUE(result.has_value())
+        << "code " << static_cast<int>(result.error().code);
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
+    EXPECT_GT(result->diagnostics.holdout_points_measured, 0u);
+    // The stencil runs six solves per preparation, so a wired-up builder
+    // reports reference solves on both grid levels.
+    EXPECT_GT(result->diagnostics.reference_solves_fine, 0u);
+    EXPECT_GT(result->diagnostics.reference_solves_coarse, 0u);
+}
+
+// Spec D4: event-gap maturities are excluded before preparation, not scored
+// as defects.  The dividend at calendar time 0.5 of a 1y contract puts the
+// event at tau = 0.5, and `compute_segment_boundaries` opens a +-5e-4 gap
+// there; the sizing loop's holdout draw must skip whatever lands inside it.
+//
+// The seed is pinned, not arbitrary: the holdout draw is
+// `latin_hypercube_4d(16, lhs_seed ^ 0x484F4C44)` scaled to the sample
+// domain's tau range [0.01, 1.0], and seed 27 is the first seed whose draw
+// puts exactly one sample inside the gap.  The observed count is that one
+// sample.
+TEST(SegmentedChebyshevAdaptive, EventGapSamplesAreUnsupportedNotFailures) {
+    AdaptiveGridParams params{.target_iv_error = 1e-3, .max_iter = 2,
+                              .validation_samples = 16, .lhs_seed = 27};
+    const auto cfg = probe_contract_config();
+    const auto domain = probe_contract_domain();
+
+    auto result = build_adaptive_chebyshev_segmented(params, cfg, domain);
+    ASSERT_TRUE(result.has_value())
+        << "code " << static_cast<int>(result.error().code);
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
+    // An excluded maturity is neither a reference nor a defect.
+    EXPECT_EQ(result->diagnostics.holdout_points_unsupported, 1u);
+    EXPECT_GT(result->diagnostics.holdout_points_measured, 0u);
 }
 
 }  // namespace
