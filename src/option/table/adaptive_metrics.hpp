@@ -48,6 +48,16 @@ PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& params,
 LegacyScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
                                     OptionType option_type);
 
+/// Temporary: deleted in Task 7.
+///
+/// Presents a `LegacyScoreErrorFn` through the `ScoreErrorFn` seam the loop
+/// now consumes, so the builders keep compiling while they still hand out the
+/// legacy metric.  It prices the handle itself, maps a skip to
+/// `PointStatus::ReferenceUnresolved` and a value to `PointStatus::Measured`,
+/// and reports the price residual the legacy metric never computed.  It never
+/// touches `SurfaceHandle::vega`, which the builders do not yet supply.
+ScoreErrorFn adapt_legacy_score_fn(LegacyScoreErrorFn legacy);
+
 /// Round-trip score for one validation point (spec D3).
 ///
 /// Runs the product inversion (`invert_price_on_surface`) on the candidate

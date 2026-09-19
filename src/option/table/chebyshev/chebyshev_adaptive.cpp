@@ -798,7 +798,9 @@ build_adaptive_chebyshev(
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
 
     auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
-    auto score_fn = make_iv_score_fn(params, type);
+    // Temporary: deleted in Task 7, when the builders move to the round-trip
+    // score and supply a handle with a vega.
+    auto score_fn = adapt_legacy_score_fn(make_iv_score_fn(params, type));
 
     // Seed initial grids: CC-level nodes for all dimensions (nested)
     InitialGrids initial;
@@ -1044,7 +1046,9 @@ ChebyshevSegmentedBuilder::build_adaptive(
         config_.dividend_yield, config_.option_type, config_.discrete_dividends,
         config_.maturity);
     auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
-    auto score_fn = make_iv_score_fn(params, config_.option_type);
+    // Temporary: deleted in Task 7.
+    auto score_fn =
+        adapt_legacy_score_fn(make_iv_score_fn(params, config_.option_type));
 
     InitialGrids initial;
     initial.moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
@@ -1135,8 +1139,7 @@ ChebyshevSegmentedBuilder::build_adaptive(
     diagnostics.monotonicity_points_invalid = 0;
     diagnostics.worst_vega_slope = 0.0;
     detail::scan_monotonicity(validation->points, final_handle, ctx,
-                              params.target_iv_error, params.vega_floor,
-                              diagnostics);
+                              params.target_iv_error, diagnostics);
 
     return ChebyshevSegmentedAdaptiveResult{
         .surface = std::move(surface->surface),

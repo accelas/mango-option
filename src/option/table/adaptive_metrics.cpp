@@ -5,8 +5,10 @@
 #include "mango/option/surface_inversion.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <utility>
 
 namespace mango {
 
@@ -187,6 +189,33 @@ LegacyScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
 
         double price_error = std::abs(interp - refs.ref_price);
         return compute_iv_error(price_error, secant, vega_floor, target);
+    };
+}
+
+// Temporary: deleted in Task 7.
+ScoreErrorFn adapt_legacy_score_fn(LegacyScoreErrorFn legacy) {
+    return [legacy = std::move(legacy)](
+        const SurfaceHandle& surface, const ErrorRefs& refs,
+        double spot, double strike, double tau, double sigma, double rate) -> PointScore
+    {
+        PointScore out;
+        const double interp = surface.price
+            ? surface.price(spot, strike, tau, sigma, rate)
+            : std::numeric_limits<double>::quiet_NaN();
+        const auto err = legacy(interp, refs, spot, strike, tau, sigma, rate);
+        if (std::isfinite(interp) && std::isfinite(refs.ref_price)) {
+            out.price_residual = std::abs(interp - refs.ref_price) / strike;
+        }
+        // The legacy skip says only that the metric is undefined here, which
+        // is what `ReferenceUnresolved` means: no evidence either way, and
+        // never a defect charged to the surface.
+        if (!err.has_value()) {
+            out.status = PointStatus::ReferenceUnresolved;
+            return out;
+        }
+        out.status = PointStatus::Measured;
+        out.iv_error = *err;
+        return out;
     };
 }
 

@@ -52,7 +52,8 @@ TEST_P(SegmentedDividendPlacement, BuildsAndPricesAcrossExactEventBoundaries) {
     ASSERT_TRUE(result.has_value())
         << "code " << static_cast<int>(result.error().code);
     EXPECT_TRUE(std::isfinite(result->achieved_max_error));
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_GT(result->diagnostics.holdout_points_measured, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 
@@ -265,7 +266,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value());
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 }
 
@@ -369,7 +371,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 }
 
@@ -434,7 +437,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 }
 
@@ -469,7 +473,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 }
 
@@ -740,7 +745,8 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
     EXPECT_DOUBLE_EQ(result->diagnostics.achieved_avg_error,
                      result->achieved_avg_error);
     EXPECT_GT(result->diagnostics.holdout_points, 0u);
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
 
     // Reproduce the builder's final validation set exactly (same sample
     // domain, same seed, same references) and re-score the surface we were
@@ -773,7 +779,8 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
             return result->surface.price(spot, strike, tau, sigma, rate);
         }};
     auto measured = detail::score_final_surface(
-        points->points, returned, make_iv_score_fn(params, seg_config.option_type),
+        points->points, returned,
+        adapt_legacy_score_fn(make_iv_score_fn(params, seg_config.option_type)),
         ctx);
 
     EXPECT_EQ(measured.measured,

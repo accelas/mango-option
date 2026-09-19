@@ -170,8 +170,8 @@ struct BuildDiagnostics {
     size_t holdout_points_measured = 0;
     /// Holdout points whose FD reference never resolved (PointStatus::ReferenceUnresolved).
     size_t holdout_points_unresolved = 0;
-    /// Holdout points whose reference resolved but the round-trip metric
-    /// found no supported inversion for them (e.g. vega floor).
+    /// Holdout samples excluded by the maturity-support predicate before any
+    /// reference was drawn (spec D4): not references, and not defects.
     size_t holdout_points_unsupported = 0;
     /// Holdout points where the round-trip inversion of the returned
     /// surface's own price failed (is_surface_failure() held).

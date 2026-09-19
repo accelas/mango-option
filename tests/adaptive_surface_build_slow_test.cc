@@ -68,7 +68,9 @@ TEST(SegmentedFinalContract, WideBandDividendBracketRemainsViable) {
     // unresolved refs.
     ASSERT_TRUE(error.has_value()) << "The regression point must remain measured";
     ASSERT_TRUE(std::isfinite(*error));
-    EXPECT_LE(*error, kViabilityBound)
+    // The retired 0.20 garbage bound, inlined: Task 10 re-measures this
+    // point against the D4 status outcome.
+    EXPECT_LE(*error, 0.20)
         << "max IV error (bps): " << *error * 1e4
         << "; surface=" << price << "; reference=" << refs->ref_price
         << "; resolved=" << refs->resolved;
@@ -107,7 +109,8 @@ TEST(AdaptiveGridBuilderTest, StableFittingReportsShortTauBestEffortAccuracy) {
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value()) << result.error();
     EXPECT_EQ(result->target_met, result->achieved_max_error <= params.target_iv_error);
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_measured, 15u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
     const double at_reference = result->surface.price(100.0, 100.0, 0.75, 0.20, 0.05);
@@ -186,7 +189,8 @@ TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridPassesCorrectedOracle) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
     auto prepare = make_fd_vega_refs_fn(params, make_validate_fn(
         0.0, OptionType::PUT, seg_config.discrete_dividends, seg_config.maturity));
@@ -199,7 +203,8 @@ TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridPassesCorrectedOracle) {
     // make_round_trip_score_fn (plan Task 7); the bridged legacy score skips
     // unresolved refs.
     ASSERT_TRUE(error.has_value());
-    EXPECT_LE(*error, kViabilityBound);
+    // The retired 0.20 garbage bound, inlined: Task 10 re-measures this.
+    EXPECT_LE(*error, 0.20);
 }
 
 // Coverage: ATM K_ref coincides with highest K_ref
@@ -822,7 +827,8 @@ TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
     EXPECT_EQ(result->diagnostics.target_met, result->target_met);
     // The gate refuses anything above the viability bound, so a returned
     // surface is always within it.
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_TRUE(std::isfinite(result->achieved_max_error));
 
     // Re-score the surface we were handed on an independently reproduced
@@ -856,7 +862,8 @@ TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
         }};
     auto measured = detail::score_final_surface(
         points->points, returned,
-        make_iv_score_fn(params, seg_config.option_type), ctx);
+        adapt_legacy_score_fn(make_iv_score_fn(params, seg_config.option_type)),
+        ctx);
 
     EXPECT_EQ(measured.measured,
               result->diagnostics.holdout_points_measured);

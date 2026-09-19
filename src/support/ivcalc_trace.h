@@ -43,6 +43,8 @@
 #define DTRACE_PROBE4(provider, probe, arg1, arg2, arg3, arg4) do {} while(0)
 #define DTRACE_PROBE5(provider, probe, arg1, arg2, arg3, arg4, arg5) do {} while(0)
 #define DTRACE_PROBE6(provider, probe, arg1, arg2, arg3, arg4, arg5, arg6) do {} while(0)
+#define DTRACE_PROBE7(provider, probe, arg1, arg2, arg3, arg4, arg5, arg6, arg7) do {} while(0)
+#define DTRACE_PROBE8(provider, probe, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) do {} while(0)
 #endif
 
 /**
@@ -308,6 +310,52 @@ enum class NormalizedIneligibilityReason {
  */
 #define MANGO_TRACE_VALIDATION_NO_REFINEMENT(iteration, reason) \
     DTRACE_PROBE2(MANGO_PROVIDER, validation_no_refine, iteration, reason)
+
+/**
+ * Adaptive-refinement validation-set identifiers (spec D2)
+ */
+#define ADAPTIVE_SET_HOLDOUT 1
+#define ADAPTIVE_SET_FINAL   2
+
+/**
+ * Adaptive-refinement stage identifiers (spec D7)
+ */
+#define ADAPTIVE_STAGE_LOOP  1
+#define ADAPTIVE_STAGE_FINAL 2
+#define ADAPTIVE_STAGE_RETRY 3
+
+/**
+ * Fired when a validation set is too thin to measure a surface (spec D2)
+ *
+ * The refusal itself is a PriceTableError with no room for these counts, so
+ * the probe is where the coverage outcome is reported.
+ *
+ * @param set: ADAPTIVE_SET_* identifier of the refused set
+ * @param requested: Validation samples requested
+ * @param prepared: Samples whose reference preparation produced a finite price
+ * @param resolved: Of those, the ones the oracle resolved (spec D2)
+ * @param unsupported: Samples excluded by the maturity-support predicate
+ */
+#define MANGO_TRACE_ADAPTIVE_VALIDATION_REFUSED(set, requested, prepared, resolved, unsupported) \
+    DTRACE_PROBE5(MANGO_PROVIDER, adaptive_validation_refused, set, requested, prepared, resolved, unsupported)
+
+/**
+ * Fired when no candidate surface is viable (spec D7)
+ *
+ * Carries the per-status outcome totals accumulated over every candidate, so
+ * a universal refusal keeps its evidence without widening the returned error.
+ *
+ * @param stage: ADAPTIVE_STAGE_* identifier
+ * @param candidates: Candidates considered
+ * @param no_root: Points whose inversion found no root
+ * @param ambiguous: Points whose inversion found more than one root
+ * @param nonconv: Points whose inversion exhausted its iteration budget
+ * @param nonfinite: Points where the surface produced a non-finite number
+ * @param vega: Points refused by the inversion's vega pre-check
+ * @param rescues: Points scored through the edge-band rescue path
+ */
+#define MANGO_TRACE_ADAPTIVE_NO_VIABLE_SURFACE(stage, candidates, no_root, ambiguous, nonconv, nonfinite, vega, rescues) \
+    DTRACE_PROBE8(MANGO_PROVIDER, adaptive_no_viable_surface, stage, candidates, no_root, ambiguous, nonconv, nonfinite, vega, rescues)
 
 /**
  * ============================================================================

@@ -917,31 +917,45 @@ RefinementContext make_score_ctx() {
     };
 }
 
-/// A LegacyScoreErrorFn that returns |interp| verbatim, so a test can dictate
-/// the exact error at every point through the surface handle.
-LegacyScoreErrorFn passthrough_score() {
-    return [](double interp, const ErrorRefs&, double, double, double,
-              double, double) -> std::optional<double> { return interp; };
+/// A ScoreErrorFn that reports the surface's own price as the error, so a
+/// test can dictate the exact error at every point through the handle.
+ScoreErrorFn passthrough_score() {
+    return [](const SurfaceHandle& handle, const ErrorRefs&, double spot,
+              double strike, double tau, double sigma,
+              double rate) -> PointScore {
+        return PointScore{
+            .status = PointStatus::Measured,
+            .iv_error = handle.price(spot, strike, tau, sigma, rate),
+            .price_residual = 0.0};
+    };
 }
 
-/// Like `passthrough_score`, but skips every `period`-th point the way the
-/// TV/K and vega-floor filters do (spec D4: nullopt, not zero).
-LegacyScoreErrorFn filtering_score(size_t period,
-                                   const std::shared_ptr<size_t>& calls) {
-    return [period, calls](double interp, const ErrorRefs&, double, double,
-                           double, double, double) -> std::optional<double> {
-        if ((*calls)++ % period == 0) return std::nullopt;
-        return interp;
+/// Like `passthrough_score`, but reports every `period`-th point as an
+/// unresolved reference (spec D2: an outcome, not a zero error).
+ScoreErrorFn filtering_score(size_t period,
+                             const std::shared_ptr<size_t>& calls) {
+    return [period, calls](const SurfaceHandle& handle, const ErrorRefs&,
+                           double spot, double strike, double tau,
+                           double sigma, double rate) -> PointScore {
+        if ((*calls)++ % period == 0) {
+            return PointScore{.status = PointStatus::ReferenceUnresolved};
+        }
+        return PointScore{
+            .status = PointStatus::Measured,
+            .iv_error = handle.price(spot, strike, tau, sigma, rate),
+            .price_residual = 0.0};
     };
 }
 
 detail::FinalScore score_of(double max_error, bool all_finite = true,
-                            size_t measured = 8) {
+                            size_t measured = 8,
+                            size_t surface_failures = 0) {
     detail::FinalScore s;
     s.max_error = max_error;
     s.avg_error = max_error;
     s.measured = measured;
     s.all_finite = all_finite;
+    s.surface_failures = surface_failures;
     return s;
 }
 
@@ -974,12 +988,14 @@ TEST(SegmentedFinalContract, PerfectSurfaceCountsEveryScoredPoint) {
 TEST(SegmentedFinalContract, NonFiniteEvaluationIsNotViable) {
     const auto pts = make_points(8);
     const auto ctx = make_score_ctx();
-    size_t calls = 0;
+    // Keyed on the point's sigma, not on a call counter: `score_final_surface`
+    // prices each point once for the finite check and once inside the score.
     const SurfaceHandle flaky{
-        .price = [&calls](double, double, double, double, double) {
-            return (calls++ % 2 == 0)
-                ? 0.001
-                : std::numeric_limits<double>::quiet_NaN();
+        .price = [](double, double, double, double sigma, double) {
+            const auto index =
+                static_cast<long>(std::lround((sigma - 0.20) * 100.0));
+            return (index % 2 == 0) ? 0.001
+                                    : std::numeric_limits<double>::quiet_NaN();
         }};
 
     auto s = detail::score_final_surface(pts, flaky, passthrough_score(), ctx);
@@ -1004,7 +1020,7 @@ TEST(SegmentedFinalContract, SparseReferencesFailValidation) {
     PrepareRefsFn mostly_failing =
         [&calls](double, double, double, double, double)
         -> std::expected<ErrorRefs, SolverError> {
-        if (calls++ < 3) return ErrorRefs{.ref_price = 10.0};
+        if (calls++ < 3) return ErrorRefs{.ref_price = 10.0, .resolved = true};
         return std::unexpected(SolverError{SolverErrorCode::ConvergenceFailure});
     };
 
@@ -1017,7 +1033,7 @@ TEST(SegmentedFinalContract, SparseReferencesFailValidation) {
     calls = 0;
     PrepareRefsFn four_ok = [&calls](double, double, double, double, double)
         -> std::expected<ErrorRefs, SolverError> {
-        if (calls++ < 4) return ErrorRefs{.ref_price = 10.0};
+        if (calls++ < 4) return ErrorRefs{.ref_price = 10.0, .resolved = true};
         return std::unexpected(SolverError{SolverErrorCode::ConvergenceFailure});
     };
     auto ok = detail::prepare_final_validation(params, ctx, four_ok,
@@ -1039,7 +1055,7 @@ TEST(SegmentedFinalContract, ReferencesExcludeUnsupportedMaturities) {
         -> std::expected<ErrorRefs, SolverError> {
         EXPECT_GE(tau, 0.3);
         ++calls;
-        return ErrorRefs{.ref_price = 10.0};
+        return ErrorRefs{.ref_price = 10.0, .resolved = true};
     };
     auto set = detail::prepare_final_validation(params, ctx, refs,
                                                params.lhs_seed + 999);
@@ -1077,30 +1093,39 @@ TEST(SegmentedFinalContract, SelectionKeepsOriginalWhenRetryIsWorse) {
               detail::FinalPick::Retry);
 }
 
-// A non-viable original is never returned, even when the retry is worse than
-// the target -- viability, not accuracy, decides admissibility.
+// A surface the shipped inversion failed on is never returned, even when its
+// error number is the lower one -- viability, not accuracy, decides
+// admissibility (spec D4).
 TEST(SegmentedFinalContract, SelectionPrefersViableOverLowerError) {
-    const auto garbage = score_of(5.0);          // > kViabilityBound
-    const auto mediocre = score_of(0.05);        // viable, misses a tight target
+    const auto garbage = score_of(0.001, true, 8, /*surface_failures=*/1);
+    const auto mediocre = score_of(0.05);  // viable, misses a tight target
+    ASSERT_FALSE(garbage.viable());
 
     EXPECT_EQ(detail::select_final_surface(garbage, mediocre),
               detail::FinalPick::Retry);
     EXPECT_EQ(detail::select_final_surface(mediocre, garbage),
               detail::FinalPick::Original);
-    EXPECT_EQ(detail::select_final_surface(garbage, score_of(6.0)),
+    EXPECT_EQ(detail::select_final_surface(garbage, score_of(6.0, true, 8, 2)),
               detail::FinalPick::None)
         << "both non-viable must refuse, not return the lesser garbage";
     EXPECT_EQ(detail::select_final_surface(garbage, std::nullopt),
               detail::FinalPick::None);
 }
 
-// A loose target does not admit a garbage surface: the retry is still tried
-// even though the original's max error is nominally "under target".
-TEST(SegmentedFinalContract, LooseTargetStillRetriesNonViableOriginal) {
-    const auto orig = score_of(0.30);  // <= 0.5 target, > 0.20 viability bound
-    EXPECT_LE(orig.max_error, 0.5);
-    EXPECT_FALSE(orig.viable());
-    EXPECT_TRUE(detail::needs_final_retry(orig, 0.5));
+// Spec D4: a finite error with no surface failure is a best-effort surface,
+// however large -- viable, and retried only when it misses the target.
+TEST(SegmentedFinalContract, LargeFiniteErrorIsViableBestEffort) {
+    const auto best_effort = score_of(0.30);  // above the retired 0.20 bound
+    EXPECT_TRUE(best_effort.viable());
+    EXPECT_FALSE(detail::needs_final_retry(best_effort, 0.5));
+    EXPECT_TRUE(detail::needs_final_retry(best_effort, 0.01));
+    EXPECT_EQ(detail::select_final_surface(best_effort, std::nullopt),
+              detail::FinalPick::Original);
+
+    // A surface failure, on the other hand, is retried under any target.
+    const auto failing = score_of(0.30, true, 8, /*surface_failures=*/1);
+    EXPECT_FALSE(failing.viable());
+    EXPECT_TRUE(detail::needs_final_retry(failing, 0.5));
 
     // And a strict target retries a perfectly viable surface too.
     const auto good = score_of(0.001);
@@ -1117,16 +1142,16 @@ TEST(SegmentedFinalContract, NoMeasuredPointsIsNotViable) {
               detail::FinalPick::None);
 }
 
-// Regression: filtered points are not measurements.
+// Regression: unresolved points are not measurements.
 // Bug: the score fn returned 0.0 where the TV/K or vega-floor filter fired,
-// so a filtered point entered the average as a perfect score and counted
-// toward "at least one measurement".  A surface filtered everywhere reported
+// so an unmeasurable point entered the average as a perfect score and counted
+// toward "at least one measurement".  A surface unmeasured everywhere reported
 // max 0 / avg 0 and passed the viability gate having been measured nowhere
 // (final-review amendment 2026-08-29).
-TEST(SegmentedFinalContract, FilteredPointsEnterNoStatistic) {
+TEST(SegmentedFinalContract, UnresolvedPointsEnterNoStatistic) {
     const auto pts = make_points(8);
     const auto ctx = make_score_ctx();
-    // Every point would score 0.10; half of them are filtered out.
+    // Every point would score 0.10; half of them report an unresolved reference.
     const SurfaceHandle flat{
         .price = [](double, double, double, double, double) { return 0.10; }};
 
@@ -1135,18 +1160,18 @@ TEST(SegmentedFinalContract, FilteredPointsEnterNoStatistic) {
                                          ctx);
 
     EXPECT_EQ(s.measured, 4u);
-    EXPECT_EQ(s.filtered, 4u);
+    EXPECT_EQ(s.unresolved, 4u);
     EXPECT_EQ(s.skipped, 0u);
     EXPECT_TRUE(s.all_finite);
-    // Averaged over the measured points only -- a filtered point pulled the
+    // Averaged over the measured points only -- an unresolved point pulled the
     // average toward zero before.
     EXPECT_DOUBLE_EQ(s.max_error, 0.10);
     EXPECT_DOUBLE_EQ(s.avg_error, 0.10);
     EXPECT_TRUE(s.viable());
 }
 
-// And with *every* point filtered there is nothing to certify.
-TEST(SegmentedFinalContract, FullyFilteredSurfaceIsNotViable) {
+// And with *every* point unresolved there is nothing to certify.
+TEST(SegmentedFinalContract, FullyUnresolvedSurfaceIsNotViable) {
     const auto pts = make_points(8);
     const auto ctx = make_score_ctx();
     const SurfaceHandle flat{
@@ -1157,7 +1182,7 @@ TEST(SegmentedFinalContract, FullyFilteredSurfaceIsNotViable) {
                                          ctx);
 
     EXPECT_EQ(s.measured, 0u);
-    EXPECT_EQ(s.filtered, pts.size());
+    EXPECT_EQ(s.unresolved, pts.size());
     EXPECT_DOUBLE_EQ(s.max_error, 0.0);
     EXPECT_FALSE(s.viable())
         << "a max of zero over an empty measurement set certifies nothing";

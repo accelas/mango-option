@@ -3,7 +3,9 @@
 #include "mango/math/latin_hypercube.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/dividend_utils.hpp"
+#include "mango/support/ivcalc_trace.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <chrono>
 #include <limits>
@@ -27,14 +29,31 @@ using HoldoutPoint = detail::ValidationPoint;
 struct SampleEval {
     double max_error = 0.0;
     double avg_error = 0.0;
-    /// Samples whose score engaged and produced a usable error.  Points the
-    /// score fn deliberately skipped (TV/K or vega floor) are not counted
-    /// here: they are not measurements of this surface.
+    /// Samples the score reported `Measured` on, with a usable error.  Points
+    /// whose reference never resolved, and points where the shipped inversion
+    /// failed, are not counted here: neither is a measurement of this surface.
     size_t measured = 0;
     size_t pde_solves_validation = 0;
+    /// Samples whose reference did not resolve (spec D2).
+    size_t unresolved = 0;
+    /// Samples excluded by the maturity-support predicate (spec D4).  Not
+    /// references, not unresolved points, not defects of the candidate.
+    size_t unsupported = 0;
+    /// Samples where `is_surface_failure()` held: an outcome of the shipped
+    /// inversion on this surface, never converted into an error number.
+    size_t surface_failures = 0;
+    /// Samples scored through the edge-band rescue path (diagnostic, D3).
+    size_t edge_band_rescues = 0;
+    /// Largest |S - V̂|/K residual, over every point that produced one.
+    double max_price_residual = 0.0;
+    /// Largest finite reference-error *estimate* among the points; 0 if none.
+    double max_delta = 0.0;
+    /// Measured errors above target, plus every surface failure (spec D4).
     ErrorBins error_bins;
+    /// Per-outcome totals, for the refusal probe (spec D7).
+    PointStatusCounts status_counts = {};
     /// False when any evaluation produced a non-finite price/score or a
-    /// negative score (spec D5 viability).
+    /// negative score (spec D4 viability).
     bool all_finite = true;
 };
 
@@ -45,11 +64,57 @@ struct Candidate {
     double holdout_max = std::numeric_limits<double>::quiet_NaN();
     double holdout_avg = std::numeric_limits<double>::quiet_NaN();
     size_t holdout_measured = 0;  ///< holdout points that actually measured it
+    size_t holdout_failures = 0;  ///< holdout points the inversion failed on
+    /// The candidate's holdout evaluation, kept whole so the returned
+    /// candidate's diagnostics describe the surface the caller receives.
+    SampleEval holdout_eval;
+    /// Outcome totals over both passes, for the refusal probe (spec D7).
+    PointStatusCounts status_counts = {};
+    /// Edge-band rescues over both passes (diagnostic, spec D3).
+    size_t edge_band_rescues = 0;
     ErrorBins bins;
     size_t iteration = 0;
     bool viable = false;
     bool fresh_converged = false;
 };
+
+/// Candidate ordering (spec D4): fewer holdout surface failures first, then a
+/// lower holdout max, then a lower holdout average, then the earlier
+/// iteration.  Fresh failures veto viability and steer refinement; they do
+/// not rank.  A non-finite statistic never outranks a finite one.
+bool better_candidate(const Candidate& a, const Candidate& b) {
+    if (a.holdout_failures != b.holdout_failures) {
+        return a.holdout_failures < b.holdout_failures;
+    }
+    const bool a_max_ok = std::isfinite(a.holdout_max);
+    const bool b_max_ok = std::isfinite(b.holdout_max);
+    if (a_max_ok != b_max_ok) return a_max_ok;
+    if (a_max_ok && a.holdout_max != b.holdout_max) {
+        return a.holdout_max < b.holdout_max;
+    }
+    const bool a_avg_ok = std::isfinite(a.holdout_avg);
+    const bool b_avg_ok = std::isfinite(b.holdout_avg);
+    if (a_avg_ok != b_avg_ok) return a_avg_ok;
+    if (a_avg_ok && a.holdout_avg != b.holdout_avg) {
+        return a.holdout_avg < b.holdout_avg;
+    }
+    return a.iteration < b.iteration;
+}
+
+/// Normalized position of one sample within the measurement domain (spec D2).
+std::array<double, 4> normalized_position(const std::array<double, 4>& coords,
+                                          const SurfaceBounds& sb) {
+    return {{
+        (coords[0] - sb.m_min) / (sb.m_max - sb.m_min),
+        (coords[1] - sb.tau_min) / (sb.tau_max - sb.tau_min),
+        (coords[2] - sb.sigma_min) / (sb.sigma_max - sb.sigma_min),
+        (coords[3] - sb.rate_min) / (sb.rate_max - sb.rate_min)
+    }};
+}
+
+/// `x` when finite, 0 otherwise -- for running maxima over estimates that are
+/// routinely absent (spec D1 partial stencils).
+double finite_or_zero(double x) { return std::isfinite(x) ? x : 0.0; }
 
 }  // namespace
 
@@ -380,15 +445,17 @@ static std::vector<std::array<double, 4>> generate_validation_samples(
 
 /// Score a candidate surface over freshly drawn samples (spec D4).
 ///
-/// Failed reference solves are skipped (they carry no evidence about the
-/// surface), as are points the score fn filters out (`std::nullopt`).
-/// Non-finite prices or scores do not contribute to the error statistics but
-/// do clear `all_finite`, which disqualifies the candidate.
+/// The order is fixed by the spec: maturity support, then the candidate's own
+/// price (non-finite vetoes the candidate whatever follows), then the
+/// reference preparation, then the score.  Unsupported samples and failed
+/// preparations carry no evidence about the surface; unresolved references
+/// carry none either.  A surface failure is recorded as an outcome and
+/// attributed to a bin -- never converted into an error number.
 static SampleEval evaluate_fresh_samples(
     const std::vector<std::array<double, 4>>& samples,
     const SurfaceHandle& handle,
     const PrepareRefsFn& prepare_refs,
-    const LegacyScoreErrorFn& score,
+    const ScoreErrorFn& score,
     const RefinementContext& ctx,
     double target_iv_error) {
     SampleEval ev;
@@ -401,12 +468,22 @@ static SampleEval evaluate_fresh_samples(
         double rate = sample[3];
 
         if (ctx.maturity_is_supported && !ctx.maturity_is_supported(tau)) {
+            ++ev.unsupported;
             continue;
         }
 
-        // Interpolated price from surface via callback
-        double strike = ctx.spot * std::exp(-m);
-        double interp_price = handle.price(ctx.spot, strike, tau, sigma, rate);
+        // A NaN price on an in-domain fresh sample disqualifies the candidate
+        // even if the fixed holdout missed that location (spec D4) -- and
+        // even where the metric turns out to be undefined here: an
+        // unresolved reference says the *IV error* is unavailable, not that
+        // garbage prices are fine.  Hence the veto before the reference.
+        const double strike = ctx.spot * std::exp(-m);
+        const double interp_price =
+            handle.price(ctx.spot, strike, tau, sigma, rate);
+        if (!std::isfinite(interp_price)) {
+            ev.all_finite = false;
+            continue;
+        }
 
         // Fresh reference stencil for this point via callback.
         // `pde_solves_validation` counts one *preparation* per successful
@@ -414,48 +491,43 @@ static SampleEval evaluate_fresh_samples(
         // costs is the factory's business, and `ReferenceSolveCounter` is
         // what tracks fine and coarse attempts and failures.
         auto refs_result = prepare_refs(ctx.spot, strike, tau, sigma, rate);
-
         if (!refs_result.has_value()) {
-            continue;  // Skip failed solves
+            continue;  // invalid reference: no evidence either way
         }
-
         ev.pde_solves_validation++;
 
-        auto scored = score(
-            interp_price, refs_result.value(),
-            ctx.spot, strike, tau, sigma, rate);
+        const auto ps = score(handle, refs_result.value(),
+                              ctx.spot, strike, tau, sigma, rate);
+        count_status(ev.status_counts, ps.status);
+        if (std::isfinite(ps.price_residual)) {
+            ev.max_price_residual =
+                std::max(ev.max_price_residual, ps.price_residual);
+        }
+        ev.max_delta = std::max(ev.max_delta, finite_or_zero(refs_result->delta));
+        if (ps.edge_band_rescue) ++ev.edge_band_rescues;
 
-        // A NaN price on an in-domain fresh sample disqualifies the candidate
-        // even if the fixed holdout missed that location (spec D5) -- and
-        // even where the error metric is filtered out: the filter says the
-        // *IV error* is undefined there, not that garbage prices are fine.
-        if (!std::isfinite(interp_price)) {
+        // Bins are normalized over the SAMPLE domain (spec D2) -- they must
+        // line up with the domain the samples came from.
+        const auto norm_pos = normalized_position(sample, ctx.sample_bounds);
+
+        if (ps.status == PointStatus::ReferenceUnresolved) {
+            ++ev.unresolved;
+            continue;
+        }
+        if (is_surface_failure(ps.status)) {
+            ++ev.surface_failures;
+            ev.error_bins.record_failure(norm_pos);
+            continue;
+        }
+        if (!std::isfinite(ps.iv_error) || ps.iv_error < 0.0) {
             ev.all_finite = false;
             continue;
         }
-        if (!scored.has_value()) {
-            continue;  // filtered: the metric is undefined here (D4)
-        }
-        const double iv_error = *scored;
-        if (!std::isfinite(iv_error) || iv_error < 0.0) {
-            ev.all_finite = false;
-            continue;
-        }
 
-        ev.max_error = std::max(ev.max_error, iv_error);
-        sum_error += iv_error;
+        ev.max_error = std::max(ev.max_error, ps.iv_error);
+        sum_error += ps.iv_error;
         ev.measured++;
-
-        // Normalize position for error bins over the SAMPLE domain (spec
-        // D2) -- bins must line up with the domain the samples came from.
-        const auto& sb = ctx.sample_bounds;
-        std::array<double, 4> norm_pos = {{
-            (m - sb.m_min) / (sb.m_max - sb.m_min),
-            (tau - sb.tau_min) / (sb.tau_max - sb.tau_min),
-            (sigma - sb.sigma_min) / (sb.sigma_max - sb.sigma_min),
-            (rate - sb.rate_min) / (sb.rate_max - sb.rate_min)
-        }};
-        ev.error_bins.record_error(norm_pos, iv_error, target_iv_error);
+        ev.error_bins.record_error(norm_pos, ps.iv_error, target_iv_error);
     }
 
     ev.avg_error = ev.measured > 0
@@ -475,37 +547,51 @@ static SampleEval evaluate_fresh_samples(
 /// builders' final gate scores its surfaces exactly the way the loop scores
 /// its candidates, and the two must not drift apart.  This wrapper only
 /// re-shapes the result into `SampleEval`; the holdout leaves
-/// `pde_solves_validation` and `error_bins` at their defaults (it performs no
-/// solves, and refinement bins come from the fresh samples).
+/// `pde_solves_validation` at its default (it performs no solves) and carries
+/// only the *failure* bins, since measured-error bins come from the fresh
+/// samples.
 static SampleEval evaluate_holdout(
     const std::vector<HoldoutPoint>& holdout,
     const SurfaceHandle& handle,
-    const LegacyScoreErrorFn& score,
+    const ScoreErrorFn& score,
     const RefinementContext& ctx) {
     const auto scored = detail::score_final_surface(holdout, handle, score, ctx);
     SampleEval ev;
     ev.max_error = scored.max_error;
     ev.avg_error = scored.avg_error;
     ev.measured = scored.measured;
+    ev.unresolved = scored.unresolved;
+    ev.unsupported = scored.unsupported;
+    ev.surface_failures = scored.surface_failures;
+    ev.edge_band_rescues = scored.edge_band_rescues;
+    ev.max_price_residual = scored.max_price_residual;
+    ev.max_delta = scored.max_delta;
+    ev.error_bins = scored.failure_bins;
+    ev.status_counts = scored.status_counts;
     ev.all_finite = scored.all_finite;
     return ev;
 }
 
 /// Pick the highest-scoring untried axis (spec D6 step 1-2).
 ///
-/// score[d] = concentration = max bin count / total bin count, defined as 0
-/// when the bin total is zero.  Ties -- including the all-zero case -- break
-/// by dimension order (moneyness, tau, sigma, rate).  Returns -1 when every
-/// axis has been tried.
+/// score[d] = concentration = max attributed count / total attributed count,
+/// defined as 0 when the total is zero.  Attribution sums measured high
+/// errors and surface failures (spec D4).  Ties -- including the all-zero
+/// case -- break by dimension order (moneyness, tau, sigma, rate).  Returns
+/// -1 when every axis has been tried.
 static int pick_refinement_axis(const ErrorBins& bins,
                                 const std::array<bool, 4>& tried) {
     int best_dim = -1;
     double best_score = -1.0;
     for (size_t d = 0; d < ErrorBins::N_DIMS; ++d) {
         if (tried[d]) continue;
-        size_t max_count = std::ranges::max(bins.bin_counts[d]);
-        size_t total = std::reduce(bins.bin_counts[d].begin(),
-                                   bins.bin_counts[d].end());
+        size_t max_count = 0;
+        size_t total = 0;
+        for (size_t b = 0; b < ErrorBins::N_BINS; ++b) {
+            const size_t count = bins.attributed(d, b);
+            max_count = std::max(max_count, count);
+            total += count;
+        }
         double concentration = total == 0
             ? 0.0
             : static_cast<double>(max_count) / static_cast<double>(total);
@@ -534,16 +620,19 @@ static std::vector<std::pair<double, double>> bins_to_intervals(
     return intervals;
 }
 
-/// Monotonicity statistics for the returned candidate (spec D7).
+/// Monotonicity statistics for the returned candidate (spec D5).
 ///
 /// Diagnostics only, never a gate: at each valid holdout (m, tau, r), scan 7
 /// equally spaced sigma across the user sigma-range and count steps where the
-/// price falls by more than the noise floor.
+/// price falls by more than that point's noise floor.
+///
+/// The floor is a *reporting threshold*: the largest finite reference-error
+/// estimate at the point, floored at `1e-8 * spot`.  A point whose stencil
+/// produced no finite estimate has nothing to report against and is skipped.
 void detail::scan_monotonicity(const std::vector<HoldoutPoint>& holdout,
                                const SurfaceHandle& handle,
                                const RefinementContext& ctx,
-                               double target_iv_error,
-                               double vega_floor,
+                               double /*target_iv_error*/,
                                BuildDiagnostics& diag) {
     const double sigma_lo = ctx.sample_bounds.sigma_min;
     const double sigma_hi = ctx.sample_bounds.sigma_max;
@@ -551,9 +640,18 @@ void detail::scan_monotonicity(const std::vector<HoldoutPoint>& holdout,
         return;  // degenerate sigma range: scan skipped
     }
     const auto sigmas = linspace(sigma_lo, sigma_hi, kMonotonicityPoints);
-    const double tol = std::max(1e-8 * ctx.spot, target_iv_error * vega_floor);
 
     for (const auto& pt : holdout) {
+        const bool any_estimate = std::isfinite(pt.refs.delta) ||
+                                  std::isfinite(pt.refs.delta_lo) ||
+                                  std::isfinite(pt.refs.delta_hi);
+        if (!any_estimate) {
+            continue;  // no noise floor to report against
+        }
+        const double tol = std::max({1e-8 * ctx.spot,
+                                     finite_or_zero(pt.refs.delta),
+                                     finite_or_zero(pt.refs.delta_lo),
+                                     finite_or_zero(pt.refs.delta_hi)});
         double prev_price = std::numeric_limits<double>::quiet_NaN();
         double prev_sigma = std::numeric_limits<double>::quiet_NaN();
         for (double sigma : sigmas) {
@@ -597,8 +695,11 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
 
     FinalValidationSet set;
     set.points.reserve(scaled.size());
+    size_t unsupported = 0;
+    size_t resolved = 0;
     for (const auto& pt : scaled) {
         if (ctx.maturity_is_supported && !ctx.maturity_is_supported(pt[1])) {
+            ++unsupported;
             continue;
         }
         const double strike = ctx.spot * std::exp(-pt[0]);
@@ -612,13 +713,20 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
             ++set.invalid;
             continue;
         }
+        if (refs->resolved) ++resolved;
         set.points.push_back(ValidationPoint{
             .coords = pt, .strike = strike, .refs = refs.value()});
     }
 
+    // Coverage policy (spec D2), an operational rule with no spatial or
+    // statistical guarantee: a set too thin to measure cannot certify the
+    // surface, and resolution is what makes a prepared point measurable.
     const size_t min_valid =
         std::max<size_t>(4, params.validation_samples / 4);
-    if (set.points.size() < min_valid) {
+    if (set.points.size() < min_valid || resolved < min_valid) {
+        MANGO_TRACE_ADAPTIVE_VALIDATION_REFUSED(
+            ADAPTIVE_SET_FINAL, params.validation_samples, set.points.size(),
+            resolved, unsupported);
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::ValidationFailed});
     }
@@ -628,38 +736,57 @@ detail::prepare_final_validation(const AdaptiveGridParams& params,
 detail::FinalScore detail::score_final_surface(
     const std::vector<ValidationPoint>& points,
     const SurfaceHandle& handle,
-    const LegacyScoreErrorFn& score,
+    const ScoreErrorFn& score,
     const RefinementContext& ctx) {
     FinalScore ev;
     double sum_error = 0.0;
 
+    // No maturity-support check here: these points were admitted at
+    // preparation, which is where unsupported maturities are excluded (D4).
     for (const auto& pt : points) {
         const double tau = pt.coords[1];
         const double sigma = pt.coords[2];
         const double rate = pt.coords[3];
         const double interp =
             handle.price(ctx.spot, pt.strike, tau, sigma, rate);
-        const auto err = score(interp, pt.refs, ctx.spot, pt.strike,
-                               tau, sigma, rate);
-        // A NaN price is garbage whether or not the metric is defined here.
+        // A NaN price is garbage whether or not the metric is defined here,
+        // and it is settled before the score runs (spec D4).
         if (!std::isfinite(interp)) {
             ev.all_finite = false;
             ++ev.skipped;
             continue;
         }
-        if (!err.has_value()) {
-            // Deliberately filtered (TV/K or vega floor): no evidence either
-            // way, so it enters no statistic and cannot certify the surface.
-            ++ev.filtered;
+        const auto ps = score(handle, pt.refs, ctx.spot, pt.strike,
+                              tau, sigma, rate);
+        count_status(ev.status_counts, ps.status);
+        if (std::isfinite(ps.price_residual)) {
+            ev.max_price_residual =
+                std::max(ev.max_price_residual, ps.price_residual);
+        }
+        ev.max_delta = std::max(ev.max_delta, finite_or_zero(pt.refs.delta));
+        if (ps.edge_band_rescue) ++ev.edge_band_rescues;
+
+        if (ps.status == PointStatus::ReferenceUnresolved) {
+            // The reference never resolved: no evidence either way, so the
+            // point enters no statistic and cannot certify the surface.
+            ++ev.unresolved;
             continue;
         }
-        if (!std::isfinite(*err) || *err < 0.0) {
+        if (is_surface_failure(ps.status)) {
+            // An outcome of the shipped inversion on this surface, recorded
+            // and attributed -- never turned into an error number.
+            ++ev.surface_failures;
+            ev.failure_bins.record_failure(
+                normalized_position(pt.coords, ctx.sample_bounds));
+            continue;
+        }
+        if (!std::isfinite(ps.iv_error) || ps.iv_error < 0.0) {
             ev.all_finite = false;
             ++ev.skipped;
             continue;
         }
-        ev.max_error = std::max(ev.max_error, *err);
-        sum_error += *err;
+        ev.max_error = std::max(ev.max_error, ps.iv_error);
+        sum_error += ps.iv_error;
         // Every measured point counts -- a zero error is a measurement, not a
         // missing one, and using it as the avg denominator's gate produced a
         // spurious "target met" for a surface nobody had measured.
@@ -689,6 +816,16 @@ detail::FinalPick detail::select_final_surface(
     const bool retry_ok = retry.has_value() && retry->viable();
 
     if (orig_ok && retry_ok) {
+        // Spec D4 ordering on the surviving pair: fewer surface failures
+        // first, then the lower max.  Ties keep the original, which is the
+        // smaller surface.  Viability already forces both counts to zero
+        // today; the comparison is written out so the order survives any
+        // future loosening of `viable()`.
+        if (retry->surface_failures != original.surface_failures) {
+            return retry->surface_failures < original.surface_failures
+                       ? FinalPick::Retry
+                       : FinalPick::Original;
+        }
         return retry->max_error < original.max_error ? FinalPick::Retry
                                                      : FinalPick::Original;
     }
@@ -744,7 +881,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     RefineFn refine_fn,
     const RefinementContext& ctx,
     const PrepareRefsFn& prepare_refs,
-    const LegacyScoreErrorFn& score,
+    const ScoreErrorFn& score,
     const InitialGrids& initial_grids,
     const RefineStateHooks& hooks)
 {
@@ -759,9 +896,9 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     if (!std::isfinite(params.target_iv_error) || params.target_iv_error <= 0.0) {
         return invalid_config();
     }
-    if (!std::isfinite(params.vega_floor) || params.vega_floor <= 0.0) {
-        return invalid_config();
-    }
+    // `params.vega_floor` is deprecated and ignored (spec D6): the loop no
+    // longer divides a price error by a vega, so there is nothing for it to
+    // validate.
     if (!std::isfinite(params.refinement_factor) ||
         params.refinement_factor <= 1.0) {
         return invalid_config();
@@ -810,27 +947,37 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     std::vector<HoldoutPoint> holdout;
     holdout.reserve(holdout_scaled.size());
     size_t holdout_invalid = 0;
+    size_t holdout_unsupported = 0;
+    size_t holdout_resolved = 0;
     for (const auto& pt : holdout_scaled) {
         if (ctx.maturity_is_supported && !ctx.maturity_is_supported(pt[1])) {
+            ++holdout_unsupported;
             continue;
         }
         double strike = ctx.spot * std::exp(-pt[0]);
         auto refs = prepare_refs(ctx.spot, strike, pt[1], pt[2], pt[3]);
         // Spec D1 partial-stencil contract, as in prepare_final_validation:
         // a finite base price is what makes the point prepared; resolution is
-        // a separate fact.
+        // a separate fact, decided here and never revisited per candidate.
         if (!refs.has_value() || !std::isfinite(refs->ref_price)) {
             ++holdout_invalid;
             continue;
         }
+        if (refs->resolved) ++holdout_resolved;
         holdout.push_back(HoldoutPoint{
             .coords = pt, .strike = strike, .refs = refs.value()});
     }
 
-    // A holdout that cannot measure cannot certify retention.
+    // Coverage policy (spec D2): a holdout that cannot measure cannot certify
+    // retention, and only resolved references can measure.  An operational
+    // threshold, not a coverage guarantee.
     const size_t min_valid_holdout =
         std::max<size_t>(4, params.validation_samples / 4);
-    if (holdout.size() < min_valid_holdout) {
+    if (holdout.size() < min_valid_holdout ||
+        holdout_resolved < min_valid_holdout) {
+        MANGO_TRACE_ADAPTIVE_VALIDATION_REFUSED(
+            ADAPTIVE_SET_HOLDOUT, params.validation_samples, holdout.size(),
+            holdout_resolved, holdout_unsupported);
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::ValidationFailed});
     }
@@ -944,20 +1091,39 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             cand.holdout_max = hold.max_error;
             cand.holdout_avg = hold.avg_error;
             cand.holdout_measured = hold.measured;
+            cand.holdout_failures = hold.surface_failures;
+            cand.holdout_eval = hold;
+            for (size_t i = 0; i < cand.status_counts.size(); ++i) {
+                cand.status_counts[i] =
+                    fresh.status_counts[i] + hold.status_counts[i];
+            }
+            cand.edge_band_rescues =
+                fresh.edge_band_rescues + hold.edge_band_rescues;
+            // Measured-error bins from the fresh pass, plus both passes'
+            // surface failures: every failure steers refinement (spec D4).
             cand.bins = fresh.error_bins;
+            cand.bins.merge_failures(hold.error_bins);
             cand.iteration = iteration;
             cand.fresh_converged =
                 fresh.measured > 0 &&
-                fresh.max_error <= params.target_iv_error;
-            // `hold.measured > 0`: a candidate whose every holdout point was
-            // filtered out has been measured nowhere, and a max of 0 over an
-            // empty set must not certify it (spec D5, final-review amendment
-            // 2026-08-29).
+                fresh.max_error <= params.target_iv_error &&
+                fresh.surface_failures == 0;
+            // `hold.measured > 0`: a candidate whose every holdout reference
+            // was unresolved has been measured nowhere, and a max of 0 over
+            // an empty set must not certify it.  The failure counts are the
+            // D4 veto: an outcome the shipped inversion could not complete is
+            // not an accuracy number, and no accuracy number excuses it.
             cand.viable = hold.all_finite && fresh.all_finite &&
                           hold.measured > 0 &&
                           std::isfinite(hold.max_error) &&
-                          hold.max_error <= kViabilityBound;
+                          fresh.surface_failures == 0 &&
+                          hold.surface_failures == 0;
 
+            stats.unresolved = fresh.unresolved + hold.unresolved;
+            stats.surface_failures =
+                fresh.surface_failures + hold.surface_failures;
+            stats.edge_band_rescues =
+                fresh.edge_band_rescues + hold.edge_band_rescues;
             stats.elapsed_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - iter_start).count();
             diag.iterations.push_back(stats);
@@ -967,24 +1133,35 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             last_attempt_failed = false;
             ++iteration;
 
-            // e. WALK BOOKKEEPING (spec D6 step 5)
+            // e. WALK BOOKKEEPING (spec D4 walk restart)
             if (pending_refined_dim >= 0 && pending_refined_dim < 4) {
-                if (std::isfinite(cand.holdout_max) &&
+                const size_t base_failures =
+                    have_base ? base.holdout_failures : cand.holdout_failures;
+                // Fewer holdout failures is itself a measured improvement;
+                // at equal failures the old 2 % relative gain still applies.
+                const bool fewer_failures =
+                    have_base && cand.holdout_failures < base_failures;
+                const bool better_max =
+                    cand.holdout_failures == base_failures &&
+                    std::isfinite(cand.holdout_max) &&
                     cand.holdout_max <
-                        prev_best_holdout * (1.0 - kMinRelImprovement)) {
+                        prev_best_holdout * (1.0 - kMinRelImprovement);
+                if (fewer_failures || better_max) {
                     tried.fill(false);  // measured improvement: restart
                 } else {
                     tried[static_cast<size_t>(pending_refined_dim)] = true;
                 }
             }
 
-            // Any improvement (even sub-threshold) advances the base.  A
-            // candidate measured nowhere (holdout_measured == 0) reports
-            // holdout_max = 0 vacuously and must not seize the base.
+            // Any improvement in the D4 order (even sub-threshold) advances
+            // the base.  A candidate measured nowhere (holdout_measured == 0)
+            // reports holdout_max = 0 vacuously and must not seize the base,
+            // and neither must one with a non-finite statistic.
+            const bool usable_base =
+                cand.holdout_measured > 0 && std::isfinite(cand.holdout_max);
             if (!have_base ||
-                (cand.holdout_measured > 0 &&
-                 std::isfinite(cand.holdout_max) &&
-                 (!have_finite_base || cand.holdout_max < prev_best_holdout))) {
+                (usable_base &&
+                 (!have_finite_base || better_candidate(cand, base)))) {
                 base = cand;
                 have_base = true;
                 if (std::isfinite(cand.holdout_max)) {
@@ -1056,15 +1233,30 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     // ---------------------------------------------------------------------
     const Candidate* picked = nullptr;
     for (const auto& cand : candidates) {
-        if (!cand.viable) continue;
-        if (picked == nullptr ||
-            cand.holdout_max < picked->holdout_max ||
-            (cand.holdout_max == picked->holdout_max &&
-             cand.holdout_avg < picked->holdout_avg)) {
+        if (!cand.viable) continue;  // viability filter first (spec D4)
+        if (picked == nullptr || better_candidate(cand, *picked)) {
             picked = &cand;  // earliest iteration wins remaining ties
         }
     }
     if (picked == nullptr) {
+        // The returned error has no room for the outcomes that produced the
+        // refusal, so the probe carries them (spec D7).
+        PointStatusCounts totals{};
+        size_t rescues = 0;
+        for (const auto& cand : candidates) {
+            for (size_t i = 0; i < totals.size(); ++i) {
+                totals[i] += cand.status_counts[i];
+            }
+            rescues += cand.edge_band_rescues;
+        }
+        MANGO_TRACE_ADAPTIVE_NO_VIABLE_SURFACE(
+            ADAPTIVE_STAGE_LOOP, candidates.size(),
+            totals[static_cast<size_t>(PointStatus::SurfaceNoRoot)],
+            totals[static_cast<size_t>(PointStatus::SurfaceAmbiguous)],
+            totals[static_cast<size_t>(PointStatus::SurfaceNonConvergent)],
+            totals[static_cast<size_t>(PointStatus::SurfaceNonFinite)],
+            totals[static_cast<size_t>(PointStatus::SurfaceVegaTooSmall)],
+            rescues);
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::NoViableSurface});
     }
@@ -1111,7 +1303,10 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     result.tau_points = static_cast<int>(picked->tau.size());
     result.achieved_max_error = picked->holdout_max;
     result.achieved_avg_error = picked->holdout_avg;
-    result.target_met = picked->holdout_max <= params.target_iv_error &&
+    // Viability is already part of the pick; naming it here keeps the
+    // condition readable as spec D4 states it.
+    result.target_met = picked->viable &&
+                        picked->holdout_max <= params.target_iv_error &&
                         picked->fresh_converged;
 
     diag.target_met = result.target_met;
@@ -1121,8 +1316,19 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
     diag.holdout_points_measured = picked->holdout_measured;
     diag.total_iterations = iteration;  // excludes the final rebuild
 
+    // Everything below describes the *returned* surface's holdout evaluation
+    // (spec D7).  `reference_solves_*` are the builders' to fill: the loop
+    // does not own the oracle's counter.
+    const SampleEval& picked_hold = picked->holdout_eval;
+    diag.holdout_points_unresolved = picked_hold.unresolved;
+    diag.holdout_points_unsupported = holdout_unsupported;
+    diag.surface_failures = picked->holdout_failures;
+    diag.edge_band_rescues = picked_hold.edge_band_rescues;
+    diag.max_price_residual = picked_hold.max_price_residual;
+    diag.reference_uncertainty_max = picked_hold.max_delta;
+
     detail::scan_monotonicity(holdout, *last_handle, ctx,
-                              params.target_iv_error, params.vega_floor, diag);
+                              params.target_iv_error, diag);
 
     result.iterations = diag.iterations;
     return result;

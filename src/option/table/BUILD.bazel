@@ -56,6 +56,7 @@ cc_library(
         "//src/option:option_spec",
         "//src/math:latin_hypercube",
         "//src/support:error_types",
+        "//src/support:ivcalc_trace_hdr",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",

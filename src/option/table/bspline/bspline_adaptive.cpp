@@ -480,7 +480,9 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
     auto validate_fn = make_validate_fn(chain.dividend_yield, type);
 
     auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
-    auto score_fn = make_iv_score_fn(params, type);
+    // Temporary: deleted in Task 7, when the builders move to the round-trip
+    // score and supply a handle with a vega.
+    auto score_fn = adapt_legacy_score_fn(make_iv_score_fn(params, type));
 
     auto refine_fn = make_bspline_refine_fn(params);
     // No state hooks: the B-spline refiner's whole state is the grids (D6).
@@ -803,7 +805,9 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             scaled.delta_hi = scale * refs->delta_hi;
             return scaled;
         };
-        auto score_fn = make_iv_score_fn(params, config_.option_type);
+        // Temporary: deleted in Task 7.
+        auto score_fn =
+            adapt_legacy_score_fn(make_iv_score_fn(params, config_.option_type));
 
         // Grids still span the whole fit domain; only the *measurement* is
         // band-scoped (spec D2: measure where the surface is used).
@@ -870,7 +874,9 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         config_.dividend_yield, config_.option_type,
         config_.discrete_dividends, config_.maturity);
     auto final_prepare_refs_fn = make_fd_vega_refs_fn(params, final_validate_fn);
-    auto final_score_fn = make_iv_score_fn(params, config_.option_type);
+    // Temporary: deleted in Task 7.
+    auto final_score_fn =
+        adapt_legacy_score_fn(make_iv_score_fn(params, config_.option_type));
 
     // References are computed ONCE here and reused for the retry, so the two
     // assembled surfaces are compared on identical coordinates.
@@ -971,8 +977,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             pr.diagnostics.build_failure_fallback;
     }
     detail::scan_monotonicity(validation->points, handle_for(picked_surface),
-                              final_ctx, params.target_iv_error,
-                              params.vega_floor, diagnostics);
+                              final_ctx, params.target_iv_error, diagnostics);
     diagnostics.iterations = all_iterations;
 
     size_t max_tau_points = 0;
