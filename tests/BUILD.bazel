@@ -1202,6 +1202,17 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "reference_oracle_test",
+    size = "medium",
+    srcs = ["reference_oracle_test.cc"],
+    deps = [
+        "//src/option:grid_spec_types",
+        "//src/option/table:adaptive_metrics",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Fast logic/unit tests for the adaptive grid builder: refinement-loop
 # decisions, segmentation, caching, error binning.  No real PDE builds —
 # those live in :adaptive_surface_build_integration_test.  This target is

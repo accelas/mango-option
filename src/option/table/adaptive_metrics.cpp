@@ -8,6 +8,100 @@
 
 namespace mango {
 
+namespace {
+
+// Rebuild the same generator family at a different point count.  Every
+// GridSpec generator is a pure map of eta = i/(n-1) (grid.hpp generate()),
+// so re-sampling at (n-1)/2^k + 1 points yields the every-2^k-th-node
+// subsequence exactly (up to floating-point rounding of eta).
+std::expected<GridSpec<double>, ValidationError>
+resample(const GridSpec<double>& spec, size_t n) {
+    switch (spec.type()) {
+        case GridSpec<double>::Type::MultiSinhSpaced: {
+            std::vector<MultiSinhCluster<double>> clusters(
+                spec.clusters().begin(), spec.clusters().end());
+            // auto_merge=false: the clusters were merged when the estimator
+            // built the fine spec; merging again could move them.
+            return GridSpec<double>::multi_sinh_spaced(
+                spec.x_min(), spec.x_max(), n, std::move(clusters), /*auto_merge=*/false);
+        }
+        case GridSpec<double>::Type::SinhSpaced:
+            return GridSpec<double>::sinh_spaced(spec.x_min(), spec.x_max(), n, spec.concentration());
+        case GridSpec<double>::Type::Uniform:
+            return GridSpec<double>::uniform(spec.x_min(), spec.x_max(), n);
+        case GridSpec<double>::Type::LogSpaced:
+            return GridSpec<double>::log_spaced(spec.x_min(), spec.x_max(), n);
+    }
+    return std::unexpected(ValidationError(ValidationErrorCode::InvalidGridSize, static_cast<double>(n)));
+}
+
+constexpr size_t kFamilyModulus = 16;  // odd through three coarsenings (spec D1)
+
+}  // namespace
+
+std::expected<ReferenceGridFamily, ValidationError>
+make_reference_grid_family(const PricingParams& params,
+                           const GridAccuracyParams& accuracy,
+                           size_t levels) {
+    auto est = estimate_pde_grid(params, accuracy);
+    if (!est) return std::unexpected(est.error());
+    const auto& [spec0, time0] = *est;
+    const size_t n0 = spec0.n_points();
+    const size_t cap = accuracy.max_spatial_points;
+    const size_t floor = std::max<size_t>(accuracy.min_spatial_points, 3);
+    ReferenceGridFamily fam;
+    // Smallest n >= n0 with n = 1 (mod 16), if it fits under the strict cap.
+    size_t n = n0 + ((kFamilyModulus + 1 - (n0 % kFamilyModulus)) % kFamilyModulus);
+    if (n > cap) {
+        // Largest n <= cap with n = 1 (mod 16) that is still >= floor.
+        n = cap - ((cap % kFamilyModulus) + kFamilyModulus - 1) % kFamilyModulus;
+        if (n < floor || n < 17) {
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidGridSize, static_cast<double>(cap)));
+        }
+        fam.rounded_down = true;
+    }
+    const size_t n_time0 = time0.n_steps();
+    for (size_t k = 0; k <= levels; ++k) {
+        const size_t nk = ((n - 1) >> k) + 1;
+        auto spec = resample(spec0, nk);
+        if (!spec) return std::unexpected(spec.error());
+        const size_t tk = (n_time0 + (size_t{1} << k) - 1) >> k;
+        // mandatory_times stays empty: resolve_grid merges the dividend taus
+        // into every explicit config (american_option.cpp:68), and copying
+        // fine time nodes here would stop the coarse level from coarsening.
+        fam.levels.push_back(PDEGridConfig{.grid_spec = std::move(*spec),
+                                           .n_time = tk,
+                                           .mandatory_times = {}});
+        fam.point_counts.push_back(nk);
+        fam.time_steps.push_back(tk);
+    }
+    return fam;
+}
+
+PricingParams ReferenceOracle::contract(double spot, double strike, double tau,
+                                        double sigma, double rate) const {
+    PricingParams p;
+    p.spot = spot; p.strike = strike; p.maturity = tau; p.rate = rate;
+    p.dividend_yield = dividend_yield; p.option_type = option_type;
+    p.volatility = sigma;
+    p.discrete_dividends = reference_maturity
+        ? rolled_dividends(discrete_dividends, *reference_maturity, tau)
+        : filter_and_merge_dividends(discrete_dividends, tau);
+    return p;
+}
+
+std::expected<double, SolverError>
+ReferenceOracle::solve(const PricingParams& p, const PDEGridConfig& grid) const {
+    auto solver = AmericanOptionSolver::create(p, PDEGridSpec{grid});
+    if (!solver) return std::unexpected(SolverError{.code = SolverErrorCode::InvalidConfiguration});
+    auto r = solver->solve();
+    if (!r) return std::unexpected(r.error());
+    const double v = r->value();
+    if (!std::isfinite(v)) return std::unexpected(SolverError{});
+    return v;
+}
+
 double compute_iv_error(double price_error, double vega,
                         double vega_floor, double target_iv_error) {
     double vega_clamped = std::max(std::abs(vega), vega_floor);
@@ -121,7 +215,12 @@ ValidateFn make_validate_fn(double dividend_yield,
         p.discrete_dividends = reference_maturity
             ? rolled_dividends(discrete_dividends, *reference_maturity, tau)
             : filter_and_merge_dividends(discrete_dividends, tau);
-        auto fd = solve_american_option(p);
+        auto solver = AmericanOptionSolver::create(
+            p, PDEGridSpec{make_grid_accuracy(kReferenceAccuracy)});
+        if (!solver) {
+            return std::unexpected(SolverError{.code = SolverErrorCode::InvalidConfiguration});
+        }
+        auto fd = solver->solve();
         if (!fd.has_value()) return std::unexpected(fd.error());
         return fd->value();
     };

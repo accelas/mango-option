@@ -1323,17 +1323,30 @@ TEST(MakeValidateFnTest, DropsDividendsBeyondSampledMaturity) {
 // Regression #485: at tau=.6 on the anchored 1y contract the dividend at
 // calendar .25 has elapsed. A newly issued .6y contract is a different oracle.
 TEST(MakeValidateFnTest, FixedExpiryRollsCalendarInsteadOfChangingExpiry) {
+    // make_validate_fn now solves at kReferenceAccuracy (High): compare
+    // against a solver built on the same explicit High-accuracy grid rather
+    // than solve_american_option's default profile.
+    auto reference_solve = [](const mango::PricingParams& params)
+        -> std::expected<mango::AmericanOptionResult, mango::SolverError> {
+        auto solver = mango::AmericanOptionSolver::create(
+            params, mango::PDEGridSpec{mango::make_grid_accuracy(mango::kReferenceAccuracy)});
+        if (!solver) {
+            return std::unexpected(mango::SolverError{
+                .code = mango::SolverErrorCode::InvalidConfiguration});
+        }
+        return solver->solve();
+    };
     auto validate = mango::make_validate_fn(0.0, mango::OptionType::PUT,
         {{0.25, 3.0}}, 1.0);
     mango::PricingParams p(mango::OptionSpec{.spot = 100.0, .strike = 100.0,
         .maturity = 0.6, .rate = 0.05, .option_type = mango::OptionType::PUT}, 0.2);
-    auto direct = mango::solve_american_option(p);
+    auto direct = reference_solve(p);
     ASSERT_TRUE(direct.has_value());
     auto fixed = validate(100.0, 100.0, 0.6, 0.2, 0.05);
     ASSERT_TRUE(fixed.has_value());
     EXPECT_DOUBLE_EQ(*fixed, direct->value());
     p.discrete_dividends = {{0.25, 3.0}};
-    auto chain = mango::solve_american_option(p);
+    auto chain = reference_solve(p);
     ASSERT_TRUE(chain.has_value());
     EXPECT_GT(chain->value() - *fixed, 1.0);
 
@@ -1341,7 +1354,7 @@ TEST(MakeValidateFnTest, FixedExpiryRollsCalendarInsteadOfChangingExpiry) {
     // positive. This tests the reference side independently of gap admission.
     p.maturity = 0.75;
     p.discrete_dividends.clear();
-    direct = mango::solve_american_option(p);
+    direct = reference_solve(p);
     ASSERT_TRUE(direct.has_value());
     fixed = validate(100.0, 100.0, 0.75, 0.2, 0.05);
     ASSERT_TRUE(fixed.has_value());
