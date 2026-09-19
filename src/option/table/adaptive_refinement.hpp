@@ -349,25 +349,6 @@ struct ErrorRefs {
 using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
     double spot, double strike, double tau, double sigma, double rate)>;
 
-/// Score one point from interpolated price + cached refs. Pure arithmetic.
-///
-/// Superseded by `ScoreErrorFn` below; kept only until the refinement loop
-/// and the builders move over to the round-trip score.
-///
-/// Contract (spec D4, final-review amendment 2026-08-29):
-///  - `std::nullopt` means the point was **deliberately skipped**: its
-///    reference is unresolved (or, on the temporary TV/K bridge, the point
-///    has no time value), so the error metric is undefined there and the
-///    point carries no evidence either way.  Skipped points are excluded from the
-///    max, the average, and the measured count -- they neither certify a
-///    surface nor condemn it.
-///  - An engaged value must be finite and nonnegative; anything else is a
-///    non-viable evaluation and disqualifies the candidate (D5).
-using LegacyScoreErrorFn = std::function<std::optional<double>(
-    double interp, const ErrorRefs& refs,
-    double spot, double strike, double tau,
-    double sigma, double rate)>;
-
 /// Score one point by round-tripping the candidate surface (spec D3).
 ///
 /// The scorer prices nothing itself: it hands `surface` to the *shipped*
@@ -420,11 +401,10 @@ TauSegmentSplit make_tau_split_from_segments(
     double K_ref);
 
 // The option-aware implementations of ValidateFn / PrepareRefsFn /
-// ScoreErrorFn (`make_validate_fn`, `make_stencil_refs_fn`,
-// `make_round_trip_score_fn`, and the legacy `make_fd_vega_refs_fn` /
-// `make_iv_score_fn`) live in adaptive_metrics.hpp: the loop consumes the
-// callback types declared above but never depends on the American solver
-// behind them.
+// ScoreErrorFn (`make_validate_fn`, `make_stencil_refs_fn` and
+// `make_round_trip_score_fn`) live in adaptive_metrics.hpp: the loop
+// consumes the callback types declared above but never depends on the
+// American solver behind them.
 
 /// Merge probe results into one set of grids: the sorted union of each
 /// probe's knot positions per continuous axis, with positions closer than

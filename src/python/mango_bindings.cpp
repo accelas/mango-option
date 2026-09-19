@@ -929,7 +929,10 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("validation_samples", &mango::AdaptiveGridParams::validation_samples)
         .def_readwrite("refinement_factor", &mango::AdaptiveGridParams::refinement_factor)
         .def_readwrite("lhs_seed", &mango::AdaptiveGridParams::lhs_seed)
-        .def_readwrite("vega_floor", &mango::AdaptiveGridParams::vega_floor)
+        .def_readwrite("vega_floor", &mango::AdaptiveGridParams::vega_floor,
+                       "Deprecated and ignored since the round-trip metric; "
+                       "kept for C ABI layout stability until #463 removes "
+                       "it.")
         .def_readwrite("max_failure_rate", &mango::AdaptiveGridParams::max_failure_rate);
 
     // MultiKRefConfig

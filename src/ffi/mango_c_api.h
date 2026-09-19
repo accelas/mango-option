@@ -89,6 +89,8 @@ typedef struct {
   uint64_t validation_samples;
   double refinement_factor;
   uint64_t lhs_seed;
+  // Deprecated and ignored since the round-trip metric; kept for C ABI
+  // layout stability until #463 removes it.
   double vega_floor;
   double max_failure_rate;
 } MangoAdaptiveGridParams;

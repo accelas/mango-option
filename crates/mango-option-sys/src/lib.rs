@@ -103,6 +103,8 @@ pub struct MangoAdaptiveGridParams {
     pub validation_samples: u64,
     pub refinement_factor: f64,
     pub lhs_seed: u64,
+    /// Deprecated and ignored since the round-trip metric; kept for C ABI
+    /// layout stability until #463 removes it.
     pub vega_floor: f64,
     pub max_failure_rate: f64,
 }

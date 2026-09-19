@@ -23,41 +23,6 @@
 
 namespace mango {
 
-/// Compute IV error from price error and vega, with floor and cap.
-double compute_iv_error(double price_error, double vega,
-                        double vega_floor, double target_iv_error);
-
-/// Legacy reference generator, superseded by `make_stencil_refs_fn`.
-///
-/// It fills only `ErrorRefs::ref_price` and leaves `resolved = false` with
-/// every other field NaN: the vega it used to report no longer has a home in
-/// `ErrorRefs`. Callers still on this factory therefore measure nothing.
-/// Kept only so the tree compiles while the round-trip metric lands; deleted
-/// once every call site is on the stencil factory.
-/// Any failed or non-finite solve => unexpected.
-PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& params,
-                                    const ValidateFn& validate_fn);
-
-/// Legacy scorer, superseded by the round-trip score.
-///
-/// Temporary bridge: `vega` is gone from `ErrorRefs`, so this skips every
-/// point whose refs are unresolved and otherwise divides the price residual
-/// by the stencil's bracket secant. Deleted with `make_fd_vega_refs_fn`.
-/// Filtered points return `std::nullopt`, never 0.0: a skip is the absence of
-/// a measurement, not a perfect one.
-LegacyScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
-                                    OptionType option_type);
-
-/// Temporary: deleted in Task 7.
-///
-/// Presents a `LegacyScoreErrorFn` through the `ScoreErrorFn` seam the loop
-/// now consumes, so the builders keep compiling while they still hand out the
-/// legacy metric.  It prices the handle itself, maps a skip to
-/// `PointStatus::ReferenceUnresolved` and a value to `PointStatus::Measured`,
-/// and reports the price residual the legacy metric never computed.  It never
-/// touches `SurfaceHandle::vega`, which the builders do not yet supply.
-ScoreErrorFn adapt_legacy_score_fn(LegacyScoreErrorFn legacy);
-
 /// Round-trip score for one validation point (spec D3).
 ///
 /// Runs the product inversion (`invert_price_on_surface`) on the candidate
@@ -126,12 +91,12 @@ struct ReferenceGridFamily {
 std::expected<ReferenceGridFamily, ValidationError> make_reference_grid_family(
     const PricingParams& params, const GridAccuracyParams& accuracy, size_t levels);
 
-/// Solve-attempt/failure counters for the reference oracle, for callers that
-/// want visibility into how much PDE work the oracle performs. Atomic so a
-/// shared counter can be read from multiple threads while solves run
-/// elsewhere; the oracle itself does not update this struct (see
-/// `ReferenceOracle::solve`) -- it is a bookkeeping surface for future
-/// callers (Task 11+) that track fine vs. coarse solve outcomes.
+/// Solve-attempt/failure counters for the reference stencil, so a caller can
+/// see how much PDE work its references cost. Atomic so one counter shared
+/// by a whole build can be read while solves run elsewhere. `ReferenceOracle`
+/// does not touch it; `make_stencil_refs_fn` records every attempt and every
+/// failure on the counter it is handed, and the adaptive builders report the
+/// totals as `BuildDiagnostics::reference_solves_fine/coarse` (spec D7).
 struct ReferenceSolveCounter {
     std::atomic<size_t> fine_attempts{0};
     std::atomic<size_t> coarse_attempts{0};
