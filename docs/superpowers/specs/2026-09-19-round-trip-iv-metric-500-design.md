@@ -199,8 +199,9 @@ strike of the contract actually solved (the probe strike on a probe
 contract; the adapter's scaling then carries the floor to the user strike).
 The floor is the oracle's calibrated accuracy scale: D8 measures
 `max |V_High − V_Ultra| / K` over the calibration set and asserts the
-constant is at least that (provisional value 1e-7 from the 2026-09-19
-measurements: 4e-6 and 7e-6 on K = 100). Without it, two discretizations
+constant is at least that (provisional value 1e-7: the 2026-09-19
+measurements were |V_High − V_Ultra| = 4e-6 and 7e-6 dollars on K = 100,
+i.e. 4e-8 and 7e-8 of strike; 1e-7 is the conservative rounding). Without it, two discretizations
 that agree exactly (both on the obstacle at a near-intrinsic point) yield
 `δ̂ = 0` and the stencil "resolves" a bracket separated by microdollars,
 which the shipped inversion then cannot invert (rev 5, measured). `δ̂` is an
@@ -396,8 +397,8 @@ identical thresholds, no policy duplication.
 **Acceptance uses the product policy on the tolerance band (rev 5, user
 decision Q10).** The scorer runs the shipped inversion (same pre-check,
 screen, Brent, post-check, cap and config limits) with the published σ
-limits widened by τ_iv on each side, clipped to the fit domain `ctx.bounds`.
-A root within the user's own tolerance beyond a published edge is a
+limits widened by τ_iv on each side. The band is not clipped to the fit
+domain. A root within the user's own tolerance beyond a published edge is a
 measurement, not a refusal. Where the fit domain has no σ support beyond
 the published edge (the B-spline backends fit exactly the published σ
 range), the scorer extends the surface over the band by first-order
@@ -803,10 +804,12 @@ documented workflow must keep building. This reverses design-review rounds
 
 - One shared fine grid per stencil, strict-subsequence coarse grid (L2) —
   agreed (rounds 1–3); removes re-gridding differences, does not cancel bias.
-- Inversion bracket — rev 2's τ_iv edge band was rejected twice; **rev 3+
-  uses the exact product bracket; the band is a diagnostic only.**
-  Consequence flagged for the go/no-go: edge-adjacent refusals reject
-  candidates.
+- Inversion bracket — rev 2's τ_iv edge band was rejected twice by the
+  design review; revs 3–4 used the exact product bracket with the band as
+  a diagnostic. **Rev 5 (user decision Q10) reinstates the band for
+  acceptance, uniformly across backends via edge extrapolation, with the
+  exact bracket as the diagnostic**, after execution measured the exact
+  bracket refusing the documented configuration over a 2.7 bps edge miss.
 - Minimum-resolved threshold `max(4, N/4)` — agreed as an explicitly chosen
   coverage policy.
 - Failure attribution — unconditional failure counts, no pseudo-error.
