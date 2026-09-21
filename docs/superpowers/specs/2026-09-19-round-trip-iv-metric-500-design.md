@@ -594,7 +594,12 @@ difference of the two coarser grids of the triple;
 `|V_High − V_Ultra| ≤ δ̂_High` at every point (δ̂ by the shipped formula
 including the floor); `kReferenceUncertaintyFloor ≥ max |V_High − V_Ultra|
 / K` over the six points. After a passing run the constant is set to the
-largest one-decimal value not above the triple-A minimum.
+largest one-decimal value not above the triple-A minimum, unless the
+finer pair's minimum order lies below that value, in which case the
+constant stays at the lower value that the safety-factor coverage check
+already licenses (2026-09-21: triple-A minimum 1.317 would license 1.3;
+the constant is kept at 1.0 because triple B reaches 0.676 at 30 days and a
+lower `p` only enlarges `δ̂`).
 
 **Effective sensitivity experiments** (the American path is a single-pass
 projected Thomas solve, `pde_solver.hpp:568/885`; `TRBDF2Config::tolerance`
@@ -690,7 +695,7 @@ reachability.
 | `F_s = 3` | literature convention (Roache, two-grid) | D1 |
 | `kReferenceAccuracy = High` | chosen from measurement | D1 |
 | grid rounding `n ≡ 1 (mod 16)` | construction rule (nesting to 3 levels) | D1 |
-| `θ = 2^-40 · K`, order-stability allowance 0.5, four-of-six coverage | calibration classification/acceptance policy | D8 |
+| `θ = 2^-40 · K`, four-of-six coverage, safety-factor coverage `F_s ≥ (2^p − 1)/(2^{p_min} − 1)` | calibration classification/acceptance policy | D8 |
 | coverage `max(4, N/4)` on prepared and on resolved | operational policy (pre-existing rule, applied twice) | D2 |
 | inversion policy: config σ 0.01/3.0, `vega_threshold 1e-4`, 17 screen points, zero-tol `1e-9·spot`, Brent `1e-6` (residual and width) / 50, cap 1.5/2/3 | product policy, reused unchanged | D3 |
 | edge band `τ_iv` | the user's tolerance, reused as the acceptance band (rev 5) | D3 |
