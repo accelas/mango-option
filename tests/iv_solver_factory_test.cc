@@ -121,10 +121,16 @@ TEST(IVSolverFactoryTest, ManualBatchSolve) {
 // live in iv_solver_factory_slow_test.cc (nightly slow suite).
 TEST(IVSolverFactoryTest, AdaptiveEndToEndSmoke) {
     auto config = make_base_config();
+    // Budget (2026-09-21): two iterations and eight samples, not five and 32.
+    // Under the round-trip metric one validation sample is a six-solve
+    // reference stencil at the High profile, which took this case to 470 s --
+    // the whole target's slowest shard.  What it asserts is wiring, and the
+    // 0.02 smoke bound holds on the reduced budget; the accuracy pins this
+    // case defers to live in the nightly slow suite.
     config.adaptive = AdaptiveGridParams{
         .target_iv_error = 0.002,
-        .max_iter = 5,
-        .validation_samples = 32,
+        .max_iter = 2,
+        .validation_samples = 8,
     };
     auto solver = build_solver(config);
 

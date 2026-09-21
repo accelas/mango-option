@@ -48,11 +48,21 @@ TEST_P(SegmentedDividendPlacement, BuildsAndPricesAcrossExactEventBoundaries) {
         .vol = {0.10, 0.15, 0.20, 0.30},
         .rate = {0.02, 0.03, 0.05, 0.07},
     };
-    // Case /6 (first dividend at day 10 of a 60-day expiry) is the one
-    // placement in this family the round-trip metric refuses; every other
-    // placement builds.  See the Issue501Refused instantiation below.
+    // The one placement in this family the round-trip metric refuses -- the
+    // first dividend at day 10 of a 60-day expiry -- is not instantiated
+    // here; it is pinned on its own in
+    // DayTenOfSixtyIsRefusedAsNearIntrinsic below.
+    //
+    // Budget (2026-09-21): two iterations and 16 samples, not the struct's
+    // default eight and 64.  What this case asserts is structural -- the
+    // surface covers every event boundary and prices finitely across it --
+    // and that holds on the first candidate; the extra iterations only
+    // sharpened an accuracy this case never reads.  At the default the seven
+    // placements cost 1320 s of the target's 3106 s, because a reference
+    // preparation is now six High-accuracy solves.
     auto result = build_adaptive_bspline_segmented(
-        AdaptiveGridParams{.target_iv_error = 1e-3}, config, domain);
+        AdaptiveGridParams{.target_iv_error = 1e-3, .max_iter = 2,
+                           .validation_samples = 16}, config, domain);
     ASSERT_TRUE(result.has_value())
         << "code " << static_cast<int>(result.error().code);
     EXPECT_TRUE(std::isfinite(result->achieved_max_error));
@@ -113,8 +123,13 @@ TEST(SegmentedDividendPlacement, DayTenOfSixtyIsRefusedAsNearIntrinsic) {
         .vol = {0.10, 0.15, 0.20, 0.30},
         .rate = {0.02, 0.03, 0.05, 0.07},
     };
+    // Budget: the sample count is the struct's default 64 and stays there.
+    // The refusal is about one near-intrinsic coordinate, so it is a
+    // property of the draw: at 16 samples this configuration builds.  Only
+    // the iteration count is cut, from eight to two.
     auto result = build_adaptive_bspline_segmented(
-        AdaptiveGridParams{.target_iv_error = 1e-3}, config, domain);
+        AdaptiveGridParams{.target_iv_error = 1e-3, .max_iter = 2},
+        config, domain);
     ASSERT_FALSE(result.has_value())
         << "near-intrinsic samples must not be certified as measured";
     EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
@@ -130,6 +145,10 @@ TEST(SegmentedShortMaturity, RecoversOneDayAtmVolatility) {
         .moneyness = {std::log(0.92), std::log(0.95), 0, std::log(1.05), std::log(1.08)},
         .vol = {0.10, 0.15, 0.20, 0.30}, .rate = {0.02, 0.03, 0.05, 0.07},
     };
+    // Budget: the struct's defaults, deliberately.  This case reads an
+    // accuracy -- the one-day ATM volatility below, to 1e-3 -- and at two
+    // iterations and 16 samples it recovers 0.2237 against 0.225, so the
+    // budget is what buys the assertion and cannot be cut.
     auto built = build_adaptive_bspline_segmented(
         AdaptiveGridParams{.target_iv_error = 1e-3}, config, domain);
     ASSERT_TRUE(built.has_value());

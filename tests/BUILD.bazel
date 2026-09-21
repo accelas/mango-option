@@ -1281,14 +1281,20 @@ cc_test(
 
 # End-to-end adaptive builds, split out of :adaptive_grid_builder_test so the
 # CI dbg assertion pass stays fast.  This target holds only the cheap wiring
-# and regression invariants (~100s CPU local fastbuild, slowest case ~16s);
-# the heavy cases (~536s CPU, up to 60s each) that made this the long pole of
+# and regression invariants; the heavy cases that made this the long pole of
 # per-PR CI live in :adaptive_surface_build_slow_test (nightly).
+#
+# Six shards, not four (2026-09-21).  Under the round-trip metric a
+# validation sample is a six-solve reference stencil at the High profile, so
+# the per-case cost roughly tripled and four shards left a 307 s slowest
+# shard against a 225 s average.  Two more shards spread the same work; the
+# cases themselves stay per-PR because each one is a wiring or regression
+# invariant, not a measurement.
 cc_test(
     name = "adaptive_surface_build_integration_test",
     size = "large",
     timeout = "long",
-    shard_count = 4,
+    shard_count = 6,
     srcs = ["adaptive_surface_build_integration_test.cc"],
     deps = [
         "//src/math:cubic_spline_solver",
