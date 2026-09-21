@@ -92,6 +92,10 @@ inline constexpr double kRichardsonSafetyFactor = 3.0;
 /// calibration test asserts the constant is at least
 /// max |V_High - V_Ultra| / K.
 ///
+/// Re-measured 2026-09-21 by `//tests:reference_oracle_calibration_test`
+/// over D8's six-point set: max |V_High - V_Ultra| / K = 6.34e-8, on the
+/// 30-day OTM put.  1e-7 covers it, so the value stands.
+///
 /// Without it, two discretizations that agree exactly -- both sitting on the
 /// obstacle at a near-intrinsic point -- estimate zero uncertainty, and the
 /// stencil admits a bracket separated by microdollars that the shipped
@@ -99,9 +103,21 @@ inline constexpr double kRichardsonSafetyFactor = 3.0;
 inline constexpr double kReferenceUncertaintyFloor = 1e-7;
 
 /// Assumed observed order of convergence for the reference grid family's
-/// two-grid error estimate. Task 11 calibrates the measured minimum order
-/// from real surfaces; this constant must stay <= that measured minimum, so
-/// the estimate below never overstates the family's actual convergence rate.
+/// two-grid error estimate.  This constant must stay <= the measured minimum
+/// usable order, so the estimate below never overstates the family's actual
+/// convergence rate.
+///
+/// PROVISIONAL.  The D8 calibration
+/// (`//tests:reference_oracle_calibration_test`, first run 2026-09-21) does
+/// NOT yet license a value: on the declared six-point set the measured
+/// minimum usable order is -0.19, because the 30-day OTM put is
+/// pre-asymptotic on the High profile's own grid (a 2x/4x finer level 0
+/// recovers p_obs ~ 1.44 at that point), and the order-stability rule fails
+/// at three of the six points.  The next move is the oracle family -- a
+/// finer profile or a revised domain rule -- not this number: lowering it to
+/// the family's current worst case would inflate every delta-hat instead of
+/// fixing what the family does.  See the calibration test's header for the
+/// full table.
 inline constexpr double kReferenceConvergenceOrder = 1.0;
 
 /// A nested family of explicit PDE grid configs for Richardson-style error

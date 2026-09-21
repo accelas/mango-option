@@ -1225,6 +1225,28 @@ cc_test(
     ],
 )
 
+# Calibration of the reference oracle's convergence order and uncertainty
+# floor (spec D8): four nested grid levels x three stencil sigma x two
+# tau_iv on six points, at High, plus Ultra/widened-domain/split-axis runs —
+# a few hundred real PDE solves.  Tagged `slow` only — NOT `manual`, because
+# Bazel drops manual-tagged targets from `//tests/...` wildcard expansion
+# before --test_tag_filters applies, which would hide this target from the
+# nightly `--test_tag_filters=slow` run.  Per-PR CI excludes it with
+# `--test_tag_filters=-manual,-slow`.  size = "enormous" grants the 3600s
+# default timeout.
+cc_test(
+    name = "reference_oracle_calibration_test",
+    size = "enormous",
+    srcs = ["reference_oracle_calibration_test.cc"],
+    tags = ["slow"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:grid_spec_types",
+        "//src/option/table:adaptive_metrics",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Fast logic/unit tests for the adaptive grid builder: refinement-loop
 # decisions, segmentation, caching, error binning.  No real PDE builds —
 # those live in :adaptive_surface_build_integration_test.  This target is
