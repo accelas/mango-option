@@ -86,9 +86,11 @@ inline constexpr double kRichardsonSafetyFactor = 3.0;
 
 /// Floor on each stencil uncertainty estimate, relative to the strike of the
 /// contract actually solved (spec D1, rev 5): calibrated constant, the
-/// oracle's High-vs-Ultra discrepancy scale relative to strike; measured 4e-6
-/// and 7e-6 on K=100 on 2026-09-19; the D8 calibration test asserts it is at
-/// least max |V_High - V_Ultra| / K.
+/// oracle's High-vs-Ultra discrepancy scale relative to strike.  Measured
+/// 2026-09-19: |V_High - V_Ultra| = 4e-6 and 7e-6 dollars on K = 100, i.e.
+/// 4e-8 and 7e-8 of strike; 1e-7 is the conservative rounding.  The D8
+/// calibration test asserts the constant is at least
+/// max |V_High - V_Ultra| / K.
 ///
 /// Without it, two discretizations that agree exactly -- both sitting on the
 /// obstacle at a near-intrinsic point -- estimate zero uncertainty, and the

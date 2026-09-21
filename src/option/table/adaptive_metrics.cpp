@@ -186,6 +186,10 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
         // exactly the published sigma range, so without this the band would be
         // inert on them and the metric would behave differently per backend.
         // Inside the fit domain these are the handle, unchanged.
+        //
+        // What is extrapolated is the edge *tangent*: the extension is at most
+        // target_iv_error long and the surface is C2, so the model error is
+        // O(vomma * target_iv_error^2), negligible at bps scale.
         const auto clamp_to_fit = [&](double s) {
             return std::min(std::max(s, fit.sigma_min), fit.sigma_max);
         };

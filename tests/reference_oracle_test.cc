@@ -441,9 +441,12 @@ TEST(RoundTripScore, EdgeExtensionStopsAtTheBandWithoutHeadroom) {
     EXPECT_FALSE(s.edge_band_rescue);
 }
 
-// The extension is not used where support exists: a context with sigma
-// headroom (the segmented Chebyshev shape) scores the same point identically.
-TEST(RoundTripScore, EdgeExtensionAgreesWithRealSupport) {
+// A globally linear surface is scored identically whether the fit domain has
+// sigma headroom or not.  This pins the *band*, not the extension: on a linear
+// handle the first-order extension reproduces the surface exactly, so the two
+// contexts must agree to the last bit.  What discriminates the extension is
+// EdgeExtensionUsesEdgeTangentNotRawEvaluation below.
+TEST(RoundTripScore, UnclippedBandScoresLinearSurfaceAlikeWithAndWithoutHeadroom) {
     AdaptiveGridParams params; params.target_iv_error = 5e-4;
     auto refs = resolved_refs(10.0 + 40.0 * (0.1 - 0.3));
     auto with_headroom = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT)(
@@ -454,6 +457,77 @@ TEST(RoundTripScore, EdgeExtensionAgreesWithRealSupport) {
     EXPECT_EQ(extended.status, with_headroom.status);
     EXPECT_NEAR(extended.iv_error, with_headroom.iv_error, 1e-12);
     EXPECT_EQ(extended.edge_band_rescue, with_headroom.edge_band_rescue);
+}
+
+// Spec D3, rev 5: what the extension actually is.  This handle is defined
+// only on the fit domain -- it returns NaN outside it -- and is *curved*
+// inside, so the two things the extension claims are both observable:
+//
+//   1. the scorer never evaluates the surface outside its fit domain.  A raw
+//      evaluation at the band floor would return NaN and the point would
+//      score SurfaceNonFinite, so this test fails outright if the clamp is
+//      removed;
+//   2. what it extrapolates is the edge *tangent*, price(sigma) = S(e) +
+//      V(e)*(sigma - e), not the surface's own continuation.  The expected
+//      root below is computed from S(e) and V(e) alone and pinned to 1e-9,
+//      which the quadratic's own root misses by ~2.2e-7 -- the
+//      O(vomma * tau_iv^2) the spec allows, here made visible.
+TEST(RoundTripScore, EdgeExtensionUsesEdgeTangentNotRawEvaluation) {
+    const auto ctx = bspline_like_ctx();          // fit.sigma == sample.sigma
+    const double edge = ctx.bounds.sigma_min;     // 0.1
+    // Inside [0.1, 0.5]: 10 + 40*(s-0.3) + 50*(s-0.3)^2, vega 40 + 100*(s-0.3).
+    // Rising over the whole band (vega 20 at the low edge, 60 at the high
+    // one), so the screen sees exactly one crossing.  Outside: NaN.
+    const auto curved = [](double s) {
+        return 10.0 + 40.0 * (s - 0.3) + 50.0 * (s - 0.3) * (s - 0.3);
+    };
+    const auto curved_vega = [](double s) { return 40.0 + 100.0 * (s - 0.3); };
+    const SurfaceHandle handle{
+        .price = [&](double, double, double, double s, double) {
+            return (s < 0.1 || s > 0.5) ? std::numeric_limits<double>::quiet_NaN()
+                                        : curved(s);
+        },
+        .vega = [&](double, double, double, double s, double) {
+            return (s < 0.1 || s > 0.5) ? std::numeric_limits<double>::quiet_NaN()
+                                        : curved_vega(s);
+        }};
+
+    const double S_e = curved(edge);         // 4.0
+    const double V_e = curved_vega(edge);    // 20.0
+    ASSERT_GT(V_e, 0.0);
+
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;   // band 5 bps
+    // Put the tangent's root 3 bps below the edge, inside the 5 bps band.
+    const double y = S_e + V_e * (-3e-4);
+    auto refs = resolved_refs(y);
+
+    auto s = make_round_trip_score_fn(params, ctx, OptionType::PUT)(
+        handle, refs, 100.0, 100.0, 0.5, edge, 0.05);
+
+    ASSERT_EQ(s.status, PointStatus::Measured)
+        << "status " << static_cast<int>(s.status)
+        << " -- SurfaceNonFinite here means the band was evaluated on the raw "
+           "handle instead of the edge tangent";
+    // sigma_hat_k = edge + (target_k - S_e) / V_e for each of y +- delta and y;
+    // the worst distance from sigma0 = edge is the lowest target's.
+    const double worst_target = y - refs.delta;
+    const double tangent_expected = std::abs((worst_target - S_e) / V_e);
+    // 2e-8, not tighter: the shipped inversion stops on a 1e-6 price residual,
+    // which is 5e-8 of sigma at this slope, so Brent itself lands ~5e-9 out.
+    EXPECT_NEAR(s.iv_error, tangent_expected, 2e-8)
+        << "the extension must follow the edge tangent, not the surface's own "
+           "curvature";
+    // And it is not the quadratic's own root: continuing 50*(s-0.3)^2 past the
+    // edge puts the crossing at 0.09969977 rather than the tangent's 0.0997,
+    // a gap of 2.3e-7 -- eleven times the tolerance above, and the
+    // O(vomma * tau_iv^2) the spec allows, made visible.
+    const double u = (-40.0 + std::sqrt(1600.0 - 200.0 * (10.0 - worst_target)))
+                   / 100.0;
+    const double quadratic_expected = std::abs((0.3 + u) - edge);
+    EXPECT_GT(std::abs(s.iv_error - quadratic_expected), 1e-7)
+        << "scored the surface's own continuation, not its edge tangent";
+    EXPECT_TRUE(s.edge_band_rescue)
+        << "the root is outside the un-widened product bracket";
 }
 
 TEST(RoundTripScore, MapsEveryFailureKind) {

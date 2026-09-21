@@ -233,12 +233,12 @@ TEST(IVSolverFactorySegmented, StableFittingAcceptsRawShortMaturitySamples) {
     // sixteenth, measured on 2026-09-21 at K = 108.4925, tau = 0.28645,
     // sigma0 = 0.12959, has a reference of 8.4925646 against an intrinsic of
     // 8.4925127 -- a time value of 5.2e-5, TV/K = 4.8e-7.  The surface
-    // reproduces it to 1.5e-5 of strike, yet the shipped inversion's
-    // 17-point screen reports MultipleRoots on a price that is flat in
-    // sigma, and one SurfaceAmbiguous point makes the candidate non-viable
-    // under D4.  Its root sits ~42 bps below sigma_min, inside the 50 bps
-    // acceptance band, but a B-spline has no support beyond its fit range so
-    // the band is clipped back to the sampled range and cannot reach it.
+    // reproduces it to 1.5e-5 of strike with a vega of 1.071, yet the shipped
+    // inversion's 17-point screen reports MultipleRoots on a price that is
+    // flat in sigma.  Measured outcome over both the final and the retry
+    // candidate: SurfaceAmbiguous 1, SurfaceNoRoot 0, edge_band_rescues 0 --
+    // the acceptance band is not what is missing here, invertibility is, and
+    // one SurfaceAmbiguous point makes a candidate non-viable under D4.
     // Pinned as the measured outcome; the accuracy this test was named for
     // is recorded in the numbers above, not asserted through a build.
     auto solver = make_interpolated_iv_solver(config);

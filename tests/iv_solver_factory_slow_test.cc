@@ -103,10 +103,10 @@ IVSolverFactoryConfig documented_adaptive_dividend_config() {
 }
 
 // The documented adaptive discrete-dividend config, pinned so the
-// documentation cannot silently rot into a configuration the viability gate
-// refuses.  Everything a reader would copy is verbatim -- including
-// `AdaptiveGridParams`, which is *not* relaxed here: the whole point of the
-// pin is that the published parameters are the ones that were measured.
+// documentation cannot silently rot.  Everything a reader would copy is
+// verbatim -- including `AdaptiveGridParams`, which is *not* relaxed here:
+// the whole point of the pin is that the published parameters are the ones
+// that were measured.
 //
 // The pairing of moneyness grid and K_refs is the fragile part.  The
 // assembled surface blends K_ref-struck prices linearly in strike, so the
@@ -114,11 +114,10 @@ IVSolverFactoryConfig documented_adaptive_dividend_config() {
 // S/K in [0.92, 1.08] means strikes in [92.6, 108.7], served here by K_refs
 // at 2.5 % spacing across [90, 110].
 //
-// Corrected fixed-expiry oracle, 2026-09-06: max 0.00744049 (74.4 bps),
-// 64 measured / 0 invalid points. The 0.001 (10 bps) target is still unmet;
-// this gate retains current viability admission and the historical ceiling.
-// Default fastbuild at 2 threads took 1445.6s on the shared test host; the live
-// stack showed bounded final assembly over 9 K_refs after refinement finished.
+// History: under the retired vega-scaled metric this configuration measured
+// 74.4 bps against a 0.20 scalar viability bound and was admitted.  The
+// round-trip metric refuses it; what that number was hiding is recorded
+// below.
 // Regression: the documented adaptive discrete-dividend configuration is
 // refused, and the refusal is the measured outcome, pinned as evidence for
 // the follow-up rather than worked around.

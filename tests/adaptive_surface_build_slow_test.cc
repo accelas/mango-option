@@ -135,50 +135,6 @@ std::vector<double> to_log_m(std::initializer_list<double> sk) {
 }
 
 
-// The same low-budget configuration as the factory regression. #488's raw
-// samples previously exposed .845046 IV fit error; #458 makes the fit viable.
-// Regression: this configuration is refused, and the refusal is about one
-// coordinate, not about the fit.  Same fixture and same coordinate as the
-// per-PR IVSolverFactorySegmented.StableFittingAcceptsRawShortMaturitySamples;
-// one ruling covers both.
-// Bug: 15 of the 16 holdout points measure at 6.49 bps against a 50 bps
-// target, with a worst price residual of 4.77e-5 of strike.  The sixteenth,
-// measured 2026-09-21 at K = 108.4925127, tau = 0.2864469, sigma0 = 0.1295946,
-// has a reference of 8.4925646 against an intrinsic of 8.4925127 -- a time
-// value of 5.2e-5, TV/K = 4.8e-7.  The surface reproduces it to 1.54e-5 of
-// strike with a vega of 1.071, yet the shipped inversion's 17-point screen
-// reports MultipleRoots on a price flat in sigma, and one SurfaceAmbiguous
-// point makes the candidate non-viable under D4.  edge_band_rescues = 0: the
-// acceptance band is not what is missing here, invertibility is.  The pricing
-// assertions this test also carried are covered by
-// SegmentedFinalContract.WideBandDividendBracketRoundTrip and by the segmented
-// fixtures in adaptive_surface_build_integration_test.cc.
-TEST(AdaptiveGridBuilderTest, StableFittingReportsShortTauBestEffortAccuracy) {
-    AdaptiveGridParams params;
-    params.target_iv_error = 0.005;  // 50 bps
-    params.max_iter = 2;
-    params.validation_samples = 16;
-
-    SegmentedAdaptiveConfig seg_config{
-        .spot = 100.0,
-        .option_type = OptionType::PUT,
-        .dividend_yield = 0.02,
-        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
-        .maturity = 1.0,
-        .kref_config = {.K_refs = {90.0, 95.0, 100.0, 105.0, 110.0}},
-    };
-
-    auto m_domain = to_log_m({0.92, 0.95, 1.0, 1.05, 1.08});
-    std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
-    std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
-
-    auto result = build_adaptive_bspline_segmented(
-        params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_FALSE(result.has_value())
-        << "a near-intrinsic sample must not be certified as measured";
-    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
-}
-
 // ===========================================================================
 // Coverage gap tests — Priority 1 (Critical)
 // ===========================================================================
@@ -203,11 +159,12 @@ TEST(AdaptiveGridBuilderTest, StableFittingReportsShortTauBestEffortAccuracy) {
 // inversion reports SurfaceNoRoot and no candidate is viable.
 // edge_band_rescues = 0.  A larger fit budget does not reach this: the error
 // is in what the deep-ITM leaf can represent, not in how finely it is sampled.
-TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridPassesCorrectedOracle) {
+TEST(AdaptiveGridBuilderTest, AsymmetricKRefGridRefusesDeepItmWithoutVega) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 16;
+    params.min_moneyness_points = 10;  // Use smaller grid for test speed
 
     // spot=100, K_refs sorted: {100, 110, 120, 130}
     // Lowest=100, highest=130, ATM=100 (closest to spot)
@@ -292,10 +249,10 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
 // a wider tolerance would have measured -- but the tolerance is what this
 // fixture is asserting, so it is not moved.  edge_band_rescues = 0.
 //
-// FOLLOW-UP: the K = 80 deep-OTM price accuracy this test was written for
-// (pre-fix 1574 bps, post-fix within $0.05 on a ~$0.30 option) needs a home
-// that does not go through an adaptive build at a 0.2 bps target.
-TEST(AdaptiveGridBuilderTest, RegressionDeepOTMPutIVAccuracy) {
+// FOLLOW-UP(#500-remainder): re-home the K = 80 deep-OTM price accuracy check
+// (pre-fix 1574 bps, post-fix within $0.05 on a ~$0.30 option) onto a build
+// that does not need an adaptive validation pass at a 0.2 bps target.
+TEST(AdaptiveGridBuilderTest, DeepOTMPutChainRefusesAtSubBpsTarget) {
     OptionGrid chain;
     chain.spot = 100.0;
     chain.dividend_yield = 0.02;
@@ -872,7 +829,7 @@ TEST(AdaptiveGridBuilderTest, ContinuousChebyshevSurfaceMatchesPickedGrids) {
 // SegmentedFinalContract.ReportedErrorsDescribeReturnedSurface in
 // adaptive_surface_build_integration_test.cc, which exercises the same
 // select_final_surface and score_final_surface code.
-TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
+TEST(SegmentedFinalContract, ChebyshevAssemblyRefusesOnSigmaEdgeLeaf) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
     params.max_iter = 1;
@@ -896,6 +853,77 @@ TEST(SegmentedFinalContract, ChebyshevReportsAssembledSurfaceNumbers) {
     ASSERT_FALSE(result.has_value())
         << "a leaf the shipped inversion cannot round-trip must not certify";
     EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
+
+    // The half of the retired contract that does not need an adaptive build:
+    // the numbers a segmented Chebyshev assembly reports are *its own*.  Two
+    // manual assemblies of the same configuration at different CC levels are
+    // scored on one shared reference set, through the same
+    // detail::score_final_surface the builder uses.  Each must re-score to
+    // its own numbers exactly, and the two must not score alike -- which is
+    // what a builder reporting the wrong surface's numbers would violate.
+    auto K_refs = resolve_k_refs(seg_config.kref_config, seg_config.spot);
+    ASSERT_TRUE(K_refs.has_value());
+    auto sample = expand_segmented_domain(domain, seg_config.maturity,
+                                          seg_config.dividend_yield, {},
+                                          K_refs->front());
+    ASSERT_TRUE(sample.has_value());
+    RefinementContext ctx{
+        .spot = seg_config.spot,
+        .dividend_yield = seg_config.dividend_yield,
+        .option_type = seg_config.option_type,
+        .bounds = *sample,
+        .sample_bounds = *sample,
+    };
+    const ReferenceOracle oracle{
+        .dividend_yield = seg_config.dividend_yield,
+        .option_type = seg_config.option_type,
+        .discrete_dividends = seg_config.discrete_dividends,
+        .reference_maturity = seg_config.maturity,
+        .accuracy = make_grid_accuracy(kReferenceAccuracy),
+    };
+    auto refs_fn = make_stencil_refs_fn(
+        params, oracle, std::make_shared<ReferenceSolveCounter>());
+    auto points = detail::prepare_final_validation(params, ctx, refs_fn,
+                                                   params.lhs_seed + 999);
+    ASSERT_TRUE(points.has_value());
+
+    auto coarse = build_chebyshev_segmented_manual(seg_config, domain,
+                                                   {6, 3, 2, 2});
+    ASSERT_TRUE(coarse.has_value()) << "manual segmented build failed";
+    auto fine = build_chebyshev_segmented_manual(seg_config, domain,
+                                                 {10, 3, 2, 2});
+    ASSERT_TRUE(fine.has_value()) << "manual segmented build failed";
+
+    const auto handle_for = [](auto& surface) {
+        return SurfaceHandle{
+            .price = [&surface](double spot, double strike, double tau,
+                                double sigma, double rate) {
+                return surface.price(spot, strike, tau, sigma, rate);
+            },
+            .vega = [&surface](double spot, double strike, double tau,
+                               double sigma, double rate) {
+                return surface.vega(spot, strike, tau, sigma, rate);
+            }};
+    };
+    const auto score_fn =
+        make_round_trip_score_fn(params, ctx, seg_config.option_type);
+    const auto coarse_a = detail::score_final_surface(
+        points->points, handle_for(*coarse), score_fn, ctx);
+    const auto coarse_b = detail::score_final_surface(
+        points->points, handle_for(*coarse), score_fn, ctx);
+    const auto fine_a = detail::score_final_surface(
+        points->points, handle_for(*fine), score_fn, ctx);
+
+    // Scoring is a pure function of (surface, references): same surface,
+    // same numbers.
+    EXPECT_EQ(coarse_a.measured, coarse_b.measured);
+    EXPECT_DOUBLE_EQ(coarse_a.max_error, coarse_b.max_error);
+    EXPECT_DOUBLE_EQ(coarse_a.max_price_residual, coarse_b.max_price_residual);
+    // Different surface, different numbers: a report taken from the wrong
+    // assembly would be indistinguishable if this held.
+    EXPECT_NE(coarse_a.max_price_residual, fine_a.max_price_residual)
+        << "two different assemblies scored identically; the numbers cannot "
+           "be describing the surface they were taken from";
 }
 
 // ===========================================================================

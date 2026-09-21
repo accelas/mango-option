@@ -83,18 +83,17 @@ INSTANTIATE_TEST_SUITE_P(Issue501, SegmentedDividendPlacement,
 // Regression: the (day 10, 60-day) placement is refused, and the refusal is
 // the measured outcome, not a gap misclassification.
 // Bug: this schedule puts a quarter of the holdout on deep-ITM samples with
-// essentially no time value.  Measured on 2026-09-21 at K = 106.6849,
-// tau = 0.04912, sigma0 = 0.17117: reference 6.6855678 against an intrinsic
-// of 6.6849043 -- TV/K = 6.2e-6 -- while the surface reproduces that price
-// to 2.2e-6 of strike with a vega of 0.428.  The 17-point screen reports
-// MultipleRoots on a price flat in sigma: 25 such SurfaceAmbiguous points
-// across 8 candidates, so none is viable.  A second family of deep-OTM
-// samples (K = 93.3, price 1.2e-3) has its root 5 bps below sigma_min,
-// inside the 10 bps tolerance band -- but a B-spline has no support beyond
-// its fit range, the band is clipped back to the sampled range, and the
-// inversion reports SurfaceNoRoot.  The surface is accurate; the metric
-// cannot measure it here.  The event-boundary pricing this suite exists for
-// is asserted on the seven placements above.
+// essentially no time value, where the shipped inversion cannot recover a
+// volatility however accurate the price is.  Measured 2026-09-21 over 8
+// candidates: SurfaceAmbiguous 25, SurfaceNoRoot 0 -- every failure is the
+// 17-point screen reporting MultipleRoots on a price that is flat in sigma,
+// and one such point is enough to make a candidate non-viable under D4.
+// Representative coordinate: K = 106.6849, tau = 0.04912, sigma0 = 0.17117,
+// reference 6.6855678 against an intrinsic of 6.6849043 -- TV/K = 6.2e-6 --
+// which the surface reproduces to 2.2e-6 of strike with a vega of 0.428.
+// The surface is accurate; the metric cannot measure it here, and the
+// acceptance band is not what is missing.  The event-boundary pricing this
+// suite exists for is asserted on the seven placements above.
 TEST(SegmentedDividendPlacement, DayTenOfSixtyIsRefusedAsNearIntrinsic) {
     SegmentedAdaptiveConfig config{
         .spot = 100.0,
@@ -162,6 +161,14 @@ std::vector<double> to_log_m(std::initializer_list<double> sk) {
     return v;
 }
 
+// Budget note (2026-09-21), for the three knobs raised below.  At the
+// original budget -- three vol seeds, a 51-point / 200-step PDE grid, two
+// iterations, eight samples -- this chain's fit left 72-133 bps of error at
+// the top of its sigma domain ([0.15, 0.25]).  That put the round trip's
+// root 21-145 bps *outside* the fit range, where a B-spline has no support
+// at all, so the shipped inversion reported SurfaceNoRoot and no candidate
+// was viable.  Resolution is what was missing, not tolerance; the target
+// below is unchanged.
 TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
     // Create a minimal synthetic chain
     OptionGrid chain;
@@ -171,31 +178,16 @@ TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
     // Add strikes and maturities
     chain.strikes = {90.0, 95.0, 100.0, 105.0, 110.0};
     chain.maturities = {0.25, 0.5, 1.0};
-    // Five vol seeds, not three: a cubic B-spline fitted from three seeds
-    // over the expanded [0.15, 0.25] sigma domain underprices by 0.16-0.70
-    // per 100 of strike at the top of that domain, which puts the round
-    // trip's root 21-145 bps outside the fit range, where the spline has no
-    // support at all.  More knots, not a wider tolerance, is the fix.
-    chain.implied_vols = {0.16, 0.18, 0.20, 0.22, 0.24};
+    chain.implied_vols = {0.16, 0.18, 0.20, 0.22, 0.24};  // five seeds, not three
     chain.rates = {0.04, 0.05, 0.06};
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.002;  // 20 bps - relaxed for test speed
-    // max_iter 5 and 16 samples, not 2 and 8: at the smaller budget the
-    // seeded sigma axis left a 72-133 bps fit error at the top of the sigma
-    // domain ([0.15, 0.25]), which put the round trip's root 44-78 bps
-    // *outside* the domain -- beyond the 20 bps acceptance band -- so the
-    // shipped inversion reported SurfaceNoRoot and no candidate was viable.
-    // The budget is what was wrong, not the tolerance.
-    params.max_iter = 5;
-    params.validation_samples = 16;
+    params.max_iter = 5;             // was 2
+    params.validation_samples = 16;  // was 8
 
-    // 201 points and 400 steps, not 51 and 200: at the coarse grid the
-    // surface underprices by 0.16-0.70 per 100 of strike at the top of the
-    // sigma domain, which puts the round trip's root outside the fit range
-    // where a B-spline has no support, so the shipped inversion reports
-    // SurfaceNoRoot and no candidate is viable.  The explicit grid is what
-    // this test supplies, so the explicit grid is what gets refined.
+    // The explicit grid is what this test supplies, so it is what gets
+    // refined: 201 points and 400 steps, was 51 and 200.
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0).value();
     auto result = build_adaptive_bspline(params, chain,
         PDEGridConfig{grid_spec, 400, {}}, OptionType::PUT);
@@ -1169,28 +1161,28 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.002;
     params.max_iter = 2;
-    // 32, not 8: raised while re-measuring, and it is not enough -- see below.
-    params.validation_samples = 32;
+    params.validation_samples = 16;
 
     // Regression: this chain cannot be measured, and the refusal is the
     // outcome, pinned rather than worked around.
     // Bug: at strikes 40-250 with tau <= 0.1 the reference price is exactly 0
     // (deep OTM) or exactly K - S (deep ITM) at almost every sampled point.
     // Implied volatility is undefined there, so the six-solve stencil cannot
-    // separate and the point does not resolve (D2).  Measured on 2026-09-21:
-    // 32 prepared, 3 resolved, against a floor of max(4, 32/4) = 8.  More
-    // samples do not help -- the domain is degenerate, not undersampled --
-    // and widening the vol axis to {0.10, 0.60} only trades the D2 refusal
-    // for a D4 one: the samples then resolve, but the Chebyshev polynomial
-    // cannot represent a deep-OTM price of 1.7e-4 (its minimum over the
-    // acceptance band is 16x that), so the inversion reports MultipleRoots.
+    // separate and the point does not resolve (D2).  Measured 2026-09-21: 16
+    // prepared, 2 resolved, against a floor of max(4, 16/4) = 4.  More
+    // samples do not help -- the domain is degenerate, not undersampled: at
+    // 32 samples the count is 3 resolved against a floor of 8, the same
+    // fraction and the same refusal, so 16 is kept as the cheaper measurement.
+    // Widening the vol axis to {0.10, 0.60} only trades the D2 refusal for a
+    // D4 one: the samples then resolve, but the Chebyshev polynomial cannot
+    // represent a deep-OTM price of 1.7e-4 (its minimum over the acceptance
+    // band is 16x that), so the inversion reports MultipleRoots.
     //
-    // FOLLOW-UP: the node-level FDM agreement this test was written for
-    // (#480 S1: pre-fix error 27.85 at m_lo = -1.088095, sigma-independent
-    // to eight significant figures, against post-fix 6.65e-09 on the node
-    // class and 0.01759 on the user-strike class) needs a home that does not
-    // go through an adaptive build.  There is no manual builder for the
-    // continuous Chebyshev path today, so it cannot move in this change.
+    // FOLLOW-UP(#500-remainder): re-home #480 S1's node-level FDM agreement
+    // (pre-fix 27.85 at m_lo = -1.088095, sigma-independent to eight
+    // significant figures, against post-fix 6.65e-09 on the node class and
+    // 0.01759 on the user-strike class); it needs a manual builder for the
+    // continuous Chebyshev path, which does not exist today.
     auto result = build_adaptive_chebyshev(params, chain, OptionType::PUT);
     ASSERT_FALSE(result.has_value())
         << "a domain of exactly-intrinsic references must not be certified";
