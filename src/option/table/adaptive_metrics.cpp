@@ -95,6 +95,20 @@ make_reference_grid_family(const PricingParams& params,
     return fam;
 }
 
+std::expected<PDEGridConfig, ValidationError>
+refine_grid_config(const PDEGridConfig& g, size_t factor) {
+    if (factor == 0) {
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSize, static_cast<double>(factor)));
+    }
+    const size_t n = g.grid_spec.n_points();
+    auto spec = resample(g.grid_spec, factor * (n - 1) + 1);
+    if (!spec) return std::unexpected(spec.error());
+    return PDEGridConfig{.grid_spec = std::move(*spec),
+                         .n_time = g.n_time * factor,
+                         .mandatory_times = g.mandatory_times};
+}
+
 PricingParams ReferenceOracle::contract(double spot, double strike, double tau,
                                         double sigma, double rate) const {
     PricingParams p;

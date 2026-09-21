@@ -75,6 +75,39 @@ TEST(ReferenceGridFamily, RoundsUpWithinCapElseDownAndFlags) {
     EXPECT_TRUE(capped->rounded_down);
 }
 
+// Spec D8 (rev 6): `refine_grid_config` runs the family's nesting argument
+// upward.  The refined grid has factor*(n-1)+1 points and factor*n_time
+// steps, and the input grid is exactly its every-factor-th-node
+// subsequence -- the mirror of LevelsAreNestedOddAndShareMiddleNode.  The
+// profile's point cap does not apply: 2G and 4G above a High fine grid
+// exceed max_spatial_points by design.
+TEST(RefineGridConfig, RefinementsContainTheInputAsEveryFactorthNode) {
+    const auto acc = make_grid_accuracy(kReferenceAccuracy);
+    auto fam = make_reference_grid_family(put_1y_with_divs(), acc, 1);
+    ASSERT_TRUE(fam.has_value());
+    const PDEGridConfig& g = fam->levels[0];
+    auto g_buf = g.grid_spec.generate();
+    auto g_pts = g_buf.view().span();
+
+    for (size_t factor : {2u, 4u}) {
+        auto refined = refine_grid_config(g, factor);
+        ASSERT_TRUE(refined.has_value()) << "factor " << factor;
+        // Keep the GridBuffer alive in a named variable: generate() returns
+        // a temporary, and chaining .view().span() on it would dangle.
+        auto buf = refined->grid_spec.generate();
+        auto pts = buf.view().span();
+        ASSERT_EQ(pts.size(), factor * (g_pts.size() - 1) + 1) << "factor " << factor;
+        EXPECT_EQ(refined->n_time, g.n_time * factor) << "factor " << factor;
+        EXPECT_EQ(refined->mandatory_times, g.mandatory_times) << "factor " << factor;
+        for (size_t j = 0; j < g_pts.size(); ++j) {
+            EXPECT_NEAR(pts[j * factor], g_pts[j], 1e-12 * (1.0 + std::abs(g_pts[j])))
+                << "factor " << factor << " node " << j;
+        }
+        EXPECT_GT(pts.size(), acc.max_spatial_points) << "factor " << factor;
+    }
+    EXPECT_FALSE(refine_grid_config(g, 0).has_value());
+}
+
 // The oracle rolls dividends onto a fixed-expiry contract exactly as
 // make_validate_fn does, and solves on the grid it is handed.
 TEST(ReferenceOracle, SolvesOnGivenGridAndMatchesValidateFn) {

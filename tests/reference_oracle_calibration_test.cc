@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Calibration of the reference oracle's convergence order and uncertainty
-// floor, and a check of the declared High profile (spec D8, rev 5).
+// floor, and a check of the declared High profile (spec D8, rev 6).
 //
 // This test IS the measurement: it prints the calibration table that
 // `docs/MATHEMATICAL_FOUNDATIONS.md` records, and it asserts the two
@@ -9,30 +9,49 @@
 // actually does.  Every number here is an empirical outcome on the declared
 // six-point set, never a bound on the oracle's error.
 //
-// STATUS (2026-09-21, first measurement): this test FAILS on the shipped
-// constants, and the constants were deliberately left untuned -- spec D8's
-// failure policy is that a failed calibration is a statement about the
-// oracle family, not a licence to move `kReferenceConvergenceOrder` down to
-// whatever the family happens to produce.  What the run measured:
+// Grids (rev 6): `G` is production's fine grid and `G½` production's coarse
+// partner -- the pair `δ̂` is computed from -- and `2G`/`4G` are two nested
+// refinements of `G` built by `refine_grid_config`.  Triple A
+// `(G½, G, 2G)` is the production pair's own observed order and is what sets
+// the constant; triple B `(G, 2G, 4G)` checks the order holds one level
+// finer.  Rev 5 calibrated downward instead (`G, G½, G¼, G⅛`); those coarser
+// grids are ones production never uses, and on the 30-day contract they were
+// pre-asymptotic (measured p_obs < 0), so the order they reported said
+// nothing about the pair that `δ̂` actually uses.
 //
-//   * `otm-30d` (30-day OTM put) is pre-asymptotic on the High profile's own
-//     grid: at tau_iv = 5e-4 the finest triple gives p_obs = -0.19..-0.16,
-//     because the level-0 -> level-1 shift is *larger* than the level-1 ->
-//     level-2 shift.  Re-running that point with a 2x and 4x finer level 0
-//     gives p_obs = 1.44 / 0.80 and 1.44 / 1.50, so the order is recoverable
-//     -- with a finer family, not with more levels.  Extending the shipped
-//     family to levels 4-5 (D8's first suggested remedy) walks the *coarse*
-//     way and turns triples (2,3,4) and (3,4,5) oscillatory.
-//   * Order stability |p1 - p2| <= 0.5 also fails at `500-trigger` (sigma-lo,
-//     both tau_iv; 0.91 and 0.95) and `itm-2y` (all three sigma at
-//     tau_iv = 1e-3; 0.73..0.78).
-//   * Everything else passes: no oscillatory triple, 6/6 points carry two
-//     usable triples at the base sigma, |V_High - V_Ultra| <= delta-hat and
-//     the widened-domain shift <= delta-hat at every point, and
-//     max |V_High - V_Ultra| / K = 6.34e-8 <= kReferenceUncertaintyFloor.
+// Orientation of `p_obs`: for a triple (coarse, mid, fine) under exact
+// halving, `V_mid − V_coarse = 2^p · (V_fine − V_mid)` in the asymptotic
+// regime, so the observed order is `log2(d_coarse / d_fine)` with
+// `d_coarse = V_mid − V_coarse` and `d_fine = V_fine − V_mid`.  The series
+// here runs coarse to fine, which is the reverse of rev 5's listing, so the
+// ratio is taken coarse-difference over fine-difference to keep `p_obs`
+// positive for a convergent series.  The insufficient-signal and
+// oscillatory tests are symmetric in the two differences and are unchanged.
 //
-// The open decision is the oracle family (profile or domain rule), not the
-// constants.
+// STATUS (2026-09-21, rev 6 measurement): one assertion FAILS, and the
+// constants were deliberately left untuned -- D8's failure policy is that a
+// failed calibration is a statement about the oracle family, not a licence
+// to move a constant.  Moving to the production pair fixed what rev 5
+// found: every p_obs is now positive, no triple is oscillatory, all six
+// points carry both triples usable at the base sigma, and the triple-A
+// minimum is 1.317 (`atm-1y-3div`, tau_iv = 5e-4, sigma-lo), so the shipped
+// `kReferenceConvergenceOrder = 1.0` is comfortably under it.  What remains:
+//
+//   * Order stability |p_A - p_B| <= 0.5 fails at `otm-30d`, tau_iv = 1e-3,
+//     all three sigma: p_A = 1.685 / 1.687 / 1.685 against p_B = 0.671 /
+//     0.676 / 0.677.  It is not time-step quantization -- forcing the
+//     tau_iv = 1e-3 grid to the tau_iv = 5e-4 step count (249, and 250)
+//     leaves p_B at 0.676 and 0.675 -- and it is not a missing refinement:
+//     an 8G level gives p over successive triples of 1.397 / 0.982 at
+//     tau_iv = 5e-4 and 0.676 / 1.349 at tau_iv = 1e-3, i.e. the observed
+//     order at this contract wanders in [0.68, 1.40] rather than settling.
+//     Both families do agree on the answer: their 8G prices differ by
+//     6e-9.  The reading is an oscillatory O(h) component from the free
+//     boundary crossing grid nodes riding on the smooth term, which the
+//     0.5 allowance is tighter than.
+//
+// The open decision is the allowance or the oracle family for the 30-day
+// contract class, not the constant.
 #include <gtest/gtest.h>
 
 #include "mango/option/american_option.hpp"
@@ -83,6 +102,10 @@ const std::vector<CalPoint>& points() {
 
 constexpr double kDividendYield = 0.02;
 
+// The four grids of one series, coarse to fine.
+enum GridLevel { kGHalf = 0, kG = 1, k2G = 2, k4G = 3, kNumGrids = 4 };
+const char* kGridName[kNumGrids] = {"Ghalf", "G", "2G", "4G"};
+
 enum class Triple { Insufficient, Oscillatory, Usable };
 
 const char* label(Triple t) {
@@ -94,16 +117,19 @@ const char* label(Triple t) {
     return "?";
 }
 
-// Spec D8 classification of one consecutive triple (k, k+1, k+2):
-// d_a = V_{k+2} - V_{k+1}, d_b = V_{k+1} - V_k, threshold theta = 2^-40 * K.
-Triple classify(double d_a, double d_b, double theta, double* p) {
-    if (std::abs(d_a) <= theta || std::abs(d_b) <= theta) return Triple::Insufficient;
-    if (d_a * d_b < 0) return Triple::Oscillatory;
-    *p = std::log(d_a / d_b) / std::log(2.0);
+// Spec D8 classification of one triple (coarse, mid, fine), with
+// `d_coarse = V_mid - V_coarse`, `d_fine = V_fine - V_mid` and threshold
+// theta = 2^-40 * K.
+Triple classify(double d_coarse, double d_fine, double theta, double* p) {
+    if (std::abs(d_coarse) <= theta || std::abs(d_fine) <= theta) {
+        return Triple::Insufficient;
+    }
+    if (d_coarse * d_fine < 0) return Triple::Oscillatory;
+    *p = std::log(d_coarse / d_fine) / std::log(2.0);
     return Triple::Usable;
 }
 
-// The shipped estimate, floor included (adaptive_metrics.cpp:315).
+// The shipped estimate, floor included (adaptive_metrics.cpp).
 double delta_hat(double fine, double coarse, double strike) {
     const double two_grid = kRichardsonSafetyFactor * std::abs(fine - coarse)
                           / (std::pow(2.0, kReferenceConvergenceOrder) - 1.0);
@@ -118,12 +144,12 @@ std::string num(double v, int prec = 12) {
 
 std::string tau_key(double tau_iv) { return tau_iv == 5e-4 ? "t5em4" : "t1em3"; }
 
-// One stencil member's price series over the four nested levels.
+// One stencil member's price series over the four grids.
 struct Series {
-    double v[4] = {};
-    Triple c1 = Triple::Insufficient, c2 = Triple::Insufficient;
-    double p1 = std::numeric_limits<double>::quiet_NaN();
-    double p2 = std::numeric_limits<double>::quiet_NaN();
+    double v[kNumGrids] = {};
+    Triple ca = Triple::Insufficient, cb = Triple::Insufficient;
+    double pa = std::numeric_limits<double>::quiet_NaN();
+    double pb = std::numeric_limits<double>::quiet_NaN();
 };
 
 // The calibration table, one CSV-ish line per measurement, prefixed so it
@@ -132,21 +158,22 @@ void row(const std::string& s) { std::cout << "CAL| " << s << "\n"; }
 
 }  // namespace
 
-// Spec D8.  Complete production stencils on four nested levels: for each of
-// the six points and each tau_iv, all three stencil sigma solved on the grid
-// family selected at sigma0 + tau_iv, so the endpoint uncertainties that
-// control admission are the ones calibrated.
+// Spec D8.  Complete production stencils on `G½, G, 2G, 4G`: for each of the
+// six points and each tau_iv, all three stencil sigma on the grid family
+// selected at sigma0 + tau_iv, so the endpoint uncertainties that control
+// admission are the ones calibrated.
 TEST(ReferenceOracleCalibration, OrderIsUsableStableAndAboveConstant) {
     const auto acc = make_grid_accuracy(kReferenceAccuracy);
     const auto ultra_acc = make_grid_accuracy(GridAccuracyProfile::Ultra);
 
-    double min_usable = std::numeric_limits<double>::infinity();
-    double max_usable = -std::numeric_limits<double>::infinity();
+    double min_usable_a = std::numeric_limits<double>::infinity();
+    double max_usable_a = -std::numeric_limits<double>::infinity();
+    double min_usable_any = std::numeric_limits<double>::infinity();
     double max_rel_profile_gap = 0.0;  // max |V_High - V_Ultra| / K
-    size_t points_with_two_usable = 0;
+    size_t points_with_both_usable = 0;
     size_t usable_count = 0, oscillatory_count = 0, insufficient_count = 0;
 
-    row("point,tau_iv,sigma,level,n_points,n_time,value");
+    row("point,tau_iv,sigma,grid,n_points,n_time,value");
 
     for (const auto& pt : points()) {
         ReferenceOracle oracle{.dividend_yield = kDividendYield,
@@ -156,25 +183,24 @@ TEST(ReferenceOracleCalibration, OrderIsUsableStableAndAboveConstant) {
                                .accuracy = acc};
         const double theta = std::ldexp(1.0, -40) * pt.K;
 
-        // The production stencil at tau_iv = 5e-4, base sigma: its level-0
-        // and level-1 prices are the fine/coarse pair the shipped code uses,
-        // so delta_hat below is the deployed estimate, not a re-derivation.
+        // The production stencil at tau_iv = 5e-4, base sigma: its G and G-half
+        // prices are the fine/coarse pair the shipped code uses, so delta_hat
+        // below is the deployed estimate, not a re-derivation.
         std::optional<Series> production;
-        std::optional<ReferenceGridFamily> production_family;
+        std::optional<PDEGridConfig> production_g, production_2g;
 
         for (double tau_iv : {5e-4, 1e-3}) {
             const auto widest =
                 oracle.contract(pt.S, pt.K, pt.tau, pt.sigma + tau_iv, pt.r);
-            auto fam = make_reference_grid_family(widest, acc, 3);
+            auto fam = make_reference_grid_family(widest, acc, 1);
             ASSERT_TRUE(fam.has_value()) << pt.name;
-            ASSERT_EQ(fam->levels.size(), 4u) << pt.name;
+            ASSERT_EQ(fam->levels.size(), 2u) << pt.name;
             // Recorded, not asserted: D8's assertion set is the list below,
             // so a stray failure here would not muddy the calibration
-            // signal.  It is worth watching all the same -- D1 says the
-            // shipped profiles never round the fine count down, and
-            // `itm-2y` at High measurably does (n0 lands in [3490, 3500],
-            // the next count = 1 (mod 16) is 3505, and the strict cap is
-            // 3500, so the family falls back to 3489).
+            // signal.  It is worth watching all the same: `itm-2y` at High
+            // rounds its fine count down (the estimate of 3495 cannot round
+            // up to 3505 under the strict 3500 cap, so the family takes
+            // 3489), which is what D1's rounded_down note now records.
             RecordProperty(std::string(pt.key) + "_" + tau_key(tau_iv) + "_rounded_down",
                            fam->rounded_down ? "true" : "false");
             if (fam->rounded_down) {
@@ -182,83 +208,101 @@ TEST(ReferenceOracleCalibration, OrderIsUsableStableAndAboveConstant) {
                     + ",rounded_down,true,n=" + std::to_string(fam->point_counts[0]));
             }
 
+            // G-half, G, then two nested refinements of G above the cap.
+            PDEGridConfig grids[kNumGrids];
+            grids[kGHalf] = fam->levels[1];
+            grids[kG] = fam->levels[0];
+            auto g2 = refine_grid_config(fam->levels[0], 2);
+            ASSERT_TRUE(g2.has_value()) << pt.name;
+            auto g4 = refine_grid_config(fam->levels[0], 4);
+            ASSERT_TRUE(g4.has_value()) << pt.name;
+            grids[k2G] = std::move(*g2);
+            grids[k4G] = std::move(*g4);
+
             const double sigmas[3] = {pt.sigma - tau_iv, pt.sigma, pt.sigma + tau_iv};
             for (size_t si = 0; si < 3; ++si) {
                 const double s = sigmas[si];
                 const char* slabel = (si == 0) ? "lo" : (si == 1) ? "base" : "hi";
                 Series ser;
-                for (size_t k = 0; k < 4; ++k) {
+                for (size_t k = 0; k < kNumGrids; ++k) {
                     auto r = oracle.solve(
-                        oracle.contract(pt.S, pt.K, pt.tau, s, pt.r), fam->levels[k]);
+                        oracle.contract(pt.S, pt.K, pt.tau, s, pt.r), grids[k]);
                     ASSERT_TRUE(r.has_value())
                         << pt.name << " tau_iv=" << tau_iv << " sigma=" << s
-                        << " level=" << k;
+                        << " grid=" << kGridName[k];
                     ser.v[k] = *r;
                     row(std::string(pt.name) + "," + num(tau_iv, 3) + "," + slabel
-                        + "," + std::to_string(k) + ","
-                        + std::to_string(fam->point_counts[k]) + ","
-                        + std::to_string(fam->time_steps[k]) + "," + num(ser.v[k], 17));
+                        + "," + kGridName[k] + ","
+                        + std::to_string(grids[k].grid_spec.n_points()) + ","
+                        + std::to_string(grids[k].n_time) + "," + num(ser.v[k], 17));
                     RecordProperty(std::string(pt.key) + "_" + tau_key(tau_iv) + "_"
-                                       + slabel + "_v" + std::to_string(k),
+                                       + slabel + "_" + kGridName[k],
                                    num(ser.v[k], 17));
                 }
 
-                ser.c1 = classify(ser.v[2] - ser.v[1], ser.v[1] - ser.v[0], theta, &ser.p1);
-                ser.c2 = classify(ser.v[3] - ser.v[2], ser.v[2] - ser.v[1], theta, &ser.p2);
+                // Triple A: the production pair plus one refinement.
+                ser.ca = classify(ser.v[kG] - ser.v[kGHalf],
+                                  ser.v[k2G] - ser.v[kG], theta, &ser.pa);
+                // Triple B: one level finer throughout.
+                ser.cb = classify(ser.v[k2G] - ser.v[kG],
+                                  ser.v[k4G] - ser.v[k2G], theta, &ser.pb);
 
                 const std::string tag =
                     std::string(pt.key) + "_" + tau_key(tau_iv) + "_" + slabel;
-                RecordProperty(tag + "_class1", label(ser.c1));
-                RecordProperty(tag + "_class2", label(ser.c2));
-                RecordProperty(tag + "_p1", num(ser.p1, 6));
-                RecordProperty(tag + "_p2", num(ser.p2, 6));
+                RecordProperty(tag + "_classA", label(ser.ca));
+                RecordProperty(tag + "_classB", label(ser.cb));
+                RecordProperty(tag + "_pA", num(ser.pa, 6));
+                RecordProperty(tag + "_pB", num(ser.pb, 6));
                 row(std::string(pt.name) + "," + num(tau_iv, 3) + "," + slabel
-                    + ",classify," + label(ser.c1) + "," + label(ser.c2) + ",p1="
-                    + num(ser.p1, 6) + ",p2=" + num(ser.p2, 6));
+                    + ",classify," + label(ser.ca) + "," + label(ser.cb) + ",pA="
+                    + num(ser.pa, 6) + ",pB=" + num(ser.pb, 6));
 
-                for (Triple c : {ser.c1, ser.c2}) {
+                for (Triple c : {ser.ca, ser.cb}) {
                     if (c == Triple::Usable) ++usable_count;
                     else if (c == Triple::Oscillatory) ++oscillatory_count;
                     else ++insufficient_count;
                 }
 
-                EXPECT_NE(ser.c1, Triple::Oscillatory)
+                EXPECT_NE(ser.ca, Triple::Oscillatory)
                     << pt.name << " tau_iv=" << tau_iv << " sigma=" << slabel
-                    << " triple (0,1,2)";
-                EXPECT_NE(ser.c2, Triple::Oscillatory)
+                    << " triple A (Ghalf, G, 2G)";
+                EXPECT_NE(ser.cb, Triple::Oscillatory)
                     << pt.name << " tau_iv=" << tau_iv << " sigma=" << slabel
-                    << " triple (1,2,3)";
-                if (ser.c1 == Triple::Usable) {
-                    EXPECT_TRUE(std::isfinite(ser.p1) && ser.p1 > 0.0)
-                        << pt.name << " p1=" << ser.p1;
-                    min_usable = std::min(min_usable, ser.p1);
-                    max_usable = std::max(max_usable, ser.p1);
+                    << " triple B (G, 2G, 4G)";
+                if (ser.ca == Triple::Usable) {
+                    EXPECT_TRUE(std::isfinite(ser.pa) && ser.pa > 0.0)
+                        << pt.name << " pA=" << ser.pa
+                        << " (a non-positive usable order on triple A means the"
+                           " profile's grid is pre-asymptotic for this contract)";
+                    min_usable_a = std::min(min_usable_a, ser.pa);
+                    max_usable_a = std::max(max_usable_a, ser.pa);
+                    min_usable_any = std::min(min_usable_any, ser.pa);
                 }
-                if (ser.c2 == Triple::Usable) {
-                    EXPECT_TRUE(std::isfinite(ser.p2) && ser.p2 > 0.0)
-                        << pt.name << " p2=" << ser.p2;
-                    min_usable = std::min(min_usable, ser.p2);
-                    max_usable = std::max(max_usable, ser.p2);
+                if (ser.cb == Triple::Usable) {
+                    EXPECT_TRUE(std::isfinite(ser.pb) && ser.pb > 0.0)
+                        << pt.name << " pB=" << ser.pb;
+                    min_usable_any = std::min(min_usable_any, ser.pb);
                 }
-                if (ser.c1 == Triple::Usable && ser.c2 == Triple::Usable) {
-                    EXPECT_NEAR(ser.p1, ser.p2, 0.5)
+                if (ser.ca == Triple::Usable && ser.cb == Triple::Usable) {
+                    EXPECT_NEAR(ser.pa, ser.pb, 0.5)
                         << pt.name << " tau_iv=" << tau_iv << " sigma=" << slabel
                         << " order not stable";
                 }
 
                 if (si == 1 && tau_iv == 5e-4) {
                     production = ser;
-                    production_family = *fam;
-                    if (ser.c1 == Triple::Usable && ser.c2 == Triple::Usable) {
-                        ++points_with_two_usable;
+                    production_g = grids[kG];
+                    production_2g = grids[k2G];
+                    if (ser.ca == Triple::Usable && ser.cb == Triple::Usable) {
+                        ++points_with_both_usable;
                     }
                 }
             }
         }
 
         ASSERT_TRUE(production.has_value()) << pt.name;
-        const double v_high = production->v[0];
-        const double v_half = production->v[1];
+        const double v_high = production->v[kG];
+        const double v_half = production->v[kGHalf];
         const double delta = delta_hat(v_high, v_half, pt.K);
 
         // Profile adequacy: High against Ultra, inside the shipped estimate.
@@ -286,13 +330,13 @@ TEST(ReferenceOracleCalibration, OrderIsUsableStableAndAboveConstant) {
         ASSERT_TRUE(v_wide.has_value()) << pt.name;
         const double domain_shift = std::abs(*v_wide - v_high);
 
-        // Effective sensitivity (b): spatial-only and temporal-only halvings,
-        // to attribute the level-0 -> level-1 shift between the two axes.
-        PDEGridConfig spatial_only{.grid_spec = production_family->levels[1].grid_spec,
-                                   .n_time = production_family->levels[0].n_time,
+        // Effective sensitivity (b): spatial-only and temporal-only
+        // refinement of G, to attribute the G -> 2G shift between the axes.
+        PDEGridConfig spatial_only{.grid_spec = production_2g->grid_spec,
+                                   .n_time = production_g->n_time,
                                    .mandatory_times = {}};
-        PDEGridConfig temporal_only{.grid_spec = production_family->levels[0].grid_spec,
-                                    .n_time = production_family->levels[1].n_time,
+        PDEGridConfig temporal_only{.grid_spec = production_g->grid_spec,
+                                    .n_time = production_2g->n_time,
                                     .mandatory_times = {}};
         const auto base_contract = oracle.contract(pt.S, pt.K, pt.tau, pt.sigma, pt.r);
         auto v_spatial = oracle.solve(base_contract, spatial_only);
@@ -301,8 +345,10 @@ TEST(ReferenceOracleCalibration, OrderIsUsableStableAndAboveConstant) {
         ASSERT_TRUE(v_temporal.has_value()) << pt.name;
 
         const std::string tag(pt.key);
-        RecordProperty(tag + "_V_high", num(v_high, 17));
-        RecordProperty(tag + "_V_half", num(v_half, 17));
+        RecordProperty(tag + "_V_G", num(v_high, 17));
+        RecordProperty(tag + "_V_Ghalf", num(v_half, 17));
+        RecordProperty(tag + "_V_2G", num(production->v[k2G], 17));
+        RecordProperty(tag + "_V_4G", num(production->v[k4G], 17));
         RecordProperty(tag + "_V_ultra", num(*v_ultra, 17));
         RecordProperty(tag + "_delta_hat", num(delta, 12));
         RecordProperty(tag + "_profile_gap", num(profile_gap, 12));
@@ -310,42 +356,45 @@ TEST(ReferenceOracleCalibration, OrderIsUsableStableAndAboveConstant) {
         RecordProperty(tag + "_domain_shift", num(domain_shift, 12));
         RecordProperty(tag + "_spatial_only_shift", num(std::abs(*v_spatial - v_high), 12));
         RecordProperty(tag + "_temporal_only_shift", num(std::abs(*v_temporal - v_high), 12));
-        RecordProperty(tag + "_coarse_shift", num(std::abs(v_half - v_high), 12));
+        RecordProperty(tag + "_refined_shift", num(std::abs(production->v[k2G] - v_high), 12));
 
-        row(std::string(pt.name) + ",profile,V_high=" + num(v_high, 17)
-            + ",V_half=" + num(v_half, 17) + ",V_ultra=" + num(*v_ultra, 17)
-            + ",delta_hat=" + num(delta, 12) + ",|V_high-V_ultra|=" + num(profile_gap, 12)
+        row(std::string(pt.name) + ",profile,V_G=" + num(v_high, 17)
+            + ",V_Ghalf=" + num(v_half, 17) + ",V_ultra=" + num(*v_ultra, 17)
+            + ",delta_hat=" + num(delta, 12) + ",|V_High-V_Ultra|=" + num(profile_gap, 12)
             + ",rel_K=" + num(profile_gap / pt.K, 12));
         row(std::string(pt.name) + ",sensitivity,domain_shift=" + num(domain_shift, 12)
             + ",spatial_only=" + num(std::abs(*v_spatial - v_high), 12)
             + ",temporal_only=" + num(std::abs(*v_temporal - v_high), 12)
-            + ",coarse=" + num(std::abs(v_half - v_high), 12));
+            + ",both(2G)=" + num(std::abs(production->v[k2G] - v_high), 12));
 
         EXPECT_LE(profile_gap, delta) << pt.name << " High vs Ultra outside the estimate";
         EXPECT_LE(domain_shift, delta) << pt.name << " domain sensitivity";
     }
 
-    RecordProperty("min_usable_order", num(min_usable, 6));
-    RecordProperty("max_usable_order", num(max_usable, 6));
+    RecordProperty("min_usable_order_tripleA", num(min_usable_a, 6));
+    RecordProperty("max_usable_order_tripleA", num(max_usable_a, 6));
+    RecordProperty("min_usable_order_any", num(min_usable_any, 6));
     RecordProperty("max_profile_gap_rel_K", num(max_rel_profile_gap, 12));
-    RecordProperty("points_with_two_usable_at_base_sigma",
-                   std::to_string(points_with_two_usable));
+    RecordProperty("points_with_both_usable_at_base_sigma",
+                   std::to_string(points_with_both_usable));
     RecordProperty("usable_triples", std::to_string(usable_count));
     RecordProperty("oscillatory_triples", std::to_string(oscillatory_count));
     RecordProperty("insufficient_triples", std::to_string(insufficient_count));
 
-    row("summary,min_usable_order=" + num(min_usable, 6)
-        + ",max_usable_order=" + num(max_usable, 6)
+    row("summary,min_usable_A=" + num(min_usable_a, 6)
+        + ",max_usable_A=" + num(max_usable_a, 6)
+        + ",min_usable_any=" + num(min_usable_any, 6)
         + ",max_profile_gap_rel_K=" + num(max_rel_profile_gap, 12)
-        + ",points_with_two_usable=" + std::to_string(points_with_two_usable)
+        + ",points_with_both_usable=" + std::to_string(points_with_both_usable)
         + ",usable=" + std::to_string(usable_count)
         + ",oscillatory=" + std::to_string(oscillatory_count)
         + ",insufficient=" + std::to_string(insufficient_count));
 
-    // Coverage rule: at least four of the six points carry two usable triples
-    // at the base sigma of the tau_iv = 5e-4 stencil.
-    EXPECT_GE(points_with_two_usable, 4u);
-    EXPECT_LE(kReferenceConvergenceOrder, min_usable);
+    // Coverage rule: at least four of the six points carry both triples
+    // usable at the base sigma of the tau_iv = 5e-4 stencil.
+    EXPECT_GE(points_with_both_usable, 4u);
+    // The constant is set from triple A: the production pair's own order.
+    EXPECT_LE(kReferenceConvergenceOrder, min_usable_a);
     // The floor is a calibrated constant (spec D1, rev 5): it must cover the
     // oracle's own High-vs-Ultra discrepancy scale on this set.
     EXPECT_GE(kReferenceUncertaintyFloor, max_rel_profile_gap);

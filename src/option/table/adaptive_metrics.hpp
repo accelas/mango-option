@@ -108,16 +108,25 @@ inline constexpr double kReferenceUncertaintyFloor = 1e-7;
 /// convergence rate.
 ///
 /// PROVISIONAL.  The D8 calibration
-/// (`//tests:reference_oracle_calibration_test`, first run 2026-09-21) does
-/// NOT yet license a value: on the declared six-point set the measured
-/// minimum usable order is -0.19, because the 30-day OTM put is
-/// pre-asymptotic on the High profile's own grid (a 2x/4x finer level 0
-/// recovers p_obs ~ 1.44 at that point), and the order-stability rule fails
-/// at three of the six points.  The next move is the oracle family -- a
-/// finer profile or a revised domain rule -- not this number: lowering it to
-/// the family's current worst case would inflate every delta-hat instead of
-/// fixing what the family does.  See the calibration test's header for the
-/// full table.
+/// (`//tests:reference_oracle_calibration_test`, rev 6 run 2026-09-21 on
+/// `G-half, G, 2G, 4G`) does not yet license a value, because one assertion
+/// still fails: order stability |p_A - p_B| <= 0.5 at the 30-day OTM put for
+/// tau_iv = 1e-3.  1.0 nonetheless remains safely conservative -- every
+/// triple-A order measured is above it.  Triple A is `(G-half, G, 2G)`, the
+/// order of the very pair this estimate differences; per point, the range
+/// over both tau_iv and all three stencil sigma:
+///
+///   atm-1y-3div  p_A 1.317..1.341   p_B 1.647..1.660
+///   500-trigger  p_A 2.096..2.369   p_B 1.833..2.444
+///   otm-30d      p_A 1.559..1.687   p_B 0.671..1.401
+///   deep-otm-7d  p_A 1.916..1.996   p_B 1.996..2.112
+///   itm-2y       p_A 1.619..1.829   p_B 1.738..1.780
+///   atm-6m-call  p_A 2.000          p_B 2.000
+///
+/// Minimum usable p_A = 1.31722 (atm-1y-3div, tau_iv = 5e-4, sigma-lo),
+/// maximum 2.36881; 72 usable triples, 0 oscillatory, 0 insufficient.  Once
+/// the stability question is settled the rule sets this to the largest
+/// one-decimal value not above the triple-A minimum.
 inline constexpr double kReferenceConvergenceOrder = 1.0;
 
 /// A nested family of explicit PDE grid configs for Richardson-style error
@@ -133,6 +142,12 @@ struct ReferenceGridFamily {
     /// `accuracy.max_spatial_points` instead of up to the next `1 (mod 16)`
     /// count -- the family's own accuracy is then an estimate, not a
     /// validated one.
+    ///
+    /// The shipped profiles do reach it: it happens whenever the estimate
+    /// lands within 15 points of the profile cap, measured for the ITM 2y
+    /// put at High, whose estimate of 3495 rounds down to 3489 under the
+    /// 3500 cap.  The fine grid is then at most 15 points coarser than the
+    /// estimate, which the cap already declared acceptable.
     bool rounded_down = false;
 };
 
@@ -140,6 +155,23 @@ struct ReferenceGridFamily {
 /// `levels + 1` entries (the fine grid plus `levels` successive halvings).
 std::expected<ReferenceGridFamily, ValidationError> make_reference_grid_family(
     const PricingParams& params, const GridAccuracyParams& accuracy, size_t levels);
+
+/// Refine one explicit grid config by an integer `factor`: the same
+/// `GridSpec` generator family re-sampled at `factor * (n - 1) + 1` points,
+/// with `n_time` multiplied by `factor` and `mandatory_times` carried over.
+///
+/// Every generator is a pure map of eta = i/(n-1) (grid.hpp `generate()`),
+/// so `g` is exactly the every-`factor`-th-node subsequence of the result --
+/// the same nesting argument `make_reference_grid_family` uses downward,
+/// run upward instead.
+///
+/// The accuracy profile's `max_spatial_points` cap deliberately does NOT
+/// apply: this is a calibration-only construction (spec D8 builds `2G` and
+/// `4G` above production's fine grid to observe the order of the pair
+/// production actually uses), and the solver accepts any explicit grid.
+/// Nothing on the production path calls it.
+std::expected<PDEGridConfig, ValidationError> refine_grid_config(
+    const PDEGridConfig& g, size_t factor);
 
 /// Solve-attempt/failure counters for the reference stencil, so a caller can
 /// see how much PDE work its references cost. Atomic so one counter shared
