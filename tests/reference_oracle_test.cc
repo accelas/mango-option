@@ -181,7 +181,7 @@ TEST(StencilRefs, SixSolvesOnOneNestedGridPair) {
                              / (std::pow(2.0, kReferenceConvergenceOrder) - 1.0),
                          kReferenceUncertaintyFloor * 100.0),
                 1e-15);
-    // Achieved time steps are recorded for both levels (record only).
+    // Requested time steps are recorded for both levels (record only).
     EXPECT_EQ(refs->fine_steps, static_cast<uint32_t>(fake.calls[0].second));
     EXPECT_EQ(refs->coarse_steps, static_cast<uint32_t>(fake.calls[1].second));
 }

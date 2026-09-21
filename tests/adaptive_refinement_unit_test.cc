@@ -812,12 +812,14 @@ namespace {
 mango::ScoreErrorFn holdout_failure_script(
     Harness& h,
     std::function<size_t(size_t build)> failures_for,
-    std::function<double(size_t build)> error_for) {
+    std::function<double(size_t build)> error_for,
+    mango::PointStatus failure_status = mango::PointStatus::SurfaceNoRoot) {
     auto last_build = std::make_shared<size_t>(
         std::numeric_limits<size_t>::max());
     auto seen = std::make_shared<size_t>(0);
     return [&h, failures_for = std::move(failures_for),
-            error_for = std::move(error_for), last_build, seen](
+            error_for = std::move(error_for), failure_status, last_build,
+            seen](
                const mango::SurfaceHandle&, const mango::ErrorRefs&, double,
                double strike, double tau, double sigma,
                double rate) -> mango::PointScore {
@@ -832,8 +834,7 @@ mango::ScoreErrorFn holdout_failure_script(
             *seen = 0;
         }
         if ((*seen)++ < failures_for(build)) {
-            return mango::PointScore{
-                .status = mango::PointStatus::SurfaceNoRoot};
+            return mango::PointScore{.status = failure_status};
         }
         return mango::PointScore{.status = mango::PointStatus::Measured,
                                  .iv_error = error_for(build),
@@ -881,6 +882,57 @@ TEST(RunRefinementTest, FewerHoldoutFailuresWinsTheExplorationBase) {
     ASSERT_GE(h.built_sizes.size(), 2u);
     EXPECT_EQ(h.refine_input_sizes[1], h.built_sizes[1]);
     EXPECT_NE(h.built_sizes[1], kSeedSizes);
+}
+
+namespace {
+/// Run one build-1-fails-once script and report the grids iteration 2 was
+/// refined from.  Build 0 carries the same single holdout failure with a far
+/// worse error, so only the finiteness of build 1's holdout statistics can
+/// decide whether the base advances.
+GridSizes base_grids_of_second_refinement(mango::PointStatus failure_status) {
+    Harness h;
+    h.params.max_iter = 3;
+    h.score_override = holdout_failure_script(
+        h,
+        [](size_t) { return 1u; },
+        [](size_t build) { return build == 0 ? 0.5 : 1e-5; },
+        failure_status);
+
+    auto r = h.run();
+    EXPECT_FALSE(r.has_value()) << "every candidate failed somewhere";
+    EXPECT_GE(h.refine_input_sizes.size(), 2u);
+    EXPECT_GE(h.built_sizes.size(), 2u);
+    return h.refine_input_sizes.size() >= 2 ? h.refine_input_sizes[1]
+                                            : GridSizes{};
+}
+}  // namespace
+
+// Regression: a holdout point that scored `SurfaceNonFinite` left the
+// candidate's `all_finite` flag set, so the candidate kept a finite holdout
+// max and avg and could seize the exploration base and steer refinement.
+// Bug: `apply_point_score` funnelled every `is_surface_failure` status
+// through one branch that counted the failure and binned it but never
+// cleared `all_finite`.  A NaN price or vega raised at sigma0 disqualified
+// the candidate (the caller's veto runs before the score), while the same
+// NaN raised at one of the two band targets did not -- although spec D4's
+// non-finite veto does not distinguish which target exposed it.
+TEST(RunRefinementTest, NonFiniteHoldoutInversionCannotSeizeTheBase) {
+    EXPECT_EQ(base_grids_of_second_refinement(
+                  mango::PointStatus::SurfaceNonFinite),
+              kSeedSizes)
+        << "a candidate whose inversion went non-finite must not become the "
+           "exploration base, however small its measured errors";
+}
+
+// The control for the regression above: with the identical script and an
+// ordinary (finite) surface failure in the same position, the accurate
+// candidate *does* take the base.  Without this, the test above would pass
+// on a loop that simply never advances its base.
+TEST(RunRefinementTest, FiniteHoldoutFailureStillAdvancesTheBase) {
+    EXPECT_NE(base_grids_of_second_refinement(
+                  mango::PointStatus::SurfaceNoRoot),
+              kSeedSizes)
+        << "equal failure counts and a 5e4x better max must advance the base";
 }
 
 // A fresh-sample failure vetoes viability even when the holdout is clean.

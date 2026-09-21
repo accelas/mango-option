@@ -337,7 +337,9 @@ struct ErrorRefs {
     /// Spec D2: the stencil separates in the expected order *and* all three
     /// targets pass the product's query validation.
     bool resolved = false;
-    /// Achieved time-step counts of the two grid levels (record only).
+    /// Requested time-step counts (`n_time`) of the two grid configs
+    /// (record only).  Per-segment rounding can make the counts the solvers
+    /// actually take differ; the loop needs neither.
     uint32_t fine_steps = 0;
     uint32_t coarse_steps = 0;
 };

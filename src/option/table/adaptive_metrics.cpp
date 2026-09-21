@@ -385,6 +385,8 @@ PrepareRefsFn make_stencil_refs_fn(const AdaptiveGridParams& params,
         }
         const PDEGridConfig& fine = fam->levels[0];
         const PDEGridConfig& coarse = fam->levels[1];
+        // The two configs' requested `n_time`, recorded as provenance; the
+        // counts the solvers take can differ by per-segment rounding.
         out.fine_steps = static_cast<uint32_t>(fam->time_steps[0]);
         out.coarse_steps = static_cast<uint32_t>(fam->time_steps[1]);
 

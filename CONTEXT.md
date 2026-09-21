@@ -61,7 +61,7 @@ The build-time IV-error measurement that inverts the reference price on the cand
 _Avoid_: Vega-scaled error, linearised IV error, price/vega
 
 **Surface inversion failure**:
-An operational outcome of the shipped inversion on a reference-resolved point — no root, an ambiguous root, non-convergent, non-finite, or a surface vega below the pre-check threshold. It is what the shipped algorithm did, not proof that no implied volatility exists there.
+An operational outcome of the shipped inversion on a reference-resolved point — no sign change on the searched bracket, a bracket the screen or the post-Brent slope check refused, non-convergent, non-finite, or a surface vega below the pre-check threshold. It is what the shipped algorithm did, not proof that no implied volatility exists there.
 _Avoid_: Infinite IV error, 2000 bps garbage, non-invertible point
 
 ## Relationships

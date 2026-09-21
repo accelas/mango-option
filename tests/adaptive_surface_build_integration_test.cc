@@ -7,6 +7,7 @@
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
+#include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
@@ -15,6 +16,7 @@
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -1191,7 +1193,7 @@ TEST(AdaptiveGridBuilderTest, AutomaticGridCoversMoneynessTailsWithFixedBudget) 
 // widens this chain's covering half-width from ~1.20 to ~1.65 and clamps
 // Nx at the Ultra 5,000-point cap: both classes moved by less than one
 // part in a thousand of their own size.)
-TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
+TEST(AdaptiveGridBuilderTest, ChebyshevRefusesADomainOfIntrinsicReferences) {
     OptionGrid chain;
     chain.spot = 100.0;
     chain.dividend_yield = 0.0;
@@ -1220,15 +1222,155 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     // represent a deep-OTM price of 1.7e-4 (its minimum over the acceptance
     // band is 16x that), so the inversion reports MultipleRoots.
     //
-    // FOLLOW-UP #509: re-home #480 S1 node-level FDM agreement on a manual
-    // continuous-Chebyshev builder (pre-fix 27.85 at m_lo = -1.088095,
-    // sigma-independent to eight significant figures, against post-fix
-    // 6.65e-09 on the node class and 0.01759 on the user-strike class); no
-    // such builder exists today.
+    // The #480 S1 node-level FDM agreement this fixture used to carry is
+    // re-homed on the manual continuous-Chebyshev builder, in
+    // ChebyshevNodesMatchFdmAtExtremeMoneyness below: `build_chebyshev_table`
+    // owns the same batch-coverage seam and takes a fit domain directly, so
+    // the check no longer depends on the adaptive loop certifying a domain it
+    // is right to refuse.
     auto result = build_adaptive_chebyshev(params, chain, OptionType::PUT);
     ASSERT_FALSE(result.has_value())
         << "a domain of exactly-intrinsic references must not be certified";
     EXPECT_EQ(result.error().code, PriceTableErrorCode::ValidationFailed);
+}
+
+// Regression (#480, S1; re-homed per #509): the continuous Chebyshev build
+// solved its (sigma, rate) batch gridless, so the shared PDE grid did not
+// cover the moneyness nodes the fit then read.  `build_chebyshev_table` owns
+// that seam -- it sets `accuracy.log_moneyness_coverage` from its own node
+// span before estimating the batch grid -- and it takes the fit domain
+// directly, so this check no longer has to route through the adaptive loop.
+//
+// Bug: extract_chain_domain floors the tau axis to a 0.5y spread and the
+// Chebyshev builder adds CC headroom, so for this chain the PDE maturity is
+// 0.6875 and the old batch-union half-width was 5 * sigma_hi * sqrt(0.694)
+// ~= 5 * 0.225 * 0.833 ~= 0.94 (the batch is normalized-ineligible: its
+// first param is the sigma_lo = 0.01 node, whose margin is far below 0.35).
+// The moneyness nodes reach +-ln(2.5) * (1 + 6/32) ~= +-1.088, so both
+// endpoint nodes were cubic-spline extrapolations -- and a Chebyshev
+// interpolant is a global polynomial, so the garbage reaches the user's own
+// strikes.
+//
+// Pre-fix max abs error on this branch's parent: 27.85, at the node
+// m_lo = -1.088095 with sigma=0.15 -- got 94.16 for a put whose reference
+// price is 66.31, i.e. above the K=100 intrinsic ceiling.  The same ~27.85
+// showed at every queried sigma (27.850638466 / 27.850638459 /
+// 27.850638458), and that sigma-independence to eight significant figures is
+// the signature of extrapolating one slice past the PDE domain edge rather
+// than of interpolation error.  The two query classes below keep the
+// tolerances that measurement set.
+//
+// Re-measured on this fixture 2026-09-21 by deleting the coverage line from
+// `build_chebyshev_table` again: the m_lo node then reads 67.6879 against an
+// FDM reference of 66.3142, an error of 1.3737 that is identical to eight
+// significant figures across all four queried sigmas (1.3736853175 /
+// 1.3736853175 / 1.3736853160 / 1.3736853276).  Smaller in dollars than the
+// adaptive fixture's 27.85 -- this batch carries neither the dividend
+// extension nor that fixture's sigma span -- but the same signature, and
+// still ~1.4e5x above TOL_NODE, so the class keeps its discriminating power.
+TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
+    OptionGrid chain;
+    chain.spot = 100.0;
+    chain.dividend_yield = 0.0;
+    chain.strikes = {40.0, 60.0, 100.0, 160.0, 250.0};
+    chain.maturities = {0.05, 0.1};
+    chain.implied_vols = {0.10};
+    chain.rates = {0.03, 0.05};
+
+    // The fit domain build_adaptive_chebyshev hands its seed candidate: the
+    // chain's sample domain, plus that builder's frozen CC headroom at its
+    // initial levels (m 5, tau 3, sigma 2, rate 1).  Recomputed here from the
+    // shared `extract_chain_domain` rather than copied, so the fixture tracks
+    // the sample domain; the node span is pinned below.
+    AdaptiveGridParams defaults;
+    auto domain = extract_chain_domain(chain, defaults.min_moneyness_points);
+    ASSERT_TRUE(domain.has_value());
+    const SurfaceBounds& sb = domain->sample_bounds;
+
+    constexpr std::array<size_t, 4> kNumPts{33, 9, 5, 3};  // CC levels 5/3/2/1
+    auto headroom = [](double lo, double hi, size_t n) {
+        return 3.0 * (hi - lo) / static_cast<double>(n - 1);
+    };
+    const double hm = headroom(sb.m_min, sb.m_max, kNumPts[0]);
+    const double ht = headroom(sb.tau_min, sb.tau_max, kNumPts[1]);
+    const double hs = headroom(sb.sigma_min, sb.sigma_max, kNumPts[2]);
+    const double hr = headroom(sb.rate_min, sb.rate_max, kNumPts[3]);
+
+    Domain<4> dom;
+    dom.lo = {sb.m_min - hm, std::max(sb.tau_min - ht, 1e-4),
+              std::max(sb.sigma_min - hs, 0.01),
+              std::max(sb.rate_min - hr, -0.05)};
+    dom.hi = {sb.m_max + hm, sb.tau_max + ht, sb.sigma_max + hs,
+              sb.rate_max + hr};
+
+    // Pin the fixture the pre-fix number was measured on: without this node
+    // span the test measures nothing.
+    EXPECT_NEAR(dom.lo[0], -1.088095, 1e-6);
+    EXPECT_NEAR(dom.hi[0], 1.088095, 1e-6);
+    EXPECT_NEAR(dom.hi[1], 0.6875, 1e-5);  // 0.687501: tau_min floors at 1e-6
+    EXPECT_NEAR(dom.lo[2], 0.01, 1e-12);
+    EXPECT_NEAR(dom.hi[2], 0.225, 1e-12);
+
+    auto table = build_chebyshev_table(ChebyshevTableConfig{
+        .num_pts = kNumPts,
+        .domain = dom,
+        .K_ref = chain.spot,
+        .option_type = OptionType::PUT,
+        .dividend_yield = chain.dividend_yield,
+    });
+    ASSERT_TRUE(table.has_value())
+        << "build failed: " << static_cast<int>(table.error().code);
+
+    const double K = chain.spot;
+    const double tau = dom.hi[1];   // a tau node: isolates m extraction
+    const double r = dom.hi[3];     // a rate node
+
+    // Tolerances in $ per K=100, split by query class because the two
+    // classes measure different things.
+    //
+    // TOL_NODE guards the two on-node m endpoints -- the queries that
+    // actually discriminate this defect.  Post-fix max deviation over that
+    // class was 6.65e-09 on the adaptive fixture, so the ">= 10x post-fix"
+    // rule would pin ~7e-08; it is loosened to 1e-5 for exactly the reason
+    // the #437 test above uses 1e-5 -- this compares two independently-run
+    // pipelines (batch PDE solve + Chebyshev fit vs. a separate High-profile
+    // FDM solve) and CI must not depend on bit-level agreement between them
+    // across toolchains.  1e-5 is still ~2.8e6x below the 27.85 pre-fix
+    // error, so the class keeps its full discriminating power.
+    constexpr double TOL_NODE = 1e-5;
+    //
+    // TOL_USER guards the two user strikes.  These sit off-node in m, so the
+    // class carries ordinary Chebyshev interpolation error across the
+    // intrinsic-value kink: post-fix max deviation was 0.01759, at strike 250
+    // with the sigma_lo = 0.01 node, where the exact American put value is
+    // its intrinsic 60 and a global polynomial cannot follow the kink.
+    // TOL_USER = 0.2 is ~11x that per the ">= 10x post-fix" rule, and ~139x
+    // below the 27.85 pre-fix error.  This class is a user-visible sanity
+    // assertion, not the discriminator: pre-fix its worst deviation was only
+    // 0.0139 (strike 250, sigma=0.01), so it would have passed at this
+    // tolerance on the unfixed code.  The bug is caught by TOL_NODE.
+    constexpr double TOL_USER = 0.2;
+
+    struct Query { double m; const char* what; double tol; };
+    const Query queries[] = {
+        {dom.lo[0], "node m_lo", TOL_NODE},
+        {dom.hi[0], "node m_hi", TOL_NODE},
+        {std::log(100.0 / 250.0), "user strike 250", TOL_USER},
+        {std::log(100.0 / 40.0), "user strike 40", TOL_USER},
+    };
+    // sigma at the node endpoints (on-axis) and the user-facing sample
+    // bounds (interpolated in sigma).
+    const double sigmas[] = {dom.lo[2], dom.hi[2], sb.sigma_min, sb.sigma_max};
+
+    for (const auto& q : queries) {
+        for (double sigma : sigmas) {
+            const double S = K * std::exp(q.m);
+            const double ref = fdm_reference_price(S, K, tau, sigma, r);
+            const double got = table->price(S, K, tau, sigma, r);
+            EXPECT_NEAR(got, ref, q.tol)
+                << q.what << " m=" << q.m << " sigma=" << sigma;
+        }
+    }
 }
 
 // Direct pricing oracle for the contract at the query valuation point.

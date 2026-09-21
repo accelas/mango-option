@@ -95,10 +95,13 @@ enum class PointStatus : uint8_t {
     /// The surface's vega at a target price was below the product
     /// pre-check's threshold, so the shipped inversion refused the query.
     SurfaceVegaTooSmall,
-    /// No volatility in the search range reproduced the reference price.
+    /// The shipped inversion found no sign change on its bracket, so it
+    /// reported no root.  An outcome of the solver on this surface, not a
+    /// statement that no volatility reproduces the reference price.
     SurfaceNoRoot,
-    /// More than one volatility in the search range reproduced the
-    /// reference price, so the recovered volatility is ambiguous.
+    /// The 17-point screen or the post-Brent slope check refused the
+    /// bracket, so the inversion returned no volatility.  An outcome of
+    /// those checks, not a statement that the price has several inverses.
     SurfaceAmbiguous,
     /// The inversion did not reach the reference price within its
     /// iteration budget.

@@ -126,8 +126,10 @@ double finite_or_zero(double x) { return std::isfinite(x) ? x : 0.0; }
 /// Shared by the fresh pass and `detail::score_final_surface` so the two
 /// cannot drift apart: `Eval` is `SampleEval` or `detail::FinalScore`, which
 /// carry the same counters.  What stays with the caller is what genuinely
-/// differs -- the maturity-support check, the non-finite price veto that runs
-/// *before* the score, and which bins a measured error belongs in.
+/// differs -- the maturity-support check, the veto on a non-finite candidate
+/// price at sigma0 (which runs *before* the score), and which bins a measured
+/// error belongs in.  The matching veto on a non-finite evaluation *inside*
+/// the inversion is applied here, since only the score reports it (spec D4).
 ///
 /// @return true when the point measured, so the caller can bin its error.
 template <typename Eval>
@@ -153,6 +155,14 @@ bool apply_point_score(const PointScore& ps, const ErrorRefs& refs,
         // attributed to a bin, never turned into an error number.
         ++ev.surface_failures;
         failure_bins.record_failure(norm_pos);
+        if (ps.status == PointStatus::SurfaceNonFinite) {
+            // A NaN price or vega raised while inverting is the same
+            // numerical failure as a NaN at sigma0, and the D4 non-finite
+            // veto does not care which target exposed it.  Without this the
+            // candidate would keep a finite holdout max and avg and could
+            // still seize the exploration base and steer refinement.
+            ev.all_finite = false;
+        }
         return false;
     }
     if (!std::isfinite(ps.iv_error) || ps.iv_error < 0.0) {
