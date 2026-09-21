@@ -26,12 +26,33 @@
 namespace mango {
 namespace {
 
-// Regression #500: the wide-band seed surface failed the final viability gate
-// at this low-vega point just beyond the backward-time dividend at tau=.25.
-// The old blend held spot fixed while normalizing by each reference strike.
+// Regression #500: this point must measure, not refuse.  The wide-band seed
+// surface failed the old final viability gate here -- a low-vega query just
+// beyond the backward-time dividend at tau = .25 -- because the retired
+// vega-scaled metric divided a small price error by a near-zero vega and
+// reported 788 bps, well above the 0.20 scalar bound that then gated
+// admissibility.
+// Bug: the 788 bps was an artifact of the metric's divisor, not a property
+// of the surface.  Scored by round-tripping the shipped inversion, the same
+// point measures 156.7 bps, and the price the surface is wrong by is
+// $0.0320 on a $113.72 strike.  The old blend held spot fixed while
+// normalizing by each reference strike; the fix is what makes the price
+// residual this small, and the round trip is what reports it honestly.
+//
 // Keep the original parameter domain and timeline, but build only the two
 // reference strikes that contribute to this query; no adaptive search needed.
-TEST(SegmentedFinalContract, WideBandDividendBracketRemainsViable) {
+//
+// Measured 2026-09-20 on 44fca83d and re-measured under spec rev 5 (the
+// tolerance-band acceptance and the uncertainty floor):
+//   resolved = true, delta = 1.537383522e-06, delta_lo = 1.589482386e-06,
+//   delta_hi = 1.420059041e-06, reference price 14.1262686212,
+//   bracket [14.1261660957, 14.126377776] -- separated by 1.03e-4 per side
+//   against a required 3.13e-6, so the stencil resolves with 33x margin.
+//   status = Measured, iv_error = 0.015669 (156.69 bps),
+//   edge_band_rescue = false, price_residual = 2.811334e-04.
+// The ceiling below is 1.5x the measured error; it is a pin on what was
+// measured, not a tolerance anyone chose.
+TEST(SegmentedFinalContract, WideBandDividendBracketRoundTrip) {
     const AdaptiveGridParams params{.target_iv_error = 5e-4};
     const SegmentedAdaptiveConfig config{
         .spot = 100.0,
@@ -88,14 +109,21 @@ TEST(SegmentedFinalContract, WideBandDividendBracketRemainsViable) {
     };
     const auto score = make_round_trip_score_fn(params, ctx, config.option_type)(
         handle, *refs, config.spot, strike, tau, sigma, rate);
-    // Task 10: pin measured outcome.  The retired scalar bound is replaced by
-    // the D4 status: the point either measures or its reference did not
-    // resolve; what it must never be is a failure of the shipped inversion.
-    EXPECT_TRUE(score.status == PointStatus::Measured ||
-                score.status == PointStatus::ReferenceUnresolved)
+    EXPECT_TRUE(refs->resolved)
+        << "the stencil separated by 1.03e-4 per side against 3.13e-6 when "
+           "this was measured; losing that is a reference regression";
+    EXPECT_EQ(score.status, PointStatus::Measured)
         << "status " << static_cast<int>(score.status)
-        << "; surface=" << price << "; reference=" << refs->ref_price
-        << "; resolved=" << refs->resolved;
+        << "; surface=" << price << "; reference=" << refs->ref_price;
+    EXPECT_LT(score.iv_error, 0.0235)
+        << "measured 0.015669 (156.69 bps); this is 1.5x that, "
+        << "got " << score.iv_error * 1e4 << " bps";
+    EXPECT_FALSE(score.edge_band_rescue)
+        << "the recovered volatility was inside the exact product bracket "
+           "when this was measured, so the shipped solver answers here too";
+    EXPECT_NEAR(score.price_residual, 2.811334e-04, 1.5e-05)
+        << "the surface is wrong by $0.032 on a $113.72 strike; the 788 bps "
+           "the retired metric reported was its divisor, not this price";
 }
 
 /// Convert S/K moneyness to log-moneyness for internal builder APIs.
@@ -133,6 +161,12 @@ TEST(AdaptiveGridBuilderTest, StableFittingReportsShortTauBestEffortAccuracy) {
     EXPECT_EQ(result->target_met, result->achieved_max_error <= params.target_iv_error);
     // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
     EXPECT_EQ(result->diagnostics.surface_failures, 0u);
+    // Accounting invariant first, observed count second (spec D3, rev 5).
+    EXPECT_EQ(result->diagnostics.holdout_points_measured
+                  + result->diagnostics.holdout_points_unresolved
+                  + result->diagnostics.holdout_points_unsupported
+                  + result->diagnostics.holdout_points_invalid,
+              result->diagnostics.holdout_points);
     EXPECT_EQ(result->diagnostics.holdout_points_measured, 15u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
     const double at_reference = result->surface.price(100.0, 100.0, 0.75, 0.20, 0.05);

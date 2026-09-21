@@ -175,6 +175,15 @@ TEST(IVSolverFactorySegmented, DocumentedBSplineConfigReportsAccuracyAndSolves) 
     ASSERT_TRUE(diagnostics);
     EXPECT_EQ(diagnostics->target_met,
               diagnostics->achieved_max_error <= config.adaptive->target_iv_error);
+    // Every holdout point is accounted for under exactly one outcome, and
+    // the measured count is the one observed on 2026-09-21 under the
+    // round-trip metric (spec D3, rev 5).  The invariant is the contract;
+    // the number is provenance.
+    EXPECT_EQ(diagnostics->holdout_points_measured
+                  + diagnostics->holdout_points_unresolved
+                  + diagnostics->holdout_points_unsupported
+                  + diagnostics->holdout_points_invalid,
+              diagnostics->holdout_points);
     EXPECT_EQ(diagnostics->holdout_points_measured, 64u);
     EXPECT_EQ(diagnostics->holdout_points_invalid, 0u);
     EXPECT_LE(diagnostics->achieved_max_error, 0.20); // Existing viability contract.
