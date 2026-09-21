@@ -578,10 +578,19 @@ For each price series and each consecutive triple `(k, k+1, k+2)`:
 Assertions: no triple A or B is oscillatory; every usable `p_obs` is finite
 and strictly positive (a non-positive usable `p_obs` on triple A means the
 profile's grid is pre-asymptotic for that contract and the oracle family,
-not the constant, must change); for series with both triples usable the two
-agree within 0.5 (chosen allowance); at least four of the six points have
+not the constant, must change); at least four of the six points have
 both triples usable at the base σ (coverage rule);
-`kReferenceConvergenceOrder ≤ min usable p_obs over triple A`;
+`kReferenceConvergenceOrder ≤ min usable p_obs over triple A`; Roache's
+safety factor covers the observed order uncertainty:
+`F_s ≥ (2^p − 1) / (2^{p_min} − 1)` with `p = kReferenceConvergenceOrder`
+and `p_min` the minimum usable order over both triples (the estimate can
+understate by at most that ratio when the true local order is `p_min`;
+measured 1.67 ≤ 3 at 30 days); `max |p_A − p_B|` per series is recorded as
+the non-asymptotic indicator (rev 6 replaced a fixed 0.5 allowance: the
+free-boundary term makes the order wander in [0.68, 1.40] at 30 days while
+successive prices agree to 6e-9, which is what the safety factor exists
+for). Orientation: `p_obs = log2(d_coarse / d_fine)` with `d_coarse` the
+difference of the two coarser grids of the triple;
 `|V_High − V_Ultra| ≤ δ̂_High` at every point (δ̂ by the shipped formula
 including the floor); `kReferenceUncertaintyFloor ≥ max |V_High − V_Ultra|
 / K` over the six points. After a passing run the constant is set to the
