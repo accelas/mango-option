@@ -121,7 +121,7 @@ inline constexpr double kReferenceUncertaintyFloor = 1e-7;
 /// production pair (minimum p_A = 1.31722), so `δ̂` never understates
 /// relative to the pair it is applied to.  It was not raised to 1.3, which
 /// the triple-A minimum would allow, because the next finer pair's order at
-/// 30 days wanders down to 0.68: a lower assumed `p` only enlarges `δ̂`, so
+/// 30 days wanders down to 0.67: a lower assumed `p` only enlarges `δ̂`, so
 /// staying at 1.0 costs conservatism in the safe direction and buys margin
 /// where the order is not settled.  The residual understatement risk is what
 /// `kRichardsonSafetyFactor` absorbs -- at p_min = 0.670717 the needed
@@ -130,14 +130,16 @@ inline constexpr double kReferenceUncertaintyFloor = 1e-7;
 ///
 /// Triple A is `(G-half, G, 2G)`, the order of the very pair this estimate
 /// differences; triple B is `(G, 2G, 4G)`, one level finer.  Per point, the
-/// range over both tau_iv and all three stencil sigma:
+/// range over both tau_iv and all three stencil sigma, rounded to three
+/// decimals from the run's own per-series records (so `atm-6m-call`'s
+/// 2.000..2.000 is p_A 2.00002 throughout and p_B 1.99966..1.99972):
 ///
 ///   atm-1y-3div  p_A 1.317..1.341   p_B 1.647..1.660
-///   500-trigger  p_A 2.096..2.369   p_B 1.833..2.444
-///   otm-30d      p_A 1.559..1.687   p_B 0.671..1.401
+///   500-trigger  p_A 1.921..2.369   p_B 1.833..2.444
+///   otm-30d      p_A 1.558..1.687   p_B 0.671..1.401
 ///   deep-otm-7d  p_A 1.916..1.996   p_B 1.996..2.112
 ///   itm-2y       p_A 1.619..1.829   p_B 1.738..1.780
-///   atm-6m-call  p_A 2.000          p_B 2.000
+///   atm-6m-call  p_A 2.000..2.000   p_B 2.000..2.000
 ///
 /// Minimum usable p_A = 1.31722 (atm-1y-3div, tau_iv = 5e-4, sigma-lo),
 /// maximum 2.36881; minimum over both triples 0.670717 (otm-30d,

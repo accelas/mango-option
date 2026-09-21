@@ -47,6 +47,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -113,7 +114,15 @@ Triple classify(double d_coarse, double d_fine, double theta, double* p) {
     return Triple::Usable;
 }
 
-// The shipped estimate, floor included (adaptive_metrics.cpp).
+// The shipped estimate, floor included: a restatement of
+// `richardson_estimate` in adaptive_metrics.cpp, which lives in an
+// anonymous namespace and cannot be called from here.  The two are kept
+// equal by `DeltaHatMatchesTheShippedStencil` below, which drives the real
+// `make_stencil_refs_fn` with a fake solve and compares its `delta` against
+// this function -- so a change to either formula fails a test rather than
+// silently making the calibration measure something the product does not.
+// (`tests/reference_oracle_test.cc` pins the same expression from the
+// other side, on `ErrorRefs::delta`.)
 double delta_hat(double fine, double coarse, double strike) {
     const double two_grid = kRichardsonSafetyFactor * std::abs(fine - coarse)
                           / (std::pow(2.0, kReferenceConvergenceOrder) - 1.0);
@@ -273,7 +282,7 @@ TEST(ReferenceOracleCalibration, OrderIsUsableStableAndAboveConstant) {
                 // non-asymptotic indicator.  At short maturities the free
                 // boundary sits between grid nodes and moves relative to
                 // them with every refinement, so the observed order wanders
-                // -- in [0.68, 1.40] at the 30-day put -- while successive
+                // -- in [0.67, 1.40] at the 30-day put -- while successive
                 // prices agree to 6e-9.  That wander is exactly what
                 // Roache's safety factor exists to absorb, and the
                 // assertion at the end of the test is that it does.
@@ -414,6 +423,45 @@ TEST(ReferenceOracleCalibration, OrderIsUsableStableAndAboveConstant) {
     // The floor is a calibrated constant (spec D1, rev 5): it must cover the
     // oracle's own High-vs-Ultra discrepancy scale on this set.
     EXPECT_GE(kReferenceUncertaintyFloor, max_rel_profile_gap);
+}
+
+// The local `delta_hat` above must be the shipped formula, or the
+// calibration's profile assertions measure something production does not
+// compute.  Drive the real `make_stencil_refs_fn` with a fake solve that
+// replays one point's recorded G and G-half prices, and compare its `delta`
+// with the local restatement.  No PDE runs: the grid family is built but
+// never solved on.
+TEST(ReferenceOracleCalibration, DeltaHatMatchesTheShippedStencil) {
+    const auto& pt = points()[0];  // atm-1y-3div
+    // Recorded at base sigma, tau_iv = 5e-4 (see the calibration table).
+    constexpr double kVG = 7.2399635840260297;
+    constexpr double kVGHalf = 7.2399477287958316;
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 5e-4;
+    ReferenceOracle oracle{.dividend_yield = kDividendYield,
+                           .option_type = pt.type,
+                           .discrete_dividends = pt.divs,
+                           .reference_maturity = pt.T,
+                           .accuracy = make_grid_accuracy(kReferenceAccuracy)};
+
+    // Solve order is [y, y-half, lo, lo-half, hi, hi-half]; the bracket
+    // members are offset so the stencil separates and all six solves
+    // succeed, which is what it takes for `delta` to be populated.
+    size_t call = 0;
+    StencilSolveFn fake = [&](const PricingParams&, const PDEGridConfig&)
+        -> std::expected<double, SolverError> {
+        const size_t i = call++;
+        const double offset = (i < 2) ? 0.0 : (i < 4) ? -0.01 : 0.01;
+        return ((i % 2 == 0) ? kVG : kVGHalf) + offset;
+    };
+
+    auto prep = make_stencil_refs_fn(params, oracle,
+                                     std::make_shared<ReferenceSolveCounter>(), fake);
+    auto refs = prep(pt.S, pt.K, pt.tau, pt.sigma, pt.r);
+    ASSERT_TRUE(refs.has_value());
+    EXPECT_EQ(call, 6u);
+    EXPECT_DOUBLE_EQ(refs->delta, delta_hat(kVG, kVGHalf, pt.K));
 }
 
 // Effective sensitivity (c): the solver's own complementarity diagnostic on
