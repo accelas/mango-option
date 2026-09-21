@@ -590,7 +590,7 @@ safety factor covers the observed order uncertainty:
 `F_s ≥ (2^p − 1) / (2^{p_min} − 1)` with `p = kReferenceConvergenceOrder`
 and `p_min` the minimum usable order over both triples (the estimate can
 understate by at most that ratio when the true local order is `p_min`;
-measured 1.67 ≤ 3 at 30 days); `max |p_A − p_B|` per series is recorded as
+measured 1.69 ≤ 3 at 30 days); `max |p_A − p_B|` per series is recorded as
 the non-asymptotic indicator (rev 6 replaced a fixed 0.5 allowance: the
 free-boundary term makes the order wander in [0.67, 1.40] at 30 days while
 successive prices agree to 6e-9, which is what the safety factor exists
