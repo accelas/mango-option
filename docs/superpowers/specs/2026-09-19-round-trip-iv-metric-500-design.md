@@ -8,6 +8,7 @@ mathematical review of that synthesis; this design adopts its recommendation
 in part: operational round trip plus reference brackets; forward-price
 validation is recorded, not gated — see §3 and Q9).
 
+Spec revision 6, 2026-09-21 (D8 calibration protocol: G½, G, 2G, 4G; D1 rounded_down note).
 Spec revision 5, 2026-09-21.
 Rev 4 → 5 (execution, plan Task 10 measurements; user decision Q10):
 acceptance scores on the published σ range widened by `target_iv_error` at
@@ -164,8 +165,11 @@ calibration).** `make_reference_grid_family(params, accuracy, levels)`:
    `n ≥ n0` and `n ≤ accuracy.max_spatial_points` (the cap is strict per the
    grid API); if none exists above `n0`, the largest such count in
    `[min_spatial_points, max_spatial_points]` is used and the family records
-   `rounded_down = true` (never triggered by the shipped profiles, whose
-   windows are ≥ 1000 wide; asserted in tests). The multi-sinh spec is
+   `rounded_down = true` (this happens whenever the estimate lands within 15
+   points of the profile cap — measured for the ITM 2y put at High, whose
+   estimate of 3495 rounds down to 3489 under the 3500 cap; the fine grid
+   is then at most 15 points coarser than the estimate, which the cap
+   already declared acceptable). The multi-sinh spec is
    re-sampled at `n` with the same domain, centres and weights. Level `k` is
    the strict subsequence of every `2^k`-th node of level 0; for `k ≤ 3`
    every level has an odd count and shares level 0's middle-index node
@@ -543,10 +547,21 @@ each path owns (holdout, fresh, final, retry reuse included).
 
 ### D8. Calibration of `p` and the profile
 
-Nightly `slow` test `reference_oracle_calibration_test`, using
-`make_reference_grid_family(levels = 3)` (levels 0..3), on six points at
-High: ATM 1y put with three $0.50 dividends; the #500 trigger; OTM 30-day
-put; deep-OTM 7-day put; ITM 2y put; ATM 6-month call. It calibrates
+Nightly `slow` test `reference_oracle_calibration_test`, on the grids
+`G½, G, 2G, 4G` — production's coarse and fine grids plus two nested
+refinements of the fine grid (`G` is the every-2nd-node subsequence of `2G`
+by D1's η-map argument; the refinements re-sample the fine `GridSpec` at
+`2(n−1)+1` and `4(n−1)+1` points with `n_time` doubled and quadrupled, built
+outside the estimator so the profile cap does not apply to them) — on six
+points at High: ATM 1y put with three $0.50 dividends; the #500 trigger; OTM
+30-day put; deep-OTM 7-day put; ITM 2y put; ATM 6-month call. Rev 6 note:
+rev 5 calibrated on `G, G½, G¼, G⅛`; those coarser grids are ones production
+never uses and were pre-asymptotic for the 30-day contract on High's own
+grid (measured `p_obs < 0`; ≈1.44 one refinement finer), so the order they
+produced said nothing about the pair `(G½, G)` that `δ̂` actually uses.
+Triple A `(G½, G, 2G)` is the production pair's observed order and sets the
+constant; triple B `(G, 2G, 4G)` checks that the order holds one level
+finer. It calibrates
 **complete production stencils**: for each point and each `τ_iv ∈ {5e-4,
 1e-3}` all three stencil σ on the grid selected at σ0 + τ_iv, so the
 endpoint uncertainties that control admission are the ones calibrated.
@@ -560,12 +575,17 @@ For each price series and each consecutive triple `(k, k+1, k+2)`:
 2. else **oscillatory** if `d_a · d_b < 0`;
 3. else **usable**, `p_obs = ln(d_a/d_b)/ln 2`.
 
-Assertions: no usable-or-oscillatory triple is oscillatory; every usable
-`p_obs` is finite and strictly positive; for series with two usable triples
-the two agree within 0.5 (chosen allowance); at least four of the six
-points have two usable triples at the base σ (coverage rule);
-`kReferenceConvergenceOrder ≤ min usable p_obs`; `|V_High − V_Ultra| ≤
-δ̂_High` at every point.
+Assertions: no triple A or B is oscillatory; every usable `p_obs` is finite
+and strictly positive (a non-positive usable `p_obs` on triple A means the
+profile's grid is pre-asymptotic for that contract and the oracle family,
+not the constant, must change); for series with both triples usable the two
+agree within 0.5 (chosen allowance); at least four of the six points have
+both triples usable at the base σ (coverage rule);
+`kReferenceConvergenceOrder ≤ min usable p_obs over triple A`;
+`|V_High − V_Ultra| ≤ δ̂_High` at every point (δ̂ by the shipped formula
+including the floor); `kReferenceUncertaintyFloor ≥ max |V_High − V_Ultra|
+/ K` over the six points. After a passing run the constant is set to the
+largest one-decimal value not above the triple-A minimum.
 
 **Effective sensitivity experiments** (the American path is a single-pass
 projected Thomas solve, `pde_solver.hpp:568/885`; `TRBDF2Config::tolerance`
@@ -575,9 +595,11 @@ to attribute error between axes — reported; (c) the solver's `LcpKktReport`
 recorded per point — reported.
 
 **If the calibration fails** (any assertion), the constant is **not** tuned
-to pass: the next step is further controlled refinement (levels 4–5) and, if
-the order remains unusable or the domain assertion fails, a revised oracle
-family (profile or domain rule) before `p` is chosen. Numbers,
+to pass: the next step is a finer controlled refinement (an `8G` level) to
+see whether triple B's order settles, and, if triple A's order remains
+unusable or the domain assertion fails, a revised oracle family (a finer
+profile estimate or domain rule for the failing contract class) before `p`
+is chosen. Numbers,
 classifications and shifts are recorded in `docs/MATHEMATICAL_FOUNDATIONS.md`.
 Per-point `p` is not measured at build time.
 
