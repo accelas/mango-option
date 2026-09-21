@@ -90,6 +90,10 @@ std::vector<IVQuery> make_test_queries() {
 /// it mixed two draws: `holdout_points_unsupported` is the sizing loop's
 /// fixed-holdout exclusion count while `holdout_points` is the final
 /// validation set.
+///
+/// The upper half of the bracket is definitional only on the builders that
+/// fold `skipped` into `holdout_points_invalid`, which is where this helper
+/// is used: the final-validation paths of both segmented builders.
 void expect_holdout_accounting(const BuildDiagnostics& d) {
     EXPECT_LE(d.holdout_points_measured + d.holdout_points_unresolved
                   + d.surface_failures,
@@ -151,7 +155,7 @@ IVSolverFactoryConfig documented_adaptive_dividend_config() {
 // refused, and the refusal is the measured outcome, pinned as evidence for
 // the follow-up rather than worked around.
 // Bug: segmented Chebyshev leaf oscillates in sigma across the early-exercise
-// shoulder (#500 follow-up); the metric now reports it instead of dividing it
+// shoulder (#506); the metric now reports it instead of dividing it
 // by a vanishing vega.
 // Measured 2026-09-21 over 8 candidates: 14 SurfaceNoRoot, edge_band_rescues
 // = 3 -- the acceptance band does rescue the smallest misses, and the rest

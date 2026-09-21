@@ -41,7 +41,7 @@ namespace mango {
 /// shipped solver at the edges by exactly `target_iv_error`*: a root the
 /// solver would refuse today, lying within the user's own tolerance beyond a
 /// published edge, is a measurement here.  Making the two coincide again is
-/// the query-time follow-up.
+/// the query-time follow-up (#507).
 ///
 /// Where the fit domain `ctx.bounds` has no sigma support over part of that
 /// band -- the B-spline backends fit exactly the published range -- the

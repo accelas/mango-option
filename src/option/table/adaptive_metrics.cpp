@@ -280,7 +280,7 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
 
         // Exact-bracket diagnostic (spec D3, rev 5): would the shipped solver,
         // searching the un-widened published range, have refused this query
-        // today?  Recorded as evidence for the query-time follow-up; it
+        // today?  Recorded as evidence for the query-time follow-up (#507); it
         // changes neither `status` nor `iv_error`, and never gates anything.
         SurfaceInversionPolicy exact = base_policy;
         exact.published_sigma_min = sample.sigma_min;

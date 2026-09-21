@@ -178,7 +178,9 @@ struct BuildDiagnostics {
     size_t total_iterations = 0;       // built iterations, excl. final rebuild
     bool final_rebuild = false;
     bool build_failure_fallback = false;
-    /// Holdout points with usable FD references (the measurable set).
+    /// Holdout points with usable FD references: the prepared set (points
+    /// whose base reference solve succeeded; it includes unresolved
+    /// references).
     size_t holdout_points = 0;
     /// Holdout points whose references failed, or whose evaluation of the
     /// returned surface was non-finite.

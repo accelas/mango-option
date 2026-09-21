@@ -277,7 +277,7 @@ so a build returns `NoViableSurface` when a resolved holdout sample cannot
 be inverted within tolerance — inspect `build_diagnostics()` to see which
 outcomes dominated. The Chebyshev configuration above currently refuses for
 that reason: the segmented leaf oscillates in the σ axis across the
-early-exercise shoulder, which is tracked as a #500 follow-up, and loosening
+early-exercise shoulder, which is tracked as #506, and loosening
 the target to 20 bps does not rescue it (measured 2026-09-21). The same
 grid, K_refs and schedule on the B-spline backend do build.
 

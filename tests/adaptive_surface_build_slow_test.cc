@@ -329,9 +329,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
 // a wider tolerance would have measured -- but the tolerance is what this
 // fixture is asserting, so it is not moved.  edge_band_rescues = 0.
 //
-// FOLLOW-UP(#500-remainder): re-home the K = 80 deep-OTM price accuracy check
-// (pre-fix 1574 bps, post-fix within $0.05 on a ~$0.30 option) onto a build
-// that does not need an adaptive validation pass at a 0.2 bps target.
+// FOLLOW-UP #509: re-home the K = 80 deep-OTM price accuracy check (pre-fix
+// 1574 bps, post-fix within $0.05 on a ~$0.30 option) onto a build that does
+// not need an adaptive validation pass at a 0.2 bps target.
 TEST(AdaptiveGridBuilderTest, DeepOTMPutChainRefusesAtSubBpsTarget) {
     OptionGrid chain;
     chain.spot = 100.0;
@@ -391,7 +391,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevGapRefusesUnsupportedTimes) {
     // Regression: the adaptive path refuses this configuration, and the
     // refusal is the measured outcome.
     // Bug: segmented Chebyshev leaf oscillates in sigma across the early-exercise
-    // shoulder (#500 follow-up); the metric now reports it instead of dividing
+    // shoulder (#506); the metric now reports it instead of dividing
     // it by a vanishing vega.
     // Measured 2026-09-21 at K = 110.0639588, tau = 0.7913174278,
     // sigma0 = 0.1064263816 (6.4 bps above sigma_min = 0.1), r = 0.0274738:
@@ -462,7 +462,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevDuplicateDividends) {
     // Regression: the adaptive path refuses this configuration, and the
     // refusal is the measured outcome.
     // Bug: segmented Chebyshev leaf oscillates in sigma across the early-exercise
-    // shoulder (#500 follow-up); the metric now reports it instead of dividing
+    // shoulder (#506); the metric now reports it instead of dividing
     // it by a vanishing vega.
     // Measured 2026-09-21 at K = 110.0639588, tau = 0.7913174278,
     // sigma0 = 0.1064263816 (6.4 bps above sigma_min = 0.1), r = 0.0274738:
@@ -529,7 +529,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNearlyCoincidentDividends) {
     // Regression: the adaptive path refuses this configuration, and the
     // refusal is the measured outcome.
     // Bug: segmented Chebyshev leaf oscillates in sigma across the early-exercise
-    // shoulder (#500 follow-up); the metric now reports it instead of dividing
+    // shoulder (#506); the metric now reports it instead of dividing
     // it by a vanishing vega.
     // Measured 2026-09-21 at K = 110.0639588, tau = 0.7913174278,
     // sigma0 = 0.1064263816 (6.4 bps above sigma_min = 0.1), r = 0.0274738:
@@ -600,7 +600,7 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowRealSegment) {
     // Regression: the adaptive path refuses this configuration, and the
     // refusal is the measured outcome.
     // Bug: segmented Chebyshev leaf oscillates in sigma across the early-exercise
-    // shoulder (#500 follow-up); the metric now reports it instead of dividing
+    // shoulder (#506); the metric now reports it instead of dividing
     // it by a vanishing vega.
     // Measured 2026-09-21 at K = 110.0639588, tau = 0.7913174278,
     // sigma0 = 0.1064263816 (6.4 bps above sigma_min = 0.1), r = 0.0274738:
@@ -895,7 +895,7 @@ TEST(AdaptiveGridBuilderTest, ContinuousChebyshevSurfaceMatchesPickedGrids) {
 // Regression: the adaptive path refuses this configuration, and the refusal
 // is the measured outcome.
 // Bug: segmented Chebyshev leaf oscillates in sigma across the early-exercise
-// shoulder (#500 follow-up); the metric now reports it instead of dividing it
+// shoulder (#506); the metric now reports it instead of dividing it
 // by a vanishing vega.
 // Measured 2026-09-21 at K = 110.0639588, tau = 0.7913174278, sigma0 =
 // 0.1064263816 (6.4 bps above sigma_min = 0.1), r = 0.0274738: the surface
@@ -910,9 +910,9 @@ TEST(AdaptiveGridBuilderTest, ContinuousChebyshevSurfaceMatchesPickedGrids) {
 // adaptive_surface_build_integration_test.cc, which exercises the same
 // select_final_surface and score_final_surface code.
 //
-// FOLLOW-UP(#500-remainder): re-home the end-to-end half of that contract for
-// the segmented Chebyshev path -- a build that returns surface A must not
-// report surface B's numbers.  What follows below covers only that *scoring*
+// FOLLOW-UP #509: re-home the segmented Chebyshev end-to-end contract -- a
+// build that returns surface A must not report surface B's numbers.  What
+// follows below covers only that *scoring*
 // is a pure function of the surface it is handed; the builder-level pairing
 // is covered on the B-spline path alone, because this configuration now
 // refuses and no other segmented Chebyshev fixture both returns and reports.

@@ -1040,7 +1040,7 @@ $\sigma$ range of the sample domain widened by $\tau_{iv}$ at each end — the
 *edge band*. A root within the user's own tolerance beyond a published edge
 is a measurement here, so the metric is stronger than the shipped solver at
 the edges by exactly $\tau_{iv}$. Making the two coincide again is a
-query-time follow-up.
+query-time follow-up (#507).
 
 **Edge-band extension.** The B-spline backends fit exactly the published
 $\sigma$ range, so they have no headroom inside the band. There the surface

@@ -472,7 +472,7 @@ A candidate is scored by the **operational round trip**: each validation point's
 - `ValidationFailed` — fewer than `max(4, validation_samples/4)` holdout references could be *prepared*, or fewer than that many *resolved*. The domain gave the oracle too little to measure on; widen it, raise `validation_samples`, or loosen `target_iv_error`. The USDT probe `mango:adaptive_validation_refused(set, requested, prepared, resolved, unsupported)` reports the counts.
 - `NoViableSurface` — every candidate had a resolved surface-inversion failure (or none measured a single holdout point). The probe `mango:adaptive_no_viable_surface(stage, candidates, failures_no_root, failures_ambiguous, failures_nonconvergent, failures_nonfinite, failures_vega, edge_band_rescues)` reports which outcomes dominated and at which stage.
 
-**The oracle is sharper than it used to be.** Every reference is now solved at the `High` accuracy profile, whatever grid the caller asked the table itself to be built on. A table built on an under-sized PDE grid — `build_adaptive_bspline` with a coarse `PDEGridConfig`, for instance — is therefore measured against a finer solve than it was fitted to, and can be refused where it previously reported a mediocre number. That is the intended outcome: the earlier number was the two grids agreeing with each other, not the surface being accurate. If a configuration that used to build now refuses, raise the caller's own grid accuracy before reaching for `target_iv_error`.
+**The oracle is sharper than it used to be.** Every reference is now solved at the `High` accuracy profile, whatever grid the caller asked the table itself to be built on. A table built on an under-sized PDE grid — `build_adaptive_bspline` with a coarse `PDEGridSpec`, for instance — is therefore measured against a finer solve than it was fitted to, and can be refused where it previously reported a mediocre number. That is the intended outcome: the earlier number was the two grids agreeing with each other, not the surface being accurate. If a configuration that used to build now refuses, raise the caller's own grid accuracy before reaching for `target_iv_error`.
 
 On a build that did return, `build_diagnostics()` tells the same story: compare `holdout_points_measured` against `holdout_points_unresolved` and `holdout_points_unsupported` to see how much of the domain was measurable, read `surface_failures` for round-trip failures on the returned surface, and read `max_price_residual` and `reference_uncertainty_max` for the forward-price record and the oracle's own estimated uncertainty.
 
@@ -805,7 +805,7 @@ Chebyshev configuration: at a 10 bps target that build is **refused** with
 early-exercise shoulder, and the nearest root at the worst holdout point
 sits about 20 bps below the acceptance band. The round-trip metric reports
 that; the retired vega-scaled metric divided it by a vanishing vega and
-passed. The leaf defect is a #500 follow-up. Loosening the target does not
+passed. The leaf defect is tracked as #506. Loosening the target does not
 work around it — the same configuration at 20 bps is refused too (measured
 2026-09-21). The same grid, K_refs and schedule on the B-spline backend do
 build, which is what the companion test covers.

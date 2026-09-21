@@ -579,8 +579,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     // domain assertions above are what this test is really for.
     // Bug: the sampled options carry almost no time value, so the shipped
     // inversion cannot recover a volatility from the reference price on that
-    // surface however accurate the surface's own price is.  Measured on 2026-09-21 at K =
-    // 106.2027, tau = 0.01846, sigma0 = 0.2093: reference 6.2032083 against
+    // surface however accurate the surface's own price is.  Measured on
+    // 2026-09-21 at K = 106.2027, tau = 0.01846, sigma0 = 0.2093:
+    // reference 6.2032083 against
     // an intrinsic of 6.2027205 -- a time value of 4.9e-4, i.e. TV/K =
     // 4.6e-6 -- with a surface price residual of 1.1e-5 of strike and a
     // surface vega of 0.222.  The 17-point screen reports MultipleRoots on a
@@ -1219,11 +1220,11 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     // represent a deep-OTM price of 1.7e-4 (its minimum over the acceptance
     // band is 16x that), so the inversion reports MultipleRoots.
     //
-    // FOLLOW-UP(#500-remainder): re-home #480 S1's node-level FDM agreement
-    // (pre-fix 27.85 at m_lo = -1.088095, sigma-independent to eight
-    // significant figures, against post-fix 6.65e-09 on the node class and
-    // 0.01759 on the user-strike class); it needs a manual builder for the
-    // continuous Chebyshev path, which does not exist today.
+    // FOLLOW-UP #509: re-home #480 S1 node-level FDM agreement on a manual
+    // continuous-Chebyshev builder (pre-fix 27.85 at m_lo = -1.088095,
+    // sigma-independent to eight significant figures, against post-fix
+    // 6.65e-09 on the node class and 0.01759 on the user-strike class); no
+    // such builder exists today.
     auto result = build_adaptive_chebyshev(params, chain, OptionType::PUT);
     ASSERT_FALSE(result.has_value())
         << "a domain of exactly-intrinsic references must not be certified";
