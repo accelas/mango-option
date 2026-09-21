@@ -398,7 +398,14 @@ decision Q10).** The scorer runs the shipped inversion (same pre-check,
 screen, Brent, post-check, cap and config limits) with the published σ
 limits widened by τ_iv on each side, clipped to the fit domain `ctx.bounds`.
 A root within the user's own tolerance beyond a published edge is a
-measurement, not a refusal. The metric is therefore named
+measurement, not a refusal. Where the fit domain has no σ support beyond
+the published edge (the B-spline backends fit exactly the published σ
+range), the scorer extends the surface over the band by first-order
+extrapolation from the edge: `S(σ) ≈ S(σ_edge) + S_σ(σ_edge)·(σ − σ_edge)`
+with the surface's own vega held at its edge value. The extension is at
+most τ_iv long and the surface is C², so the model error is
+`O(vomma · τ_iv²)`, negligible at bps scale; the band therefore behaves the
+same on every backend (rev 5, plan Task 10). The metric is therefore named
 **operational round trip (edge band τ)** in code, diagnostics and docs, and
 the docs state that it is stronger than the shipped solver at the edges by
 exactly τ_iv. The exact-bracket version was tried first (revs 3–4): it
