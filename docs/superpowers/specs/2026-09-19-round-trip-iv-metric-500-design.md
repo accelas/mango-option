@@ -184,7 +184,7 @@ calibration).** `make_reference_grid_family(params, accuracy, levels)`:
    temporal ratio is 2 up to per-segment rounding and can be 1:1 inside a
    very short event interval; the calibrated `p` is therefore an *effective*
    order for this family under equal-coordinate refinement, not an exact
-   joint Richardson exponent. Achieved step counts are recorded.
+   joint Richardson exponent. `ErrorRefs` records the **requested** step counts (`n_time` of the two configs); the achieved counts differ by that per-segment rounding and are not needed by the loop (rev 7 wording; the pre-merge review noted the earlier "achieved" claim was not what the code stored).
 
 **Stencil.** Six solves per point, `G = level 0`, `G½ = level 1`, chosen once
 per preparation for the contract at σ0 + τ_iv (the widest x-domain of the
@@ -221,7 +221,7 @@ struct ErrorRefs {
     double sigma_lo, sigma_hi;                   // σ0 ∓ τ_iv as solved
     double delta, delta_lo, delta_hi;            // δ̂ estimates; NaN when unavailable
     bool resolved;                               // D2
-    uint32_t fine_steps, coarse_steps;           // achieved time steps (record only)
+    uint32_t fine_steps, coarse_steps;           // requested time steps of the two configs (record only)
 };
 ```
 
