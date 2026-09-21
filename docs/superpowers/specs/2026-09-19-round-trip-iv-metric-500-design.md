@@ -8,6 +8,15 @@ mathematical review of that synthesis; this design adopts its recommendation
 in part: operational round trip plus reference brackets; forward-price
 validation is recorded, not gated — see §3 and Q9).
 
+Spec revision 5, 2026-09-21.
+Rev 4 → 5 (execution, plan Task 10 measurements; user decision Q10):
+acceptance scores on the published σ range widened by `target_iv_error` at
+each end (the exact product bracket's refusals become the
+`edge_band_rescues` diagnostic), and `δ̂` is floored at the oracle's
+calibrated uncertainty scale `kReferenceUncertaintyFloor · K`. Reason: the
+exact bracket refused the documented Pattern-4 configuration over a 2.7 bps
+miss below σ_min, and identical discretizations produced `δ̂ = 0` at
+near-intrinsic points, admitting brackets separated by microdollars.
 Spec revision 4, 2026-09-19.
 Rev 1 → 2 (review round 1): endpoint uncertainty in the admission test, an
 explicitly empirical contract, the product's inversion policy, a controlled
@@ -183,10 +192,18 @@ three); dividends are rolled once per preparation:
 | `lo`, `lo½` | σ0 − τ_iv | G, G½ |
 | `hi`, `hi½` | σ0 + τ_iv | G, G½ |
 
-**Uncertainty estimates.** For each σ: `δ̂_k = F_s · |V̂_k − V̂½_k| /
-(2^p − 1)`, `F_s = 3` (Roache's two-grid safety factor), `p =
-kReferenceConvergenceOrder` calibrated by D8. A zero difference yields
-`δ̂_k = 0` (legitimate where the price is intrinsic on both grids). `δ̂` is an
+**Uncertainty estimates.** For each σ: `δ̂_k = max(F_s · |V̂_k − V̂½_k| /
+(2^p − 1), kReferenceUncertaintyFloor · K)`, `F_s = 3` (Roache's two-grid
+safety factor), `p = kReferenceConvergenceOrder` calibrated by D8, `K` the
+strike of the contract actually solved (the probe strike on a probe
+contract; the adapter's scaling then carries the floor to the user strike).
+The floor is the oracle's calibrated accuracy scale: D8 measures
+`max |V_High − V_Ultra| / K` over the calibration set and asserts the
+constant is at least that (provisional value 1e-7 from the 2026-09-19
+measurements: 4e-6 and 7e-6 on K = 100). Without it, two discretizations
+that agree exactly (both on the obstacle at a near-intrinsic point) yield
+`δ̂ = 0` and the stencil "resolves" a bracket separated by microdollars,
+which the shipped inversion then cannot invert (rev 5, measured). `δ̂` is an
 *estimate*: a two-grid difference cannot see bias shared by both grids, and a
 profile-level `p` does not establish pointwise order.
 
@@ -376,15 +393,26 @@ calls `effective_sigma_bracket` with `published = ctx.sample_bounds` σ range
 and the default policy, then `invert_price_on_surface` — identical code,
 identical thresholds, no policy duplication.
 
-**Acceptance uses the exact product policy.** No widening. A resolved
-reference price whose only surface root lies outside the effective bracket is
-a `SurfaceNoRoot`: that is what the shipped solver returns.
+**Acceptance uses the product policy on the tolerance band (rev 5, user
+decision Q10).** The scorer runs the shipped inversion (same pre-check,
+screen, Brent, post-check, cap and config limits) with the published σ
+limits widened by τ_iv on each side, clipped to the fit domain `ctx.bounds`.
+A root within the user's own tolerance beyond a published edge is a
+measurement, not a refusal. The metric is therefore named
+**operational round trip (edge band τ)** in code, diagnostics and docs, and
+the docs state that it is stronger than the shipped solver at the edges by
+exactly τ_iv. The exact-bracket version was tried first (revs 3–4): it
+refused the documented Pattern-4 configuration over a 2.7 bps miss below
+σ_min, and any surface with a few bps of error near an edge has a coin-flip
+chance per edge-adjacent sample of refusing the whole build. The query-time
+follow-up gives the product the same band so the two coincide again.
 
-**Edge-band diagnostic (never used for acceptance).** After a
-`SurfaceNoRoot`, the scorer re-runs the same function with the published
-σ limits widened by τ_iv on each side (clipped to the fit domain
-`ctx.bounds`). Success sets `edge_band_rescue = true`; the status stays
-`SurfaceNoRoot`. Counts are reported (D7) for the query-time follow-up (L3).
+**Exact-bracket diagnostic (never used for acceptance).** For a `Measured`
+point, if any of the three recovered σ̂_k lies outside the exact product
+bracket (published limits, no widening, after cap and config limits), the
+point sets `edge_band_rescue = true`: the shipped solver would have refused
+that query today. Counts are reported (D7) as evidence for the follow-up
+(L3); they influence neither ranking nor viability.
 
 **Three targets.** For a resolved point the inversion runs for
 `y − δ̂, y, y + δ̂`. `Measured` iff all three succeed;
@@ -626,7 +654,8 @@ reachability.
 | `θ = 2^-40 · K`, order-stability allowance 0.5, four-of-six coverage | calibration classification/acceptance policy | D8 |
 | coverage `max(4, N/4)` on prepared and on resolved | operational policy (pre-existing rule, applied twice) | D2 |
 | inversion policy: config σ 0.01/3.0, `vega_threshold 1e-4`, 17 screen points, zero-tol `1e-9·spot`, Brent `1e-6` (residual and width) / 50, cap 1.5/2/3 | product policy, reused unchanged | D3 |
-| edge band `τ_iv` | diagnostic only | D3 |
+| edge band `τ_iv` | the user's tolerance, reused as the acceptance band (rev 5) | D3 |
+| `kReferenceUncertaintyFloor` | calibrated constant (D8: ≥ max \|V_High − V_Ultra\| / K) | D1 |
 | monotonicity-scan floor `1e-8·spot` | diagnostic floor, pre-existing | D5 |
 | walk restart 2 % | pre-existing loop policy | D4 |
 
@@ -750,6 +779,18 @@ reject.
 certification only" and **not chosen**; the residual is recorded, never
 gated. Consequence (review round 3, open question 3): unresolved regions
 carry no forward-price acceptance requirement. Flagged for the go/no-go.
+
+**Q10 (execution, 2026-09-21). Edge policy for acceptance.** Raised after
+plan Task 10 measured the exact-bracket rule: six fixtures refused on a
+single edge-adjacent sample, including the documented Pattern-4
+configuration (2.7 bps miss below σ_min). Options: tolerance band for
+acceptance with the exact bracket as a diagnostic; keep the exact bracket
+and change the product's edge policy now; keep the exact bracket and accept
+the refusals. **Chosen: tolerance band.** Why: a root within the user's own
+tolerance beyond a published edge is a measurement, the shipped solver's
+refusal there is a query-path policy to fix in the follow-up, and the
+documented workflow must keep building. This reverses design-review rounds
+1–2 on this one point, with the measured evidence as the reason.
 
 **Design choices made without a question, with review verdicts:**
 
