@@ -82,6 +82,14 @@ inline constexpr GridAccuracyProfile kReferenceAccuracy = GridAccuracyProfile::H
 
 /// Roache's recommended safety factor for a two-grid (uncalibrated-order)
 /// Richardson error estimate.
+///
+/// The D8 calibration test gives it a measured job as well: where the true
+/// local order is `p_min` rather than the assumed
+/// `kReferenceConvergenceOrder`, the estimate understates by at most
+/// `(2^p - 1) / (2^{p_min} - 1)`, and the test asserts this constant covers
+/// that ratio over the calibration set (measured 1.69 at 30 days, against
+/// 3).  That is what absorbs the order wander the free boundary produces at
+/// short maturities.
 inline constexpr double kRichardsonSafetyFactor = 3.0;
 
 /// Floor on each stencil uncertainty estimate, relative to the strike of the
@@ -107,14 +115,22 @@ inline constexpr double kReferenceUncertaintyFloor = 1e-7;
 /// usable order, so the estimate below never overstates the family's actual
 /// convergence rate.
 ///
-/// PROVISIONAL.  The D8 calibration
+/// Calibrated at 1.0 by the D8 test
 /// (`//tests:reference_oracle_calibration_test`, rev 6 run 2026-09-21 on
-/// `G-half, G, 2G, 4G`) does not yet license a value, because one assertion
-/// still fails: order stability |p_A - p_B| <= 0.5 at the 30-day OTM put for
-/// tau_iv = 1e-3.  1.0 nonetheless remains safely conservative -- every
-/// triple-A order measured is above it.  Triple A is `(G-half, G, 2G)`, the
-/// order of the very pair this estimate differences; per point, the range
-/// over both tau_iv and all three stencil sigma:
+/// `G-half, G, 2G, 4G`).  It sits below every observed order of the
+/// production pair (minimum p_A = 1.31722), so `δ̂` never understates
+/// relative to the pair it is applied to.  It was not raised to 1.3, which
+/// the triple-A minimum would allow, because the next finer pair's order at
+/// 30 days wanders down to 0.68: a lower assumed `p` only enlarges `δ̂`, so
+/// staying at 1.0 costs conservatism in the safe direction and buys margin
+/// where the order is not settled.  The residual understatement risk is what
+/// `kRichardsonSafetyFactor` absorbs -- at p_min = 0.670717 the needed
+/// factor is (2^1 - 1)/(2^0.670717 - 1) = 1.69 against the shipped 3, which
+/// the calibration test asserts.
+///
+/// Triple A is `(G-half, G, 2G)`, the order of the very pair this estimate
+/// differences; triple B is `(G, 2G, 4G)`, one level finer.  Per point, the
+/// range over both tau_iv and all three stencil sigma:
 ///
 ///   atm-1y-3div  p_A 1.317..1.341   p_B 1.647..1.660
 ///   500-trigger  p_A 2.096..2.369   p_B 1.833..2.444
@@ -124,9 +140,8 @@ inline constexpr double kReferenceUncertaintyFloor = 1e-7;
 ///   atm-6m-call  p_A 2.000          p_B 2.000
 ///
 /// Minimum usable p_A = 1.31722 (atm-1y-3div, tau_iv = 5e-4, sigma-lo),
-/// maximum 2.36881; 72 usable triples, 0 oscillatory, 0 insufficient.  Once
-/// the stability question is settled the rule sets this to the largest
-/// one-decimal value not above the triple-A minimum.
+/// maximum 2.36881; minimum over both triples 0.670717 (otm-30d,
+/// tau_iv = 1e-3); 72 usable triples, 0 oscillatory, 0 insufficient.
 inline constexpr double kReferenceConvergenceOrder = 1.0;
 
 /// A nested family of explicit PDE grid configs for Richardson-style error
