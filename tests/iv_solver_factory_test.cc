@@ -125,7 +125,7 @@ TEST(IVSolverFactoryTest, AdaptiveEndToEndSmoke) {
     // Under the round-trip metric one validation sample is a six-solve
     // reference stencil at the High profile, which took this case to 470 s --
     // the whole target's slowest shard.  What it asserts is wiring, and the
-    // 0.02 smoke bound holds on the reduced budget; the accuracy pins this
+    // 0.02 smoke threshold holds on the reduced budget; the accuracy pins this
     // case defers to live in the nightly slow suite.
     config.adaptive = AdaptiveGridParams{
         .target_iv_error = 0.002,

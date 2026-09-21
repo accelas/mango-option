@@ -32,10 +32,11 @@ protected:
     // does not comes back as an IV miss.  Measured on this chain with the
     // 51-point, 200-step grid these cases used before the round-trip metric:
     // the table's price sat 2.3e-3 of strike below the High-accuracy
-    // reference, a 202 bps outcome that no grid refinement moved (denser
-    // moneyness, vol and strike axes all reproduced it to three digits),
-    // because it is the table's PDE error, not its interpolation error.  At
-    // 401 points and 800 steps the same chain measures 3.4 bps.
+    // reference, a 202 bps outcome that no table-grid refinement moved: vol
+    // seeds at 5, 7 and 9 knots, a vol range widened from [0.15, 0.25] to
+    // [0.12, 0.28], and 7 strikes instead of 5 each reproduced it to three
+    // digits, because it is the table's PDE error, not its interpolation
+    // error.  At 401 points and 800 steps the same chain measures 3.4 bps.
     //
     // The 202 bps floor also broke the build outright: at a fresh sample near
     // the published sigma ceiling (sigma = 0.2472, ceiling 0.25) the root of
@@ -62,10 +63,12 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, ConvergesToTarget) {
 
     ASSERT_TRUE(result.has_value()) << "Build should succeed";
 
-    // Should meet target within max_iter
-    if (result->target_met) {
-        EXPECT_LE(result->achieved_max_error, params.target_iv_error);
-    }
+    // Convergence is not a coin flip at this budget: the chain measures
+    // 3.4 bps against a 20 bps target, on the first candidate.  Asserting it
+    // conditionally would let a future regression pass by simply failing to
+    // converge.
+    ASSERT_TRUE(result->target_met);
+    EXPECT_LE(result->achieved_max_error, params.target_iv_error);
 
     // Should have diagnostic history
     EXPECT_FALSE(result->iterations.empty());
@@ -113,6 +116,11 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, HandlesImpossibleTarget) {
     // "impossible target" at all -- it is an unresolvable one, and the build
     // then refuses instead of reporting best effort.  That outcome is pinned
     // separately by RefusesTargetBelowReferenceResolution.
+    //
+    // The margin is 3.4x, not orders of magnitude: 3.4e-4 measured against
+    // the 1e-4 asked for here.  A change that makes this chain materially
+    // more accurate will make the target attainable and flip the case, and
+    // the answer then is a smaller target, not a weaker assertion.
     params.target_iv_error = 1e-4;
     params.max_iter = 2;       // Limited iterations
     params.max_points_per_dim = 10;  // Limited grid
@@ -270,10 +278,13 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, TracksIterationDiagnostics) {
               table_solves + result->diagnostics.reference_solves_fine
                            + result->diagnostics.reference_solves_coarse);
 
-    // The counter's two halves move together: every stencil solve is a fine
-    // solve on the reference grid paired with a coarse one on its every-other
-    // node subsequence, which is what makes the uncertainty estimate a
-    // two-grid difference.
+    // Equality is not structural: a preparation whose fine solve fails skips
+    // the coarse half, and one that returns early on a non-positive
+    // sigma0 - target_iv_error leaves one fine attempt against no coarse one
+    // (adaptive_metrics.cpp, make_stencil_refs_fn).  What this asserts is
+    // that neither happened on this fixture -- every preparation cleared the
+    // stencil's positivity check and no reference solve failed -- so the
+    // uncertainty estimates really are two-grid differences here.
     EXPECT_EQ(result->diagnostics.reference_solves_fine,
               result->diagnostics.reference_solves_coarse);
 
@@ -296,7 +307,11 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, TracksIterationDiagnostics) {
 // round-trip metric prepares its reference as a price stencil at
 // sigma0 +/- target_iv_error, so at 1e-10 the three prices are separated by
 // about 1e-8 dollars while the oracle's own uncertainty estimate on this
-// chain is 3e-5 to 1.4e-4 dollars.  No holdout point resolves (measured: 0 of
+// chain is 3e-5 to 1.4e-4 dollars.  Measured at one holdout point
+// (K = 100.2582, tau = 0.78588, sigma0 = 0.23203): reference 6.98875070,
+// bracket low 6.98875070, bracket high 6.98875071 -- a separation of 1e-8
+// against delta = 7.317e-05, so D2's ordering test fails by four orders of
+// magnitude.  No holdout point resolves (measured: 0 of
 // 8, against the coverage floor of max(4, samples/4) = 4), and the loop
 // refuses with ValidationFailed and the `mango:adaptive_validation_refused`
 // probe.  This is the honest outcome -- the reference cannot tell the three

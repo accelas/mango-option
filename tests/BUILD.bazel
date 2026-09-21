@@ -1374,10 +1374,17 @@ cc_test(
     ],
 )
 
+# Three shards (2026-09-21).  Each of the eight cases is a full adaptive
+# build, and under the round-trip metric a validation sample is a six-solve
+# reference stencil at the High profile, so the target runs about 217 s under
+# per-PR load -- close enough to the 300 s "moderate" timeout to be a flake
+# risk, and long enough to sit on the suite's critical path.  Sharding cuts
+# the wall time instead of just raising the ceiling.
 cc_test(
     name = "adaptive_grid_builder_integration_test",
     size = "medium",
     timeout = "moderate",
+    shard_count = 3,
     srcs = ["adaptive_grid_builder_integration_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],

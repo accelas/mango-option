@@ -126,7 +126,9 @@ TEST(SegmentedDividendPlacement, DayTenOfSixtyIsRefusedAsNearIntrinsic) {
     // Budget: the sample count is the struct's default 64 and stays there.
     // The refusal is about one near-intrinsic coordinate, so it is a
     // property of the draw: at 16 samples this configuration builds.  Only
-    // the iteration count is cut, from eight to two.
+    // the iteration count is cut, from eight to two, and the refusal was
+    // re-measured at that budget on 2026-09-21: still NoViableSurface.  The
+    // candidate counts quoted above were measured at eight iterations.
     auto result = build_adaptive_bspline_segmented(
         AdaptiveGridParams{.target_iv_error = 1e-3, .max_iter = 2},
         config, domain);
