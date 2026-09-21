@@ -566,14 +566,17 @@ finer. It calibrates
 1e-3}` all three stencil σ on the grid selected at σ0 + τ_iv, so the
 endpoint uncertainties that control admission are the ones calibrated.
 
-For each price series and each consecutive triple `(k, k+1, k+2)`:
-`d_a = V_{k+2} − V_{k+1}`, `d_b = V_{k+1} − V_k`, threshold `θ = 2^-40 · K`
-(a chosen classification threshold, §4.11):
+For each price series listed coarse to fine and each consecutive triple
+`(k, k+1, k+2)`: `d_coarse = V_{k+1} − V_k`, `d_fine = V_{k+2} − V_{k+1}`,
+threshold `θ = 2^-40 · K` (a chosen classification threshold, §4.11):
 
-1. **insufficient signal** if `|d_a| ≤ θ` or `|d_b| ≤ θ` (no order
+1. **insufficient signal** if `|d_coarse| ≤ θ` or `|d_fine| ≤ θ` (no order
    available; legitimate at exercise or deep-OTM points);
-2. else **oscillatory** if `d_a · d_b < 0`;
-3. else **usable**, `p_obs = ln(d_a/d_b)/ln 2`.
+2. else **oscillatory** if `d_coarse · d_fine < 0`;
+3. else **usable**, `p_obs = log2(d_coarse / d_fine)`.
+
+The four-of-six coverage count is taken on the `τ_iv = 5e-4` stencil at the
+base σ.
 
 Assertions: no triple A or B is oscillatory; every usable `p_obs` is finite
 and strictly positive (a non-positive usable `p_obs` on triple A means the
@@ -589,8 +592,7 @@ measured 1.67 ≤ 3 at 30 days); `max |p_A − p_B|` per series is recorded as
 the non-asymptotic indicator (rev 6 replaced a fixed 0.5 allowance: the
 free-boundary term makes the order wander in [0.68, 1.40] at 30 days while
 successive prices agree to 6e-9, which is what the safety factor exists
-for). Orientation: `p_obs = log2(d_coarse / d_fine)` with `d_coarse` the
-difference of the two coarser grids of the triple;
+for);
 `|V_High − V_Ultra| ≤ δ̂_High` at every point (δ̂ by the shipped formula
 including the floor); `kReferenceUncertaintyFloor ≥ max |V_High − V_Ultra|
 / K` over the six points. After a passing run the constant is set to the
