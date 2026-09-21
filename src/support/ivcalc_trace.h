@@ -352,7 +352,8 @@ enum class NormalizedIneligibilityReason {
  * @param nonconv: Points whose inversion exhausted its iteration budget
  * @param nonfinite: Points where the surface produced a non-finite number
  * @param vega: Points refused by the inversion's vega pre-check
- * @param rescues: Points scored through the edge-band rescue path
+ * @param rescues: Measured points whose recovered volatility lay outside the
+ *                 un-widened product bracket
  */
 #define MANGO_TRACE_ADAPTIVE_NO_VIABLE_SURFACE(stage, candidates, no_root, ambiguous, nonconv, nonfinite, vega, rescues) \
     DTRACE_PROBE8(MANGO_PROVIDER, adaptive_no_viable_surface, stage, candidates, no_root, ambiguous, nonconv, nonfinite, vega, rescues)

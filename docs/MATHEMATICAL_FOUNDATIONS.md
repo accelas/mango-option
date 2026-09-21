@@ -939,7 +939,7 @@ stencil member $\sigma_0 + \tau_{iv}$, so no member is re-gridded and no
 difference between two solves is a difference between two grids.
 
 **Nested grid family.** `estimate_pde_grid` supplies a spatial count $n_0$.
-The family takes the largest $n \equiv 1 \pmod{16}$ with $n \ge n_0$ and
+The family takes the smallest $n \equiv 1 \pmod{16}$ with $n \ge n_0$ and
 $n \le$ the profile's `max_spatial_points`, and re-samples the same
 multi-sinh generator at $n$ points over the same domain. Every generator is
 a pure map of $\eta = i/(n-1)$, so level $k$ — every $2^k$-th node of level 0
@@ -1027,6 +1027,13 @@ detect, and Brent stops on a residual-and-width condition rather than on an
 exact inverse. When $\tau_{iv}$ falls below Brent's stopping tolerance
 mapped through the surface's slope, the reported error carries that
 resolution floor.
+
+Note what the outer two targets cost: because they are $y \pm \hat\delta$, a
+surface that reproduces the reference exactly still measures
+$\text{iv\_error} \approx \hat\delta/\nu$, which the resolution condition
+keeps below $\tau_{iv}$. A point whose own accuracy is already near the
+tolerance therefore needs roughly twice that accuracy in the surface to
+report `target_met`.
 
 **Acceptance band.** The bracket is the product's, taken over the published
 $\sigma$ range of the sample domain widened by $\tau_{iv}$ at each end — the

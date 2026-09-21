@@ -208,7 +208,9 @@ struct BuildDiagnostics {
     /// product bracket, i.e. queries the shipped solver would refuse today
     /// (spec D3, rev 5); a diagnostic count, not part of any decision.
     size_t edge_band_rescues = 0;
-    /// Largest |S - V̂|/K price residual observed among measured points.
+    /// Largest |S - V̂|/K price residual observed over every prepared holdout
+    /// point whose surface price was finite -- measured or not, so an
+    /// unresolved reference still contributes one.
     double max_price_residual = 0.0;
     /// Largest estimated uncertainty in an FD reference used as ground truth.
     double reference_uncertainty_max = 0.0;

@@ -205,6 +205,14 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
         // What is extrapolated is the edge *tangent*: the extension is at most
         // target_iv_error long and the surface is C2, so the model error is
         // O(vomma * target_iv_error^2), negligible at bps scale.
+        //
+        // That length depends on `fit.sigma` covering `sample.sigma`, which
+        // every backend here satisfies (the B-spline backends fit exactly the
+        // published range, Chebyshev adds headroom beyond it).  A fit domain
+        // narrower in sigma than the sampled one would carry the tangent
+        // further than target_iv_error, and the error estimate above with it.
+        // The clamp is still to the *fit* domain: it is what the handle can
+        // be evaluated on at all.
         const auto clamp_to_fit = [&](double s) {
             return std::min(std::max(s, fit.sigma_min), fit.sigma_max);
         };
@@ -404,12 +412,22 @@ PrepareRefsFn make_stencil_refs_fn(const AdaptiveGridParams& params,
         if (!(out.sigma_lo > 0.0) || !std::isfinite(out.sigma_hi)) {
             return out;                                 // unresolved, base present
         }
+        // One failed solve makes the point unresolved whatever the remaining
+        // ones return, so stop at the first: the rest would be spent on an
+        // answer nobody reads.  The base solve above keeps its own contract
+        // (an `unexpected` carrying the solver's code); everything here
+        // returns the partial stencil instead.  The counters keep their
+        // meaning -- they count solves attempted, which is now fewer.
         auto y2 = run(sigma, coarse, false);
+        if (!y2) return out;
         auto lo = run(out.sigma_lo, fine, true);
-        auto lo2 = lo ? run(out.sigma_lo, coarse, false) : std::nullopt;
+        if (!lo) return out;
+        auto lo2 = run(out.sigma_lo, coarse, false);
+        if (!lo2) return out;
         auto hi = run(out.sigma_hi, fine, true);
-        auto hi2 = hi ? run(out.sigma_hi, coarse, false) : std::nullopt;
-        if (!y2 || !lo || !lo2 || !hi || !hi2) return out;
+        if (!hi) return out;
+        auto hi2 = run(out.sigma_hi, coarse, false);
+        if (!hi2) return out;
         out.bracket_lo_price = *lo;
         out.bracket_hi_price = *hi;
         out.delta = richardson_estimate(*y, *y2, strike);

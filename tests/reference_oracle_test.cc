@@ -274,6 +274,9 @@ TEST(StencilRefs, PartialAndBaseFailures) {
     auto refs = prep(100.0, 100.0, 1.0, 0.2, 0.05);
     ASSERT_TRUE(refs.has_value()); EXPECT_FALSE(refs->resolved);
     EXPECT_EQ(counter->fine_failures.load() + counter->coarse_failures.load(), 1u);
+    // The stencil stops at the first failed solve: the point is unresolved
+    // whatever the remaining three would have returned, so they are not run.
+    EXPECT_EQ(counter->fine_attempts.load() + counter->coarse_attempts.load(), 3u);
     // The base failure propagates the solver's own code, not a default one.
     StencilSolveFn fail_first = [](const PricingParams&, const PDEGridConfig&) -> std::expected<double, SolverError> {
         return std::unexpected(SolverError{SolverErrorCode::ConvergenceFailure}); };
@@ -357,6 +360,58 @@ TEST(StencilRefs, SeparatedStencilStillFailsOnUpperBoundTarget) {
     };
     auto prep_tight = make_stencil_refs_fn(params, oracle, std::make_shared<ReferenceSolveCounter>(), tight);
     auto tight_refs = prep_tight(100.0, 90.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(tight_refs.has_value());
+    EXPECT_NEAR(tight_refs->delta, kDelta / 10.0, 1e-12);
+    EXPECT_TRUE(tight_refs->resolved);
+}
+
+// Spec D9: the put's upper limit is `K` times the largest discount factor
+// over [0, T], which exceeds `K` once the rate is negative.  A deep-ITM put
+// on S = 1, K = 100 at r = -2 % for one year may be worth up to 100 *
+// e^{0.02} = 102.0201.  Fine prices lo = 101.00, y = 102.01, hi = 102.50 with
+// every coarse solve `kDiff` below its fine partner give three 0.02
+// estimates: the stencil separates (y - d = 101.99 > lo + d_lo = 101.02, and
+// hi - d_hi = 102.48 > y + d = 102.03), but y + d = 102.03 is above the
+// limit, so the target set is not priceable and the point is unresolved.
+//
+// The companion above (SeparatedStencilStillFailsOnUpperBoundTarget) pins the
+// same rule for a call at its own limit, the spot.
+TEST(StencilRefs, NegativeRatePutUpperBoundRejectsUpperTarget) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    const double kDelta = 0.02;
+    const double kDiff = kDelta * (std::pow(2.0, kReferenceConvergenceOrder) - 1.0)
+                       / kRichardsonSafetyFactor;
+    const double fine[3] = {102.01, 101.00, 102.50};  // y, lo, hi in solve order
+    size_t n = 0;
+    StencilSolveFn stencil = [&](const PricingParams&, const PDEGridConfig&)
+        -> std::expected<double, SolverError> {
+        const size_t i = n++;
+        const double base = fine[i / 2];
+        return (i % 2 == 0) ? base : base - kDiff;  // fine, then its coarse partner
+    };
+    auto prep = make_stencil_refs_fn(
+        params, plain_oracle(), std::make_shared<ReferenceSolveCounter>(), stencil);
+    auto refs = prep(1.0, 100.0, 1.0, 0.2, -0.02);
+    ASSERT_TRUE(refs.has_value());
+    EXPECT_NEAR(refs->delta, kDelta, 1e-12);
+    // The separation inequalities alone admit this stencil ...
+    EXPECT_TRUE(stencil_resolved(*refs));
+    // ... but y + delta is 102.03 against a limit of 102.0201.
+    EXPECT_FALSE(refs->resolved);
+
+    // The complement: a tenth of the two-grid difference keeps the
+    // separation and puts y + delta back under the limit.
+    const double kSmallDiff = kDiff / 10.0;
+    n = 0;
+    StencilSolveFn tight = [&](const PricingParams&, const PDEGridConfig&)
+        -> std::expected<double, SolverError> {
+        const size_t i = n++;
+        const double base = fine[i / 2];
+        return (i % 2 == 0) ? base : base - kSmallDiff;
+    };
+    auto prep_tight = make_stencil_refs_fn(
+        params, plain_oracle(), std::make_shared<ReferenceSolveCounter>(), tight);
+    auto tight_refs = prep_tight(1.0, 100.0, 1.0, 0.2, -0.02);
     ASSERT_TRUE(tight_refs.has_value());
     EXPECT_NEAR(tight_refs->delta, kDelta / 10.0, 1e-12);
     EXPECT_TRUE(tight_refs->resolved);

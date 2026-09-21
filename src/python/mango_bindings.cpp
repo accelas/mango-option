@@ -1086,8 +1086,9 @@ PYBIND11_MODULE(mango_option, m) {
 
                 max_price_residual and reference_uncertainty_max are
                 estimates of the round-trip metric's largest observed
-                residual and reference uncertainty among measured holdout
-                points; they are outcomes of the build, not bounds or
+                residual and reference uncertainty over the prepared holdout
+                points -- every point with a reference, not only the measured
+                ones; they are outcomes of the build, not bounds or
                 guarantees on any subsequent query.
             )pbdoc")
         .def("price",

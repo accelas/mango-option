@@ -116,7 +116,7 @@ TEST(IVSolverFactoryTest, ManualBatchSolve) {
 // true vol, and batch solve round-trips.  Historically these were four
 // separate cases (Builds/Adaptive, SolvesIV/Adaptive, BatchSolve/Adaptive,
 // AdaptivePathExposesDiagnostics), each paying ~18-50s for its own build of
-// the same surface.  The 0.02 tolerance is a smoke bound distinguishing a
+// the same surface.  The 0.02 tolerance is a smoke threshold distinguishing a
 // correctly wired surface from garbage, not an accuracy pin — accuracy pins
 // live in iv_solver_factory_slow_test.cc (nightly slow suite).
 TEST(IVSolverFactoryTest, AdaptiveEndToEndSmoke) {

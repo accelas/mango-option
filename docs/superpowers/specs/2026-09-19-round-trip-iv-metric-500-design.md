@@ -161,7 +161,7 @@ calibration).** `make_reference_grid_family(params, accuracy, levels)`:
 
 1. `estimate_pde_grid(params, accuracy)` gives `(GridSpec G0, TimeDomain T0)`
    with point count `n0`.
-2. Spatial: `n` is the **largest** count `≡ 1 (mod 16)` with
+2. Spatial: `n` is the **smallest** count `≡ 1 (mod 16)` with
    `n ≥ n0` and `n ≤ accuracy.max_spatial_points` (the cap is strict per the
    grid API); if none exists above `n0`, the largest such count in
    `[min_spatial_points, max_spatial_points]` is used and the family records

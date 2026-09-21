@@ -414,6 +414,7 @@ def main():
         test_build_diagnostics_property,
         test_vega_floor_is_ignored_and_new_diagnostics_present,
         test_price_table_validation_and_iv_error_parity,
+        test_multiple_root_screen_is_configurable,
         test_legacy_interpolated_iv_solver_factory_still_works,
         test_typed_exceptions_for_validation_and_persistence,
     ]
