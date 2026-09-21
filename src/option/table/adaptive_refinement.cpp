@@ -545,6 +545,14 @@ static SampleEval evaluate_fresh_samples(
             handle.price(ctx.spot, strike, tau, sigma, rate);
         if (!std::isfinite(interp_price)) {
             ev.all_finite = false;
+            // The refusal probe reads `status_counts` and nothing else, so
+            // record the veto there too (spec D7): a build refused only for
+            // NaN prices at sigma0 would otherwise report every failure
+            // counter at zero and carry no reason at all.  `surface_failures`
+            // is deliberately left alone -- it is the count of points whose
+            // *round trip* failed, and this point is vetoed before any
+            // inversion runs.
+            count_status(ev.status_counts, PointStatus::SurfaceNonFinite);
             continue;
         }
 
@@ -796,6 +804,9 @@ detail::FinalScore detail::score_final_surface(
         if (!std::isfinite(interp)) {
             ev.all_finite = false;
             ++ev.skipped;
+            // Same as the fresh pass: the veto is an outcome the refusal
+            // probe must be able to name (spec D7).
+            count_status(ev.status_counts, PointStatus::SurfaceNonFinite);
             continue;
         }
         const auto ps = score(handle, pt.refs, ctx.spot, pt.strike,

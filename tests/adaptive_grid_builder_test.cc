@@ -1010,6 +1010,43 @@ TEST(SegmentedFinalContract, NonFiniteEvaluationIsNotViable) {
         << "non-viable must retry even under a target it nominally meets";
 }
 
+// Regression: a candidate refused solely for a non-finite price at a point's
+// own sigma0 emitted `adaptive_no_viable_surface` with every failure
+// counter -- `failures_nonfinite` included -- at zero, so the refusal named
+// no reason when no diagnostics object came back.
+// Bug: the pre-score veto cleared `all_finite` and counted `skipped` but
+// never touched `status_counts`, which is the only thing the probe reads.
+// `surface_failures` stays as it was, and is asserted so below: it is
+// documented as the points whose *round trip* failed, and a point vetoed
+// before any inversion runs is not one of those; it is also
+// `better_candidate`'s primary ranking key, so moving it would change which
+// candidate the loop picks rather than what the refusal reports.
+TEST(SegmentedFinalContract, NonFiniteEvaluationIsCountedForTheRefusalProbe) {
+    const auto pts = make_points(8);
+    const auto ctx = make_score_ctx();
+    // Exactly one point is non-finite; the other seven measure cleanly, so
+    // the bucket cannot be read off the point count.
+    const SurfaceHandle one_nan{
+        .price = [](double, double, double, double sigma, double) {
+            return sigma < 0.205 ? std::numeric_limits<double>::quiet_NaN()
+                                 : 0.001;
+        }};
+
+    auto s = detail::score_final_surface(pts, one_nan, passthrough_score(),
+                                         ctx);
+
+    EXPECT_FALSE(s.viable()) << "the refusal itself is unchanged";
+    EXPECT_EQ(s.skipped, 1u);
+    EXPECT_EQ(
+        s.status_counts[static_cast<size_t>(PointStatus::SurfaceNonFinite)],
+        1u)
+        << "the refusal probe sums status_counts across candidates and "
+           "reports nothing else";
+    EXPECT_EQ(s.status_counts[static_cast<size_t>(PointStatus::Measured)], 7u);
+    EXPECT_EQ(s.surface_failures, 0u)
+        << "a point vetoed before the inversion is not a round-trip failure";
+}
+
 // A validation set that cannot measure cannot certify the surface (D4/D9.1).
 TEST(SegmentedFinalContract, SparseReferencesFailValidation) {
     AdaptiveGridParams params;
