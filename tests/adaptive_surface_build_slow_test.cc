@@ -909,6 +909,13 @@ TEST(AdaptiveGridBuilderTest, ContinuousChebyshevSurfaceMatchesPickedGrids) {
 // SegmentedFinalContract.ReportedErrorsDescribeReturnedSurface in
 // adaptive_surface_build_integration_test.cc, which exercises the same
 // select_final_surface and score_final_surface code.
+//
+// FOLLOW-UP(#500-remainder): re-home the end-to-end half of that contract for
+// the segmented Chebyshev path -- a build that returns surface A must not
+// report surface B's numbers.  What follows below covers only that *scoring*
+// is a pure function of the surface it is handed; the builder-level pairing
+// is covered on the B-spline path alone, because this configuration now
+// refuses and no other segmented Chebyshev fixture both returns and reports.
 TEST(SegmentedFinalContract, ChebyshevAssemblyRefusesOnSigmaEdgeLeaf) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;
