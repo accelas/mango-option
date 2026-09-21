@@ -935,6 +935,64 @@ TEST(RunRefinementTest, FiniteHoldoutFailureStillAdvancesTheBase) {
         << "equal failure counts and a 5e4x better max must advance the base";
 }
 
+namespace {
+/// Run a walk whose seed carries two holdout failures and whose every
+/// refinement carries one, and report the axes the loop asked to refine.
+///
+/// The axis count is the bin-independent observable: `tried` is only ever
+/// set, never cleared, unless the walk restarts, and there are four axes.
+/// So at most four refinements can happen without a restart, and more than
+/// four is proof that one did.
+std::vector<size_t> refined_axes_of_walk(mango::PointStatus failure_status) {
+    Harness h;
+    h.params.max_iter = 8;
+    h.score_override = holdout_failure_script(
+        h,
+        [](size_t build) { return build == 0 ? 2u : 1u; },
+        [](size_t) { return 1e-5; },
+        failure_status);
+
+    auto r = h.run();
+    EXPECT_FALSE(r.has_value()) << "every candidate failed somewhere";
+    return h.refine_axes;
+}
+}  // namespace
+
+// Regression: a refinement whose holdout inversion went non-finite cleared
+// every tried-axis flag, restarting the walk it could not advance.
+// Bug: the D4 walk restart read only the failure counts and the max, so a
+// candidate with fewer holdout failures than the base restarted the walk
+// even when its NaN holdout statistics barred it from becoming the base.
+// The next iteration then restored the unchanged base and -- the builders
+// being deterministic -- re-picked the same axis, so the whole iteration
+// budget could be spent on one axis with the other three never explored.
+TEST(RunRefinementTest, NonFiniteRefinementCannotRestartTheWalk) {
+    const auto axes = refined_axes_of_walk(
+        mango::PointStatus::SurfaceNonFinite);
+
+    ASSERT_GE(axes.size(), 2u);
+    EXPECT_LE(axes.size(), 4u)
+        << "a candidate that cannot take the base must not restart the walk";
+    EXPECT_NE(axes[0], axes[1])
+        << "the second refinement must try a different axis, not repeat the "
+           "one the ineligible candidate came from";
+    std::set<size_t> distinct(axes.begin(), axes.end());
+    EXPECT_EQ(distinct.size(), axes.size())
+        << "without a restart no axis can be tried twice";
+}
+
+// The control: the identical script with an ordinary (finite) surface
+// failure produces a candidate that *is* base-eligible and has fewer
+// failures than the base, so it does restart the walk -- visible as more
+// refinements than there are axes.  Without this, the test above would pass
+// on a loop that had simply stopped restarting walks altogether.
+TEST(RunRefinementTest, FiniteFewerFailuresStillRestartsTheWalk) {
+    const auto axes = refined_axes_of_walk(mango::PointStatus::SurfaceNoRoot);
+
+    EXPECT_GT(axes.size(), 4u)
+        << "more refinements than axes is only reachable through a restart";
+}
+
 // A fresh-sample failure vetoes viability even when the holdout is clean.
 TEST(RunRefinementTest, FreshFailureVetoesViability) {
     Harness h;

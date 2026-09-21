@@ -1148,7 +1148,24 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             last_attempt_failed = false;
             ++iteration;
 
-            // e. WALK BOOKKEEPING (spec D4 walk restart)
+            // Eligibility to become the exploration base (spec D4).  A
+            // candidate measured nowhere (holdout_measured == 0) reports
+            // holdout_max = 0 vacuously, and one whose inversion went
+            // non-finite reports NaN; neither describes a surface the walk
+            // can explore from.  Both the restart and the base advance read
+            // this one boolean so they cannot diverge.
+            const bool usable_as_base =
+                cand.holdout_measured > 0 && std::isfinite(cand.holdout_max);
+
+            // e. WALK BOOKKEEPING (spec D4 walk restart, feeding D6 axis
+            //    selection).  Only a candidate that could take the base may
+            //    restart the walk.  An ineligible one leaves the base
+            //    untouched, so clearing the tried set would send the next
+            //    iteration back to the same base and -- the builders being
+            //    deterministic -- the same axis, repeating until the
+            //    iteration budget is gone without another axis ever being
+            //    explored.  It marks its axis tried instead, exactly as a
+            //    trial that did not improve does.
             if (pending_refined_dim >= 0 && pending_refined_dim < 4) {
                 const size_t base_failures =
                     have_base ? base.holdout_failures : cand.holdout_failures;
@@ -1161,7 +1178,7 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
                     std::isfinite(cand.holdout_max) &&
                     cand.holdout_max <
                         prev_best_holdout * (1.0 - kMinRelImprovement);
-                if (fewer_failures || better_max) {
+                if (usable_as_base && (fewer_failures || better_max)) {
                     tried.fill(false);  // measured improvement: restart
                 } else {
                     tried[static_cast<size_t>(pending_refined_dim)] = true;
@@ -1169,13 +1186,9 @@ std::expected<RefinementResult, PriceTableError> run_refinement(
             }
 
             // Any improvement in the D4 order (even sub-threshold) advances
-            // the base.  A candidate measured nowhere (holdout_measured == 0)
-            // reports holdout_max = 0 vacuously and must not seize the base,
-            // and neither must one with a non-finite statistic.
-            const bool usable_base =
-                cand.holdout_measured > 0 && std::isfinite(cand.holdout_max);
+            // the base.
             if (!have_base ||
-                (usable_base &&
+                (usable_as_base &&
                  (!have_finite_base || better_candidate(cand, base)))) {
                 base = cand;
                 have_base = true;
