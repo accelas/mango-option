@@ -465,7 +465,16 @@ if (auto diag = solver.build_diagnostics(); diag.has_value()) {
 
 `build_diagnostics()` returns `std::nullopt` for a manually-built (non-adaptive) table, a table loaded from Parquet, or a `DimensionlessBackend` build, which does not honor `.adaptive`. Continuous and segmented adaptive Chebyshev builds expose diagnostics, as do both adaptive B-spline paths. Diagnostics are never persisted to `PriceTableData`/Parquet. Python exposes the same data via the `build_diagnostics` property (a dict) on `PriceTable` and `InterpolatedIVSolver`.
 
-If every candidate built during refinement fails the internal viability gate (holdout error above an absolute, target-independent garbage-detection bound — or no holdout point could be measured at all, e.g. a domain where implied vol is everywhere undefined), the build itself fails with `ValidationErrorCode::NoViableSurface` rather than silently returning a broken surface — check for it alongside the usual validation errors.
+A candidate is scored by the **operational round trip**: each validation point's reference price is inverted on the candidate with the same inversion the shipped `InterpolatedIVSolver` runs, and the error is the recovered volatility's distance from the point's own. There is no absolute error ceiling. Instead, any resolved surface-inversion failure — no root, an ambiguous root, a non-convergent or non-finite search, or a surface vega below the pre-check threshold — on the declared fresh or holdout sample set makes that candidate non-viable. References the oracle could not resolve are excluded from the score and counted separately, never treated as candidate defects. If no candidate built during refinement is viable, the build itself fails with `ValidationErrorCode::NoViableSurface` rather than silently returning a surface the shipped solver cannot invert — check for it alongside the usual validation errors.
+
+**When an adaptive build refuses.** Two refusals are worth telling apart.
+
+- `ValidationFailed` — fewer than `max(4, validation_samples/4)` holdout references could be *prepared*, or fewer than that many *resolved*. The domain gave the oracle too little to measure on; widen it, raise `validation_samples`, or loosen `target_iv_error`. The USDT probe `mango:adaptive_validation_refused(set, requested, prepared, resolved, unsupported)` reports the counts.
+- `NoViableSurface` — every candidate had a resolved surface-inversion failure (or none measured a single holdout point). The probe `mango:adaptive_no_viable_surface(stage, candidates, failures_no_root, failures_ambiguous, failures_nonconvergent, failures_nonfinite, failures_vega, edge_band_rescues)` reports which outcomes dominated and at which stage.
+
+On a build that did return, `build_diagnostics()` tells the same story: compare `holdout_points_measured` against `holdout_points_unresolved` and `holdout_points_unsupported` to see how much of the domain was measurable, read `surface_failures` for round-trip failures on the returned surface, and read `max_price_residual` and `reference_uncertainty_max` for the forward-price record and the oracle's own estimated uncertainty.
+
+The `vega_floor` field of `AdaptiveGridParams` is **deprecated and ignored**. The round-trip metric applies no such cutoff; the field is kept only for C ABI layout stability and is removed in a later release. Setting it changes nothing.
 
 ### Multiple-Root Screening
 
@@ -782,9 +791,22 @@ The B-spline segmented path uses raw fixed-expiry PDE snapshots. Fitted
 surfaces do not feed later PDE solves. Adaptive construction can return its
 best available surface before reaching the requested accuracy; inspect
 `build_diagnostics()->target_met` and `achieved_max_error` for the returned
-surface. The tests `DocumentedAdaptiveDiscreteDividendConfig` and
-`DocumentedBSplineConfigReportsAccuracyAndSolves` exercise the documented
-Chebyshev and B-spline configurations, including independent PDE-to-IV queries.
+surface.
+
+The test `DocumentedBSplineConfigReportsAccuracyAndSolves` exercises the
+documented B-spline configuration: it builds, reports its achieved accuracy,
+accounts for every holdout point under exactly one outcome, and prices an
+independently generated FDM quote back to its own volatility.
+`DocumentedAdaptiveDiscreteDividendConfig` pins the opposite outcome for the
+Chebyshev configuration: at a 10 bps target that build is **refused** with
+`NoViableSurface`. Its segmented leaf oscillates in volatility across the
+early-exercise shoulder, and the nearest root at the worst holdout point
+sits about 20 bps below the acceptance band. The round-trip metric reports
+that; the retired vega-scaled metric divided it by a vanishing vega and
+passed. The leaf defect is a #500 follow-up. Loosening the target does not
+work around it — the same configuration at 20 bps is refused too (measured
+2026-09-21). The same grid, K_refs and schedule on the B-spline backend do
+build, which is what the companion test covers.
 
 **Reference strikes should cover the query range.** For example,
 `S/K ∈ [0.92, 1.08]` at spot 100 implies strikes in `[92.6, 108.7]`.
@@ -840,7 +862,7 @@ if (result.has_value()) {
 ### Configuration Notes
 
 - **`kref_config`** is optional. When omitted, the builder selects reference strikes automatically at log-spaced intervals around the spot. Explicit K_refs are useful when you know the strike range of interest — but they must span and resolve the strike range your moneyness grid implies (see above).
-- **Adaptive builds are gated on measured accuracy.** After assembling the final surface the builder re-measures it against fresh PDE solves over your own moneyness/vol/rate ranges and refuses to return one whose IV error exceeds 2,000 bps (`PriceTableErrorCode::NoViableSurface`). A surface that misses `target_iv_error` but stays inside that bound is returned as best-effort.
+- **Adaptive builds are gated on the operational round trip.** After assembling the final surface the builder re-measures it against fresh PDE references over your own moneyness/vol/rate ranges, inverting each reference price on the surface with the shipped solver's own inversion. A surface that misses `target_iv_error` is still returned as best-effort, with the achieved error in its diagnostics. A surface that produces a resolved inversion failure at any declared sample point is refused (`PriceTableErrorCode::NoViableSurface`); so is one on which no holdout point could be measured at all.
 - **Continuous yield** applies inside each segment's PDE. Discrete dividends operate at segment boundaries. Both can be used together.
 
 ---
@@ -1337,3 +1359,17 @@ Segmented B-spline adaptive build diagnostics include `sample_rows`,
 builds across refinement probes and final/retry assemblies. The Python
 `build_diagnostics()` dictionary exposes the same fields. The direct
 `build_with_diagnostics()` result reports the counts for its single build.
+
+Every adaptive build also reports the round-trip metric's own accounting,
+in C++ and in the Python `build_diagnostics` dictionary alike:
+
+| Key | Meaning |
+|---|---|
+| `holdout_points_unresolved` | Holdout points whose reference stencil did not separate, or whose target prices failed query validation. No evidence either way. |
+| `holdout_points_unsupported` | Holdout samples dropped before preparation because the product does not serve that maturity. |
+| `surface_failures` | Holdout points where the round trip on the returned surface failed: no root, ambiguous, non-convergent, non-finite, or vega below the pre-check threshold. |
+| `edge_band_rescues` | Measured points whose recovered volatility fell outside the un-widened product bracket — queries the shipped solver would refuse today. A diagnostic; it gates nothing. |
+| `max_price_residual` | Largest \|surface price − reference price\| / strike over the prepared holdout points. Recorded, never gated. |
+| `reference_uncertainty_max` | Largest estimated reference uncertainty on the holdout. A grid-convergence estimate, not a bound. |
+| `reference_solves_fine` | Reference PDE solves on the fine grid, across the whole build. |
+| `reference_solves_coarse` | Reference PDE solves on the coarse grid, across the whole build. |
