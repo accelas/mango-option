@@ -141,11 +141,55 @@ TEST(StencilRefs, SixSolvesOnOneNestedGridPair) {
     EXPECT_TRUE(refs->resolved);
     EXPECT_DOUBLE_EQ(refs->sigma_lo, 0.2 - 5e-4);
     EXPECT_DOUBLE_EQ(refs->sigma_hi, 0.2 + 5e-4);
-    // delta = F_s * |bias| / (2^p - 1)
-    EXPECT_NEAR(refs->delta, kRichardsonSafetyFactor * 1e-4 / (std::pow(2.0, kReferenceConvergenceOrder) - 1.0), 1e-15);
+    // delta = max(F_s * |bias| / (2^p - 1), kReferenceUncertaintyFloor * K)
+    // -- here the two-grid term (3e-4) dominates the floor (1e-5).
+    EXPECT_NEAR(refs->delta,
+                std::max(kRichardsonSafetyFactor * 1e-4
+                             / (std::pow(2.0, kReferenceConvergenceOrder) - 1.0),
+                         kReferenceUncertaintyFloor * 100.0),
+                1e-15);
     // Achieved time steps are recorded for both levels (record only).
     EXPECT_EQ(refs->fine_steps, static_cast<uint32_t>(fake.calls[0].second));
     EXPECT_EQ(refs->coarse_steps, static_cast<uint32_t>(fake.calls[1].second));
+}
+
+// Spec D1, rev 5: where both discretizations agree exactly -- both on the
+// obstacle at a near-intrinsic point -- the two-grid difference sees nothing,
+// and the estimate falls back to the oracle's calibrated accuracy scale.
+TEST(StencilRefs, ZeroCoarseBiasFloorsTheUncertaintyEstimate) {
+    FakeStencil fake{.slope = 40.0, .coarse_bias = 0.0};
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    auto prep = make_stencil_refs_fn(params, plain_oracle(),
+                                     std::make_shared<ReferenceSolveCounter>(), fake.fn());
+    auto refs = prep(100.0, 100.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(refs.has_value());
+    // Two-grid term is exactly zero, so each estimate is the floor times the
+    // strike of the contract solved.
+    EXPECT_DOUBLE_EQ(refs->delta, kReferenceUncertaintyFloor * 100.0);
+    EXPECT_DOUBLE_EQ(refs->delta_lo, kReferenceUncertaintyFloor * 100.0);
+    EXPECT_DOUBLE_EQ(refs->delta_hi, kReferenceUncertaintyFloor * 100.0);
+    // A slope of 40 separates the bracket by 0.02 per side, far above the
+    // 2e-5 the floored estimates now require.
+    EXPECT_TRUE(refs->resolved);
+}
+
+// Rev 5: the floor is what stops a bracket separated by microdollars from
+// "resolving".  Slope 0.02 moves the price by 1e-5 per side over
+// sigma0 +- 5e-4, which is below delta + delta_lo = 2e-5.
+TEST(StencilRefs, SeparationBelowTwiceTheFloorIsUnresolved) {
+    FakeStencil fake{.slope = 0.02, .coarse_bias = 0.0};
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    auto prep = make_stencil_refs_fn(params, plain_oracle(),
+                                     std::make_shared<ReferenceSolveCounter>(), fake.fn());
+    auto refs = prep(100.0, 100.0, 1.0, 0.2, 0.05);
+    ASSERT_TRUE(refs.has_value());
+    EXPECT_DOUBLE_EQ(refs->delta, kReferenceUncertaintyFloor * 100.0);
+    EXPECT_NEAR(refs->ref_price - refs->bracket_lo_price, 1e-5, 1e-15);
+    EXPECT_LT(refs->ref_price - refs->bracket_lo_price,
+              refs->delta + refs->delta_lo);
+    EXPECT_FALSE(refs->resolved);
+    // The base price is still present: preparation succeeded, resolution did not.
+    EXPECT_TRUE(std::isfinite(refs->ref_price));
 }
 
 // Spec D2, reviewer example: y=10, lo=9.85, hi=10.15, delta=0.10 at every
@@ -332,21 +376,32 @@ TEST(RoundTripScore, UnresolvedReferenceStillRecordsResidual) {
     EXPECT_TRUE(std::isnan(s.iv_error));
 }
 
-// Root beyond the published edge: NoRoot under the exact product bracket;
-// the tau_iv edge band rescues it only as a diagnostic flag.
-TEST(RoundTripScore, EdgeMissIsNoRootWithRescueFlag) {
+// Spec D3, rev 5: acceptance runs on the published range widened by tau_iv.
+// A root within the user's own tolerance beyond a published edge is a
+// measurement; the exact product bracket's refusal becomes the diagnostic.
+TEST(RoundTripScore, EdgeMissWithinToleranceMeasuresAndFlagsExactBracket) {
     AdaptiveGridParams params; params.target_iv_error = 5e-3;   // band 50 bps
     auto score = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);
-    // Surface overprices by 0.04 at sigma=0.1 -> root at 0.099 (1e-3 below the edge, inside the band)
+    // Surface overprices by 0.04 at sigma=0.1 -> root at 0.099, i.e. 10 bps
+    // below the published edge and inside the 50 bps band.
+    auto refs = resolved_refs(10.0 + 40.0 * (0.1 - 0.3));
+    auto s = score(linear_handle(0.04), refs, 100.0, 100.0, 0.5, 0.1, 0.05);
+    EXPECT_EQ(s.status, PointStatus::Measured);
+    EXPECT_NEAR(s.iv_error, 1e-3 + 2.5e-6, 1e-7);
+    EXPECT_TRUE(s.edge_band_rescue)
+        << "the recovered sigma lies outside the un-widened product bracket";
+}
+
+// Beyond the tolerance band the outcome is what the shipped inversion
+// reports: no root.  The diagnostic is only ever set on a Measured point.
+TEST(RoundTripScore, EdgeMissBeyondToleranceIsNoRootWithoutFlag) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;   // band 5 bps
+    auto score = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);
     auto refs = resolved_refs(10.0 + 40.0 * (0.1 - 0.3));
     auto s = score(linear_handle(0.04), refs, 100.0, 100.0, 0.5, 0.1, 0.05);
     EXPECT_EQ(s.status, PointStatus::SurfaceNoRoot);
-    EXPECT_TRUE(s.edge_band_rescue);
-    params.target_iv_error = 5e-4;   // band 5 bps: root is 10 bps outside -> no rescue
-    auto score2 = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);
-    auto s2 = score2(linear_handle(0.04), refs, 100.0, 100.0, 0.5, 0.1, 0.05);
-    EXPECT_EQ(s2.status, PointStatus::SurfaceNoRoot);
-    EXPECT_FALSE(s2.edge_band_rescue);
+    EXPECT_FALSE(s.edge_band_rescue);
+    EXPECT_TRUE(std::isnan(s.iv_error));
 }
 
 TEST(RoundTripScore, MapsEveryFailureKind) {

@@ -23,14 +23,24 @@
 
 namespace mango {
 
-/// Round-trip score for one validation point (spec D3).
+/// Operational round trip (edge band tau): the score for one validation
+/// point (spec D3, rev 5).
 ///
 /// Runs the product inversion (`invert_price_on_surface`) on the candidate
 /// surface at the three stencil targets -- `refs.ref_price` and
-/// `refs.ref_price +- refs.delta` -- over the bracket
-/// `effective_sigma_bracket` derives from `ctx.sample_bounds`, and reports
-/// the largest distance between a recovered volatility and `sigma`.  Both
-/// domains of `ctx` are copied into the returned callable.
+/// `refs.ref_price +- refs.delta` -- and reports the largest distance
+/// between a recovered volatility and `sigma`.  Both domains of `ctx` are
+/// copied into the returned callable.
+///
+/// The bracket is the product's, taken over the *acceptance band*: the
+/// published sigma range of `ctx.sample_bounds` widened by
+/// `params.target_iv_error` at each end and clipped to the fit domain
+/// `ctx.bounds`.  Pre-check, screen, Brent, post-check, the adaptive cap and
+/// the configured sigma limits are the shipped ones, unchanged.  The metric
+/// is therefore *stronger than the shipped solver at the edges by exactly
+/// `target_iv_error`*: a root the solver would refuse today, lying within
+/// the user's own tolerance beyond a published edge, is a measurement here.
+/// Making the two coincide again is the query-time follow-up.
 ///
 /// Outcomes, not verdicts about the surface as a whole:
 ///  - every target inverted => `PointStatus::Measured` and `iv_error` set;
@@ -39,11 +49,12 @@ namespace mango {
 ///    mapped to the matching `Surface*` status.
 ///
 /// `price_residual` (|surface price - reference price| / strike) is recorded
-/// whenever both prices are finite, including on the unresolved path.  When
-/// the outcome is `SurfaceNoRoot`, the three targets are re-inverted over the
-/// bracket widened by `params.target_iv_error` per side (clipped to
-/// `ctx.bounds`); success there only sets `edge_band_rescue`, a diagnostic
-/// that changes neither `status` nor `iv_error`.
+/// whenever both prices are finite, including on the unresolved path.
+///
+/// `edge_band_rescue` is the exact-bracket diagnostic: set on a `Measured`
+/// point when any recovered volatility falls outside the un-widened product
+/// bracket, i.e. when the shipped solver would have refused that query
+/// today.  It changes neither `status` nor `iv_error` and gates nothing.
 ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
                                       const RefinementContext& ctx,
                                       OptionType option_type);
@@ -63,6 +74,18 @@ inline constexpr GridAccuracyProfile kReferenceAccuracy = GridAccuracyProfile::H
 /// Roache's recommended safety factor for a two-grid (uncalibrated-order)
 /// Richardson error estimate.
 inline constexpr double kRichardsonSafetyFactor = 3.0;
+
+/// Floor on each stencil uncertainty estimate, relative to the strike of the
+/// contract actually solved (spec D1, rev 5): calibrated constant, the
+/// oracle's High-vs-Ultra discrepancy scale relative to strike; measured 4e-6
+/// and 7e-6 on K=100 on 2026-09-19; the D8 calibration test asserts it is at
+/// least max |V_High - V_Ultra| / K.
+///
+/// Without it, two discretizations that agree exactly -- both sitting on the
+/// obstacle at a near-intrinsic point -- estimate zero uncertainty, and the
+/// stencil admits a bracket separated by microdollars that the shipped
+/// inversion cannot then invert.
+inline constexpr double kReferenceUncertaintyFloor = 1e-7;
 
 /// Assumed observed order of convergence for the reference grid family's
 /// two-grid error estimate. Task 11 calibrates the measured minimum order

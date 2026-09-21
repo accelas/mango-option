@@ -209,34 +209,47 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
         // precondition holds for every one of them.
         const double targets[3] = {refs.ref_price - refs.delta, refs.ref_price,
                                    refs.ref_price + refs.delta};
+
+        // Acceptance band (spec D3, rev 5): the published sigma range widened
+        // by the user's own tolerance at each end, clipped to the fit domain.
+        // A root within tau_iv of a published edge is a measurement, not a
+        // refusal -- everything else is the product's policy, unchanged.
+        const double band_lo = std::max(sample.sigma_min - tau_iv, fit.sigma_min);
+        const double band_hi = std::min(sample.sigma_max + tau_iv, fit.sigma_max);
+
         double worst = 0.0;
+        double recovered[3] = {std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::quiet_NaN()};
         PointStatus status = PointStatus::Measured;
-        for (double target : targets) {
-            const auto inverted = invert(target, sample.sigma_min, sample.sigma_max);
+        for (int k = 0; k < 3; ++k) {
+            const auto inverted = invert(targets[k], band_lo, band_hi);
             if (!inverted) {
                 if (severity(inverted.error()) > severity(status)) status = inverted.error();
                 continue;
             }
+            recovered[k] = *inverted;
             worst = std::max(worst, std::abs(*inverted - sigma));
         }
 
         out.status = status;
-        if (status == PointStatus::Measured) {
-            out.iv_error = worst;
-            return out;
-        }
-        if (status == PointStatus::SurfaceNoRoot) {
-            // Diagnostic only (spec D3): would a bracket widened by one
-            // target_iv_error per side, clipped to the fit domain, have found
-            // the root the published bracket missed?  The answer is recorded,
-            // never substituted for the outcome above.
-            const double lo = std::max(sample.sigma_min - tau_iv, fit.sigma_min);
-            const double hi = std::min(sample.sigma_max + tau_iv, fit.sigma_max);
-            bool all_inverted = true;
-            for (double target : targets) {
-                if (!invert(target, lo, hi)) { all_inverted = false; break; }
+        if (status != PointStatus::Measured) return out;
+        out.iv_error = worst;
+
+        // Exact-bracket diagnostic (spec D3, rev 5): would the shipped solver,
+        // searching the un-widened published range, have refused this query
+        // today?  Recorded as evidence for the query-time follow-up; it
+        // changes neither `status` nor `iv_error`, and never gates anything.
+        SurfaceInversionPolicy exact;
+        exact.published_sigma_min = sample.sigma_min;
+        exact.published_sigma_max = sample.sigma_max;
+        for (int k = 0; k < 3; ++k) {
+            const auto [lo, hi] =
+                effective_sigma_bracket(spot, strike, option_type, targets[k], exact);
+            if (recovered[k] < lo || recovered[k] > hi) {
+                out.edge_band_rescue = true;
+                break;
             }
-            out.edge_band_rescue = all_inverted;
         }
         return out;
     };
@@ -272,11 +285,18 @@ bool stencil_resolved(const ErrorRefs& r) noexcept {
 
 namespace {
 
-// Two-grid Richardson error estimate (spec D1).  An estimate, never a
-// certificate: a difference between two grids cannot see bias they share.
-double richardson_estimate(double fine, double coarse) {
-    return kRichardsonSafetyFactor * std::abs(fine - coarse)
-         / (std::pow(2.0, kReferenceConvergenceOrder) - 1.0);
+// Two-grid Richardson error estimate, floored at the oracle's calibrated
+// accuracy scale (spec D1, rev 5).  An estimate, never a certificate: a
+// difference between two grids cannot see bias they share, and where the two
+// grids agree exactly -- both on the obstacle at a near-intrinsic point --
+// the difference sees nothing at all.  `strike` is the strike of the
+// contract actually solved; on a probe contract that is the probe strike,
+// and `make_probe_scaled_refs_fn` then carries the floor to the user strike
+// with the same scaling it applies to the prices.
+double richardson_estimate(double fine, double coarse, double strike) {
+    const double two_grid = kRichardsonSafetyFactor * std::abs(fine - coarse)
+                          / (std::pow(2.0, kReferenceConvergenceOrder) - 1.0);
+    return std::max(two_grid, kReferenceUncertaintyFloor * strike);
 }
 
 // Spec D2: each of the three targets must pass the product's own query
@@ -358,9 +378,9 @@ PrepareRefsFn make_stencil_refs_fn(const AdaptiveGridParams& params,
         if (!y2 || !lo || !lo2 || !hi || !hi2) return out;
         out.bracket_lo_price = *lo;
         out.bracket_hi_price = *hi;
-        out.delta = richardson_estimate(*y, *y2);
-        out.delta_lo = richardson_estimate(*lo, *lo2);
-        out.delta_hi = richardson_estimate(*hi, *hi2);
+        out.delta = richardson_estimate(*y, *y2, strike);
+        out.delta_lo = richardson_estimate(*lo, *lo2, strike);
+        out.delta_hi = richardson_estimate(*hi, *hi2, strike);
         if (!stencil_resolved(out)) return out;
         const PricingParams base = oracle.contract(spot, strike, tau, sigma, rate);
         for (double target : {out.ref_price - out.delta, out.ref_price,

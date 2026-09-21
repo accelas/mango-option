@@ -46,7 +46,8 @@ struct SampleEval {
     /// on is `all_finite`; the count is kept so this evaluation and
     /// `detail::FinalScore` accumulate the same shape (`apply_point_score`).
     size_t skipped = 0;
-    /// Samples scored through the edge-band rescue path (diagnostic, D3).
+    /// Samples whose recovered sigma fell outside the exact product
+    /// bracket (exact-bracket diagnostic, spec D3).
     size_t edge_band_rescues = 0;
     /// Largest |S - V̂|/K residual, over every point that produced one.
     double max_price_residual = 0.0;
@@ -74,7 +75,7 @@ struct Candidate {
     SampleEval holdout_eval;
     /// Outcome totals over both passes, for the refusal probe (spec D7).
     PointStatusCounts status_counts = {};
-    /// Edge-band rescues over both passes (diagnostic, spec D3).
+    /// Exact-bracket diagnostic over both passes (spec D3).
     size_t edge_band_rescues = 0;
     ErrorBins bins;
     size_t iteration = 0;

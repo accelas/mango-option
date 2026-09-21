@@ -127,8 +127,10 @@ struct PointScore {
     /// |S - V̂|/K between the reference price and the surface's price,
     /// when finite; a diagnostic, not part of the error metric.
     double price_residual = std::numeric_limits<double>::quiet_NaN();
-    /// Whether the edge-band rescue path was used for this point; a
-    /// diagnostic only, does not affect `status` or `iv_error`.
+    /// Exact-bracket diagnostic (spec D3, rev 5): a recovered volatility
+    /// fell outside the un-widened product bracket, so the shipped solver
+    /// would have refused this query today.  Diagnostic only; it does not
+    /// affect `status` or `iv_error` and gates nothing.
     bool edge_band_rescue = false;
 };
 
@@ -159,7 +161,7 @@ struct IterationStats {
     bool build_failed = false;               ///< Refinement trial build failed (D5)
     size_t unresolved = 0;                   ///< Points with PointStatus::ReferenceUnresolved
     size_t surface_failures = 0;             ///< Points where is_surface_failure() held
-    size_t edge_band_rescues = 0;            ///< Points scored with PointScore::edge_band_rescue set
+    size_t edge_band_rescues = 0;            ///< Points with PointScore::edge_band_rescue set (exact-bracket diagnostic)
 };
 
 /// Adaptive refinement build diagnostics
@@ -197,8 +199,9 @@ struct BuildDiagnostics {
     /// Holdout points where the round-trip inversion of the returned
     /// surface's own price failed (is_surface_failure() held).
     size_t surface_failures = 0;
-    /// Holdout points scored via the edge-band rescue path; a diagnostic
-    /// count, not part of any pass/fail decision.
+    /// Holdout points whose recovered volatility fell outside the exact
+    /// product bracket, i.e. queries the shipped solver would refuse today
+    /// (spec D3, rev 5); a diagnostic count, not part of any decision.
     size_t edge_band_rescues = 0;
     /// Largest |S - V̂|/K price residual observed among measured points.
     double max_price_residual = 0.0;

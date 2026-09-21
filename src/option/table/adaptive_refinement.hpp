@@ -547,7 +547,7 @@ struct FinalScore {
     /// `holdout_points_unsupported` comes from that preparation, not here.
     size_t unsupported = 0;
     size_t surface_failures = 0;   ///< points where is_surface_failure() held
-    size_t edge_band_rescues = 0;  ///< points scored via the rescue path (D3)
+    size_t edge_band_rescues = 0;  ///< exact-bracket diagnostic hits (D3)
     /// Largest |S - V̂|/K residual seen over the points, measured or not.
     double max_price_residual = 0.0;
     /// Largest finite reference-error *estimate* over the points; 0 when none
