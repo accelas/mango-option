@@ -78,30 +78,34 @@ struct SegmentedAdaptiveConfig {
     MultiKRefConfig kref_config;
 };
 
-/// Outcome of scoring one holdout point under the round-trip IV metric:
-/// price the reference IV off the built surface, then re-invert the
-/// surface's own price back to an IV and compare against the reference.
+/// Outcome of scoring one holdout point under the round-trip IV metric
+/// (spec 2026-09-19 D3): take the FD reference price `y` and the two band
+/// ends `y ± δ̂`, invert each of those three target prices on the candidate
+/// surface with the shipped inversion, and compare every recovered
+/// volatility against the point's own `σ0`.  Nothing is priced off the
+/// surface at `σ0` for the metric itself; the forward price enters only as
+/// the diagnostic residual below.
 enum class PointStatus : uint8_t {
-    /// The round trip completed and produced an IV error.
+    /// The inversion succeeded at all three target prices, so the point
+    /// carries an IV error.
     Measured,
-    /// The FD reference for this point could not be established, so no
-    /// round trip was attempted.  Not charged against the surface.
+    /// The FD reference for this point did not resolve (spec D2), so no
+    /// inversion was attempted.  Not charged against the surface.
     ReferenceUnresolved,
-    /// The surface's local vega at this point was too small for the
-    /// round-trip inversion to recover an IV from the surface's price.
+    /// The surface's vega at a target price was below the product
+    /// pre-check's threshold, so the shipped inversion refused the query.
     SurfaceVegaTooSmall,
-    /// The round-trip inversion found no root: no surface IV reproduced
-    /// the surface's own price within the solver's search range.
+    /// No volatility in the search range reproduced the reference price.
     SurfaceNoRoot,
-    /// The round-trip inversion found more than one candidate root,
-    /// so the recovered IV is ambiguous.
+    /// More than one volatility in the search range reproduced the
+    /// reference price, so the recovered volatility is ambiguous.
     SurfaceAmbiguous,
-    /// The round-trip inversion did not converge within its iteration
-    /// budget.
+    /// The inversion did not reach the reference price within its
+    /// iteration budget.
     SurfaceNonConvergent,
-    /// The surface produced a non-finite price or derivative during the
-    /// round-trip inversion.  Keep this enumerator last: `kPointStatusCount`
-    /// is derived from it.
+    /// The surface produced a non-finite price or vega while inverting a
+    /// target price.  Keep this enumerator last: `kPointStatusCount` is
+    /// derived from it.
     SurfaceNonFinite,
 };
 
@@ -122,7 +126,8 @@ constexpr bool is_surface_failure(PointStatus s) noexcept {
 /// Result of scoring one holdout point under the round-trip IV metric.
 struct PointScore {
     PointStatus status = PointStatus::ReferenceUnresolved;
-    /// Round-trip IV error; only meaningful when `status == Measured`.
+    /// Round-trip IV error: the largest |σ̂ − σ0| over the three inverted
+    /// target prices.  Only meaningful when `status == Measured`.
     double iv_error = std::numeric_limits<double>::quiet_NaN();
     /// |S - V̂|/K between the reference price and the surface's price,
     /// when finite; a diagnostic, not part of the error metric.
@@ -180,7 +185,7 @@ struct BuildDiagnostics {
     size_t holdout_points_invalid = 0;
     /// Of `holdout_points`, those that actually produced an error for the
     /// returned surface.  The rest are the unresolved references, the points
-    /// where the shipped inversion failed on the surface's own price, and the
+    /// where the shipped inversion failed on a reference target price, and the
     /// non-finite evaluations; a build with `holdout_points_measured == 0` is
     /// refused, never certified.
     size_t holdout_points_measured = 0;
@@ -196,8 +201,8 @@ struct BuildDiagnostics {
     /// segmented B-spline, whose tau segments are contiguous -- sets no
     /// predicate and reads 0 here by construction.
     size_t holdout_points_unsupported = 0;
-    /// Holdout points where the round-trip inversion of the returned
-    /// surface's own price failed (is_surface_failure() held).
+    /// Holdout points where inverting a reference target price on the
+    /// returned surface failed (is_surface_failure() held).
     size_t surface_failures = 0;
     /// Holdout points whose recovered volatility fell outside the exact
     /// product bracket, i.e. queries the shipped solver would refuse today

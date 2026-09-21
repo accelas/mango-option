@@ -578,8 +578,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     // Regression: at a 0.05 y maturity the adaptive path refuses, and the
     // domain assertions above are what this test is really for.
     // Bug: the sampled options carry almost no time value, so the shipped
-    // inversion cannot recover a volatility from the surface's own price
-    // however accurate that price is.  Measured on 2026-09-21 at K =
+    // inversion cannot recover a volatility from the reference price on that
+    // surface however accurate the surface's own price is.  Measured on 2026-09-21 at K =
     // 106.2027, tau = 0.01846, sigma0 = 0.2093: reference 6.2032083 against
     // an intrinsic of 6.2027205 -- a time value of 4.9e-4, i.e. TV/K =
     // 4.6e-6 -- with a surface price residual of 1.1e-5 of strike and a
@@ -743,9 +743,29 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     // classification.
     EXPECT_EQ(adaptive->diagnostics.surface_failures, 0u);
     EXPECT_GT(adaptive->diagnostics.holdout_points_measured, 0u);
-    EXPECT_EQ(adaptive->diagnostics.holdout_points_measured
+    // Every prepared holdout point ends in exactly one of four outcomes --
+    // measured, unresolved, surface failure, or a non-finite evaluation
+    // ("skipped") -- but `skipped` is never reported on its own: it is
+    // folded into `holdout_points_invalid` together with the preparations
+    // that failed and so never entered the prepared set at all
+    // (chebyshev_adaptive.cpp: `invalid + final_score.skipped`).  The three
+    // separable outcomes can therefore only under-count the prepared set,
+    // and adding the folded counter can only over-count it; an exact
+    // identity is not expressible from the public fields.
+    // Bug: the previous `measured + unresolved + unsupported + invalid ==
+    // holdout_points` was not an identity.  `holdout_points` is already the
+    // prepared set, so it excludes the unsupported and invalid samples the
+    // assertion subtracted a second time, and on the segmented Chebyshev
+    // path it mixed two draws: `holdout_points_unsupported` comes from the
+    // sizing loop's fixed holdout while `holdout_points` is the final
+    // validation set.
+    EXPECT_LE(adaptive->diagnostics.holdout_points_measured
                   + adaptive->diagnostics.holdout_points_unresolved
-                  + adaptive->diagnostics.holdout_points_unsupported
+                  + adaptive->diagnostics.surface_failures,
+              adaptive->diagnostics.holdout_points);
+    EXPECT_GE(adaptive->diagnostics.holdout_points_measured
+                  + adaptive->diagnostics.holdout_points_unresolved
+                  + adaptive->diagnostics.surface_failures
                   + adaptive->diagnostics.holdout_points_invalid,
               adaptive->diagnostics.holdout_points);
 

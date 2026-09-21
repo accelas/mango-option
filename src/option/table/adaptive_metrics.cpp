@@ -167,11 +167,12 @@ int severity(PointStatus s) {
 // refinement context was not built around.
 ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
                                       const RefinementContext& ctx,
-                                      OptionType option_type) {
+                                      OptionType option_type,
+                                      SurfaceInversionPolicy base_policy) {
     const double tau_iv = params.target_iv_error;
     const SurfaceBounds sample = ctx.sample_bounds;
     const SurfaceBounds fit = ctx.bounds;
-    return [tau_iv, sample, fit, option_type](
+    return [tau_iv, sample, fit, option_type, base_policy](
         const SurfaceHandle& surface, const ErrorRefs& refs,
         double spot, double strike, double tau, double sigma, double rate) -> PointScore
     {
@@ -219,7 +220,7 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
         const auto invert = [&](double target, double published_lo, double published_hi)
             -> std::expected<double, PointStatus>
         {
-            SurfaceInversionPolicy policy;
+            SurfaceInversionPolicy policy = base_policy;
             policy.published_sigma_min = published_lo;
             policy.published_sigma_max = published_hi;
             const auto bracket =
@@ -273,7 +274,7 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
         // searching the un-widened published range, have refused this query
         // today?  Recorded as evidence for the query-time follow-up; it
         // changes neither `status` nor `iv_error`, and never gates anything.
-        SurfaceInversionPolicy exact;
+        SurfaceInversionPolicy exact = base_policy;
         exact.published_sigma_min = sample.sigma_min;
         exact.published_sigma_max = sample.sigma_max;
         for (int k = 0; k < 3; ++k) {

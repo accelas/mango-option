@@ -14,6 +14,7 @@
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/grid_spec_types.hpp"
+#include "mango/option/surface_inversion.hpp"
 #include <atomic>
 #include <expected>
 #include <functional>
@@ -64,9 +65,18 @@ namespace mango {
 /// point when any recovered volatility falls outside the un-widened product
 /// bracket, i.e. when the shipped solver would have refused that query
 /// today.  It changes neither `status` nor `iv_error` and gates nothing.
+///
+/// `base_policy` carries every inversion setting except the published sigma
+/// limits, which the scorer sets itself (the acceptance band for the score,
+/// the un-widened range for the diagnostic).  It defaults to the product
+/// policy and every build path takes that default; the parameter exists so a
+/// test can reach an outcome the shipped thresholds make unreachable on a
+/// well-behaved fixture -- `SurfaceNonConvergent` needs an iteration budget
+/// no build would ever ship.
 ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
                                       const RefinementContext& ctx,
-                                      OptionType option_type);
+                                      OptionType option_type,
+                                      SurfaceInversionPolicy base_policy = {});
 
 /// Create a direct FD reference. With reference_maturity, the dividends are
 /// anchored to one fixed expiry and rolled to each query's remaining life.

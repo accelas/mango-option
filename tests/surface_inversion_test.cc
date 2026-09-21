@@ -96,3 +96,33 @@ TEST(SurfaceInversion, ReportsProductErrorCodes) {
     ASSERT_FALSE(nf.has_value());
     EXPECT_EQ(nf.error().code, IVErrorCode::NumericalInstability);
 }
+
+// The fifth product error code, which the cases above cannot reach: on any
+// fixture the shipped 50-iteration budget converges, so the only way to
+// observe the exhausted budget is to shrink it.  Brent tests convergence at
+// the top of each pass, so one pass cannot report a root however good its
+// step was -- a linear objective is enough.
+//
+// Regression: `PointStatus::SurfaceNonConvergent` had no fixture anywhere,
+// so nothing pinned that `MaxIterationsExceeded` survives the extraction
+// into `invert_price_on_surface` and still reaches the caller as itself.
+// Bug: the code was reachable only through the scorer, which had no way to
+// vary the iteration budget.
+TEST(SurfaceInversion, ExhaustedIterationBudgetReportsMaxIterations) {
+    SurfaceInversionPolicy pol{.published_sigma_min = 0.1,
+                               .published_sigma_max = 0.5};
+    pol.max_iter = 1;
+    auto r = invert_price_on_surface(lin_price, lin_vega, lin_price(0.31),
+                                     {0.1, 0.5}, 100.0, pol);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, IVErrorCode::MaxIterationsExceeded);
+
+    // The same query with the shipped budget converges, so the budget is
+    // what this test varied and nothing else.
+    pol.max_iter = 50;
+    auto converged = invert_price_on_surface(lin_price, lin_vega,
+                                             lin_price(0.31), {0.1, 0.5},
+                                             100.0, pol);
+    ASSERT_TRUE(converged.has_value());
+    EXPECT_NEAR(converged->implied_vol, 0.31, 1e-7);
+}

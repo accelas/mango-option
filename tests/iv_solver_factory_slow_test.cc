@@ -15,6 +15,7 @@
 #include <cmath>
 #include <iostream>
 #include <chrono>
+#include <string>
 
 using namespace mango;
 
@@ -68,6 +69,34 @@ std::vector<IVQuery> make_test_queries() {
         }
     }
     return queries;
+}
+
+/// What the public holdout counters do and do not say.
+///
+/// Every prepared holdout point ends in exactly one of four outcomes --
+/// measured, unresolved, surface failure, or a non-finite evaluation
+/// ("skipped").  `skipped` is never reported on its own: it is folded into
+/// `holdout_points_invalid` together with the preparations that failed and
+/// so never entered the prepared set at all (`invalid + final_score.skipped`
+/// in bspline_adaptive.cpp and chebyshev_adaptive.cpp).  The three separable
+/// outcomes can therefore only under-count the prepared set, and adding the
+/// folded counter can only over-count it; an exact identity is not
+/// expressible from the public fields.
+///
+/// Bug: the previous `measured + unresolved + unsupported + invalid ==
+/// holdout_points` was not an identity.  `holdout_points` is already the
+/// prepared set, so it excludes the unsupported and invalid samples the
+/// assertion subtracted a second time, and on the segmented Chebyshev path
+/// it mixed two draws: `holdout_points_unsupported` is the sizing loop's
+/// fixed-holdout exclusion count while `holdout_points` is the final
+/// validation set.
+void expect_holdout_accounting(const BuildDiagnostics& d) {
+    EXPECT_LE(d.holdout_points_measured + d.holdout_points_unresolved
+                  + d.surface_failures,
+              d.holdout_points);
+    EXPECT_GE(d.holdout_points_measured + d.holdout_points_unresolved
+                  + d.surface_failures + d.holdout_points_invalid,
+              d.holdout_points);
 }
 
 /// The adaptive discrete-dividend configuration published in CLAUDE.md
@@ -158,15 +187,12 @@ TEST(IVSolverFactorySegmented, DocumentedBSplineConfigReportsAccuracyAndSolves) 
     ASSERT_TRUE(diagnostics);
     EXPECT_EQ(diagnostics->target_met,
               diagnostics->achieved_max_error <= config.adaptive->target_iv_error);
-    // Every holdout point is accounted for under exactly one outcome, and
-    // the measured count is the one observed on 2026-09-21 under the
-    // round-trip metric (spec D3, rev 5).  The invariant is the contract;
-    // the number is provenance.
-    EXPECT_EQ(diagnostics->holdout_points_measured
-                  + diagnostics->holdout_points_unresolved
-                  + diagnostics->holdout_points_unsupported
-                  + diagnostics->holdout_points_invalid,
-              diagnostics->holdout_points);
+    // Every prepared holdout point is accounted for under exactly one
+    // outcome (see expect_holdout_accounting for why the public fields only
+    // bracket that), and the measured count is the one observed on
+    // 2026-09-21 under the round-trip metric (spec D3, rev 5).  The
+    // invariant is the contract; the number is provenance.
+    expect_holdout_accounting(*diagnostics);
     EXPECT_EQ(diagnostics->holdout_points_measured, 64u);
     EXPECT_EQ(diagnostics->holdout_points_invalid, 0u);
     EXPECT_LE(diagnostics->achieved_max_error, 0.20); // Existing viability contract.
@@ -245,9 +271,8 @@ static void check_benchmark_dividend_maturities(
         auto diag = solver->build_diagnostics();
         ASSERT_TRUE(diag.has_value());
         EXPECT_GT(diag->holdout_points_measured, 0u) << "T=" << T;
-        EXPECT_EQ(diag->holdout_points_measured + diag->holdout_points_unresolved
-                      + diag->holdout_points_unsupported + diag->holdout_points_invalid,
-                  diag->holdout_points) << "T=" << T;
+        SCOPED_TRACE("T=" + std::to_string(T));
+        expect_holdout_accounting(*diag);
     }
 }
 

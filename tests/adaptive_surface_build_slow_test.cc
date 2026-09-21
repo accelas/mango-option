@@ -135,6 +135,86 @@ std::vector<double> to_log_m(std::initializer_list<double> sk) {
 }
 
 
+// Re-homes the three price-level assertions of the retired
+// AdaptiveGridBuilderTest.StableFittingReportsShortTauBestEffortAccuracy:
+// strike interpolation between reference strikes, High-vs-Ultra agreement at
+// the short-tau deep-ITM point, and that point's price against the converged
+// FDM value.  Commit eb954ba6 removed that test as a duplicate of the
+// factory's refusal pin, which it was only in its *refusal*; these three
+// assertions were covered nowhere else.
+//
+// The fixture is the same configuration, assembled manually -- one
+// SegmentedPriceTableBuilder solve per reference strike, then
+// build_multi_kref_surface -- because the adaptive path now refuses it over a
+// single near-intrinsic holdout sample the shipped inversion cannot invert
+// (see the factory pin), and refusing is the right outcome there.  Prices
+// are what this test is about, so it takes the assembled surface directly
+// and asks no validation pass for a verdict.
+TEST(AdaptiveGridBuilderTest, ManualSegmentedAssemblyPricesAcrossReferences) {
+    const double spot = 100.0;
+    const double maturity = 1.0;
+    const DividendSpec dividends{
+        .dividend_yield = 0.02,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+    };
+    const IVGrid grid{
+        .moneyness = to_log_m({0.92, 0.95, 1.0, 1.05, 1.08}),
+        .vol = {0.10, 0.15, 0.20, 0.30},
+        .rate = {0.02, 0.03, 0.05, 0.07},
+    };
+
+    std::vector<BSplineMultiKRefEntry> entries;
+    for (double K_ref : {90.0, 95.0, 100.0, 105.0, 110.0}) {
+        auto leaf = SegmentedPriceTableBuilder::build(
+            SegmentedPriceTableBuilder::Config{
+                .K_ref = K_ref,
+                .option_type = OptionType::PUT,
+                .dividends = dividends,
+                .grid = grid,
+                .maturity = maturity,
+            });
+        ASSERT_TRUE(leaf.has_value()) << "K_ref=" << K_ref;
+        entries.push_back(
+            BSplineMultiKRefEntry{.K_ref = K_ref, .surface = std::move(*leaf)});
+    }
+    auto surface = build_multi_kref_surface(std::move(entries));
+    ASSERT_TRUE(surface.has_value());
+
+    // Strike interpolation: a put struck between two reference strikes is
+    // worth less than the one struck at the higher reference.
+    const double at_reference = surface->price(spot, 100.0, 0.75, 0.20, 0.05);
+    const double between_references = surface->price(spot, 97.5, 0.75, 0.20, 0.05);
+    EXPECT_TRUE(std::isfinite(at_reference));
+    EXPECT_TRUE(std::isfinite(between_references));
+    EXPECT_GT(at_reference, 0.0);
+    EXPECT_GT(between_references, 0.0);
+    EXPECT_LT(between_references, at_reference);
+
+    // Short-tau deep-ITM point, past the dividend payment in calendar time.
+    // The price stays meaningful even where this put's vega is negligible.
+    PricingParams p(OptionSpec{.spot = spot, .strike = 105.0,
+        .maturity = 0.0522771, .rate = 0.05, .dividend_yield = 0.02,
+        .option_type = OptionType::PUT}, 0.1);
+    auto high = AmericanOptionSolver::create(
+        p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::High)});
+    auto ultra = AmericanOptionSolver::create(
+        p, PDEGridSpec{make_grid_accuracy(GridAccuracyProfile::Ultra)});
+    ASSERT_TRUE(high.has_value());
+    ASSERT_TRUE(ultra.has_value());
+    auto reference = high->solve();
+    auto converged = ultra->solve();
+    ASSERT_TRUE(reference.has_value());
+    ASSERT_TRUE(converged.has_value());
+    ASSERT_NEAR(reference->value(), converged->value(), 0.001);
+
+    // A five-cent budget on a coarse fixed-expiry fit: successful
+    // construction is not a one-cent accuracy claim.
+    const double price_error = std::abs(
+        surface->price(spot, 105.0, p.maturity, 0.1, 0.05) - converged->value());
+    EXPECT_LE(price_error, 0.05);
+    RecordProperty("short_tau_price_error", std::to_string(price_error));
+}
+
 // ===========================================================================
 // Coverage gap tests — Priority 1 (Critical)
 // ===========================================================================

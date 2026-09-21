@@ -584,6 +584,91 @@ TEST(RoundTripScore, MapsEveryFailureKind) {
     EXPECT_EQ(score(capped, refs, 100, 100, 0.5, 0.3, 0.05).status, PointStatus::SurfaceNoRoot);
 }
 
+// The sixth status, which `MapsEveryFailureKind` cannot reach: on any
+// fixture the shipped 50-iteration budget converges, so the only way to see
+// the exhausted budget is to shrink it -- which is what the scorer's
+// `base_policy` parameter exists for.  Brent tests convergence at the top of
+// each pass, so one pass cannot report a root however good its step was.
+//
+// Regression: `PointStatus::SurfaceNonConvergent` had no fixture at all, so
+// nothing pinned that `MaxIterationsExceeded` reaches the scorer as itself
+// rather than collapsing into another status.
+// Bug: the scorer always built the product policy internally, leaving the
+// iteration budget with no injection point.
+TEST(RoundTripScore, ExhaustedIterationBudgetScoresNonConvergent) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    SurfaceInversionPolicy one_pass;   // the product policy, one Brent pass
+    one_pass.max_iter = 1;
+    auto s = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT,
+                                      one_pass)(
+        linear_handle(0.0), resolved_refs(10.0), 100.0, 100.0, 0.5, 0.3, 0.05);
+    EXPECT_EQ(s.status, PointStatus::SurfaceNonConvergent);
+    EXPECT_TRUE(std::isnan(s.iv_error));
+    EXPECT_FALSE(s.edge_band_rescue);
+
+    // The default is the shipped policy, so the same point measures: the
+    // budget is what this test varied and nothing else.
+    auto shipped = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT)(
+        linear_handle(0.0), resolved_refs(10.0), 100.0, 100.0, 0.5, 0.3, 0.05);
+    EXPECT_EQ(shipped.status, PointStatus::Measured);
+}
+
+// Spec D3: across the three targets the point is recorded under the most
+// severe outcome -- NonFinite > NonConvergent > Ambiguous > NoRoot >
+// VegaTooSmall -- whichever target produced it.
+//
+// Only pairs that can differ *between targets* are exercisable here, and
+// NonFinite and VegaTooSmall are not among them: a NaN in the objective is a
+// NaN at every target price, and the vega pre-check reads the same bracket
+// for all three whenever the published range sits inside the cap ladder's
+// first rung, as it does on every fixture in this file.
+TEST(RoundTripScore, MostSevereTargetOutcomeWins) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    SurfaceInversionPolicy one_pass;
+    one_pass.max_iter = 1;
+    auto one_pass_score =
+        make_round_trip_score_fn(params, score_ctx(), OptionType::PUT, one_pass);
+    auto shipped = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);
+    const auto refs = resolved_refs(10.0);   // targets 9.9999, 10.0, 10.0001
+
+    // Ceiling at 10.00005: the highest target has no root, the other two
+    // exhaust the one-pass budget.  The severe outcome comes first in target
+    // order, so this pins that a later milder one does not overwrite it.
+    SurfaceHandle capped{
+        .price = [](double, double, double, double s, double) {
+            return std::min(10.0 + 40.0 * (s - 0.3), 10.00005); },
+        .vega = [](double, double, double, double, double) { return 40.0; }};
+    EXPECT_EQ(one_pass_score(capped, refs, 100, 100, 0.5, 0.3, 0.05).status,
+              PointStatus::SurfaceNonConvergent);
+
+    // Floor at 9.99995: now the lowest target has no root, so the severe
+    // outcome arrives second and must still win.
+    SurfaceHandle floored{
+        .price = [](double, double, double, double s, double) {
+            return std::max(10.0 + 40.0 * (s - 0.3), 9.99995); },
+        .vega = [](double, double, double, double, double) { return 40.0; }};
+    EXPECT_EQ(one_pass_score(floored, refs, 100, 100, 0.5, 0.3, 0.05).status,
+              PointStatus::SurfaceNonConvergent);
+
+    // With the shipped budget the two other targets measure, so what remains
+    // is the single failing target's own outcome: the ordering above is what
+    // the one-pass policy changed, not the fixtures.
+    EXPECT_EQ(shipped(capped, refs, 100, 100, 0.5, 0.3, 0.05).status,
+              PointStatus::SurfaceNoRoot);
+    EXPECT_EQ(shipped(floored, refs, 100, 100, 0.5, 0.3, 0.05).status,
+              PointStatus::SurfaceNoRoot);
+
+    // Ambiguous over NoRoot, on the shipped policy: a falling surface capped
+    // above 10.00005 leaves the highest target rootless and makes the other
+    // two fail the post-Brent slope check.
+    SurfaceHandle falling_capped{
+        .price = [](double, double, double, double s, double) {
+            return std::min(10.0 - 40.0 * (s - 0.3), 10.00005); },
+        .vega = [](double, double, double, double, double) { return 40.0; }};
+    EXPECT_EQ(shipped(falling_capped, refs, 100, 100, 0.5, 0.3, 0.05).status,
+              PointStatus::SurfaceAmbiguous);
+}
+
 // A handle without `vega` cannot be round-tripped: calling an empty
 // std::function would throw, and library code here does not throw.  The
 // residual needs only `price`, so it is still recorded.
