@@ -34,13 +34,22 @@ namespace mango {
 ///
 /// The bracket is the product's, taken over the *acceptance band*: the
 /// published sigma range of `ctx.sample_bounds` widened by
-/// `params.target_iv_error` at each end and clipped to the fit domain
-/// `ctx.bounds`.  Pre-check, screen, Brent, post-check, the adaptive cap and
-/// the configured sigma limits are the shipped ones, unchanged.  The metric
-/// is therefore *stronger than the shipped solver at the edges by exactly
-/// `target_iv_error`*: a root the solver would refuse today, lying within
-/// the user's own tolerance beyond a published edge, is a measurement here.
-/// Making the two coincide again is the query-time follow-up.
+/// `params.target_iv_error` at each end.  Pre-check, screen, Brent,
+/// post-check, the adaptive cap and the configured sigma limits are the
+/// shipped ones, unchanged.  The metric is therefore *stronger than the
+/// shipped solver at the edges by exactly `target_iv_error`*: a root the
+/// solver would refuse today, lying within the user's own tolerance beyond a
+/// published edge, is a measurement here.  Making the two coincide again is
+/// the query-time follow-up.
+///
+/// Where the fit domain `ctx.bounds` has no sigma support over part of that
+/// band -- the B-spline backends fit exactly the published range -- the
+/// surface is extended from its nearest supported edge by first-order
+/// extrapolation, `price(sigma) = S(sigma_e) + V(sigma_e) * (sigma -
+/// sigma_e)` with the vega held at `V(sigma_e)`.  The extension is at most
+/// `target_iv_error` long and the surface is C2, so the model error is
+/// `O(vomma * target_iv_error^2)`, negligible at bps scale; the band
+/// therefore behaves the same on every backend.
 ///
 /// Outcomes, not verdicts about the surface as a whole:
 ///  - every target inverted => `PointStatus::Measured` and `iv_error` set;

@@ -404,6 +404,58 @@ TEST(RoundTripScore, EdgeMissBeyondToleranceIsNoRootWithoutFlag) {
     EXPECT_TRUE(std::isnan(s.iv_error));
 }
 
+// Spec D3, rev 5: the acceptance band behaves the same on every backend.
+// A B-spline fits exactly the published sigma range, so `fit.sigma ==
+// sample.sigma`; without the edge extension the band would be clipped back
+// to the published range and never reach a root just outside it.
+static RefinementContext bspline_like_ctx() {
+    RefinementContext c = score_ctx();
+    c.bounds.sigma_min = c.sample_bounds.sigma_min;   // no sigma headroom
+    c.bounds.sigma_max = c.sample_bounds.sigma_max;
+    return c;
+}
+
+TEST(RoundTripScore, EdgeExtensionMeasuresWithoutFitDomainHeadroom) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;  // band 5 bps
+    auto score = make_round_trip_score_fn(params, bspline_like_ctx(), OptionType::PUT);
+    // Surface: 10 + 40*(sigma - 0.3) + bias.  sample.sigma_min = 0.1, so a
+    // bias of 40 * 3e-4 = 0.012 puts the root at 0.0997, 3 bps below the
+    // published edge and inside the 5 bps band.
+    auto refs = resolved_refs(10.0 + 40.0 * (0.1 - 0.3));
+    auto s = score(linear_handle(0.012), refs, 100.0, 100.0, 0.5, 0.1, 0.05);
+    EXPECT_EQ(s.status, PointStatus::Measured);
+    // sigma0 is 0.1; the three targets sit at y +- 1e-4, i.e. +- 2.5e-6.
+    EXPECT_NEAR(s.iv_error, 3e-4 + 2.5e-6, 1e-7);
+    EXPECT_TRUE(s.edge_band_rescue)
+        << "the root is outside the un-widened product bracket";
+}
+
+TEST(RoundTripScore, EdgeExtensionStopsAtTheBandWithoutHeadroom) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;  // band 5 bps
+    auto score = make_round_trip_score_fn(params, bspline_like_ctx(), OptionType::PUT);
+    // bias 40 * 8e-4 = 0.032 -> root at 0.0992, 8 bps below the edge and
+    // outside the band: the outcome is the shipped inversion's.
+    auto refs = resolved_refs(10.0 + 40.0 * (0.1 - 0.3));
+    auto s = score(linear_handle(0.032), refs, 100.0, 100.0, 0.5, 0.1, 0.05);
+    EXPECT_EQ(s.status, PointStatus::SurfaceNoRoot);
+    EXPECT_FALSE(s.edge_band_rescue);
+}
+
+// The extension is not used where support exists: a context with sigma
+// headroom (the segmented Chebyshev shape) scores the same point identically.
+TEST(RoundTripScore, EdgeExtensionAgreesWithRealSupport) {
+    AdaptiveGridParams params; params.target_iv_error = 5e-4;
+    auto refs = resolved_refs(10.0 + 40.0 * (0.1 - 0.3));
+    auto with_headroom = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT)(
+        linear_handle(0.012), refs, 100.0, 100.0, 0.5, 0.1, 0.05);
+    auto extended = make_round_trip_score_fn(params, bspline_like_ctx(), OptionType::PUT)(
+        linear_handle(0.012), refs, 100.0, 100.0, 0.5, 0.1, 0.05);
+    EXPECT_EQ(with_headroom.status, PointStatus::Measured);
+    EXPECT_EQ(extended.status, with_headroom.status);
+    EXPECT_NEAR(extended.iv_error, with_headroom.iv_error, 1e-12);
+    EXPECT_EQ(extended.edge_band_rescue, with_headroom.edge_band_rescue);
+}
+
 TEST(RoundTripScore, MapsEveryFailureKind) {
     AdaptiveGridParams params; params.target_iv_error = 5e-4;
     auto score = make_round_trip_score_fn(params, score_ctx(), OptionType::PUT);

@@ -180,9 +180,23 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
             return out;
         }
 
-        // Bind every coordinate but sigma, exactly as the shipped solver does.
-        const auto price_of = [&](double s) { return surface.price(spot, strike, tau, s, rate); };
-        const auto vega_of = [&](double s) { return surface.vega(spot, strike, tau, s, rate); };
+        // Bind every coordinate but sigma, exactly as the shipped solver does,
+        // and extend the surface over the part of the acceptance band its fit
+        // domain does not support (spec D3, rev 5).  The B-spline backends fit
+        // exactly the published sigma range, so without this the band would be
+        // inert on them and the metric would behave differently per backend.
+        // Inside the fit domain these are the handle, unchanged.
+        const auto clamp_to_fit = [&](double s) {
+            return std::min(std::max(s, fit.sigma_min), fit.sigma_max);
+        };
+        const auto price_of = [&](double s) {
+            const double e = clamp_to_fit(s);
+            const double v = surface.price(spot, strike, tau, e, rate);
+            return (e == s) ? v : v + surface.vega(spot, strike, tau, e, rate) * (s - e);
+        };
+        const auto vega_of = [&](double s) {
+            return surface.vega(spot, strike, tau, clamp_to_fit(s), rate);
+        };
 
         const auto invert = [&](double target, double published_lo, double published_hi)
             -> std::expected<double, PointStatus>
@@ -211,11 +225,12 @@ ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
                                    refs.ref_price + refs.delta};
 
         // Acceptance band (spec D3, rev 5): the published sigma range widened
-        // by the user's own tolerance at each end, clipped to the fit domain.
-        // A root within tau_iv of a published edge is a measurement, not a
-        // refusal -- everything else is the product's policy, unchanged.
-        const double band_lo = std::max(sample.sigma_min - tau_iv, fit.sigma_min);
-        const double band_hi = std::min(sample.sigma_max + tau_iv, fit.sigma_max);
+        // by the user's own tolerance at each end.  A root within tau_iv of a
+        // published edge is a measurement, not a refusal -- everything else is
+        // the product's policy, unchanged (the cap and the configured sigma
+        // limits still apply, through `effective_sigma_bracket`).
+        const double band_lo = sample.sigma_min - tau_iv;
+        const double band_hi = sample.sigma_max + tau_iv;
 
         double worst = 0.0;
         double recovered[3] = {std::numeric_limits<double>::quiet_NaN(),
