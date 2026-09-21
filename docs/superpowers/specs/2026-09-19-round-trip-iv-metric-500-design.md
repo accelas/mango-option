@@ -445,12 +445,14 @@ reference whose surface price is finite, resolved or not.
 ### D4. Loop consumption: support, fresh and holdout, ranking, viability, refinement
 
 **Maturity support.** `RefinementContext::maturity_is_supported` is
-populated for **both** segmented paths (no builder sets it today; only tests
-do): the Chebyshev loop and final validation from `seg_bounds_`/`seg_is_gap_`,
-the B-spline loop and final validation from `compute_segment_boundaries` on
-the same schedule, maturity and τ domain, so the predicate matches the
-`TauSegmentSplit::contains_maturity` the product enforces (unsupported
-inside a ±5e-4 gap). Unsupported samples are excluded before
+populated for the segmented **Chebyshev** loop and final validation from
+`seg_bounds_`/`seg_is_gap_` (its handle returns NaN inside the ±5e-4 event
+gaps, which the product's `contains_maturity` also refuses). The segmented
+**B-spline** path does not set it: that backend builds contiguous, gapless
+segments (`bspline_segmented_builder.cpp:260-294`) and its product serves
+every maturity in `[0, T]`, so excluding event neighbourhoods there would
+measure less than the product answers (L4; rev 5 correction after plan
+Task 7 measured the builder). Unsupported samples are excluded before
 preparation and counted (`unsupported`); they are not references, not
 unresolved points, and not candidate defects. At supported maturities the
 non-finite veto stands. (Moved from §3 non-goals: leaving it unset would make
@@ -590,7 +592,7 @@ and `p_min` the minimum usable order over both triples (the estimate can
 understate by at most that ratio when the true local order is `p_min`;
 measured 1.67 ≤ 3 at 30 days); `max |p_A − p_B|` per series is recorded as
 the non-asymptotic indicator (rev 6 replaced a fixed 0.5 allowance: the
-free-boundary term makes the order wander in [0.68, 1.40] at 30 days while
+free-boundary term makes the order wander in [0.67, 1.40] at 30 days while
 successive prices agree to 6e-9, which is what the safety factor exists
 for);
 `|V_High − V_Ultra| ≤ δ̂_High` at every point (δ̂ by the shipped formula
@@ -600,7 +602,7 @@ largest one-decimal value not above the triple-A minimum, unless the
 finer pair's minimum order lies below that value, in which case the
 constant stays at the lower value that the safety-factor coverage check
 already licenses (2026-09-21: triple-A minimum 1.317 would license 1.3;
-the constant is kept at 1.0 because triple B reaches 0.676 at 30 days and a
+the constant is kept at 1.0 because triple B reaches 0.67 at 30 days and a
 lower `p` only enlarges `δ̂`).
 
 **Effective sensitivity experiments** (the American path is a single-pass
