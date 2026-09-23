@@ -14,13 +14,17 @@
 #include "mango/option/dividend_utils.hpp"
 #include "mango/option/table/splits/multi_kref.hpp"
 #include "mango/option/table/splits/tau_segment.hpp"
+#include "mango/support/ivcalc_trace.h"
 #include <algorithm>
 #include <any>
 #include <cmath>
 #include <chrono>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <random>
 #include <span>
+#include <utility>
 
 namespace mango {
 
@@ -557,6 +561,10 @@ static BuildFn make_chebyshev_build_fn(
                               double sigma, double rate) {
                 return shared->price(spot, strike, tau, sigma, rate);
             },
+            .vega = [shared](double spot, double strike, double tau,
+                             double sigma, double rate) {
+                return shared->vega(spot, strike, tau, sigma, rate);
+            },
             .pde_solves = new_solves,
         };
     };
@@ -615,35 +623,54 @@ static BuildFn make_segmented_chebyshev_build_fn(
             config.seg_is_gap.begin(), config.seg_is_gap.end());
         double K_ref = config.K_ref;
 
+        // One routing rule, shared by `.price` and `.vega` (spec D3): both
+        // must reach the same leaf at the same local time origin, or the
+        // round-trip inversion would take its slope from a different
+        // segment than its price.
+        //
+        // No time substitution: these event neighborhoods have no sampled
+        // representation, including the exact event instant, so an
+        // unsupported tau routes nowhere.
+        const auto route = [seg_copy, gap_copy, n_seg](double tau)
+            -> std::optional<std::pair<size_t, double>> {
+            // Find segment for tau (reverse scan for proper boundary handling)
+            const auto& bounds = *seg_copy;
+            const auto& is_gap = *gap_copy;
+            size_t seg_idx = 0;
+            bool supported = false;
+            for (size_t i = n_seg; i > 0; --i) {
+                size_t j = i - 1;
+                if (!is_gap[j] && tau >= bounds[j] && tau <= bounds[j + 1]) {
+                    seg_idx = j;
+                    supported = true;
+                    break;
+                }
+            }
+            if (!supported) return std::nullopt;
+            const double origin = seg_idx > 0 && is_gap[seg_idx - 1]
+                ? (bounds[seg_idx - 1] + bounds[seg_idx]) * 0.5 : bounds[seg_idx];
+            return std::pair{seg_idx, tau - origin};
+        };
+
         return SurfaceHandle{
-            .price = [leaves_shared, seg_copy, gap_copy, K_ref, n_seg](
+            .price = [leaves_shared, route, K_ref](
                 double spot, double strike, double tau,
                 double sigma, double rate) {
-                // Find segment for tau (reverse scan for proper boundary handling)
-                const auto& bounds = *seg_copy;
-                const auto& is_gap = *gap_copy;
-                size_t seg_idx = 0;
-                bool supported = false;
-                for (size_t i = n_seg; i > 0; --i) {
-                    size_t j = i - 1;
-                    if (!is_gap[j] && tau >= bounds[j] && tau <= bounds[j + 1]) {
-                        seg_idx = j;
-                        supported = true;
-                        break;
-                    }
-                }
-                if (tau <= bounds.front()) seg_idx = 0;
-                else if (tau >= bounds.back()) seg_idx = n_seg - 1;
-
-                // No time substitution: these event neighborhoods have no
-                // sampled representation, including the exact event instant.
-                if (!supported) return std::numeric_limits<double>::quiet_NaN();
-                const double origin = seg_idx > 0 && is_gap[seg_idx - 1]
-                    ? (bounds[seg_idx - 1] + bounds[seg_idx]) * 0.5 : bounds[seg_idx];
-                const double local_tau = tau - origin;
-
-                double v_over_kref = (*leaves_shared)[seg_idx].price(
-                    spot, strike, local_tau, sigma, rate);
+                auto leg = route(tau);
+                if (!leg) return std::numeric_limits<double>::quiet_NaN();
+                double v_over_kref = (*leaves_shared)[leg->first].price(
+                    spot, strike, leg->second, sigma, rate);
+                return v_over_kref * K_ref;
+            },
+            // Same K_ref scaling as the price: the leaf reports dV/dsigma
+            // per unit of K_ref, exactly as it reports V.
+            .vega = [leaves_shared, route, K_ref](
+                double spot, double strike, double tau,
+                double sigma, double rate) {
+                auto leg = route(tau);
+                if (!leg) return std::numeric_limits<double>::quiet_NaN();
+                double v_over_kref = (*leaves_shared)[leg->first].vega(
+                    spot, strike, leg->second, sigma, rate);
                 return v_over_kref * K_ref;
             },
             .pde_solves = new_solves,
@@ -795,10 +822,21 @@ build_adaptive_chebyshev(
     auto build_fn = make_chebyshev_build_fn(pde_cache, build_cfg, last_surface);
     auto refine_fn = detail::make_chebyshev_refine_fn(state);
     auto state_hooks = detail::make_chebyshev_state_hooks(state);
-    auto validate_fn = make_validate_fn(chain.dividend_yield, type);
-
-    auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
-    auto score_fn = make_iv_score_fn(params, type);
+    // One counter for the whole build: the sizing loop's fresh and holdout
+    // preparations all draw from it, so `total_pde_solves` reports the
+    // reference work once (spec D7).
+    auto ref_counter = std::make_shared<ReferenceSolveCounter>();
+    // A continuous surface describes a contract from now: no schedule to
+    // roll, and no fixed expiry to roll it onto.
+    const ReferenceOracle oracle{
+        .dividend_yield = chain.dividend_yield,
+        .option_type = type,
+        .discrete_dividends = {},
+        .reference_maturity = std::nullopt,
+        .accuracy = make_grid_accuracy(kReferenceAccuracy),
+    };
+    auto prepare_refs_fn = make_stencil_refs_fn(params, oracle, ref_counter);
+    auto score_fn = make_round_trip_score_fn(params, ctx, type);
 
     // Seed initial grids: CC-level nodes for all dimensions (nested)
     InitialGrids initial;
@@ -841,8 +879,14 @@ build_adaptive_chebyshev(
     result.achieved_max_error = grids.achieved_max_error;
     result.achieved_avg_error = grids.achieved_avg_error;
     result.target_met = grids.target_met;
-    result.total_pde_solves = pde_cache.total_pde_solves();
     result.diagnostics = std::move(grids.diagnostics);
+    result.diagnostics.reference_solves_fine = ref_counter->fine_attempts.load();
+    result.diagnostics.reference_solves_coarse = ref_counter->coarse_attempts.load();
+    // The references are not free: the stencil runs six solves per prepared
+    // point, and the caller's PDE budget should say so (spec D7).
+    result.total_pde_solves = pde_cache.total_pde_solves()
+                            + result.diagnostics.reference_solves_fine
+                            + result.diagnostics.reference_solves_coarse;
     result.sample_bounds = ctx.sample_bounds;
 
     return result;
@@ -1040,11 +1084,6 @@ ChebyshevSegmentedBuilder::build_adaptive(
     auto build_fn = make_segmented_chebyshev_build_fn(pde_cache, build_cfg);
     auto refine_fn = detail::make_segmented_chebyshev_refine_fn(state);
     auto state_hooks = detail::make_chebyshev_state_hooks(state);
-    auto validate_fn = make_validate_fn(
-        config_.dividend_yield, config_.option_type, config_.discrete_dividends,
-        config_.maturity);
-    auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
-    auto score_fn = make_iv_score_fn(params, config_.option_type);
 
     InitialGrids initial;
     initial.moneyness = cc_level_nodes(state.m_level, state.m_lo, state.m_hi);
@@ -1072,7 +1111,36 @@ ChebyshevSegmentedBuilder::build_adaptive(
             .rate_min = state.rate_lo, .rate_max = state.rate_hi,
         },
         .sample_bounds = sample_domain_,
+        // Spec D4: an event neighborhood has no sampled representation, so a
+        // sample inside a gap segment is excluded before any reference is
+        // drawn -- it is neither a reference nor a defect of the candidate.
+        .maturity_is_supported = [b = seg_bounds_, g = seg_is_gap_](double tau) {
+            for (size_t s = 0; s + 1 < b.size(); ++s)
+                if (g[s] && tau > b[s] && tau < b[s + 1]) return false;
+            return true;
+        },
     };
+
+    // One counter for the whole build: the sizing loop and the final
+    // validation both draw from it, so `total_pde_solves` reports the
+    // reference work once (spec D7).
+    auto ref_counter = std::make_shared<ReferenceSolveCounter>();
+    // A segmented surface follows one fixed expiry: the schedule is anchored
+    // to `config_.maturity` and rolled onto each query's remaining life.
+    const ReferenceOracle oracle{
+        .dividend_yield = config_.dividend_yield,
+        .option_type = config_.option_type,
+        .discrete_dividends = config_.discrete_dividends,
+        .reference_maturity = config_.maturity,
+        .accuracy = make_grid_accuracy(kReferenceAccuracy),
+    };
+    auto user_refs_fn = make_stencil_refs_fn(params, oracle, ref_counter);
+
+    // The sizing loop measures a single-K_ref probe at K_ref = spot, so its
+    // references live on that probe's own contract (spec D1/L6).
+    PrepareRefsFn prepare_refs_fn =
+        make_probe_scaled_refs_fn(user_refs_fn, config_.spot);
+    auto score_fn = make_round_trip_score_fn(params, ctx, config_.option_type);
 
     // Level counters roll back with the grids on every backtracking reset
     // (spec D6); see build_adaptive_chebyshev for the rationale.
@@ -1097,9 +1165,12 @@ ChebyshevSegmentedBuilder::build_adaptive(
     // was the pre-#434 behavior.  There is no retry on this path: the loop
     // owns sizing, and a second uncalibrated guess would only hide the
     // refusal.
-    auto final_prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+    //
+    // The assembled surface answers on the user's own contract, so its
+    // references are the unscaled stencil -- the probe adapter above belongs
+    // to the sizing loop alone.
     auto validation = detail::prepare_final_validation(
-        params, ctx, final_prepare_refs_fn, params.lhs_seed + 999);
+        params, ctx, user_refs_fn, params.lhs_seed + 999);
     if (!validation) return std::unexpected(validation.error());
 
     const SurfaceHandle final_handle{
@@ -1107,36 +1178,67 @@ ChebyshevSegmentedBuilder::build_adaptive(
                                          double sigma, double rate) -> double {
             return s.price(spot, strike, tau, sigma, rate);
         },
+        .vega = [&s = surface->surface](double spot, double strike, double tau,
+                                        double sigma, double rate) -> double {
+            return s.vega(spot, strike, tau, sigma, rate);
+        },
         .pde_solves = 0,
     };
     const auto final_score = detail::score_final_surface(
         validation->points, final_handle, score_fn, ctx);
 
     if (!final_score.viable()) {
+        // The returned error has no room for the outcomes that produced the
+        // refusal, so the probe carries them (spec D7).
+        MANGO_TRACE_ADAPTIVE_NO_VIABLE_SURFACE(
+            ADAPTIVE_STAGE_FINAL, 1u,
+            final_score.status_counts[
+                static_cast<size_t>(PointStatus::SurfaceNoRoot)],
+            final_score.status_counts[
+                static_cast<size_t>(PointStatus::SurfaceAmbiguous)],
+            final_score.status_counts[
+                static_cast<size_t>(PointStatus::SurfaceNonConvergent)],
+            final_score.status_counts[
+                static_cast<size_t>(PointStatus::SurfaceNonFinite)],
+            final_score.status_counts[
+                static_cast<size_t>(PointStatus::SurfaceVegaTooSmall)],
+            final_score.edge_band_rescues);
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::NoViableSurface});
     }
 
     BuildDiagnostics diagnostics = grids.diagnostics;
     diagnostics.target_met =
-        final_score.measured > 0 &&
+        final_score.viable() &&
         final_score.max_error <= params.target_iv_error;
     diagnostics.achieved_max_error = final_score.max_error;
     diagnostics.achieved_avg_error = final_score.avg_error;
     // Same meaning as the loop's (spec D7): `holdout_points` is the usable
     // reference set, `holdout_points_measured` how much of it actually scored
-    // the returned surface -- the difference is what the score fn filtered.
+    // the returned surface -- the difference is the unresolved references and
+    // the points where the shipped inversion failed on the surface's price.
     diagnostics.holdout_points = validation->points.size();
     diagnostics.holdout_points_measured = final_score.measured;
     diagnostics.holdout_points_invalid =
         validation->invalid + final_score.skipped;
+    diagnostics.holdout_points_unresolved = final_score.unresolved;
+    // `holdout_points_unsupported` is deliberately NOT overwritten here: it
+    // is defined as the sizing loop's fixed-holdout exclusion count (spec
+    // D7), and the final validation set carries no such counter.
+    diagnostics.surface_failures = final_score.surface_failures;
+    diagnostics.edge_band_rescues = final_score.edge_band_rescues;
+    diagnostics.max_price_residual = final_score.max_price_residual;
+    // An estimate of how far the references themselves could be off, never a
+    // certificate that they are not further.
+    diagnostics.reference_uncertainty_max = final_score.max_delta;
+    diagnostics.reference_solves_fine = ref_counter->fine_attempts.load();
+    diagnostics.reference_solves_coarse = ref_counter->coarse_attempts.load();
     // Monotonicity describes the returned surface, not the loop's candidate.
     diagnostics.monotonicity_violations = 0;
     diagnostics.monotonicity_points_invalid = 0;
     diagnostics.worst_vega_slope = 0.0;
     detail::scan_monotonicity(validation->points, final_handle, ctx,
-                              params.target_iv_error, params.vega_floor,
-                              diagnostics);
+                              params.target_iv_error, diagnostics);
 
     return ChebyshevSegmentedAdaptiveResult{
         .surface = std::move(surface->surface),
@@ -1144,10 +1246,12 @@ ChebyshevSegmentedBuilder::build_adaptive(
         .achieved_max_error = final_score.max_error,
         .achieved_avg_error = final_score.avg_error,
         .target_met = diagnostics.target_met,
-        // The final validation is not free: every reference is a base solve
-        // plus two sigma bumps, and the caller's PDE budget should say so.
+        // The references are not free: the stencil runs up to six solves per
+        // prepared point across the sizing loop and the final validation, and
+        // the caller's PDE budget should say so (spec D7).
         .total_pde_solves = pde_cache.total_pde_solves() + surface->pde_solves
-                          + validation->ref_attempts * 3,
+                          + diagnostics.reference_solves_fine
+                          + diagnostics.reference_solves_coarse,
         .diagnostics = std::move(diagnostics),
         .sample_bounds = sample_domain_,
     };

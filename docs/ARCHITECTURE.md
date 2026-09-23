@@ -284,15 +284,18 @@ result under a safety contract, not just a stopping rule:
   improvement can't burn the iteration budget re-trying every axis. The walk
   stops when all axes are exhausted or the iteration budget runs out.
 - **Viability gate.** A candidate is *viable* only if every sample evaluated
-  for it (holdout and fresh) produced a finite, nonnegative error and its
-  holdout max error is below an absolute operational bound
-  (`kViabilityBound`, independent of the accuracy target — it flags
-  catastrophically broken surfaces, not merely off-target ones), and at
-  least one holdout point actually measured it (a surface whose whole
-  holdout is filtered as IV-undefined cannot be certified). If no
-  candidate built during a run is viable, the build fails with
-  `PriceTableErrorCode::NoViableSurface` rather than silently returning
-  garbage.
+  for it (holdout and fresh) produced a finite, nonnegative evaluation, at
+  least one holdout point was actually measured, and no sample produced a
+  surface-inversion failure — `SurfaceNoRoot`, `SurfaceAmbiguous`,
+  `SurfaceNonConvergent`, `SurfaceNonFinite` or `SurfaceVegaTooSmall`. There
+  is no absolute error ceiling: a measured error is a genuine σ distance,
+  and a resolved failure already rejects. Points the reference oracle could
+  not resolve (`ReferenceUnresolved`) are excluded from the score and
+  counted, never charged to the candidate. Fewer failures rank a candidate
+  ahead of a lower error, so the ordering never trades a failure for a
+  smaller max. If no candidate built during a run is viable, the build fails
+  with `PriceTableErrorCode::NoViableSurface` rather than returning a
+  surface the shipped inversion cannot round-trip.
 - **Build diagnostics.** Every adaptive build records a `BuildDiagnostics`
   struct — `target_met`, achieved max/avg error, which iteration was
   returned, monotonicity-violation statistics, and per-iteration forensics —
@@ -311,6 +314,21 @@ This closes the failure mode where an adaptive build silently returned a
 degraded final iteration whose error, measured honestly against the user
 domain, was orders of magnitude worse than an earlier candidate already in
 hand.
+
+**One inversion, two callers.** `//src/option:surface_inversion`
+(`surface_inversion.{hpp,cpp}`) holds the price-to-volatility inversion
+itself: the effective σ bracket, the vega pre-check, the multiple-root
+screen, Brent, and the post-check. `InterpolatedIVSolver::solve` calls it at
+query time, and the adaptive scorer calls it at build time with the same
+policy object, so what the loop measures is what the shipped solver does —
+identical code, identical thresholds, no duplicated constants. The component
+deliberately depends only on root finding, `option_spec` and the error
+types: it knows nothing of price tables, builders or queries, which is what
+lets the refinement loop link it without a dependency cycle. The caller
+binds every coordinate but σ into two callbacks and hands over the policy.
+The build-time bracket is the published σ range widened by
+`target_iv_error` at each end; the query-time bracket is the published range
+itself, and closing that gap is a tracked follow-up.
 
 ---
 

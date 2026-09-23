@@ -6,6 +6,7 @@
 #include <vector>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace mango {
 
@@ -58,8 +59,8 @@ struct AdaptiveGridParams {
     /// Random seed for Latin Hypercube sampling (default: 42)
     uint64_t lhs_seed = 42;
 
-    /// Vega floor for error metric (default: 1e-4)
-    /// When vega < floor, fall back to price-based tolerance
+    /// Deprecated and ignored since the round-trip metric (spec 2026-09-19
+    /// D6); kept for C ABI layout stability until #463 removes it.
     double vega_floor = 1e-4;
 
     /// Maximum tolerable PDE solve failure rate (default: 0.5 = 50%)
@@ -77,6 +78,70 @@ struct SegmentedAdaptiveConfig {
     MultiKRefConfig kref_config;
 };
 
+/// Outcome of scoring one holdout point under the round-trip IV metric
+/// (spec 2026-09-19 D3): take the FD reference price `y` and the two band
+/// ends `y ± δ̂`, invert each of those three target prices on the candidate
+/// surface with the shipped inversion, and compare every recovered
+/// volatility against the point's own `σ0`.  Nothing is priced off the
+/// surface at `σ0` for the metric itself; the forward price enters only as
+/// the diagnostic residual below.
+enum class PointStatus : uint8_t {
+    /// The inversion succeeded at all three target prices, so the point
+    /// carries an IV error.
+    Measured,
+    /// The FD reference for this point did not resolve (spec D2), so no
+    /// inversion was attempted.  Not charged against the surface.
+    ReferenceUnresolved,
+    /// The surface's vega at a target price was below the product
+    /// pre-check's threshold, so the shipped inversion refused the query.
+    SurfaceVegaTooSmall,
+    /// The shipped inversion found no sign change on its bracket, so it
+    /// reported no root.  An outcome of the solver on this surface, not a
+    /// statement that no volatility reproduces the reference price.
+    SurfaceNoRoot,
+    /// The 17-point screen or the post-Brent slope check refused the
+    /// bracket, so the inversion returned no volatility.  An outcome of
+    /// those checks, not a statement that the price has several inverses.
+    SurfaceAmbiguous,
+    /// The inversion did not reach the reference price within its
+    /// iteration budget.
+    SurfaceNonConvergent,
+    /// The surface produced a non-finite price or vega while inverting a
+    /// target price.  Keep this enumerator last: `kPointStatusCount` is
+    /// derived from it.
+    SurfaceNonFinite,
+};
+
+/// Number of `PointStatus` enumerators, for fixed-size per-status tallies
+/// (`PointStatusCounts`, the D7 refusal probe).
+inline constexpr size_t kPointStatusCount = 7;
+static_assert(static_cast<size_t>(PointStatus::SurfaceNonFinite) + 1 ==
+                  kPointStatusCount,
+              "PointStatus gained or lost an enumerator: update "
+              "kPointStatusCount and every per-status tally that reports it");
+
+/// True for every Surface* status: an operational failure of the shipped
+/// inversion at this point, as opposed to a reference that never resolved.
+constexpr bool is_surface_failure(PointStatus s) noexcept {
+    return s != PointStatus::Measured && s != PointStatus::ReferenceUnresolved;
+}
+
+/// Result of scoring one holdout point under the round-trip IV metric.
+struct PointScore {
+    PointStatus status = PointStatus::ReferenceUnresolved;
+    /// Round-trip IV error: the largest |σ̂ − σ0| over the three inverted
+    /// target prices.  Only meaningful when `status == Measured`.
+    double iv_error = std::numeric_limits<double>::quiet_NaN();
+    /// |S - V̂|/K between the reference price and the surface's price,
+    /// when finite; a diagnostic, not part of the error metric.
+    double price_residual = std::numeric_limits<double>::quiet_NaN();
+    /// Exact-bracket diagnostic (spec D3, rev 5): a recovered volatility
+    /// fell outside the un-widened product bracket, so the shipped solver
+    /// would have refused this query today.  Diagnostic only; it does not
+    /// affect `status` or `iv_error` and gates nothing.
+    bool edge_band_rescue = false;
+};
+
 /// Per-iteration diagnostics
 ///
 /// `refined_dim` is a dimension index (0 = moneyness, 1 = tau, 2 = sigma,
@@ -92,12 +157,19 @@ struct IterationStats {
     size_t iteration = 0;                    ///< Iteration number (0-indexed)
     std::array<size_t, 4> grid_sizes = {};   ///< [m, tau, sigma, r] sizes
     size_t pde_solves_table = 0;             ///< Slices computed for table
-    size_t pde_solves_validation = 0;        ///< Fresh solves for validation
+    /// Successful reference preparations for the fresh validation pass.
+    /// One per sample whose reference came back, not the PDE solves it cost:
+    /// what a preparation runs is the reference factory's business, and
+    /// `BuildDiagnostics::reference_solves_*` is what records those.
+    size_t pde_solves_validation = 0;
     double max_error = 0.0;                  ///< Max IV error observed
     double avg_error = 0.0;                  ///< Mean IV error
     int refined_dim = -1;                    ///< Refined dim, or -1/-2/-3 (above)
     double elapsed_seconds = 0.0;            ///< Wall-clock time for this iteration
     bool build_failed = false;               ///< Refinement trial build failed (D5)
+    size_t unresolved = 0;                   ///< Points with PointStatus::ReferenceUnresolved
+    size_t surface_failures = 0;             ///< Points where is_surface_failure() held
+    size_t edge_band_rescues = 0;            ///< Points with PointScore::edge_band_rescue set (exact-bracket diagnostic)
 };
 
 /// Adaptive refinement build diagnostics
@@ -109,16 +181,48 @@ struct BuildDiagnostics {
     size_t total_iterations = 0;       // built iterations, excl. final rebuild
     bool final_rebuild = false;
     bool build_failure_fallback = false;
-    /// Holdout points with usable FD references (the measurable set).
+    /// Holdout points with usable FD references: the prepared set (points
+    /// whose base reference solve succeeded; it includes unresolved
+    /// references).
     size_t holdout_points = 0;
     /// Holdout points whose references failed, or whose evaluation of the
     /// returned surface was non-finite.
     size_t holdout_points_invalid = 0;
     /// Of `holdout_points`, those that actually produced an error for the
-    /// returned surface.  The rest were filtered out by the score function
-    /// (TV/K or vega floor), where the IV-error metric is undefined; a build
-    /// with `holdout_points_measured == 0` is refused, never certified.
+    /// returned surface.  The rest are the unresolved references, the points
+    /// where the shipped inversion failed on a reference target price, and the
+    /// non-finite evaluations; a build with `holdout_points_measured == 0` is
+    /// refused, never certified.
     size_t holdout_points_measured = 0;
+    /// Holdout points whose FD reference never resolved (PointStatus::ReferenceUnresolved).
+    size_t holdout_points_unresolved = 0;
+    /// Samples of the *sizing loop's* fixed holdout that its
+    /// `RefinementContext::maturity_is_supported` excluded before any
+    /// reference was drawn (spec D4): not references, and not defects.
+    ///
+    /// Deliberately the loop's set, not the builders' final validation set:
+    /// spec D7's "holdout" is the loop's, and `FinalValidationSet` carries no
+    /// such counter.  A backend whose surface admits every maturity -- the
+    /// segmented B-spline, whose tau segments are contiguous -- sets no
+    /// predicate and reads 0 here by construction.
+    size_t holdout_points_unsupported = 0;
+    /// Holdout points where inverting a reference target price on the
+    /// returned surface failed (is_surface_failure() held).
+    size_t surface_failures = 0;
+    /// Holdout points whose recovered volatility fell outside the exact
+    /// product bracket, i.e. queries the shipped solver would refuse today
+    /// (spec D3, rev 5); a diagnostic count, not part of any decision.
+    size_t edge_band_rescues = 0;
+    /// Largest |S - V̂|/K price residual observed over every prepared holdout
+    /// point whose surface price was finite -- measured or not, so an
+    /// unresolved reference still contributes one.
+    double max_price_residual = 0.0;
+    /// Largest estimated uncertainty in an FD reference used as ground truth.
+    double reference_uncertainty_max = 0.0;
+    /// Reference solves that used the fine grid.
+    size_t reference_solves_fine = 0;
+    /// Reference solves that used the coarse grid.
+    size_t reference_solves_coarse = 0;
     /// Rows/points from successful segmented sampling builds, including payoff
     /// rows, refinement probes, and final/retry assemblies. Other backends leave zero.
     size_t sample_rows = 0;

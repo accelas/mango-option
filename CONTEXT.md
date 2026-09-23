@@ -52,6 +52,18 @@ _Avoid_: Manual wrapper-only API, C++-shaped ceremony
 An experimental C++ convenience layer for market-data-oriented option chain and volatility-surface workflows.
 _Avoid_: Stable pricing API, parity baseline
 
+**Reference-resolved point**:
+A validation point whose numerical reference separates the point's volatility from that volatility plus and minus the target by more than its own estimated uncertainty at all three stencil points, and whose three target prices are valid queries. Decided before any candidate surface exists, so every candidate in a run is scored on the same points.
+_Avoid_: Measurable point, TV/K-admitted point, vega-floor pass
+
+**Operational round trip**:
+The build-time IV-error measurement that inverts the reference price on the candidate surface with the shipped solver's own bracket, pre-check, screen and Brent search, at three target prices. The reported error is the largest distance between a recovered volatility and the point's own.
+_Avoid_: Vega-scaled error, linearised IV error, price/vega
+
+**Surface inversion failure**:
+An operational outcome of the shipped inversion on a reference-resolved point — no sign change on the searched bracket, a bracket the screen or the post-Brent slope check refused, non-convergent, non-finite, or a surface vega below the pre-check threshold. It is what the shipped algorithm did, not proof that no implied volatility exists there.
+_Avoid_: Infinite IV error, 2000 bps garbage, non-invertible point
+
 ## Relationships
 
 - **Python API parity** is measured against **C++ capabilities**, not against every C++ symbol.

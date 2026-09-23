@@ -2,101 +2,449 @@
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/dividend_utils.hpp"
+#include "mango/option/surface_inversion.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <memory>
 #include <optional>
+#include <utility>
 
 namespace mango {
 
-double compute_iv_error(double price_error, double vega,
-                        double vega_floor, double target_iv_error) {
-    double vega_clamped = std::max(std::abs(vega), vega_floor);
-    double iv_error = price_error / vega_clamped;
-    double price_tol = target_iv_error * vega_floor;
-    if (price_error <= price_tol) {
-        iv_error = std::min(iv_error, target_iv_error);
+namespace {
+
+// Rebuild the same generator family at a different point count.  Every
+// GridSpec generator is a pure map of eta = i/(n-1) (grid.hpp generate()),
+// so re-sampling at (n-1)/2^k + 1 points yields the every-2^k-th-node
+// subsequence exactly (up to floating-point rounding of eta).
+std::expected<GridSpec<double>, ValidationError>
+resample(const GridSpec<double>& spec, size_t n) {
+    switch (spec.type()) {
+        case GridSpec<double>::Type::MultiSinhSpaced: {
+            std::vector<MultiSinhCluster<double>> clusters(
+                spec.clusters().begin(), spec.clusters().end());
+            // auto_merge=false: the clusters were merged when the estimator
+            // built the fine spec; merging again could move them.
+            return GridSpec<double>::multi_sinh_spaced(
+                spec.x_min(), spec.x_max(), n, std::move(clusters), /*auto_merge=*/false);
+        }
+        case GridSpec<double>::Type::SinhSpaced:
+            return GridSpec<double>::sinh_spaced(spec.x_min(), spec.x_max(), n, spec.concentration());
+        case GridSpec<double>::Type::Uniform:
+            return GridSpec<double>::uniform(spec.x_min(), spec.x_max(), n);
+        case GridSpec<double>::Type::LogSpaced:
+            return GridSpec<double>::log_spaced(spec.x_min(), spec.x_max(), n);
     }
-    return iv_error;
+    return std::unexpected(ValidationError(ValidationErrorCode::InvalidGridSize, static_cast<double>(n)));
 }
 
-PrepareRefsFn make_fd_vega_refs_fn(const AdaptiveGridParams& /*params*/,
-                                    const ValidateFn& validate_fn) {
-    // Copy validate_fn by value so the returned lambda is self-contained.
-    return [validate_fn](
-        double spot, double strike, double tau,
-        double sigma, double rate) -> std::expected<ErrorRefs, SolverError>
+constexpr size_t kFamilyModulus = 16;  // odd through three coarsenings (spec D1)
+
+// Shared create -> check -> solve -> check sequence for both ReferenceOracle
+// solve variants (explicit grid and auto-estimated grid).
+std::expected<double, SolverError> solve_pde_grid_spec(const PricingParams& p, PDEGridSpec spec) {
+    auto solver = AmericanOptionSolver::create(p, std::move(spec));
+    if (!solver) return std::unexpected(SolverError{.code = SolverErrorCode::InvalidConfiguration});
+    auto r = solver->solve();
+    if (!r) return std::unexpected(r.error());
+    const double v = r->value();
+    if (!std::isfinite(v)) return std::unexpected(SolverError{.code = SolverErrorCode::NonFiniteSolution});
+    return v;
+}
+
+}  // namespace
+
+std::expected<ReferenceGridFamily, ValidationError>
+make_reference_grid_family(const PricingParams& params,
+                           const GridAccuracyParams& accuracy,
+                           size_t levels) {
+    auto est = estimate_pde_grid(params, accuracy);
+    if (!est) return std::unexpected(est.error());
+    const auto& [spec0, time0] = *est;
+    const size_t n0 = spec0.n_points();
+    const size_t cap = accuracy.max_spatial_points;
+    const size_t floor = std::max<size_t>(accuracy.min_spatial_points, 3);
+    ReferenceGridFamily fam;
+    // Smallest n >= n0 with n = 1 (mod 16), if it fits under the strict cap.
+    size_t n = n0 + ((kFamilyModulus + 1 - (n0 % kFamilyModulus)) % kFamilyModulus);
+    if (n > cap) {
+        // Largest n <= cap with n = 1 (mod 16) that is still >= floor.
+        n = cap - ((cap % kFamilyModulus) + kFamilyModulus - 1) % kFamilyModulus;
+        if (n < floor || n < kFamilyModulus + 1) {
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidGridSize, static_cast<double>(cap)));
+        }
+        fam.rounded_down = true;
+    }
+    const size_t n_time0 = time0.n_steps();
+    for (size_t k = 0; k <= levels; ++k) {
+        const size_t nk = ((n - 1) >> k) + 1;
+        auto spec = resample(spec0, nk);
+        if (!spec) return std::unexpected(spec.error());
+        const size_t tk = (n_time0 + (size_t{1} << k) - 1) >> k;
+        // mandatory_times stays empty: resolve_grid merges the dividend taus
+        // into every explicit config (american_option.cpp:68), and copying
+        // fine time nodes here would stop the coarse level from coarsening.
+        fam.levels.push_back(PDEGridConfig{.grid_spec = std::move(*spec),
+                                           .n_time = tk,
+                                           .mandatory_times = {}});
+        fam.point_counts.push_back(nk);
+        fam.time_steps.push_back(tk);
+    }
+    return fam;
+}
+
+std::expected<PDEGridConfig, ValidationError>
+refine_grid_config(const PDEGridConfig& g, size_t factor) {
+    if (factor == 0) {
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSize, static_cast<double>(factor)));
+    }
+    const size_t n = g.grid_spec.n_points();
+    auto spec = resample(g.grid_spec, factor * (n - 1) + 1);
+    if (!spec) return std::unexpected(spec.error());
+    return PDEGridConfig{.grid_spec = std::move(*spec),
+                         .n_time = g.n_time * factor,
+                         .mandatory_times = g.mandatory_times};
+}
+
+PricingParams ReferenceOracle::contract(double spot, double strike, double tau,
+                                        double sigma, double rate) const {
+    PricingParams p;
+    p.spot = spot; p.strike = strike; p.maturity = tau; p.rate = rate;
+    p.dividend_yield = dividend_yield; p.option_type = option_type;
+    p.volatility = sigma;
+    p.discrete_dividends = reference_maturity
+        ? rolled_dividends(discrete_dividends, *reference_maturity, tau)
+        : filter_and_merge_dividends(discrete_dividends, tau);
+    return p;
+}
+
+std::expected<double, SolverError>
+ReferenceOracle::solve(const PricingParams& p, const PDEGridConfig& grid) const {
+    return solve_pde_grid_spec(p, PDEGridSpec{grid});
+}
+
+std::expected<double, SolverError>
+ReferenceOracle::solve_estimated(const PricingParams& p) const {
+    return solve_pde_grid_spec(p, PDEGridSpec{accuracy});
+}
+
+namespace {
+
+// The inversion's own failure codes, restated as per-point outcomes of the
+// shipped inversion (spec D3).
+PointStatus status_of(const IVError& e) {
+    switch (e.code) {
+        case IVErrorCode::VegaTooSmall:          return PointStatus::SurfaceVegaTooSmall;
+        case IVErrorCode::BracketingFailed:      return PointStatus::SurfaceNoRoot;
+        case IVErrorCode::MultipleRoots:         return PointStatus::SurfaceAmbiguous;
+        case IVErrorCode::MaxIterationsExceeded: return PointStatus::SurfaceNonConvergent;
+        // NumericalInstability and any invariant violation: the surface
+        // produced something the inversion could not use as a number.
+        default:                                 return PointStatus::SurfaceNonFinite;
+    }
+}
+
+// Reporting order across the three targets (spec D3): the worst outcome is
+// the one the point is recorded under.  Higher wins.
+int severity(PointStatus s) {
+    switch (s) {
+        case PointStatus::SurfaceNonFinite:     return 5;
+        case PointStatus::SurfaceNonConvergent: return 4;
+        case PointStatus::SurfaceAmbiguous:     return 3;
+        case PointStatus::SurfaceNoRoot:        return 2;
+        case PointStatus::SurfaceVegaTooSmall:  return 1;
+        default:                                return 0;
+    }
+}
+
+}  // namespace
+
+// `ctx.option_type` is deliberately not read: `option_type` is the
+// authoritative one, so a caller can score a surface for an option type the
+// refinement context was not built around.
+ScoreErrorFn make_round_trip_score_fn(const AdaptiveGridParams& params,
+                                      const RefinementContext& ctx,
+                                      OptionType option_type,
+                                      SurfaceInversionPolicy base_policy) {
+    const double tau_iv = params.target_iv_error;
+    const SurfaceBounds sample = ctx.sample_bounds;
+    const SurfaceBounds fit = ctx.bounds;
+    return [tau_iv, sample, fit, option_type, base_policy](
+        const SurfaceHandle& surface, const ErrorRefs& refs,
+        double spot, double strike, double tau, double sigma, double rate) -> PointScore
     {
-        auto fd_base = validate_fn(spot, strike, tau, sigma, rate);
-        if (!fd_base.has_value()) {
-            return std::unexpected(fd_base.error());
+        PointScore out;
+        if (surface.price) {
+            const double surface_price = surface.price(spot, strike, tau, sigma, rate);
+            if (std::isfinite(surface_price) && std::isfinite(refs.ref_price)) {
+                out.price_residual = std::abs(surface_price - refs.ref_price) / strike;
+            }
         }
-        double ref_price = fd_base.value();
-        if (!std::isfinite(ref_price)) {
-            return std::unexpected(SolverError{});
+        if (!refs.resolved) {
+            out.status = PointStatus::ReferenceUnresolved;
+            return out;
         }
-
-        // FD American vega via central difference
-        double eps = std::max(1e-4, 0.01 * sigma);
-        double sigma_dn = std::max(1e-4, sigma - eps);
-        double sigma_up = sigma + eps;
-        double effective_eps = (sigma_up - sigma_dn) / 2.0;
-
-        auto fd_up = validate_fn(spot, strike, tau, sigma_up, rate);
-        if (!fd_up.has_value()) {
-            return std::unexpected(fd_up.error());
-        }
-        auto fd_dn = validate_fn(spot, strike, tau, sigma_dn, rate);
-        if (!fd_dn.has_value()) {
-            return std::unexpected(fd_dn.error());
+        // A handle missing either callable cannot be round-tripped: calling an
+        // empty std::function throws, and library code here does not throw.
+        // The residual above needs only `price`, so it survives a missing vega.
+        if (!surface.price || !surface.vega) {
+            out.status = PointStatus::SurfaceNonFinite;
+            return out;
         }
 
-        double vega = 0.0;
-        if (effective_eps > 1e-6) {
-            vega = (fd_up.value() - fd_dn.value()) / (2.0 * effective_eps);
-        }
-        if (!std::isfinite(vega)) {
-            return std::unexpected(SolverError{});
+        // Bind every coordinate but sigma, exactly as the shipped solver does,
+        // and extend the surface over the part of the acceptance band its fit
+        // domain does not support (spec D3, rev 5).  The B-spline backends fit
+        // exactly the published sigma range, so without this the band would be
+        // inert on them and the metric would behave differently per backend.
+        // Inside the fit domain these are the handle, unchanged.
+        //
+        // What is extrapolated is the edge *tangent*: the extension is at most
+        // target_iv_error long and the surface is C2, so the model error is
+        // O(vomma * target_iv_error^2), negligible at bps scale.
+        //
+        // That length depends on `fit.sigma` covering `sample.sigma`, which
+        // every backend here satisfies (the B-spline backends fit exactly the
+        // published range, Chebyshev adds headroom beyond it).  A fit domain
+        // narrower in sigma than the sampled one would carry the tangent
+        // further than target_iv_error, and the error estimate above with it.
+        // The clamp is still to the *fit* domain: it is what the handle can
+        // be evaluated on at all.
+        const auto clamp_to_fit = [&](double s) {
+            return std::min(std::max(s, fit.sigma_min), fit.sigma_max);
+        };
+        const auto price_of = [&](double s) {
+            const double e = clamp_to_fit(s);
+            const double v = surface.price(spot, strike, tau, e, rate);
+            return (e == s) ? v : v + surface.vega(spot, strike, tau, e, rate) * (s - e);
+        };
+        const auto vega_of = [&](double s) {
+            return surface.vega(spot, strike, tau, clamp_to_fit(s), rate);
+        };
+
+        const auto invert = [&](double target, double published_lo, double published_hi)
+            -> std::expected<double, PointStatus>
+        {
+            SurfaceInversionPolicy policy = base_policy;
+            policy.published_sigma_min = published_lo;
+            policy.published_sigma_max = published_hi;
+            const auto bracket =
+                effective_sigma_bracket(spot, strike, option_type, target, policy);
+            const auto inverted =
+                invert_price_on_surface(price_of, vega_of, target, bracket, spot, policy);
+            if (!inverted) return std::unexpected(status_of(inverted.error()));
+            // A non-finite root would otherwise leave the point Measured with
+            // an understated error, since NaN loses every std::max against it.
+            if (!std::isfinite(inverted->implied_vol)) {
+                return std::unexpected(PointStatus::SurfaceNonFinite);
+            }
+            return inverted->implied_vol;
+        };
+
+        // `refs.resolved` implies all three targets are positive:
+        // `stencil_resolved` requires y - delta > lo + delta_lo, and a price
+        // is never negative, so `effective_sigma_bracket`'s `target_price > 0`
+        // precondition holds for every one of them.
+        const double targets[3] = {refs.ref_price - refs.delta, refs.ref_price,
+                                   refs.ref_price + refs.delta};
+
+        // Acceptance band (spec D3, rev 5): the published sigma range widened
+        // by the user's own tolerance at each end.  A root within tau_iv of a
+        // published edge is a measurement, not a refusal -- everything else is
+        // the product's policy, unchanged (the cap and the configured sigma
+        // limits still apply, through `effective_sigma_bracket`).
+        const double band_lo = sample.sigma_min - tau_iv;
+        const double band_hi = sample.sigma_max + tau_iv;
+
+        double worst = 0.0;
+        double recovered[3] = {std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::quiet_NaN()};
+        PointStatus status = PointStatus::Measured;
+        for (int k = 0; k < 3; ++k) {
+            const auto inverted = invert(targets[k], band_lo, band_hi);
+            if (!inverted) {
+                if (severity(inverted.error()) > severity(status)) status = inverted.error();
+                continue;
+            }
+            recovered[k] = *inverted;
+            worst = std::max(worst, std::abs(*inverted - sigma));
         }
 
-        return ErrorRefs{.ref_price = ref_price, .vega = vega};
+        out.status = status;
+        if (status != PointStatus::Measured) return out;
+        out.iv_error = worst;
+
+        // Exact-bracket diagnostic (spec D3, rev 5): would the shipped solver,
+        // searching the un-widened published range, have refused this query
+        // today?  Recorded as evidence for the query-time follow-up (#507); it
+        // changes neither `status` nor `iv_error`, and never gates anything.
+        SurfaceInversionPolicy exact = base_policy;
+        exact.published_sigma_min = sample.sigma_min;
+        exact.published_sigma_max = sample.sigma_max;
+        for (int k = 0; k < 3; ++k) {
+            const auto [lo, hi] =
+                effective_sigma_bracket(spot, strike, option_type, targets[k], exact);
+            if (recovered[k] < lo || recovered[k] > hi) {
+                out.edge_band_rescue = true;
+                break;
+            }
+        }
+        return out;
     };
 }
 
-ScoreErrorFn make_iv_score_fn(const AdaptiveGridParams& params,
-                              OptionType option_type) {
-    double vega_floor = params.vega_floor;
-    double target = params.target_iv_error;
-    return [vega_floor, target, option_type](
-        double interp, const ErrorRefs& refs,
-        double spot, double strike, double /*tau*/,
-        double /*sigma*/, double /*rate*/) -> std::optional<double>
-    {
-        // TV/K filter: skip points where IV is undefined.  `nullopt`, not
-        // 0.0: a skipped point is no measurement at all, and reporting it as
-        // a perfect one let a surface nobody could measure look flawless.
-        constexpr double kTVKThreshold = 1e-4;
-        double intrinsic = intrinsic_value(spot, strike, option_type);
-        if ((refs.ref_price - intrinsic) / strike < kTVKThreshold) {
-            return std::nullopt;
-        }
+PrepareRefsFn make_probe_scaled_refs_fn(PrepareRefsFn base, double K_ref) {
+    return [base = std::move(base), K_ref](
+        double spot, double strike, double tau, double sigma, double rate)
+        -> std::expected<ErrorRefs, SolverError> {
+        const double a = (strike > 0.0) ? strike / K_ref : 1.0;
+        auto refs = base(spot / a, K_ref, tau, sigma, rate);
+        if (!refs) return std::unexpected(refs.error());
+        ErrorRefs scaled = *refs;
+        scaled.ref_price = a * refs->ref_price;
+        scaled.bracket_lo_price = a * refs->bracket_lo_price;
+        scaled.bracket_hi_price = a * refs->bracket_hi_price;
+        scaled.delta = a * refs->delta;
+        scaled.delta_lo = a * refs->delta_lo;
+        scaled.delta_hi = a * refs->delta_hi;
+        return scaled;
+    };
+}
 
-        // Vega floor: below it the price carries no volatility information,
-        // so `price_error / vega_floor` is a price error in units of the
-        // floor -- not an IV error.  Left unfiltered it reads as thousands
-        // of IV points from a sub-cent price wobble (measured: a deep-ITM
-        // put with vega = -3.5e-5 scoring 9,700 on a surface whose worst
-        // *measurable* point scored 0.15), which the D5 viability gate then
-        // condemns.  This is the documented meaning of `vega_floor` --
-        // "when vega < floor, fall back to price-based tolerance" -- and
-        // there is no IV tolerance to fall back to, so the point is skipped
-        // like any other IV-undefined one.  Price accuracy where vega ~ 0
-        // is not what the IV-error metric (or kViabilityBound) measures.
-        if (std::abs(refs.vega) < vega_floor) {
-            return std::nullopt;
-        }
+bool stencil_resolved(const ErrorRefs& r) noexcept {
+    const double v[] = {r.ref_price, r.bracket_lo_price, r.bracket_hi_price,
+                        r.delta, r.delta_lo, r.delta_hi};
+    for (double x : v) {
+        if (!std::isfinite(x)) return false;
+    }
+    return (r.ref_price - r.delta > r.bracket_lo_price + r.delta_lo) &&
+           (r.bracket_hi_price - r.delta_hi > r.ref_price + r.delta);
+}
 
-        double price_error = std::abs(interp - refs.ref_price);
-        return compute_iv_error(price_error, refs.vega, vega_floor, target);
+namespace {
+
+// Two-grid Richardson error estimate, floored at the oracle's calibrated
+// accuracy scale (spec D1, rev 5).  An estimate, never a certificate: a
+// difference between two grids cannot see bias they share, and where the two
+// grids agree exactly -- both on the obstacle at a near-intrinsic point --
+// the difference sees nothing at all.  `strike` is the strike of the
+// contract actually solved; on a probe contract that is the probe strike,
+// and `make_probe_scaled_refs_fn` then carries the floor to the user strike
+// with the same scaling it applies to the prices.
+double richardson_estimate(double fine, double coarse, double strike) {
+    const double two_grid = kRichardsonSafetyFactor * std::abs(fine - coarse)
+                          / (std::pow(2.0, kReferenceConvergenceOrder) - 1.0);
+    return std::max(two_grid, kReferenceUncertaintyFloor * strike);
+}
+
+// Spec D2: each of the three targets must pass the product's own query
+// validation -- finite, positive, at or above intrinsic, at or below the
+// upper no-arbitrage limit.
+bool target_is_valid_query(const PricingParams& p, double target) {
+    IVQuery q;
+    // PricingParams and IVQuery both derive from OptionSpec: copy spot,
+    // strike, maturity, rate, dividend_yield and option_type in one move.
+    static_cast<OptionSpec&>(q) = static_cast<const OptionSpec&>(p);
+    q.market_price = target;
+    q.discrete_dividends = p.discrete_dividends;
+    return validate_iv_query(q).has_value();
+}
+
+}  // namespace
+
+PrepareRefsFn make_stencil_refs_fn(const AdaptiveGridParams& params,
+                                   ReferenceOracle oracle,
+                                   std::shared_ptr<ReferenceSolveCounter> counter,
+                                   StencilSolveFn solve) {
+    if (!solve) {
+        solve = [oracle](const PricingParams& p, const PDEGridConfig& g) {
+            return oracle.solve(p, g);
+        };
+    }
+    if (!counter) counter = std::make_shared<ReferenceSolveCounter>();
+    const double tau_iv = params.target_iv_error;
+    return [oracle, counter, solve, tau_iv](
+        double spot, double strike, double tau, double sigma, double rate)
+        -> std::expected<ErrorRefs, SolverError> {
+        ErrorRefs out;                  // all-NaN, resolved = false
+        out.sigma_lo = sigma - tau_iv;
+        out.sigma_hi = sigma + tau_iv;
+
+        // One family per preparation, chosen at the widest stencil member
+        // (spec D1/L2): all six solves share this one fine/coarse pair.
+        const PricingParams widest =
+            oracle.contract(spot, strike, tau, out.sigma_hi, rate);
+        auto fam = make_reference_grid_family(widest, oracle.accuracy, 1);
+        if (!fam) {
+            return std::unexpected(
+                SolverError{.code = SolverErrorCode::InvalidConfiguration});
+        }
+        const PDEGridConfig& fine = fam->levels[0];
+        const PDEGridConfig& coarse = fam->levels[1];
+        // The two configs' requested `n_time`, recorded as provenance; the
+        // counts the solvers take can differ by per-segment rounding.
+        out.fine_steps = static_cast<uint32_t>(fam->time_steps[0]);
+        out.coarse_steps = static_cast<uint32_t>(fam->time_steps[1]);
+
+        // Kept so the base solve's `unexpected` carries the solver's own
+        // code rather than a bare default one.
+        SolverError last_error{};
+        auto run = [&](double s, const PDEGridConfig& g,
+                       bool is_fine) -> std::optional<double> {
+            (is_fine ? counter->fine_attempts
+                     : counter->coarse_attempts).fetch_add(1);
+            auto r = solve(oracle.contract(spot, strike, tau, s, rate), g);
+            if (!r || !std::isfinite(*r)) {
+                last_error = r ? SolverError{.code = SolverErrorCode::NonFiniteSolution}
+                               : r.error();
+                (is_fine ? counter->fine_failures
+                         : counter->coarse_failures).fetch_add(1);
+                return std::nullopt;
+            }
+            return *r;
+        };
+
+        auto y = run(sigma, fine, true);
+        if (!y) return std::unexpected(last_error);  // invalid point
+        out.ref_price = *y;
+        if (!(out.sigma_lo > 0.0) || !std::isfinite(out.sigma_hi)) {
+            return out;                                 // unresolved, base present
+        }
+        // One failed solve makes the point unresolved whatever the remaining
+        // ones return, so stop at the first: the rest would be spent on an
+        // answer nobody reads.  The base solve above keeps its own contract
+        // (an `unexpected` carrying the solver's code); everything here
+        // returns the partial stencil instead.  The counters keep their
+        // meaning -- they count solves attempted, which is now fewer.
+        auto y2 = run(sigma, coarse, false);
+        if (!y2) return out;
+        auto lo = run(out.sigma_lo, fine, true);
+        if (!lo) return out;
+        auto lo2 = run(out.sigma_lo, coarse, false);
+        if (!lo2) return out;
+        auto hi = run(out.sigma_hi, fine, true);
+        if (!hi) return out;
+        auto hi2 = run(out.sigma_hi, coarse, false);
+        if (!hi2) return out;
+        out.bracket_lo_price = *lo;
+        out.bracket_hi_price = *hi;
+        out.delta = richardson_estimate(*y, *y2, strike);
+        out.delta_lo = richardson_estimate(*lo, *lo2, strike);
+        out.delta_hi = richardson_estimate(*hi, *hi2, strike);
+        if (!stencil_resolved(out)) return out;
+        const PricingParams base = oracle.contract(spot, strike, tau, sigma, rate);
+        for (double target : {out.ref_price - out.delta, out.ref_price,
+                              out.ref_price + out.delta}) {
+            if (!target_is_valid_query(base, target)) {
+                return out;             // reference limitation, not a candidate's
+            }
+        }
+        out.resolved = true;
+        return out;
     };
 }
 
@@ -104,26 +452,17 @@ ValidateFn make_validate_fn(double dividend_yield,
                             OptionType option_type,
                             const std::vector<Dividend>& discrete_dividends,
                             std::optional<double> reference_maturity) {
-    return [dividend_yield, option_type, discrete_dividends, reference_maturity](
-        double spot, double strike, double tau,
-        double sigma, double rate) -> std::expected<double, SolverError>
-    {
-        PricingParams p;
-        p.spot = spot;
-        p.strike = strike;
-        p.maturity = tau;
-        p.rate = rate;
-        p.dividend_yield = dividend_yield;
-        p.option_type = option_type;
-        p.volatility = sigma;
-        // Segmented surfaces follow one fixed expiry across remaining life.
-        // Ordinary callers without an anchor describe a contract from now.
-        p.discrete_dividends = reference_maturity
-            ? rolled_dividends(discrete_dividends, *reference_maturity, tau)
-            : filter_and_merge_dividends(discrete_dividends, tau);
-        auto fd = solve_american_option(p);
-        if (!fd.has_value()) return std::unexpected(fd.error());
-        return fd->value();
+    // Segmented surfaces follow one fixed expiry across remaining life
+    // (oracle.contract rolls dividends onto it); ordinary callers without an
+    // anchor describe a contract from now (contract() filters to tau
+    // directly). Single-price callers have no reference grid family in
+    // hand, so this solves at the oracle's accuracy profile on an
+    // auto-estimated grid rather than a fixed explicit one.
+    ReferenceOracle oracle{dividend_yield, option_type, discrete_dividends,
+                          reference_maturity, make_grid_accuracy(kReferenceAccuracy)};
+    return [oracle](double spot, double strike, double tau, double sigma,
+                    double rate) -> std::expected<double, SolverError> {
+        return oracle.solve_estimated(oracle.contract(spot, strike, tau, sigma, rate));
     };
 }
 

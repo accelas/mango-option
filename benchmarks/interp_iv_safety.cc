@@ -989,17 +989,15 @@ constexpr double kWindowLo = 85.0, kWindowHi = 115.0;
 constexpr std::array<double, 4> kSpacings = {10.0, 5.0, 2.5, 1.25};
 constexpr std::array<double, 4> kSweepMaturities = {0.20, 0.30, 0.60, 1.0};
 constexpr std::array<double, 2> kSweepVols = {0.15, 0.30};
-constexpr double kVegaFloor = 1e-4;      // AdaptiveGridParams::vega_floor default
-constexpr double kTVKThreshold = 1e-4;   // make_iv_score_fn's threshold
 constexpr double kQualifyBps = 10.0;     // D5 classification threshold
 constexpr size_t kBaseMoneynessKnots = 41;
 constexpr int kBaseTauPoints = 5;
 
 struct Ref { double price = 0.0, vega = 0.0; bool ok = false; };
 
-/// FDM reference price and central-bump vega (same bump as
-/// make_fd_vega_refs_fn: eps = max(1e-4, 0.01*sigma)). `accuracy` nullopt =
-/// the solver's automatic grid; set = an explicit GridAccuracyParams.
+/// FDM reference price and central-bump vega (eps = max(1e-4, 0.01*sigma)).
+/// `accuracy` nullopt = the solver's automatic grid; set = an explicit
+/// GridAccuracyParams.
 static Ref fdm_ref(double K, double T, double sigma,
                    const std::vector<Dividend>& divs,
                    std::optional<GridAccuracyParams> accuracy, double spot = kSpot) {
@@ -1094,10 +1092,12 @@ static double blend_control(double K, double L, double H, double w,
 
 /// Accumulator for one (delta, T, sigma, anchor/mid) population.
 struct Stat {
-    size_t q = 0, elig = 0, ref_fail = 0, low_tv = 0, surf_nonfinite = 0;
-    // The sweep's vega test is signed, which is stricter than make_iv_score_fn's
-    // |vega| test only for negative FD vega; neg_vega counts that difference.
-    size_t low_vega = 0, neg_vega = 0;
+    size_t q = 0, elig = 0, ref_fail = 0, surf_nonfinite = 0;
+    // Every column below divides a price difference by the FDM vega to read
+    // it as IV bps, so a vega that is not strictly positive leaves nothing to
+    // report.  The test is the sweep's own, not a mirror of any threshold the
+    // library applies.
+    size_t unusable_vega = 0;
     double blend_max = 0, blend_sq = 0;   // |B_fdm - P_fdm| / vega, bps
     double blend_signed_sum = 0;          // signed (B_fdm - P_fdm) / vega, bps
     double surf_max = 0, surf_sq = 0;     // |P_hat - B_fdm| / vega, bps
@@ -1166,10 +1166,7 @@ static RowResult run_row(double delta, double T, double sigma, size_t n_m, int t
         Ref rl = qy.anchor ? rk : cached_ref(cache, qy.L, T, sigma, divs, false, kSpot * qy.L / qy.K);
         Ref rh = qy.anchor ? rk : cached_ref(cache, qy.H, T, sigma, divs, false, kSpot * qy.H / qy.K);
         if (!rk.ok || !rl.ok || !rh.ok) { st.ref_fail++; continue; }
-        const double intrinsic = intrinsic_value(kSpot, qy.K, OptionType::PUT);
-        if ((rk.price - intrinsic) / qy.K < kTVKThreshold) { st.low_tv++; continue; }
-        if (rk.vega < 0.0) { st.neg_vega++; continue; }
-        if (rk.vega < kVegaFloor) { st.low_vega++; continue; }
+        if (!(rk.vega > 0.0)) { st.unusable_vega++; continue; }
         st.elig++;
 
         // Anchors take w = 0 against their own reference: no (H - L) division.
@@ -1201,7 +1198,7 @@ static RowResult run_row(double delta, double T, double sigma, size_t n_m, int t
             Ref fk = cached_ref(cache, qy.K, T, sigma, divs, true);
             Ref fl = cached_ref(cache, qy.L, T, sigma, divs, true, kSpot * qy.L / qy.K);
             Ref fh = cached_ref(cache, qy.H, T, sigma, divs, true, kSpot * qy.H / qy.K);
-            if (fk.ok && fl.ok && fh.ok && fk.vega >= kVegaFloor) {
+            if (fk.ok && fl.ok && fh.ok && fk.vega > 0.0) {
                 const double b_fine = blend_control(qy.K, qy.L, qy.H, w, fl.price, fh.price);
                 st.blend_max_fine = std::max(st.blend_max_fine, std::abs(b_fine - fk.price) / fk.vega * 1e4);
                 st.fine_n++;
@@ -1219,8 +1216,7 @@ static void print_legend() {
     std::printf("    Δ         K_ref spacing in dollars; K_refs are 80, 80+Δ, ..., 120\n");
     std::printf("    T         maturity in years (0.20 carries no dividend: the control row)\n");
     std::printf("    q/elig    queries in the window / the eligible subset (reference-only test:\n");
-    std::printf("              finite P_FDM(K), P_FDM(L), P_FDM(H) and vega, TV/K >= %.0e, vega >= %.0e)\n",
-                kTVKThreshold, kVegaFloor);
+    std::printf("              finite P_FDM(K), P_FDM(L), P_FDM(H) and a strictly positive vega)\n");
     std::printf("    blendmax  max |B_FDM - P_FDM| / vega_FDM in bps over the eligible queries,\n");
     std::printf("              B_FDM = K[(1-w)P_FDM(SL/K,L)/L + w P_FDM(SH/K,H)/H], w linear in 1/K\n");
     std::printf("    blendmaxU the same maximum with every reference re-solved at\n");
@@ -1241,9 +1237,8 @@ static void print_legend() {
     std::printf("              Ultra reference (ref-sens-skip > 0); incomplete = eligible mid-anchors < 90%% of q\n");
     std::printf("    n/a       an empty population\n");
     std::printf("  exclusions (printed under any row that has them): ref-fail = a reference solve\n");
-    std::printf("    failed or returned a non-finite value; low-tv = TV/K below the threshold;\n");
-    std::printf("    low-vega = 0 <= vega < floor; neg-vega = vega < 0 (the sweep's signed test is\n");
-    std::printf("    stricter than make_iv_score_fn's |vega| test only here); surf-nonfinite = the\n");
+    std::printf("    failed or returned a non-finite value; bad-vega = the reference vega was not\n");
+    std::printf("    strictly positive, so the bps columns have no denominator; surf-nonfinite = the\n");
     std::printf("    surface returned a non-finite price; inv-fail = an inversion did not converge;\n");
     std::printf("    ref-sens-skip = an eligible mid-anchor whose Ultra references were unusable.\n");
 }
@@ -1287,16 +1282,16 @@ static void print_row(const char* delta_label, const char* t_label, const RowRes
                 " | %4zu %5zu %s %s %5zu %s | %s %-12s %6.0fs\n",
                 delta_label, t_label, m.q, m.elig, b1, b1u, b1m, b2, b3, b4, m.inv_n, b5,
                 a.q, a.elig, b6, b7, a.inv_n, b8, b9, status, r.seconds);
-    if (m.ref_fail || m.low_vega || m.neg_vega || m.low_tv || m.surf_nonfinite || m.inv_fail ||
+    if (m.ref_fail || m.unusable_vega || m.surf_nonfinite || m.inv_fail ||
         m.fine_skip ||
-        a.ref_fail || a.low_vega || a.neg_vega || a.low_tv || a.surf_nonfinite || a.inv_fail)
-        std::printf("         excluded: mid ref-fail=%zu low-tv=%zu low-vega=%zu neg-vega=%zu"
+        a.ref_fail || a.unusable_vega || a.surf_nonfinite || a.inv_fail)
+        std::printf("         excluded: mid ref-fail=%zu bad-vega=%zu"
                     " surf-nonfinite=%zu inv-fail=%zu ref-sens-skip=%zu"
-                    " | anchor ref-fail=%zu low-tv=%zu low-vega=%zu neg-vega=%zu"
+                    " | anchor ref-fail=%zu bad-vega=%zu"
                     " surf-nonfinite=%zu inv-fail=%zu\n",
-                    m.ref_fail, m.low_tv, m.low_vega, m.neg_vega, m.surf_nonfinite, m.inv_fail,
+                    m.ref_fail, m.unusable_vega, m.surf_nonfinite, m.inv_fail,
                     m.fine_skip,
-                    a.ref_fail, a.low_tv, a.low_vega, a.neg_vega, a.surf_nonfinite, a.inv_fail);
+                    a.ref_fail, a.unusable_vega, a.surf_nonfinite, a.inv_fail);
 }
 
 }  // namespace kref

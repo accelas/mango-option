@@ -23,6 +23,31 @@ protected:
 
         return chain;
     }
+
+    // The table's own PDE budget, shared by every case here.
+    //
+    // It is sized against the validation oracle, not against the option: the
+    // round-trip metric inverts the candidate surface at the oracle's own
+    // price, so any discretization error the table carries and the reference
+    // does not comes back as an IV miss.  Measured on this chain with the
+    // 51-point, 200-step grid these cases used before the round-trip metric:
+    // the table's price sat 2.3e-3 of strike below the High-accuracy
+    // reference, a 202 bps outcome that no table-grid refinement moved: vol
+    // seeds at 5, 7 and 9 knots, a vol range widened from [0.15, 0.25] to
+    // [0.12, 0.28], and 7 strikes instead of 5 each reproduced it to three
+    // digits, because it is the table's PDE error, not its interpolation
+    // error.  At 401 points and 800 steps the same chain measures 3.4 bps.
+    //
+    // The 202 bps floor also broke the build outright: at a fresh sample near
+    // the published sigma ceiling (sigma = 0.2472, ceiling 0.25) the root of
+    // the oracle's price lay 74 bps of vol above the sample, outside the
+    // acceptance band of +/- target_iv_error, so the inversion returned no
+    // root -- a resolved surface failure, which makes the candidate
+    // non-viable and refuses the build with NoViableSurface.
+    PDEGridConfig make_pde_grid() {
+        auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 401, 2.0).value();
+        return PDEGridConfig{grid_spec, 800, {}};
+    }
 };
 
 TEST_F(AdaptiveGridBuilderIntegrationTest, ConvergesToTarget) {
@@ -33,17 +58,17 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, ConvergesToTarget) {
     params.max_iter = 2;
     params.validation_samples = 8;  // Match unit test
 
-    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
-
     auto result = build_adaptive_bspline(params, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+        make_pde_grid(), OptionType::PUT);
 
     ASSERT_TRUE(result.has_value()) << "Build should succeed";
 
-    // Should meet target within max_iter
-    if (result->target_met) {
-        EXPECT_LE(result->achieved_max_error, params.target_iv_error);
-    }
+    // Convergence is not a coin flip at this budget: the chain measures
+    // 3.4 bps against a 20 bps target, on the first candidate.  Asserting it
+    // conditionally would let a future regression pass by simply failing to
+    // converge.
+    ASSERT_TRUE(result->target_met);
+    EXPECT_LE(result->achieved_max_error, params.target_iv_error);
 
     // Should have diagnostic history
     EXPECT_FALSE(result->iterations.empty());
@@ -60,10 +85,8 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, RefinementAttemptsLargerGrid) {
     params.max_iter = 3;
     params.validation_samples = 8;
 
-    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
-
     auto result = build_adaptive_bspline(params, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+        make_pde_grid(), OptionType::PUT);
 
     ASSERT_TRUE(result.has_value());
 
@@ -86,15 +109,25 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, HandlesImpossibleTarget) {
     auto chain = make_test_chain();
 
     AdaptiveGridParams params;
-    params.target_iv_error = 1e-10;  // Impossible target
+    // 1 bp: unattainable on this chain and grid budget, which measures
+    // 3.4 bps, and still inside what the reference oracle can resolve.  The
+    // target is also the half-width of the stencil the oracle prepares, so a
+    // target far below the oracle's own uncertainty estimate is not an
+    // "impossible target" at all -- it is an unresolvable one, and the build
+    // then refuses instead of reporting best effort.  That outcome is pinned
+    // separately by RefusesTargetBelowReferenceResolution.
+    //
+    // The margin is 3.4x, not orders of magnitude: 3.4e-4 measured against
+    // the 1e-4 asked for here.  A change that makes this chain materially
+    // more accurate will make the target attainable and flip the case, and
+    // the answer then is a smaller target, not a weaker assertion.
+    params.target_iv_error = 1e-4;
     params.max_iter = 2;       // Limited iterations
     params.max_points_per_dim = 10;  // Limited grid
     params.validation_samples = 8;
 
-    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
-
     auto result = build_adaptive_bspline(params, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+        make_pde_grid(), OptionType::PUT);
 
     ASSERT_TRUE(result.has_value());
 
@@ -123,12 +156,10 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, DeterministicWithSameSeed) {
     params.validation_samples = 8;
     params.lhs_seed = 12345;
 
-    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
-
     auto result1 = build_adaptive_bspline(params, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+        make_pde_grid(), OptionType::PUT);
     auto result2 = build_adaptive_bspline(params, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+        make_pde_grid(), OptionType::PUT);
 
     ASSERT_TRUE(result1.has_value());
     ASSERT_TRUE(result2.has_value());
@@ -156,12 +187,10 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, DifferentSeedsProduceDifferentSamples
     AdaptiveGridParams params2 = params1;
     params2.lhs_seed = 222;
 
-    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
-
     auto result1 = build_adaptive_bspline(params1, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+        make_pde_grid(), OptionType::PUT);
     auto result2 = build_adaptive_bspline(params2, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+        make_pde_grid(), OptionType::PUT);
 
     ASSERT_TRUE(result1.has_value());
     ASSERT_TRUE(result2.has_value());
@@ -181,10 +210,8 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, SurfaceInterpolatesWithinBounds) {
     params.max_iter = 2;
     params.validation_samples = 8;
 
-    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
-
     auto result = build_adaptive_bspline(params, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+        make_pde_grid(), OptionType::PUT);
 
     ASSERT_TRUE(result.has_value());
     ASSERT_NE(result->spline, nullptr);
@@ -209,10 +236,8 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, TracksIterationDiagnostics) {
     params.max_iter = 3;
     params.validation_samples = 8;
 
-    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
-
     auto result = build_adaptive_bspline(params, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+        make_pde_grid(), OptionType::PUT);
 
     ASSERT_TRUE(result.has_value());
 
@@ -234,12 +259,77 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, TracksIterationDiagnostics) {
         }
     }
 
-    // Total PDE solves should be consistent
-    size_t computed_total = 0;
+    // Total PDE solves should be consistent.
+    //
+    // Regression: the accounting identity is over the reference solve
+    // counter, not over `pde_solves_validation`.
+    // Bug: this summed `pde_solves_table + pde_solves_validation`, which held
+    // only while a validation point cost exactly the solves it was charged.
+    // `pde_solves_validation` counts *preparations* (spec D7), and one
+    // preparation now runs a six-solve stencil -- three fine and three coarse
+    // -- so the sum understated the work (54 against an actual 222).  The
+    // solves themselves come from the one `ReferenceSolveCounter` the build
+    // owns, reported as `reference_solves_fine/coarse`.
+    size_t table_solves = 0;
     for (const auto& iter : result->iterations) {
-        computed_total += iter.pde_solves_table + iter.pde_solves_validation;
+        table_solves += iter.pde_solves_table;
     }
-    EXPECT_EQ(result->total_pde_solves, computed_total);
+    EXPECT_EQ(result->total_pde_solves,
+              table_solves + result->diagnostics.reference_solves_fine
+                           + result->diagnostics.reference_solves_coarse);
+
+    // Equality is not structural: a preparation whose fine solve fails skips
+    // the coarse half, and one that returns early on a non-positive
+    // sigma0 - target_iv_error leaves one fine attempt against no coarse one
+    // (adaptive_metrics.cpp, make_stencil_refs_fn).  What this asserts is
+    // that neither happened on this fixture -- every preparation cleared the
+    // stencil's positivity check and no reference solve failed -- so the
+    // uncertainty estimates really are two-grid differences here.
+    EXPECT_EQ(result->diagnostics.reference_solves_fine,
+              result->diagnostics.reference_solves_coarse);
+
+    // Three fine solves per prepared point, over the fresh preparations the
+    // iterations report plus the one-off holdout preparations.
+    size_t preparations = 0;
+    for (const auto& iter : result->iterations) {
+        preparations += iter.pde_solves_validation;
+    }
+    EXPECT_GE(result->diagnostics.reference_solves_fine, 3 * preparations);
+}
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: a target below the reference oracle's resolution refuses the
+// build rather than returning a best-effort surface.
+// Bug: HandlesImpossibleTarget asked for 1e-10 and expected best effort.  The
+// round-trip metric prepares its reference as a price stencil at
+// sigma0 +/- target_iv_error, so at 1e-10 the three prices are separated by
+// about 1e-8 dollars while the oracle's own uncertainty estimate on this
+// chain is 3e-5 to 1.4e-4 dollars.  Measured at one holdout point
+// (K = 100.2582, tau = 0.78588, sigma0 = 0.23203): reference 6.98875070,
+// bracket low 6.98875070, bracket high 6.98875071 -- a separation of 1e-8
+// against delta = 7.317e-05, so D2's ordering test fails by four orders of
+// magnitude.  No holdout point resolves (measured: 0 of
+// 8, against the coverage floor of max(4, samples/4) = 4), and the loop
+// refuses with ValidationFailed and the `mango:adaptive_validation_refused`
+// probe.  This is the honest outcome -- the reference cannot tell the three
+// targets apart -- so it is pinned, not repaired.
+TEST_F(AdaptiveGridBuilderIntegrationTest, RefusesTargetBelowReferenceResolution) {
+    auto chain = make_test_chain();
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 1e-10;
+    params.max_iter = 2;
+    params.max_points_per_dim = 10;
+    params.validation_samples = 8;
+
+    auto result = build_adaptive_bspline(params, chain,
+        make_pde_grid(), OptionType::PUT);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::ValidationFailed);
 }
 
 }  // namespace

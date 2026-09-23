@@ -28,51 +28,15 @@ TEST(BuildDiagnosticsTest, DefaultsAreEmpty) {
     mango::BuildDiagnostics d;
     EXPECT_FALSE(d.target_met);
     EXPECT_EQ(d.holdout_points, 0u);
+    EXPECT_EQ(d.surface_failures, 0u);
+    EXPECT_EQ(d.holdout_points_unresolved, 0u);
+    EXPECT_EQ(d.reference_solves_fine, 0u);
 }
 
-// ===========================================================================
-// Reference/score split: PrepareRefsFn and ScoreErrorFn (spec D4)
-// ===========================================================================
-
-// Score equivalence with the old arithmetic:
-TEST(ScoreFnTest, MatchesComputeIvError) {
-    mango::AdaptiveGridParams p;  // target 2e-5, floor 1e-4
-    auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
-    mango::ErrorRefs refs{.ref_price = 5.0, .vega = 20.0};
-    // price_error 0.01 / vega 20 = 5e-4
-    auto err = score(5.01, refs, 100.0, 100.0, 1.0, 0.2, 0.05);
-    ASSERT_TRUE(err.has_value());
-    EXPECT_NEAR(*err, 5e-4, 1e-12);
-}
-
-// A filtered point returns nullopt, not 0.0: the IV-error metric is
-// undefined there, and reporting a perfect score let a surface nobody could
-// measure certify itself (final-review amendment 2026-08-29).
-TEST(ScoreFnTest, TvkFilterSkipsDeepItm) {
-    mango::AdaptiveGridParams p;
-    auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
-    // K=100, S=100 put ref 0.005 -> TV/K = 5e-5 < 1e-4 -> filtered
-    mango::ErrorRefs refs{.ref_price = 0.005, .vega = 1.0};
-    EXPECT_FALSE(score(1.0, refs, 100.0, 100.0, 0.01, 0.2, 0.05).has_value());
-}
-
-TEST(ScoreFnTest, VegaFloorFilterSkipsPoint) {
-    mango::AdaptiveGridParams p;  // vega floor 1e-4
-    auto score = mango::make_iv_score_fn(p, mango::OptionType::PUT);
-    // Ample time value, but vega below the floor: price error carries no
-    // volatility information, so the point is skipped like any other
-    // IV-undefined one.
-    mango::ErrorRefs refs{.ref_price = 5.0, .vega = 1e-6};
-    EXPECT_FALSE(score(5.5, refs, 100.0, 100.0, 1.0, 0.2, 0.05).has_value());
-}
-
-TEST(PrepareRefsTest, PropagatesSolveFailure) {
-    mango::ValidateFn failing = [](double, double, double, double, double)
-        -> std::expected<double, mango::SolverError> {
-        return std::unexpected(mango::SolverError{});
-    };
-    auto prep = mango::make_fd_vega_refs_fn(mango::AdaptiveGridParams{}, failing);
-    EXPECT_FALSE(prep(100, 100, 1.0, 0.2, 0.05).has_value());
+TEST(PointStatusTest, SurfaceFailureClassification) {
+    EXPECT_FALSE(mango::is_surface_failure(mango::PointStatus::Measured));
+    EXPECT_FALSE(mango::is_surface_failure(mango::PointStatus::ReferenceUnresolved));
+    EXPECT_TRUE(mango::is_surface_failure(mango::PointStatus::SurfaceNoRoot));
 }
 
 // ===========================================================================
@@ -259,11 +223,20 @@ TEST(RunRefinementDomainTest, ValidationSamplesStayInSampleBounds) {
     mango::PrepareRefsFn prepare_refs =
         [](double, double, double, double, double)
         -> std::expected<mango::ErrorRefs, mango::SolverError> {
-        return mango::ErrorRefs{.ref_price = 1.0, .vega = 20.0};
+        return mango::ErrorRefs{.ref_price = 1.0,
+                                .bracket_lo_price = 0.8,
+                                .bracket_hi_price = 1.2,
+                                .sigma_lo = 0.19, .sigma_hi = 0.21,
+                                .delta = 0.0, .delta_lo = 0.0, .delta_hi = 0.0,
+                                .resolved = true};
     };
     mango::ScoreErrorFn score =
-        [](double, const mango::ErrorRefs&, double, double, double,
-           double, double) { return 0.0; };
+        [](const mango::SurfaceHandle&, const mango::ErrorRefs&, double,
+           double, double, double, double) {
+            return mango::PointScore{.status = mango::PointStatus::Measured,
+                                     .iv_error = 0.0,
+                                     .price_residual = 0.0};
+        };
 
     auto result = mango::run_refinement(p, build_fn, refine_fn, ctx,
                                         prepare_refs, score);
@@ -369,6 +342,9 @@ public:
     std::set<size_t> noop_axes;        ///< axes whose refine is a no-op
     std::function<double(double, double, double, double, double)> price_override;
     mango::ScoreErrorFn score_override;  ///< replaces the |interp - ref| score
+    /// Replaces the default reference preparation.  `prepare_fn()` never
+    /// consults it, so an override can wrap the default without recursing.
+    mango::PrepareRefsFn prepare_override;
     bool use_levels = false;           ///< emulate Chebyshev level counters
 
     // ---- observations -------------------------------------------------
@@ -388,9 +364,10 @@ public:
     std::set<std::array<double, 4>> holdout_keys;
 
     std::expected<mango::RefinementResult, mango::PriceTableError> run() {
+        mango::PrepareRefsFn prepare =
+            prepare_override ? prepare_override : prepare_fn();
         return mango::run_refinement(params, build_fn(), refine_fn(), ctx,
-                                     prepare_fn(), score_fn(), initial,
-                                     hooks());
+                                     prepare, score_fn(), initial, hooks());
     }
 
     mango::PrepareRefsFn prepare_fn() {
@@ -405,17 +382,28 @@ public:
                 }
                 holdout_keys.insert({strike, tau, sigma, rate});
             }
+            const double base = analytic_ref(spot, strike, tau, rate);
             return mango::ErrorRefs{
-                .ref_price = analytic_ref(spot, strike, tau, rate),
-                .vega = 1.0};
+                .ref_price = base,
+                .bracket_lo_price = base - 0.01,
+                .bracket_hi_price = base + 0.01,
+                .sigma_lo = sigma - params.target_iv_error,
+                .sigma_hi = sigma + params.target_iv_error,
+                .delta = 0.0, .delta_lo = 0.0, .delta_hi = 0.0,
+                .resolved = true};
         };
     }
 
     mango::ScoreErrorFn score_fn() {
         if (score_override) return score_override;
-        return [](double interp, const mango::ErrorRefs& refs, double, double,
-                  double, double, double) -> std::optional<double> {
-            return std::abs(interp - refs.ref_price);
+        return [](const mango::SurfaceHandle& handle,
+                  const mango::ErrorRefs& refs, double spot, double strike,
+                  double tau, double sigma, double rate) -> mango::PointScore {
+            const double interp = handle.price(spot, strike, tau, sigma, rate);
+            const double residual = std::abs(interp - refs.ref_price);
+            return mango::PointScore{.status = mango::PointStatus::Measured,
+                                     .iv_error = residual,
+                                     .price_residual = residual / strike};
         };
     }
 
@@ -458,6 +446,11 @@ public:
                             {std::log(spot / strike), tau, sigma, rate});
                     }
                     return base + s.fresh_err;
+                },
+                // Unit vega: the default score does not use it, but the
+                // round-trip seam requires every handle to carry one.
+                .vega = [](double, double, double, double, double) {
+                    return 1.0;
                 },
                 .pde_solves = 1,
             };
@@ -575,10 +568,6 @@ TEST(RunRefinementTest, ParamValidation) {
     {   Harness h;
         h.params.target_iv_error = std::numeric_limits<double>::infinity();
         expect_invalid(h, "target_iv_error non-finite"); }
-    {   Harness h; h.params.vega_floor = 0.0;
-        expect_invalid(h, "vega_floor == 0"); }
-    {   Harness h; h.params.vega_floor = std::numeric_limits<double>::quiet_NaN();
-        expect_invalid(h, "vega_floor non-finite"); }
     {   Harness h; h.params.refinement_factor = 1.0;
         expect_invalid(h, "refinement_factor == 1"); }
     {   Harness h; h.params.refinement_factor = 0.5;
@@ -697,31 +686,38 @@ TEST(RunRefinementTest, FinalRebuildStatsExcluded) {
 }
 
 // ---------------------------------------------------------------------------
-// Viability gate (spec D5)
+// Viability gate (spec D4)
 // ---------------------------------------------------------------------------
-TEST(RunRefinementTest, ViabilityBoundRejectsAll) {
+
+// Spec D4: accuracy no longer gates admissibility.  A large but finite error,
+// measured everywhere with no surface failure, is a best-effort surface --
+// returned, and honestly reported as missing the target.
+TEST(RunRefinementTest, LargeFiniteErrorIsBestEffort) {
     Harness h;
-    // Every candidate is far above kViabilityBound (0.20).
     h.script = by_growth({}, SurfaceScript{.holdout_err = 0.5});
 
     auto r = h.run();
-    ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::NoViableSurface);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_FALSE(r->target_met);
+    EXPECT_NEAR(r->achieved_max_error, 0.5, 1e-12);
+    EXPECT_EQ(r->diagnostics.surface_failures, 0u);
     EXPECT_GT(h.build_calls, 1u);  // exploration was attempted
 }
 
-// Regression: a candidate whose every holdout point is filtered out has been
-// measured nowhere, and must not be certified.
-// Bug: filtered points scored 0.0, so the holdout maximum of a wholly
+// Regression: a candidate whose every holdout reference is unresolved has
+// been measured nowhere, and must not be certified.
+// Bug: unresolved points scored 0.0, so the holdout maximum of a wholly
 // unmeasurable candidate was 0 -- under every bound, "target met", returned.
-// The score fn now reports a skip as nullopt and viability requires at least
-// one real measurement (final-review amendment 2026-08-29).
-TEST(RunRefinementTest, AllFilteredHoldoutIsNotViable) {
+// The score now reports the outcome as a status and viability requires at
+// least one real measurement (final-review amendment 2026-08-29).
+TEST(RunRefinementTest, AllUnresolvedHoldoutIsNotViable) {
     Harness h;
     h.params.max_iter = 1;  // the seed is the only candidate
-    h.score_override = [](double, const mango::ErrorRefs&, double, double,
-                          double, double, double) -> std::optional<double> {
-        return std::nullopt;  // every point filtered
+    h.score_override = [](const mango::SurfaceHandle&, const mango::ErrorRefs&,
+                          double, double, double, double,
+                          double) -> mango::PointScore {
+        return mango::PointScore{
+            .status = mango::PointStatus::ReferenceUnresolved};
     };
 
     auto r = h.run();
@@ -730,17 +726,24 @@ TEST(RunRefinementTest, AllFilteredHoldoutIsNotViable) {
     EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::NoViableSurface);
 }
 
-// The complement: points that do measure still certify, and the filtered ones
-// simply do not participate.
-TEST(RunRefinementTest, PartiallyFilteredHoldoutStillMeasures) {
+// The complement: points that do measure still certify, and the unresolved
+// ones simply do not participate.
+TEST(RunRefinementTest, PartiallyUnresolvedHoldoutStillMeasures) {
     Harness h;
     h.params.max_iter = 1;
     auto seen = std::make_shared<size_t>(0);
-    h.score_override = [seen](double interp, const mango::ErrorRefs& refs,
-                              double, double, double, double, double)
-        -> std::optional<double> {
-        if ((*seen)++ % 2 == 0) return std::nullopt;  // half filtered
-        return std::abs(interp - refs.ref_price);
+    h.score_override = [seen](const mango::SurfaceHandle& handle,
+                              const mango::ErrorRefs& refs, double spot,
+                              double strike, double tau, double sigma,
+                              double rate) -> mango::PointScore {
+        if ((*seen)++ % 2 == 0) {
+            return mango::PointScore{
+                .status = mango::PointStatus::ReferenceUnresolved};
+        }
+        const double interp = handle.price(spot, strike, tau, sigma, rate);
+        return mango::PointScore{.status = mango::PointStatus::Measured,
+                                 .iv_error = std::abs(interp - refs.ref_price),
+                                 .price_residual = 0.0};
     };
 
     auto r = h.run();
@@ -748,10 +751,11 @@ TEST(RunRefinementTest, PartiallyFilteredHoldoutStillMeasures) {
     EXPECT_GT(r->diagnostics.holdout_points_measured, 0u);
     EXPECT_LT(r->diagnostics.holdout_points_measured,
               r->diagnostics.holdout_points)
-        << "filtered points must not count as measurements";
+        << "unresolved points must not count as measurements";
+    EXPECT_GT(r->diagnostics.holdout_points_unresolved, 0u);
 }
 
-TEST(RunRefinementTest, ViabilityBoundIsIndependentOfTarget) {
+TEST(RunRefinementTest, ViabilityIsIndependentOfTarget) {
     Harness h;
     // A 50 bps surface against a 0.7 bps target: not target_met, but viable.
     h.params.target_iv_error = 7e-5;
@@ -761,7 +765,308 @@ TEST(RunRefinementTest, ViabilityBoundIsIndependentOfTarget) {
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r->target_met);
     EXPECT_NEAR(r->achieved_max_error, 0.005, 1e-12);
-    EXPECT_LT(0.005, mango::kViabilityBound);
+}
+
+// ---------------------------------------------------------------------------
+// Point statuses in the loop (spec D2/D4)
+// ---------------------------------------------------------------------------
+
+// Spec D4: a surface failure on a *fresh* sample makes the candidate
+// non-viable; a later candidate with zero failures but a worse max is picked.
+// The failure lands on a fresh sample because the fresh pass is scored first.
+TEST(RunRefinementTest, FreshFailureRejectsMostAccurateCandidate) {
+    Harness h;
+    h.script = [](const GridSizes&, size_t call) {
+        SurfaceScript s;
+        s.holdout_err = call == 0 ? 1e-5 : 5e-4;
+        return s;
+    };
+    size_t scored = 0;
+    h.score_override = [&](const mango::SurfaceHandle& hd,
+                           const mango::ErrorRefs& refs, double spot,
+                           double strike, double tau, double sigma,
+                           double rate) -> mango::PointScore {
+        const double interp = hd.price(spot, strike, tau, sigma, rate);
+        mango::PointScore p{
+            .status = mango::PointStatus::Measured,
+            .iv_error = std::abs(interp - refs.ref_price),
+            .price_residual = std::abs(interp - refs.ref_price) / strike};
+        // First build only: its first fresh sample fails.
+        if (scored++ == 0) p.status = mango::PointStatus::SurfaceNoRoot;
+        return p;
+    };
+
+    auto r = h.run();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_NE(r->diagnostics.picked_iteration, 0u)
+        << "the most accurate candidate failed, so it must not be returned";
+    EXPECT_EQ(r->diagnostics.surface_failures, 0u);
+    EXPECT_NEAR(r->achieved_max_error, 5e-4, 1e-12);
+}
+
+namespace {
+/// A score that fails the first `failures_for(build)` points of each build's
+/// **holdout** pass and measures `error_for(build)` on the rest; every fresh
+/// sample measures exactly zero.  The holdout is scored contiguously once per
+/// build, so counting within a build identifies its points.
+mango::ScoreErrorFn holdout_failure_script(
+    Harness& h,
+    std::function<size_t(size_t build)> failures_for,
+    std::function<double(size_t build)> error_for,
+    mango::PointStatus failure_status = mango::PointStatus::SurfaceNoRoot) {
+    auto last_build = std::make_shared<size_t>(
+        std::numeric_limits<size_t>::max());
+    auto seen = std::make_shared<size_t>(0);
+    return [&h, failures_for = std::move(failures_for),
+            error_for = std::move(error_for), failure_status, last_build,
+            seen](
+               const mango::SurfaceHandle&, const mango::ErrorRefs&, double,
+               double strike, double tau, double sigma,
+               double rate) -> mango::PointScore {
+        if (h.holdout_keys.count({strike, tau, sigma, rate}) == 0) {
+            return mango::PointScore{.status = mango::PointStatus::Measured,
+                                     .iv_error = 0.0,
+                                     .price_residual = 0.0};
+        }
+        const size_t build = h.build_calls - 1;
+        if (build != *last_build) {
+            *last_build = build;
+            *seen = 0;
+        }
+        if ((*seen)++ < failures_for(build)) {
+            return mango::PointScore{.status = failure_status};
+        }
+        return mango::PointScore{.status = mango::PointStatus::Measured,
+                                 .iv_error = error_for(build),
+                                 .price_residual = 0.0};
+    };
+}
+}  // namespace
+
+// The inverse of FreshFailureVetoesViability: the failure is on the fixed
+// holdout, and the candidate that carries it is refused however accurate its
+// measured points are (spec D4 viability).
+TEST(RunRefinementTest, HoldoutFailureRejectsMostAccurateCandidate) {
+    Harness h;
+    h.score_override = holdout_failure_script(
+        h,
+        [](size_t build) { return build == 0 ? 1u : 0u; },
+        [](size_t build) { return build == 0 ? 1e-5 : 5e-4; });
+
+    auto r = h.run();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->diagnostics.picked_iteration, 1u)
+        << "the seed's holdout failure outranks its smaller error";
+    EXPECT_EQ(r->diagnostics.surface_failures, 0u);
+    EXPECT_NEAR(r->achieved_max_error, 5e-4, 1e-12);
+}
+
+// `better_candidate`'s primary key as an exploration-base choice: a candidate
+// with fewer holdout failures becomes the base even though its measured error
+// is far worse, and a run where no candidate is failure-free is refused.
+TEST(RunRefinementTest, FewerHoldoutFailuresWinsTheExplorationBase) {
+    Harness h;
+    h.params.max_iter = 3;
+    h.score_override = holdout_failure_script(
+        h,
+        [](size_t build) { return build == 0 ? 2u : 1u; },
+        [](size_t build) { return build == 0 ? 1e-5 : 0.5; });
+
+    auto r = h.run();
+    ASSERT_FALSE(r.has_value()) << "every candidate failed somewhere";
+    EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::NoViableSurface);
+
+    // Iteration 2 refined from iteration 1's grids, not the seed's: one
+    // holdout failure beats two, whatever the error numbers say.
+    ASSERT_GE(h.refine_input_sizes.size(), 2u);
+    ASSERT_GE(h.built_sizes.size(), 2u);
+    EXPECT_EQ(h.refine_input_sizes[1], h.built_sizes[1]);
+    EXPECT_NE(h.built_sizes[1], kSeedSizes);
+}
+
+namespace {
+/// Run one build-1-fails-once script and report the grids iteration 2 was
+/// refined from.  Build 0 carries the same single holdout failure with a far
+/// worse error, so only the finiteness of build 1's holdout statistics can
+/// decide whether the base advances.
+GridSizes base_grids_of_second_refinement(mango::PointStatus failure_status) {
+    Harness h;
+    h.params.max_iter = 3;
+    h.score_override = holdout_failure_script(
+        h,
+        [](size_t) { return 1u; },
+        [](size_t build) { return build == 0 ? 0.5 : 1e-5; },
+        failure_status);
+
+    auto r = h.run();
+    EXPECT_FALSE(r.has_value()) << "every candidate failed somewhere";
+    EXPECT_GE(h.refine_input_sizes.size(), 2u);
+    EXPECT_GE(h.built_sizes.size(), 2u);
+    return h.refine_input_sizes.size() >= 2 ? h.refine_input_sizes[1]
+                                            : GridSizes{};
+}
+}  // namespace
+
+// Regression: a holdout point that scored `SurfaceNonFinite` left the
+// candidate's `all_finite` flag set, so the candidate kept a finite holdout
+// max and avg and could seize the exploration base and steer refinement.
+// Bug: `apply_point_score` funnelled every `is_surface_failure` status
+// through one branch that counted the failure and binned it but never
+// cleared `all_finite`.  A NaN price or vega raised at sigma0 disqualified
+// the candidate (the caller's veto runs before the score), while the same
+// NaN raised at one of the two band targets did not -- although spec D4's
+// non-finite veto does not distinguish which target exposed it.
+TEST(RunRefinementTest, NonFiniteHoldoutInversionCannotSeizeTheBase) {
+    EXPECT_EQ(base_grids_of_second_refinement(
+                  mango::PointStatus::SurfaceNonFinite),
+              kSeedSizes)
+        << "a candidate whose inversion went non-finite must not become the "
+           "exploration base, however small its measured errors";
+}
+
+// The control for the regression above: with the identical script and an
+// ordinary (finite) surface failure in the same position, the accurate
+// candidate *does* take the base.  Without this, the test above would pass
+// on a loop that simply never advances its base.
+TEST(RunRefinementTest, FiniteHoldoutFailureStillAdvancesTheBase) {
+    EXPECT_NE(base_grids_of_second_refinement(
+                  mango::PointStatus::SurfaceNoRoot),
+              kSeedSizes)
+        << "equal failure counts and a 5e4x better max must advance the base";
+}
+
+namespace {
+/// Run a walk whose seed carries two holdout failures and whose every
+/// refinement carries one, and report the axes the loop asked to refine.
+///
+/// The axis count is the bin-independent observable: `tried` is only ever
+/// set, never cleared, unless the walk restarts, and there are four axes.
+/// So at most four refinements can happen without a restart, and more than
+/// four is proof that one did.
+std::vector<size_t> refined_axes_of_walk(mango::PointStatus failure_status) {
+    Harness h;
+    h.params.max_iter = 8;
+    h.score_override = holdout_failure_script(
+        h,
+        [](size_t build) { return build == 0 ? 2u : 1u; },
+        [](size_t) { return 1e-5; },
+        failure_status);
+
+    auto r = h.run();
+    EXPECT_FALSE(r.has_value()) << "every candidate failed somewhere";
+    return h.refine_axes;
+}
+}  // namespace
+
+// Regression: a refinement whose holdout inversion went non-finite cleared
+// every tried-axis flag, restarting the walk it could not advance.
+// Bug: the D4 walk restart read only the failure counts and the max, so a
+// candidate with fewer holdout failures than the base restarted the walk
+// even when its NaN holdout statistics barred it from becoming the base.
+// The next iteration then restored the unchanged base and -- the builders
+// being deterministic -- re-picked the same axis, so the whole iteration
+// budget could be spent on one axis with the other three never explored.
+TEST(RunRefinementTest, NonFiniteRefinementCannotRestartTheWalk) {
+    const auto axes = refined_axes_of_walk(
+        mango::PointStatus::SurfaceNonFinite);
+
+    ASSERT_GE(axes.size(), 2u);
+    EXPECT_LE(axes.size(), 4u)
+        << "a candidate that cannot take the base must not restart the walk";
+    EXPECT_NE(axes[0], axes[1])
+        << "the second refinement must try a different axis, not repeat the "
+           "one the ineligible candidate came from";
+    std::set<size_t> distinct(axes.begin(), axes.end());
+    EXPECT_EQ(distinct.size(), axes.size())
+        << "without a restart no axis can be tried twice";
+}
+
+// The control: the identical script with an ordinary (finite) surface
+// failure produces a candidate that *is* base-eligible and has fewer
+// failures than the base, so it does restart the walk -- visible as more
+// refinements than there are axes.  Without this, the test above would pass
+// on a loop that had simply stopped restarting walks altogether.
+TEST(RunRefinementTest, FiniteFewerFailuresStillRestartsTheWalk) {
+    const auto axes = refined_axes_of_walk(mango::PointStatus::SurfaceNoRoot);
+
+    EXPECT_GT(axes.size(), 4u)
+        << "more refinements than axes is only reachable through a restart";
+}
+
+// A fresh-sample failure vetoes viability even when the holdout is clean.
+TEST(RunRefinementTest, FreshFailureVetoesViability) {
+    Harness h;
+    h.params.max_iter = 1;
+    h.score_override = [&](const mango::SurfaceHandle&, const mango::ErrorRefs&,
+                           double, double strike, double tau, double sigma,
+                           double rate) -> mango::PointScore {
+        const bool holdout = h.holdout_keys.count({strike, tau, sigma, rate}) > 0;
+        return mango::PointScore{
+            .status = holdout ? mango::PointStatus::Measured
+                              : mango::PointStatus::SurfaceAmbiguous,
+            .iv_error = holdout ? 0.0 : std::nan(""),
+            .price_residual = 0.0};
+    };
+
+    auto r = h.run();
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::NoViableSurface);
+}
+
+// Unresolved references enter no statistic; fewer than max(4, N/4) resolved
+// holdout references refuse the build outright (spec D2 coverage policy).
+TEST(RunRefinementTest, UnresolvedHoldoutBelowCoverageRefuses) {
+    Harness h;  // validation_samples = 8 -> 4 resolved references required
+    size_t n = 0;
+    auto base_prep = h.prepare_fn();
+    h.prepare_override = [&, base_prep](double spot, double strike, double tau,
+                                        double sigma, double rate) {
+        auto r = base_prep(spot, strike, tau, sigma, rate);
+        if (r && (n++ % 8) < 5) r->resolved = false;  // 5 of every 8
+        return r;
+    };
+
+    auto r = h.run();
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, mango::PriceTableErrorCode::ValidationFailed);
+    EXPECT_EQ(h.build_calls, 0u) << "coverage is decided before any build";
+}
+
+// Failures are attributed to bins unconditionally and steer the axis walk.
+TEST(ErrorBinsTest, FailureCountsDriveProblematicBins) {
+    mango::ErrorBins b;
+    b.record_failure({0.05, 0.5, 0.5, 0.5});
+    b.record_failure({0.07, 0.5, 0.5, 0.5});
+    EXPECT_EQ(b.problematic_bins(0), (std::vector<size_t>{0}));
+    EXPECT_EQ(b.problematic_bins(1), (std::vector<size_t>{2}));
+    // No error mass: a failure is an outcome, not an error number.
+    EXPECT_DOUBLE_EQ(b.dim_error_mass[0], 0.0);
+}
+
+// A candidate's bins carry both passes' failures (spec D4).
+TEST(ErrorBinsTest, MergeFailuresAddsCounts) {
+    mango::ErrorBins a;
+    a.record_failure({0.05, 0.05, 0.05, 0.05});
+    mango::ErrorBins other;
+    other.record_failure({0.05, 0.05, 0.05, 0.05});
+    other.record_error({0.9, 0.9, 0.9, 0.9}, 1.0, 0.0);
+
+    a.merge_failures(other);
+    EXPECT_EQ(a.attributed(0, 0), 2u);
+    EXPECT_EQ(a.attributed(0, 4), 0u)
+        << "merge_failures must not import measured-error bins";
+}
+
+// Spec D6: vega_floor is deprecated and ignored -- 0 and NaN no longer
+// invalidate the run.
+TEST(RunRefinementTest, VegaFloorIsIgnored) {
+    Harness h;
+    h.params.vega_floor = 0.0;
+    EXPECT_TRUE(h.run().has_value());
+
+    Harness nan_floor;
+    nan_floor.params.vega_floor = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_TRUE(nan_floor.run().has_value());
 }
 
 TEST(RunRefinementTest, NonFiniteHoldoutDisqualifies) {
@@ -1038,7 +1343,9 @@ TEST(RunRefinementTest, AllTrialBuildsFailNoViable) {
     Harness h;
     h.script = [](const GridSizes& s, size_t) {
         if (delta(s) == Deltas{0, 0, 0, 0}) {
-            return SurfaceScript{.holdout_err = 0.5};  // seed: non-viable
+            // Seed: non-viable, because one holdout price is not a number
+            // (spec D4's veto -- accuracy alone no longer disqualifies).
+            return SurfaceScript{.nan_holdout = true};
         }
         return SurfaceScript{.build_ok = false};
     };
@@ -1323,29 +1630,39 @@ TEST(MakeValidateFnTest, DropsDividendsBeyondSampledMaturity) {
 // Regression #485: at tau=.6 on the anchored 1y contract the dividend at
 // calendar .25 has elapsed. A newly issued .6y contract is a different oracle.
 TEST(MakeValidateFnTest, FixedExpiryRollsCalendarInsteadOfChangingExpiry) {
+    // make_validate_fn now solves at kReferenceAccuracy (High): compare
+    // against ReferenceOracle::solve_estimated on the same profile rather
+    // than solve_american_option's default profile. reference_solve takes
+    // an already-built (possibly manually rolled) PricingParams directly, so
+    // the oracle's own dividend fields are irrelevant here -- only its
+    // accuracy profile matters.
+    mango::ReferenceOracle raw_oracle{.accuracy = mango::make_grid_accuracy(mango::kReferenceAccuracy)};
+    auto reference_solve = [&raw_oracle](const mango::PricingParams& params) {
+        return raw_oracle.solve_estimated(params);
+    };
     auto validate = mango::make_validate_fn(0.0, mango::OptionType::PUT,
         {{0.25, 3.0}}, 1.0);
     mango::PricingParams p(mango::OptionSpec{.spot = 100.0, .strike = 100.0,
         .maturity = 0.6, .rate = 0.05, .option_type = mango::OptionType::PUT}, 0.2);
-    auto direct = mango::solve_american_option(p);
+    auto direct = reference_solve(p);
     ASSERT_TRUE(direct.has_value());
     auto fixed = validate(100.0, 100.0, 0.6, 0.2, 0.05);
     ASSERT_TRUE(fixed.has_value());
-    EXPECT_DOUBLE_EQ(*fixed, direct->value());
+    EXPECT_DOUBLE_EQ(*fixed, *direct);
     p.discrete_dividends = {{0.25, 3.0}};
-    auto chain = mango::solve_american_option(p);
+    auto chain = reference_solve(p);
     ASSERT_TRUE(chain.has_value());
-    EXPECT_GT(chain->value() - *fixed, 1.0);
+    EXPECT_GT(*chain - *fixed, 1.0);
 
     // At tau=.75 the event has elapsed; just above it the rolled offset is
     // positive. This tests the reference side independently of gap admission.
     p.maturity = 0.75;
     p.discrete_dividends.clear();
-    direct = mango::solve_american_option(p);
+    direct = reference_solve(p);
     ASSERT_TRUE(direct.has_value());
     fixed = validate(100.0, 100.0, 0.75, 0.2, 0.05);
     ASSERT_TRUE(fixed.has_value());
-    EXPECT_DOUBLE_EQ(*fixed, direct->value());
+    EXPECT_DOUBLE_EQ(*fixed, *direct);
     auto before = validate(100.0, 100.0, 0.750001, 0.2, 0.05);
     ASSERT_TRUE(before.has_value());
     EXPECT_GT(*before - *fixed, 1.0);

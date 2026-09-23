@@ -33,6 +33,11 @@ namespace mango {
 struct SurfaceHandle {
     std::function<double(double spot, double strike, double tau,
                          double sigma, double rate)> price;
+    /// Surface vega at the same coordinates. The round-trip scorer feeds it to
+    /// the shipped inversion's vega pre-check, so a candidate is judged by the
+    /// same sensitivity the product would see.
+    std::function<double(double spot, double strike, double tau,
+                         double sigma, double rate)> vega;
     size_t pde_solves = 0;
 };
 
@@ -58,11 +63,6 @@ struct RefinementContext {
     /// non-finite prices at admitted times still disqualify a candidate.
     std::function<bool(double)> maturity_is_supported = {};
 };
-
-/// Absolute holdout-error ceiling above which a candidate surface is treated
-/// as garbage and never returned (spec D5).  2,000 bps of IV: an operational
-/// garbage detector, deliberately independent of `target_iv_error`.
-inline constexpr double kViabilityBound = 0.20;
 
 /// Relative holdout improvement required to restart the axis walk (spec D6).
 inline constexpr double kMinRelImprovement = 0.02;
@@ -128,8 +128,27 @@ struct ErrorBins {
     /// Count of high-error samples in each bin for each dimension
     std::array<std::array<size_t, N_BINS>, N_DIMS> bin_counts = {};
 
+    /// Count of surface failures in each bin for each dimension (spec D4).
+    /// Recorded unconditionally: a point the shipped inversion could not
+    /// round-trip carries no error number, but it does say where the surface
+    /// misbehaves, and refinement should be steered there.
+    std::array<std::array<size_t, N_BINS>, N_DIMS> failure_counts = {};
+
     /// Total error mass accumulated in each dimension
     std::array<double, N_DIMS> dim_error_mass = {};
+
+    /// Bin index of a normalized coordinate, clamped into [0, N_BINS).
+    [[nodiscard]] static size_t bin_of(double normalized) noexcept {
+        double pos = std::clamp(normalized, 0.0, 1.0);
+        return std::min(static_cast<size_t>(pos * N_BINS), N_BINS - 1);
+    }
+
+    /// Attributed count in one bin: measured high errors plus surface
+    /// failures (spec D4).  Both say "refine here"; only the first is a
+    /// number, which is why they are stored apart and summed on read.
+    [[nodiscard]] size_t attributed(size_t dim, size_t bin) const noexcept {
+        return bin_counts[dim][bin] + failure_counts[dim][bin];
+    }
 
     /// Record an error at a normalized position [0,1]^4
     ///
@@ -143,13 +162,29 @@ struct ErrorBins {
         }
 
         for (size_t d = 0; d < N_DIMS; ++d) {
-            // Clamp to [0, 1] and compute bin
-            double pos = std::clamp(normalized_pos[d], 0.0, 1.0);
-            size_t bin = static_cast<size_t>(pos * N_BINS);
-            bin = std::min(bin, N_BINS - 1);  // Handle pos == 1.0
-
-            bin_counts[d][bin]++;
+            bin_counts[d][bin_of(normalized_pos[d])]++;
             dim_error_mass[d] += iv_error;
+        }
+    }
+
+    /// Record a surface failure at a normalized position [0,1]^4 (spec D4).
+    ///
+    /// Unconditional: there is no threshold to compare against, because a
+    /// failure produces no error number.  It adds no error mass either --
+    /// mass is measured error, and this point measured nothing.
+    void record_failure(const std::array<double, N_DIMS>& normalized_pos) {
+        for (size_t d = 0; d < N_DIMS; ++d) {
+            failure_counts[d][bin_of(normalized_pos[d])]++;
+        }
+    }
+
+    /// Add another set's failure counts (spec D4: a candidate's bins carry
+    /// the fresh pass's measured errors plus both passes' failures).
+    void merge_failures(const ErrorBins& other) {
+        for (size_t d = 0; d < N_DIMS; ++d) {
+            for (size_t b = 0; b < N_BINS; ++b) {
+                failure_counts[d][b] += other.failure_counts[d][b];
+            }
         }
     }
 
@@ -188,10 +223,11 @@ struct ErrorBins {
         return best_dim;
     }
 
-    /// Get bins with error count >= min_count for a dimension
+    /// Get bins with attributed count >= min_count for a dimension
+    /// (measured high errors plus surface failures, spec D4).
     [[nodiscard]] std::vector<size_t> problematic_bins(size_t dim, size_t min_count = 2) const {
         auto indices = std::views::iota(size_t{0}, N_BINS)
-                     | std::views::filter([&](size_t b) { return bin_counts[dim][b] >= min_count; });
+                     | std::views::filter([&](size_t b) { return attributed(dim, b) >= min_count; });
         return std::ranges::to<std::vector<size_t>>(indices);
     }
 
@@ -200,9 +236,26 @@ struct ErrorBins {
         for (auto& dim_bins : bin_counts) {
             dim_bins.fill(0);
         }
+        for (auto& dim_bins : failure_counts) {
+            dim_bins.fill(0);
+        }
         dim_error_mass.fill(0.0);
     }
 };
+
+/// One counter per `PointStatus` enumerator, indexed by its underlying value
+/// (spec D7).  Kept as a plain array so an evaluation can be summed across
+/// candidates without naming each outcome.  `kPointStatusCount` is asserted
+/// against the enum, so a new outcome fails the build instead of quietly
+/// dropping out of the refusal probe.
+using PointStatusCounts = std::array<size_t, kPointStatusCount>;
+
+/// Add `status` to `counts`, ignoring an out-of-range value rather than
+/// writing past the array.
+constexpr void count_status(PointStatusCounts& counts, PointStatus status) noexcept {
+    const auto idx = static_cast<size_t>(status);
+    if (idx < counts.size()) ++counts[idx];
+}
 
 // ============================================================================
 // Callback type aliases
@@ -256,29 +309,61 @@ using ValidateFn = std::function<std::expected<double, SolverError>(
     double spot, double strike, double tau,
     double sigma, double rate)>;
 
-/// Per-point reference data, computed once per validation/holdout point.
+/// Per-point reference data from the six-solve stencil (spec D1), computed
+/// once per validation/holdout point.
+///
+/// The stencil prices sigma0 and sigma0 +- target_iv_error on one nested
+/// grid pair; each `delta*` is the two-grid Richardson *estimate* of that
+/// price's discretisation error (an estimate, never a certificate: a two-grid
+/// difference cannot see bias the two grids share).
+///
+/// Partial stencils are normal.  Only `ref_price` is always present; every
+/// other numeric field is NaN when its solve did not happen or did not
+/// succeed, and `resolved` is then false.
 struct ErrorRefs {
-    double ref_price = 0.0;  ///< FD American price
-    double vega = 0.0;       ///< FD central-difference American vega
+    /// y: the fine-grid reference price at sigma0. Always present.
+    double ref_price = std::numeric_limits<double>::quiet_NaN();
+    /// lo / hi: fine-grid prices at `sigma_lo` / `sigma_hi`. NaN when unavailable.
+    double bracket_lo_price = std::numeric_limits<double>::quiet_NaN();
+    double bracket_hi_price = std::numeric_limits<double>::quiet_NaN();
+    /// sigma0 -+ target_iv_error, as actually solved.
+    double sigma_lo = std::numeric_limits<double>::quiet_NaN();
+    double sigma_hi = std::numeric_limits<double>::quiet_NaN();
+    /// Richardson error estimates for `ref_price`, `bracket_lo_price` and
+    /// `bracket_hi_price`. NaN when unavailable.
+    double delta = std::numeric_limits<double>::quiet_NaN();
+    double delta_lo = std::numeric_limits<double>::quiet_NaN();
+    double delta_hi = std::numeric_limits<double>::quiet_NaN();
+    /// Spec D2: the stencil separates in the expected order *and* all three
+    /// targets pass the product's query validation.
+    bool resolved = false;
+    /// Requested time-step counts (`n_time`) of the two grid configs
+    /// (record only).  Per-segment rounding can make the counts the solvers
+    /// actually take differ; the loop needs neither.
+    uint32_t fine_steps = 0;
+    uint32_t coarse_steps = 0;
 };
 
-/// Produce refs for one point (base solve + two sigma-bump solves).
-/// Any failed or non-finite solve => unexpected.
+/// Produce refs for one point (the six-solve stencil of spec D1).
+/// A failed or non-finite *base* solve => unexpected (the point is invalid).
+/// Any other missing piece => success with `resolved = false` and the base
+/// price present.
 using PrepareRefsFn = std::function<std::expected<ErrorRefs, SolverError>(
     double spot, double strike, double tau, double sigma, double rate)>;
 
-/// Score one point from interpolated price + cached refs. Pure arithmetic.
+/// Score one point by round-tripping the candidate surface (spec D3).
 ///
-/// Contract (spec D4, final-review amendment 2026-08-29):
-///  - `std::nullopt` means the point was **deliberately skipped** by a filter
-///    (TV/K or vega floor): the error metric is undefined there, so the point
-///    carries no evidence either way.  Skipped points are excluded from the
-///    max, the average, and the measured count -- they neither certify a
-///    surface nor condemn it.
-///  - An engaged value must be finite and nonnegative; anything else is a
-///    non-viable evaluation and disqualifies the candidate (D5).
-using ScoreErrorFn = std::function<std::optional<double>(
-    double interp, const ErrorRefs& refs,
+/// The scorer prices nothing itself: it hands `surface` to the *shipped*
+/// inversion at the three stencil targets (`ref_price` and `ref_price +-
+/// delta`) and reports how far the recovered volatilities land from `sigma`.
+/// The returned `PointScore::status` therefore describes an operational
+/// outcome of that inversion at this point, and `iv_error` is an estimate of
+/// the surface's IV error there.
+///
+/// Precondition: handles must supply `vega` as well as `price`; a handle
+/// without it scores `SurfaceNonFinite`.
+using ScoreErrorFn = std::function<PointScore(
+    const SurfaceHandle& surface, const ErrorRefs& refs,
     double spot, double strike, double tau,
     double sigma, double rate)>;
 
@@ -318,10 +403,10 @@ TauSegmentSplit make_tau_split_from_segments(
     double K_ref);
 
 // The option-aware implementations of ValidateFn / PrepareRefsFn /
-// ScoreErrorFn (`make_validate_fn`, `make_fd_vega_refs_fn`,
-// `make_iv_score_fn`) live in adaptive_metrics.hpp: the loop consumes the
-// callback types declared above but never depends on the American solver
-// behind them.
+// ScoreErrorFn (`make_validate_fn`, `make_stencil_refs_fn` and
+// `make_round_trip_score_fn`) live in adaptive_metrics.hpp: the loop
+// consumes the callback types declared above but never depends on the
+// American solver behind them.
 
 /// Merge probe results into one set of grids: the sorted union of each
 /// probe's knot positions per continuous axis, with positions closer than
@@ -411,10 +496,10 @@ struct ValidationPoint {
 struct FinalValidationSet {
     std::vector<ValidationPoint> points;
     size_t invalid = 0;
-    /// `PrepareRefsFn` invocations made, valid and invalid alike.  Each costs
-    /// up to three FD solves (base plus two sigma bumps); an attempt that
-    /// fails on the base solve costs fewer, so `3 * ref_attempts` is an upper
-    /// bound on the build's validation cost.
+    /// `PrepareRefsFn` invocations made, valid and invalid alike.  This
+    /// counts preparations, not PDE solves: how many solves one preparation
+    /// runs depends on the factory, and an attempt that stops at the base
+    /// solve runs fewer.  `ReferenceSolveCounter` is what records the solves.
     size_t ref_attempts = 0;
 };
 
@@ -422,9 +507,13 @@ struct FinalValidationSet {
 /// (spec D2) and compute `ErrorRefs` for each exactly once.
 ///
 /// Points whose refs fail or are non-finite are dropped and counted.  Fewer
-/// than `max(4, validation_samples / 4)` valid points ⇒
+/// than `max(4, validation_samples / 4)` prepared points -- or fewer than
+/// that many *resolved* ones (spec D2) -- ⇒
 /// `PriceTableErrorCode::ValidationFailed`: a validation set that cannot
-/// measure cannot certify the surface.
+/// measure cannot certify the surface.  The threshold is an operational
+/// coverage policy, not a spatial or statistical guarantee; the refusal fires
+/// `MANGO_TRACE_ADAPTIVE_VALIDATION_REFUSED` with the counts the error cannot
+/// carry.
 ///
 /// @param seed  LHS seed for this set, passed explicitly and deliberately
 ///              *instead of* `params.lhs_seed`: the final validation must not
@@ -439,26 +528,46 @@ prepare_final_validation(const AdaptiveGridParams& params,
 
 /// Score of one assembled surface over a cached `FinalValidationSet`.
 ///
-/// `measured` counts every point whose score *engaged* and produced a finite,
-/// nonnegative error -- including exact zeros -- so `avg_error`'s denominator
-/// matches its numerator even for a surface that reproduces every reference
-/// exactly.  Points the `ScoreErrorFn` deliberately skipped are counted in
-/// `filtered` and enter no statistic: the metric is undefined there.
+/// `measured` counts every point whose score reported `PointStatus::Measured`
+/// with a finite, nonnegative error -- including exact zeros -- so
+/// `avg_error`'s denominator matches its numerator even for a surface that
+/// reproduces every reference exactly.  Points whose reference never resolved
+/// are counted in `unresolved` and enter no statistic: the metric is
+/// undefined there, and an unresolved reference is not a defect of the
+/// surface.  Points where the shipped inversion failed on the surface's own
+/// price are counted in `surface_failures`: an outcome, never a number.
 struct FinalScore {
     double max_error = 0.0;
     double avg_error = 0.0;
-    size_t measured = 0;   ///< points that produced a usable error
-    size_t filtered = 0;   ///< points the score fn skipped (nullopt)
-    size_t skipped = 0;    ///< points with a non-finite/negative evaluation
+    size_t measured = 0;    ///< points that produced a usable error
+    size_t unresolved = 0;  ///< points whose reference did not resolve (D2)
+    size_t skipped = 0;     ///< points with a non-finite/negative evaluation
+    /// Points excluded by maturity support (spec D4).  Structurally zero
+    /// here: this score runs over points that were already admitted at
+    /// preparation, which is where unsupported maturities are dropped.  The
+    /// field exists so both passes accumulate the same shape; the loop's
+    /// `holdout_points_unsupported` comes from that preparation, not here.
+    size_t unsupported = 0;
+    size_t surface_failures = 0;   ///< points where is_surface_failure() held
+    size_t edge_band_rescues = 0;  ///< exact-bracket diagnostic hits (D3)
+    /// Largest |S - V̂|/K residual seen over the points, measured or not.
+    double max_price_residual = 0.0;
+    /// Largest finite reference-error *estimate* over the points; 0 when none
+    /// was finite.  An estimate, never a certificate.
+    double max_delta = 0.0;
+    /// Where the surface failures landed, for refinement attribution (D4).
+    ErrorBins failure_bins;
+    /// Per-outcome totals over the points (spec D7 refusal probe).
+    PointStatusCounts status_counts = {};
     bool all_finite = true;
 
-    /// D5 viability: every engaged evaluation finite and nonnegative, at
-    /// least one *measurement*, and the max error within the absolute garbage
-    /// bound.  `measured > 0` is what stops a surface whose every holdout
-    /// point was filtered from certifying itself with a vacuous max of 0.
+    /// D4 viability: every evaluation finite and nonnegative, at least one
+    /// *measurement*, and no surface failure.  `measured > 0` is what stops a
+    /// surface whose every point was unresolved from certifying itself with a
+    /// vacuous max of 0; `surface_failures == 0` is what stops one the
+    /// shipped inversion could not round-trip from being returned at all.
     [[nodiscard]] bool viable() const noexcept {
-        return all_finite && measured > 0 && std::isfinite(max_error) &&
-               max_error <= kViabilityBound;
+        return all_finite && measured > 0 && surface_failures == 0;
     }
 };
 
@@ -488,16 +597,21 @@ enum class FinalPick { None, Original, Retry };
     const FinalScore& original,
     const std::optional<FinalScore>& retry);
 
-/// Monotonicity statistics for a returned surface (spec D7).
+/// Monotonicity statistics for a returned surface (spec D5).
 ///
 /// Diagnostics only, never a gate: at each validation point's (m, tau, r),
 /// scan 7 equally spaced sigma across `ctx.sample_bounds` and count steps
-/// where the price falls by more than the noise floor.
+/// where the price falls by more than the point's noise floor.
+///
+/// The noise floor is a *reporting threshold*: the largest finite reference
+/// error estimate among `delta`, `delta_lo` and `delta_hi`, floored at
+/// `1e-8 * spot`.  A point with no finite estimate has no floor to report
+/// against and is skipped.  `target_iv_error` is unused by the threshold and
+/// kept only so callers need not re-derive the scan's context.
 void scan_monotonicity(const std::vector<ValidationPoint>& points,
                        const SurfaceHandle& handle,
                        const RefinementContext& ctx,
                        double target_iv_error,
-                       double vega_floor,
                        BuildDiagnostics& diag);
 
 }  // namespace detail

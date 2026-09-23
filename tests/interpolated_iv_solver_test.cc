@@ -130,6 +130,34 @@ TEST_F(InterpolatedIVSolverTest, SolveOTMPut) {
     // Test passes as long as it doesn't crash
 }
 
+// Regression: the inversion moved out of this header into
+// //src/option:surface_inversion (issue #500, task 2).  The code path and its
+// thresholds are unchanged, but the arithmetic now happens in a different
+// translation unit, so answers are only guaranteed equal to within contraction
+// noise.  These pins exist to make any *larger* drift visible: a change here
+// means the algorithm moved, not the compiler.
+TEST_F(InterpolatedIVSolverTest, PinsGoldenImpliedVols) {
+    auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
+    ASSERT_TRUE(solver_result.has_value());
+    auto& solver = solver_result.value();
+
+    // Same fixture as SolveATMPut.
+    IVQuery atm(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05,
+                   .option_type = OptionType::PUT}, 8.0);
+    auto atm_result = solver.solve(atm);
+    ASSERT_TRUE(atm_result.has_value());
+    EXPECT_NEAR(atm_result->implied_vol, 0.25094392008047284, 1e-12);
+
+    // Same fixture as SolveOTMPut.
+    IVQuery otm(
+        OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05,
+                   .option_type = OptionType::PUT}, 3.0);
+    auto otm_result = solver.solve(otm);
+    ASSERT_TRUE(otm_result.has_value());
+    EXPECT_NEAR(otm_result->implied_vol, 0.20075435007448583, 1e-12);
+}
+
 TEST_F(InterpolatedIVSolverTest, RejectsInvalidQuery) {
     auto solver_result = InterpolatedIVSolver<BSplinePriceTable>::create(make_wrapper());
     ASSERT_TRUE(solver_result.has_value());
@@ -404,8 +432,8 @@ private:
 
 constexpr double kMarketPrice = 8.0;
 
-/// ATM PUT query.  Time value == market price, so adaptive_bounds leaves the
-/// bracket at the surface's own sigma range.
+/// ATM PUT query.  Time value == market price, so effective_sigma_bracket
+/// leaves the bracket at the surface's own sigma range.
 IVQuery screen_query() {
     return IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
                               .rate = 0.05, .option_type = OptionType::PUT},

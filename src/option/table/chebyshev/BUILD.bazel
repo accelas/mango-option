@@ -56,6 +56,7 @@ cc_library(
         "//src/option/table:split_surface",
         "//src/option/table:tau_segment_split",
         "//src/support:error_types",
+        "//src/support:ivcalc_trace_hdr",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table/chebyshev",

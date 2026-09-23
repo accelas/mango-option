@@ -229,6 +229,10 @@ def test_build_diagnostics_property():
         "holdout_points_invalid",
         "monotonicity_violations", "monotonicity_points_invalid",
         "worst_vega_slope", "n_iterations",
+        "holdout_points_unresolved", "holdout_points_unsupported",
+        "surface_failures", "edge_band_rescues", "max_price_residual",
+        "reference_uncertainty_max", "reference_solves_fine",
+        "reference_solves_coarse",
     }
     assert expected_keys <= diag.keys()
     assert diag["total_iterations"] >= 1
@@ -250,6 +254,24 @@ def test_build_diagnostics_property():
         table.save(path)
         loaded = mo.PriceTable.load(path)
         assert loaded.build_diagnostics is None
+
+
+def test_vega_floor_is_ignored_and_new_diagnostics_present():
+    config = make_price_table_config()
+    adaptive = mo.AdaptiveGridParams()
+    adaptive.target_iv_error = 0.002
+    adaptive.max_iter = 2
+    adaptive.validation_samples = 16
+    adaptive.vega_floor = 0.0          # deprecated, ignored (spec D6)
+    config.adaptive = adaptive
+    table = mo.make_price_table(config)
+    diag = table.build_diagnostics
+    for key in ("holdout_points_unresolved", "holdout_points_unsupported", "surface_failures",
+                "edge_band_rescues", "max_price_residual", "reference_uncertainty_max",
+                "reference_solves_fine", "reference_solves_coarse"):
+        assert key in diag, key
+    assert diag["surface_failures"] == 0
+    assert diag["reference_solves_fine"] > 0
 
 
 def test_price_table_validation_and_iv_error_parity():
@@ -389,7 +411,10 @@ def main():
         test_dividend_conversions,
         test_fdm_iv_solver_honors_discrete_dividends,
         test_bspline_4d_price_table_workflow_and_persistence_paths,
+        test_build_diagnostics_property,
+        test_vega_floor_is_ignored_and_new_diagnostics_present,
         test_price_table_validation_and_iv_error_parity,
+        test_multiple_root_screen_is_configurable,
         test_legacy_interpolated_iv_solver_factory_still_works,
         test_typed_exceptions_for_validation_and_persistence,
     ]

@@ -287,6 +287,14 @@ py::object build_diagnostics_to_pyobject(
     result["holdout_points"] = d.holdout_points;
     result["holdout_points_measured"] = d.holdout_points_measured;
     result["holdout_points_invalid"] = d.holdout_points_invalid;
+    result["holdout_points_unresolved"] = d.holdout_points_unresolved;
+    result["holdout_points_unsupported"] = d.holdout_points_unsupported;
+    result["surface_failures"] = d.surface_failures;
+    result["edge_band_rescues"] = d.edge_band_rescues;
+    result["max_price_residual"] = d.max_price_residual;
+    result["reference_uncertainty_max"] = d.reference_uncertainty_max;
+    result["reference_solves_fine"] = d.reference_solves_fine;
+    result["reference_solves_coarse"] = d.reference_solves_coarse;
     result["monotonicity_violations"] = d.monotonicity_violations;
     result["monotonicity_points_invalid"] = d.monotonicity_points_invalid;
     result["worst_vega_slope"] = d.worst_vega_slope;
@@ -929,7 +937,10 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("validation_samples", &mango::AdaptiveGridParams::validation_samples)
         .def_readwrite("refinement_factor", &mango::AdaptiveGridParams::refinement_factor)
         .def_readwrite("lhs_seed", &mango::AdaptiveGridParams::lhs_seed)
-        .def_readwrite("vega_floor", &mango::AdaptiveGridParams::vega_floor)
+        .def_readwrite("vega_floor", &mango::AdaptiveGridParams::vega_floor,
+                       "Deprecated and ignored since the round-trip metric; "
+                       "kept for C ABI layout stability until #463 removes "
+                       "it.")
         .def_readwrite("max_failure_rate", &mango::AdaptiveGridParams::max_failure_rate);
 
     // MultiKRefConfig
@@ -1065,9 +1076,20 @@ PYBIND11_MODULE(mango_option, m) {
                 achieved_max_error, achieved_avg_error, picked_iteration,
                 total_iterations, final_rebuild, build_failure_fallback,
                 holdout_points, holdout_points_measured,
-                holdout_points_invalid,
+                holdout_points_invalid, holdout_points_unresolved,
+                holdout_points_unsupported, surface_failures,
+                edge_band_rescues, max_price_residual,
+                reference_uncertainty_max, reference_solves_fine,
+                reference_solves_coarse,
                 monotonicity_violations, monotonicity_points_invalid,
                 worst_vega_slope, n_iterations.
+
+                max_price_residual and reference_uncertainty_max are
+                estimates of the round-trip metric's largest observed
+                residual and reference uncertainty over the prepared holdout
+                points -- every point with a reference, not only the measured
+                ones; they are outcomes of the build, not bounds or
+                guarantees on any subsequent query.
             )pbdoc")
         .def("price",
             [](const mango::AnyPriceTable& table, const mango::PricingParams& params) {

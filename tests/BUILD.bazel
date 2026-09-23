@@ -1044,6 +1044,16 @@ cc_test(
 )
 
 cc_test(
+    name = "surface_inversion_test",
+    size = "small",
+    srcs = ["surface_inversion_test.cc"],
+    deps = [
+        "//src/option:surface_inversion",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "interpolated_iv_solver_test",
     size = "medium",
     srcs = ["interpolated_iv_solver_test.cc"],
@@ -1202,6 +1212,43 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "reference_oracle_test",
+    size = "medium",
+    srcs = ["reference_oracle_test.cc"],
+    deps = [
+        "//src/option:grid_spec_types",
+        "//src/option:option_spec",
+        "//src/option/table:adaptive_metrics",
+        "//src/option/table:adaptive_refinement",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Calibration of the reference oracle's convergence order and uncertainty
+# floor (spec D8): four nested grid levels x three stencil sigma x two
+# tau_iv on six points, at High, plus Ultra/widened-domain/split-axis runs —
+# a few hundred real PDE solves.  Tagged `slow` only — NOT `manual`, because
+# Bazel drops manual-tagged targets from `//tests/...` wildcard expansion
+# before --test_tag_filters applies, which would hide this target from the
+# nightly `--test_tag_filters=slow` run.  Per-PR CI excludes it with
+# `--test_tag_filters=-manual,-slow`.  size = "enormous" grants the 3600s
+# default timeout.
+cc_test(
+    name = "reference_oracle_calibration_test",
+    size = "enormous",
+    srcs = ["reference_oracle_calibration_test.cc"],
+    tags = ["slow"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:grid_spec_types",
+        "//src/option/table:adaptive_grid_types",
+        "//src/option/table:adaptive_metrics",
+        "//src/option/table:adaptive_refinement",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Fast logic/unit tests for the adaptive grid builder: refinement-loop
 # decisions, segmentation, caching, error binning.  No real PDE builds —
 # those live in :adaptive_surface_build_integration_test.  This target is
@@ -1234,14 +1281,20 @@ cc_test(
 
 # End-to-end adaptive builds, split out of :adaptive_grid_builder_test so the
 # CI dbg assertion pass stays fast.  This target holds only the cheap wiring
-# and regression invariants (~100s CPU local fastbuild, slowest case ~16s);
-# the heavy cases (~536s CPU, up to 60s each) that made this the long pole of
+# and regression invariants; the heavy cases that made this the long pole of
 # per-PR CI live in :adaptive_surface_build_slow_test (nightly).
+#
+# Six shards, not four (2026-09-21).  Under the round-trip metric a
+# validation sample is a six-solve reference stencil at the High profile, so
+# the per-case cost roughly tripled and four shards left a 307 s slowest
+# shard against a 225 s average.  Two more shards spread the same work; the
+# cases themselves stay per-PR because each one is a wiring or regression
+# invariant, not a measurement.
 cc_test(
     name = "adaptive_surface_build_integration_test",
     size = "large",
     timeout = "long",
-    shard_count = 4,
+    shard_count = 6,
     srcs = ["adaptive_surface_build_integration_test.cc"],
     deps = [
         "//src/math:cubic_spline_solver",
@@ -1256,6 +1309,7 @@ cc_test(
         "//src/option/table/bspline:bspline_surface",
         "//src/option/table/chebyshev:chebyshev_adaptive",
         "//src/option/table/chebyshev:chebyshev_surface",
+        "//src/option/table/chebyshev:chebyshev_table_builder",
         "//src/math/chebyshev:chebyshev_nodes",
         "//src/option:american_option",
         "//src/option:american_option_batch",
@@ -1321,10 +1375,17 @@ cc_test(
     ],
 )
 
+# Three shards (2026-09-21).  Each of the eight cases is a full adaptive
+# build, and under the round-trip metric a validation sample is a six-solve
+# reference stencil at the High profile, so the target runs about 217 s under
+# per-PR load -- close enough to the 300 s "moderate" timeout to be a flake
+# risk, and long enough to sit on the suite's critical path.  Sharding cuts
+# the wall time instead of just raising the ceiling.
 cc_test(
     name = "adaptive_grid_builder_integration_test",
     size = "medium",
     timeout = "moderate",
+    shard_count = 3,
     srcs = ["adaptive_grid_builder_integration_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
@@ -1547,8 +1608,11 @@ cc_test(
     # manual-tagged targets from `//tests/...` wildcard expansion before
     # --test_tag_filters applies, which would hide this target from the
     # nightly `--test_tag_filters=slow` run.  Per-PR CI excludes it with
-    # `--test_tag_filters=-manual,-slow`.  One shard per case.
-    shard_count = 5,
+    # `--test_tag_filters=-manual,-slow`.  One shard per case: the benchmark
+    # maturity sweep was split into four cases in 2026-09, and the two most
+    # expensive builds (its 2-year case and the refused documented dividend
+    # config) must not land in one shard.
+    shard_count = 9,
     srcs = ["iv_solver_factory_slow_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],

@@ -14,7 +14,6 @@ TEST(AdaptiveGridParamsTest, DefaultValues) {
     EXPECT_EQ(params.validation_samples, 64);
     EXPECT_DOUBLE_EQ(params.refinement_factor, 1.3);
     EXPECT_EQ(params.lhs_seed, 42);
-    EXPECT_DOUBLE_EQ(params.vega_floor, 1e-4);
 }
 
 TEST(AdaptiveGridParamsTest, CustomValues) {
@@ -25,7 +24,6 @@ TEST(AdaptiveGridParamsTest, CustomValues) {
     params.validation_samples = 128;
     params.refinement_factor = 1.5;
     params.lhs_seed = 12345;
-    params.vega_floor = 1e-3;
 
     EXPECT_DOUBLE_EQ(params.target_iv_error, 0.001);
     EXPECT_EQ(params.max_iter, 10);
@@ -33,7 +31,18 @@ TEST(AdaptiveGridParamsTest, CustomValues) {
     EXPECT_EQ(params.validation_samples, 128);
     EXPECT_DOUBLE_EQ(params.refinement_factor, 1.5);
     EXPECT_EQ(params.lhs_seed, 12345);
-    EXPECT_DOUBLE_EQ(params.vega_floor, 1e-3);
+}
+
+// vega_floor is deprecated and ignored since the round-trip metric (spec
+// 2026-09-19 D6); it is kept only for C ABI layout stability until #463
+// removes it.  This test asserts the field still exists and accepts
+// arbitrary values without affecting anything else.
+TEST(AdaptiveGridParamsTest, VegaFloorIsIgnoredButAssignable) {
+    AdaptiveGridParams params;
+    params.vega_floor = 0.0;
+    EXPECT_DOUBLE_EQ(params.vega_floor, 0.0);
+    params.vega_floor = -1.0;
+    EXPECT_DOUBLE_EQ(params.vega_floor, -1.0);
 }
 
 TEST(IterationStatsTest, DefaultConstruction) {

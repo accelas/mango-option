@@ -64,6 +64,8 @@ pub struct AdaptiveGridParams {
     pub validation_samples: usize,
     pub refinement_factor: f64,
     pub lhs_seed: u64,
+    /// Deprecated and ignored since the round-trip metric; kept for C ABI
+    /// layout stability until #463 removes it.
     pub vega_floor: f64,
     pub max_failure_rate: f64,
 }

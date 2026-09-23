@@ -15,6 +15,7 @@
 #include <cmath>
 #include <iostream>
 #include <chrono>
+#include <string>
 
 using namespace mango;
 
@@ -70,6 +71,38 @@ std::vector<IVQuery> make_test_queries() {
     return queries;
 }
 
+/// What the public holdout counters do and do not say.
+///
+/// Every prepared holdout point ends in exactly one of four outcomes --
+/// measured, unresolved, surface failure, or a non-finite evaluation
+/// ("skipped").  `skipped` is never reported on its own: it is folded into
+/// `holdout_points_invalid` together with the preparations that failed and
+/// so never entered the prepared set at all (`invalid + final_score.skipped`
+/// in bspline_adaptive.cpp and chebyshev_adaptive.cpp).  The three separable
+/// outcomes can therefore only under-count the prepared set, and adding the
+/// folded counter can only over-count it; an exact identity is not
+/// expressible from the public fields.
+///
+/// Bug: the previous `measured + unresolved + unsupported + invalid ==
+/// holdout_points` was not an identity.  `holdout_points` is already the
+/// prepared set, so it excludes the unsupported and invalid samples the
+/// assertion subtracted a second time, and on the segmented Chebyshev path
+/// it mixed two draws: `holdout_points_unsupported` is the sizing loop's
+/// fixed-holdout exclusion count while `holdout_points` is the final
+/// validation set.
+///
+/// The upper half of the bracket is definitional only on the builders that
+/// fold `skipped` into `holdout_points_invalid`, which is where this helper
+/// is used: the final-validation paths of both segmented builders.
+void expect_holdout_accounting(const BuildDiagnostics& d) {
+    EXPECT_LE(d.holdout_points_measured + d.holdout_points_unresolved
+                  + d.surface_failures,
+              d.holdout_points);
+    EXPECT_GE(d.holdout_points_measured + d.holdout_points_unresolved
+                  + d.surface_failures + d.holdout_points_invalid,
+              d.holdout_points);
+}
+
 /// The adaptive discrete-dividend configuration published in CLAUDE.md
 /// (Pattern 4) and docs/API_GUIDE.md ("Discrete Dividends with Adaptive
 /// Grid").  Shared by the two tests below so the pinning and the
@@ -103,10 +136,10 @@ IVSolverFactoryConfig documented_adaptive_dividend_config() {
 }
 
 // The documented adaptive discrete-dividend config, pinned so the
-// documentation cannot silently rot into a configuration the viability gate
-// refuses.  Everything a reader would copy is verbatim -- including
-// `AdaptiveGridParams`, which is *not* relaxed here: the whole point of the
-// pin is that the published parameters are the ones that were measured.
+// documentation cannot silently rot.  Everything a reader would copy is
+// verbatim -- including `AdaptiveGridParams`, which is *not* relaxed here:
+// the whole point of the pin is that the published parameters are the ones
+// that were measured.
 //
 // The pairing of moneyness grid and K_refs is the fragile part.  The
 // assembled surface blends K_ref-struck prices linearly in strike, so the
@@ -114,52 +147,35 @@ IVSolverFactoryConfig documented_adaptive_dividend_config() {
 // S/K in [0.92, 1.08] means strikes in [92.6, 108.7], served here by K_refs
 // at 2.5 % spacing across [90, 110].
 //
-// Corrected fixed-expiry oracle, 2026-09-06: max 0.00744049 (74.4 bps),
-// 64 measured / 0 invalid points. The 0.001 (10 bps) target is still unmet;
-// this gate retains current viability admission and the historical ceiling.
-// Default fastbuild at 2 threads took 1445.6s on the shared test host; the live
-// stack showed bounded final assembly over 9 K_refs after refinement finished.
+// History: under the retired vega-scaled metric this configuration measured
+// 74.4 bps against a 0.20 scalar viability bound and was admitted.  The
+// round-trip metric refuses it; what that number was hiding is recorded
+// below.
+// Regression: the documented adaptive discrete-dividend configuration is
+// refused, and the refusal is the measured outcome, pinned as evidence for
+// the follow-up rather than worked around.
+// Bug: segmented Chebyshev leaf oscillates in sigma across the early-exercise
+// shoulder (#506); the metric now reports it instead of dividing it
+// by a vanishing vega.
+// Measured 2026-09-21 over 8 candidates: 14 SurfaceNoRoot, edge_band_rescues
+// = 3 -- the acceptance band does rescue the smallest misses, and the rest
+// are simply larger than the 10 bps tolerance.  Worst at K = 104.7337228,
+// tau = 0.1244759, sigma0 = 0.1184649, r = 0.0418301: reference 4.8309965
+// against a surface of 4.9520419, a residual of 1.156e-3 of strike, whose
+// value at the band floor 0.099 is 4.8435484 -- putting the only root about
+// 20 bps below the band, 30 bps below sigma_min, with a vega of 6.231.
+// Second worst at K = 104.7386464: residual 2.94e-4 of strike, root 19.5 bps
+// below the band.  Under the retired vega-scaled metric this configuration
+// reported 74.4 bps and passed; the error was always there, divided by a
+// vanishing vega.  The solve-through assertion this test also carried
+// returns with the surface.
 TEST(IVSolverFactorySegmented, DocumentedAdaptiveDiscreteDividendConfig) {
     auto config = documented_adaptive_dividend_config();
 
     auto solver = make_interpolated_iv_solver(config);
-    ASSERT_TRUE(solver.has_value())
-        << "the documented adaptive discrete-dividend config must build a "
-           "viable surface: code "
-        << static_cast<int>(solver.error().code);
-
-    auto diag = solver->build_diagnostics();
-    ASSERT_TRUE(diag.has_value()) << "an adaptive build must report diagnostics";
-    EXPECT_GT(diag->holdout_points_measured, 0u)
-        << "a surface measured nowhere certifies nothing";
-    EXPECT_LE(diag->achieved_max_error, 0.20)
-        << "measured " << diag->achieved_max_error * 1e4 << " bps against the "
-           "0.20 viability bound";
-    // Preserve the existing ceiling for this documented configuration.
-    EXPECT_LE(diag->achieved_max_error, 0.10)
-        << "the corrected oracle measured 74.4 bps; now measuring "
-        << diag->achieved_max_error * 1e4
-        << " bps means it has degraded materially";
-
-    OptionSpec spec{
-        .spot = 100.0, .strike = 95.0, .maturity = 0.6,
-        .rate = 0.05, .dividend_yield = 0.01,
-        .option_type = OptionType::PUT
-    };
-    PricingParams pricing_params(spec, 0.20);
-    // At tau=.6, .4 years elapsed: d=.25 is past; d=.5 is .1 ahead.
-    // Explicit offsets make this a separate oracle for schedule conversion.
-    pricing_params.discrete_dividends = {{0.1, 1.5}};
-    auto ref = solve_american_option(pricing_params);
-    ASSERT_TRUE(ref.has_value());
-
-    IVQuery query(spec, ref->value(), pricing_params.discrete_dividends);
-    auto result = solver->solve(query);
-    ASSERT_TRUE(result.has_value())
-        << "the documented config must also solve, not merely build: code "
-        << static_cast<int>(result.error().code);
-    EXPECT_GT(result->implied_vol, 0.0);
-    EXPECT_LT(result->implied_vol, 3.0);
+    ASSERT_FALSE(solver.has_value())
+        << "a leaf the shipped inversion cannot round-trip must not certify";
+    EXPECT_EQ(solver.error().code, ValidationErrorCode::NoViableSurface);
 }
 
 // Regression: the documented raw-sampling configuration reports its achieved
@@ -175,6 +191,12 @@ TEST(IVSolverFactorySegmented, DocumentedBSplineConfigReportsAccuracyAndSolves) 
     ASSERT_TRUE(diagnostics);
     EXPECT_EQ(diagnostics->target_met,
               diagnostics->achieved_max_error <= config.adaptive->target_iv_error);
+    // Every prepared holdout point is accounted for under exactly one
+    // outcome (see expect_holdout_accounting for why the public fields only
+    // bracket that), and the measured count is the one observed on
+    // 2026-09-21 under the round-trip metric (spec D3, rev 5).  The
+    // invariant is the contract; the number is provenance.
+    expect_holdout_accounting(*diagnostics);
     EXPECT_EQ(diagnostics->holdout_points_measured, 64u);
     EXPECT_EQ(diagnostics->holdout_points_invalid, 0u);
     EXPECT_LE(diagnostics->achieved_max_error, 0.20); // Existing viability contract.
@@ -202,10 +224,11 @@ TEST(IVSolverFactorySegmented, DocumentedBSplineConfigReportsAccuracyAndSolves) 
 // and nothing outside the manual benchmark noticed (#462). The documented
 // pin above uses a different yield, schedule and a single maturity, so it
 // cannot catch this. Viability only: no accuracy number is pinned here.
-TEST(IVSolverFactorySegmented, BenchmarkDividendsConfigBuildsAtEveryMaturity) {
-    // Mirrors benchmarks/interp_iv_safety.cc kDoc* constants + quarterly_div_schedule.
-    const std::vector<double> maturities = {7.0 / 365, 14.0 / 365, 30.0 / 365, 60.0 / 365,
-                                            90.0 / 365, 180.0 / 365, 1.0, 2.0};
+// Split short from long (2026-09-21): under the round-trip metric the loop no
+// longer aborts at its first maturity, so running all eight in one test
+// exceeded the 1800 s nightly budget.  Same assertions, two shards.
+static void check_benchmark_dividend_maturities(
+    const std::vector<double>& maturities) {
     for (double T : maturities) {
         std::vector<Dividend> divs;
         for (double t = 0.25; t < T; t += 0.25) divs.push_back({.calendar_time = t, .amount = 0.50});
@@ -223,11 +246,59 @@ TEST(IVSolverFactorySegmented, BenchmarkDividendsConfigBuildsAtEveryMaturity) {
                 .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0, 102.5, 105.0, 107.5, 110.0}}},
         };
         auto solver = make_interpolated_iv_solver(config);
+        if (T == 7.0 / 365 || T == 60.0 / 365) {
+            // Regression: the two short expiries cannot be measured, and the
+            // refusals are the measured outcome; the longer maturities are
+            // what keep the benchmark's config honest.
+            // Bug: at 7 days (tau ~ 0.0022) a +-10 bps sigma bump moves the
+            // price by 1.32e-3 against a required separation of 1.53e-3, so
+            // most references cannot resolve (D2).  Measured 2026-09-21: 64
+            // prepared, 12 resolved, against a floor of max(4, 64/4) = 16.
+            // More samples do not help -- the floor is N/4, so the required
+            // fraction stays at 25 % while the resolved fraction is 18.8 %.
+            // At 60 days the references do resolve and the surface is
+            // accurate -- residual 2.9e-6 of strike at K = 106.3085, tau =
+            // 0.0378, sigma0 = 0.1770 -- but the sample sits 7.1e-6 of strike
+            // above intrinsic with a vega of 0.412, so the 17-point screen
+            // reports MultipleRoots on a price flat in sigma: 30 such
+            // SurfaceAmbiguous points across 8 candidates, none viable.
+            // edge_band_rescues = 0 in both cases.
+            ASSERT_FALSE(solver.has_value()) << "T=" << T;
+            EXPECT_TRUE(solver.error().code ==
+                            ValidationErrorCode::AdaptiveValidationFailed ||
+                        solver.error().code ==
+                            ValidationErrorCode::NoViableSurface)
+                << "T=" << T << " code " << static_cast<int>(solver.error().code);
+            continue;
+        }
         ASSERT_TRUE(solver.has_value()) << "T=" << T << " code " << static_cast<int>(solver.error().code);
         auto diag = solver->build_diagnostics();
         ASSERT_TRUE(diag.has_value());
         EXPECT_GT(diag->holdout_points_measured, 0u) << "T=" << T;
+        SCOPED_TRACE("T=" + std::to_string(T));
+        expect_holdout_accounting(*diag);
     }
+}
+
+// Mirrors benchmarks/interp_iv_safety.cc kDoc* constants + quarterly_div_schedule.
+TEST(IVSolverFactorySegmented, BenchmarkDividendsConfigBuildsAtShortMaturities) {
+    check_benchmark_dividend_maturities(
+        {7.0 / 365, 14.0 / 365, 30.0 / 365, 60.0 / 365});
+}
+
+TEST(IVSolverFactorySegmented, BenchmarkDividendsConfigBuildsAtMidMaturities) {
+    check_benchmark_dividend_maturities({90.0 / 365, 180.0 / 365});
+}
+
+// One build each: at a 1y and a 2y expiry with a quarterly schedule these are
+// the two most expensive surfaces in either suite, and sharing a test put the
+// pair over the 1800 s nightly budget.
+TEST(IVSolverFactorySegmented, BenchmarkDividendsConfigBuildsAtOneYear) {
+    check_benchmark_dividend_maturities({1.0});
+}
+
+TEST(IVSolverFactorySegmented, BenchmarkDividendsConfigBuildsAtTwoYears) {
+    check_benchmark_dividend_maturities({2.0});
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +436,22 @@ TEST(IVSolverFactoryChebyshev, ContinuousAdaptiveCapsShortMaturity) {
             .target_iv_error = 0.01, .max_iter = 1, .validation_samples = 16};
         config.backend = ChebyshevBackend{.maturity = maturity};
         auto table = make_price_table(config);
+        if (maturity == 0.005) {
+            // Regression: the 1.8-day expiry is refused, and the refusal is
+            // the measured outcome; the maturity admission this test is about
+            // is exercised by the three longer expiries.
+            // Bug: at tau ~ 0.0028 the surface's vega is 0.00997, so a price
+            // error of 4.25e-4 -- a residual of 5.37e-6 of strike, i.e. the
+            // surface is right to five parts per million -- divides into
+            // about 426 bps of volatility.  Measured 2026-09-21 at K =
+            // 96.9611, tau = 0.0028155, sigma0 = 0.1811473: the only root
+            // lies 426 bps below the acceptance band's floor of 0.14, far
+            // past the 100 bps tolerance the band grants.
+            // edge_band_rescues = 0.
+            ASSERT_FALSE(table) << "a vega of 0.01 cannot carry an IV";
+            EXPECT_EQ(table.error().code, ValidationErrorCode::NoViableSurface);
+            continue;
+        }
         ASSERT_TRUE(table) << static_cast<int>(table.error().code);
         PricingParams p(OptionSpec{
             .spot = 100, .strike = 100, .maturity = maturity,

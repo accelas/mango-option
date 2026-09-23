@@ -853,17 +853,18 @@ After the first iteration, the sampling becomes **two-phase**: half the budget (
 
 #### Stage 4: Error Metric
 
-For each validation point, the error metric converts the price difference between the B-spline surface and the fresh PDE solve into an IV-equivalent error:
+Each validation point is scored by the **operational round trip**: the
+shipped inversion is run on the candidate surface at three reference prices,
+and the error is the largest distance between a recovered volatility and the
+point's own. The metric, its reference stencil, its admission rule and its
+calibration are described in
+[Adaptive validation metric (operational round trip)](#adaptive-validation-metric-operational-round-trip)
+below.
 
-$$\text{error} = \begin{cases} \displaystyle\frac{|P_\text{interp} - P_\text{ref}|}{\nu} & \text{if } \nu \geq \nu_\text{floor} \\[10pt] \displaystyle\frac{|P_\text{interp} - P_\text{ref}|}{\nu_\text{floor}} & \text{if } \nu < \nu_\text{floor} \text{ and } |P_\text{interp} - P_\text{ref}| > \varepsilon_\text{target} \cdot \nu_\text{floor} \\[10pt] \text{(skip)} & \text{otherwise} \end{cases}$$
-
-where $\nu$ is the European Black-Scholes vega at the sample point and $\nu_\text{floor} = 10^{-4}$.
-
-The first case is the standard first-order Taylor approximation $\Delta\sigma \approx \Delta P / \nu$. The second case handles deep ITM/OTM options where vega is near zero and IV is numerically ill-defined; here the floor prevents division by a tiny number. The third case skips samples where the price error is small enough that even with the floor, the point would pass — these are uninteresting for refinement decisions.
-
-Using European vega (instead of the true American vega) is a deliberate approximation. For ATM and OTM options the two are nearly identical. For deep ITM American puts, European vega overestimates vega, which underestimates the IV error — a conservative choice that may slightly under-refine those regions. Computing true American vega would require two additional PDE solves per validation point, an unacceptable cost.
-
-**Convergence check.** If $\max(\text{error}) \leq \varepsilon_\text{target}$ across all validation points, the grid is accurate enough and the algorithm terminates. Otherwise, the error data is passed to the error attribution stage.
+**Convergence check.** If the largest measured error is at most
+$\varepsilon_\text{target}$ across the validation points, the grid is
+accurate enough and the algorithm terminates. Otherwise, the error data is
+passed to the error attribution stage.
 
 #### Stage 5: Error Attribution and Targeted Refinement
 
@@ -890,6 +891,363 @@ where $f = 1.3$ is the refinement factor (30% geometric growth), and the absolut
 If no problematic bins are identified (errors are spread uniformly), the algorithm falls back to uniform midpoint insertion across the entire dimension.
 
 **Iteration budget.** The default maximum is 5 iterations. Convergence typically occurs in 2–3 iterations for a 5 bps target, since each iteration both adds points where needed and benefits from the slice cache (only new $(\sigma, r)$ pairs require fresh PDE solves). The total PDE solve cost is the sum of table solves (new slices only, thanks to caching) plus validation solves ($N$ per iteration).
+
+---
+
+### Adaptive validation metric (operational round trip)
+
+Stage 4 scores a validation point by running the product's own inversion on
+the candidate surface. This section states what that measures and what it
+does not.
+
+**What this metric is.** Everything below is an empirical operational
+measurement on the declared sample set.
+
+- The reference is a numerical oracle. Its uncertainty $\hat\delta$ is a
+  grid-convergence *estimate*, never a bound; $p$ is a *calibrated constant*.
+- "Resolved" means the oracle's three estimated price intervals are
+  separated in the expected order and all three target prices are valid
+  queries. It is a statement about numbers, made before any candidate
+  surface exists. It does not claim monotonicity, uniqueness, or a
+  continuous-model enclosure, and it does not bound the oracle's actual
+  error.
+- The score is the outcome of running the **shipped** inversion on the
+  candidate at three target prices. Nothing is claimed about prices between
+  them. That three-price test is the whole uncertainty contract.
+- Rejecting a candidate on a resolved failure means "no resolved failure on
+  the declared fresh and holdout sets", not a domain-wide maximum.
+- The forward-price residual is recorded and never gated. Unresolved regions
+  carry no price acceptance requirement.
+- A "surface inversion failure" is an algorithmic outcome of the shipped
+  solver, not proof of mathematical non-existence.
+
+#### The reference stencil
+
+Write $\tau_{iv}$ for `target_iv_error` and $(S, K, \tau, \sigma_0, r)$ for a
+validation point. The oracle solves the American PDE at the `High` accuracy
+profile on two nested grids, $G$ (fine) and $G_{1/2}$ (coarse), at three
+volatilities — six solves per point:
+
+| Solve | $\sigma$ | Grid |
+|---|---|---|
+| $y$, $y_{1/2}$ | $\sigma_0$ | $G$, $G_{1/2}$ |
+| $lo$, $lo_{1/2}$ | $\sigma_0 - \tau_{iv}$ | $G$, $G_{1/2}$ |
+| $hi$, $hi_{1/2}$ | $\sigma_0 + \tau_{iv}$ | $G$, $G_{1/2}$ |
+
+One grid family serves all six. It is built once per point, at the widest
+stencil member $\sigma_0 + \tau_{iv}$, so no member is re-gridded and no
+difference between two solves is a difference between two grids.
+
+**Nested grid family.** `estimate_pde_grid` supplies a spatial count $n_0$.
+The family takes the smallest $n \equiv 1 \pmod{16}$ with $n \ge n_0$ and
+$n \le$ the profile's `max_spatial_points`, and re-samples the same
+multi-sinh generator at $n$ points over the same domain. Every generator is
+a pure map of $\eta = i/(n-1)$, so level $k$ — every $2^k$-th node of level 0
+— is nested exactly inside level 0, with an odd count and a shared middle
+index for $k \le 3$. The coarse grid is therefore literally the
+every-other-node subsequence of the fine grid, and the spatial refinement
+ratio is exactly 2. In time, level $k$ requests
+$\lceil n_\text{time}/2^k \rceil$ steps with the event times as mandatory
+points; `with_mandatory_points` rounds per event segment, so the achieved
+temporal ratio is 2 up to that rounding and can be 1:1 inside a very short
+event interval. The calibrated $p$ is therefore an *effective* order for this
+family under equal-coordinate refinement, not an exact joint Richardson
+exponent.
+
+When the estimate lands within 15 points of the profile cap, no
+$n \equiv 1 \pmod{16}$ count fits above it and the family rounds *down*
+instead, recording `rounded_down`. Measured case: the ITM 2-year put at
+`High` estimates 3495 points, which rounds down to 3489 under the strict
+3500 cap. The fine grid is then at most 15 points coarser than the estimate,
+which the cap had already declared acceptable.
+
+**Uncertainty estimate.** For each stencil volatility,
+
+$$\hat\delta \;=\; \max\!\left(F_s \cdot \frac{|V - V_{1/2}|}{2^p - 1},\;
+\texttt{kReferenceUncertaintyFloor} \cdot K\right)$$
+
+with $F_s = 3$ (Roache's two-grid safety factor), $p = 1.0$ (calibrated,
+below), and the floor $10^{-7}$ relative to the strike of the contract
+actually solved. This is Roache's generalized-Richardson estimator, not a
+bound: a two-grid difference cannot see bias shared by both grids, and a
+profile-level $p$ does not establish a pointwise order. The floor is the
+oracle's own calibrated accuracy scale. Without it, two discretizations that
+agree exactly — both sitting on the obstacle at a near-intrinsic point —
+estimate zero uncertainty, and the stencil then admits a bracket separated
+by microdollars that the shipped inversion cannot invert.
+
+#### Admission: resolved points
+
+A point is **resolved at $\tau_{iv}$** when all six stencil prices are
+finite, the three estimated price intervals are separated in the expected
+order,
+
+$$y - \hat\delta \;>\; lo + \hat\delta_{lo}
+\qquad\text{and}\qquad
+hi - \hat\delta_{hi} \;>\; y + \hat\delta ,$$
+
+and each of the three targets $y - \hat\delta$, $y$, $y + \hat\delta$ passes
+the product's own query validation: finite, positive, at least intrinsic,
+and at most the upper no-arbitrage value (spot for calls, strike times the
+largest discount factor for puts, which exceeds 1 under negative rates).
+
+Admission compares numbers and claims nothing else. In the exercise region
+$lo = y = hi$ and the point is unresolved. Where vega is small the
+separation falls inside the estimates and the point is unresolved. The test
+never reads the candidate surface, so every candidate in a run is admitted
+on exactly the same points. Unresolved points produce no IV statistic and no
+refinement bin; they are counted, and their price residual is still
+recorded.
+
+This replaces the two filters the metric used before — a time-value
+threshold relative to strike, and a minimum-vega cutoff — neither of which
+was anchored to anything.
+
+#### The round trip
+
+For a resolved point the loop runs `invert_price_on_surface`: the same
+pre-check, 17-point screen, Brent search and post-check the shipped
+`InterpolatedIVSolver` runs, with the same thresholds, at all three targets.
+The point is `Measured` only when all three invert, and then
+
+$$\text{iv\_error} \;=\; \max_k \bigl|\hat\sigma_k - \sigma_0\bigr| .$$
+
+Otherwise the point takes the most severe failure among the three, in the
+order
+
+$$\texttt{SurfaceNonFinite} \;>\; \texttt{SurfaceNonConvergent} \;>\;
+\texttt{SurfaceAmbiguous} \;>\; \texttt{SurfaceNoRoot} \;>\;
+\texttt{SurfaceVegaTooSmall} ,$$
+
+with `ReferenceUnresolved` as the separate non-evidence outcome. What this
+measures is the shipped solver's answer at three prices the oracle could
+have meant, given its estimated uncertainty. What it does not claim is
+anything about prices between them: the screen documents folds it cannot
+detect, and Brent stops on a residual-and-width condition rather than on an
+exact inverse. When $\tau_{iv}$ falls below Brent's stopping tolerance
+mapped through the surface's slope, the reported error carries that
+resolution floor.
+
+Note what the outer two targets cost: because they are $y \pm \hat\delta$, a
+surface that reproduces the reference exactly still measures
+$\text{iv\_error} \approx \hat\delta/\nu$, which the resolution condition
+keeps below $\tau_{iv}$. A point whose own accuracy is already near the
+tolerance therefore needs roughly twice that accuracy in the surface to
+report `target_met`.
+
+**Acceptance band.** The bracket is the product's, taken over the published
+$\sigma$ range of the sample domain widened by $\tau_{iv}$ at each end — the
+*edge band*. A root within the user's own tolerance beyond a published edge
+is a measurement here, so the metric is stronger than the shipped solver at
+the edges by exactly $\tau_{iv}$. Making the two coincide again is a
+query-time follow-up (#507).
+
+**Edge-band extension.** The B-spline backends fit exactly the published
+$\sigma$ range, so they have no headroom inside the band. There the surface
+is extended from its nearest supported edge by first-order extrapolation,
+
+$$S(\sigma) \;\approx\; S(\sigma_e) + \nu(\sigma_e)\,(\sigma - \sigma_e) ,$$
+
+with the surface's own vega held at its edge value. The extension is at most
+$\tau_{iv}$ long and the surface is $C^2$, so the model error is
+$O(\text{vomma}\cdot\tau_{iv}^2)$ — negligible at bps scale. The band
+therefore behaves the same on every backend. The segmented Chebyshev path is
+the only one with $\sigma$ headroom of its own.
+
+**Exact-bracket diagnostic.** On a `Measured` point, if any recovered
+$\hat\sigma_k$ lies outside the *un-widened* product bracket, the point sets
+`edge_band_rescue`: the shipped solver would have refused that query today.
+The counts are reported as `edge_band_rescues`. They change neither the
+status nor the error and gate nothing.
+
+**Price residual.** $|S(\sigma_0) - y| / K$ is recorded for every point with
+a prepared reference and a finite surface price, resolved or not. It is a
+record, never a gate.
+
+#### How the loop consumes the score
+
+**Support.** Samples at maturities the product does not serve are excluded
+before any reference is prepared, and counted separately. They are not
+references, not unresolved points, and not candidate defects. The segmented
+Chebyshev path declares its event gaps this way, because its handle and the
+product's `contains_maturity` both refuse them. The segmented B-spline path
+declares none: it builds contiguous, gapless segments and its product serves
+every maturity in $[0, T]$, so excluding event neighbourhoods there would
+measure less than the product answers. At supported maturities a non-finite
+surface price still vetoes the candidate.
+
+**Viability.** A candidate is viable when every fresh and holdout surface
+price is finite, at least one holdout point was measured, and neither the
+fresh nor the holdout pass produced a surface inversion failure. There is no
+absolute error ceiling: a measured error is a genuine $\sigma$ distance, and
+a resolved failure already rejects. If no candidate in a run is viable, the
+build fails with `NoViableSurface` rather than returning a surface the
+shipped inversion could not round-trip.
+
+**Ordering.** After the viability filter, candidates are compared by fewer
+holdout surface failures, then lower holdout max, then lower holdout
+average, then earlier iteration. Fresh failures veto and attribute; they do
+not rank. A candidate with a non-finite holdout statistic is never an
+exploration base. A candidate that measured nothing may serve as a base when
+nothing better exists, but is never returned.
+
+**Walk restart.** The axis walk restarts when a candidate has fewer holdout
+failures than the exploration base, or equal failures with the existing 2 %
+relative improvement of the holdout max.
+
+**Refinement bins.** Every surface failure, fresh or holdout, is recorded
+unconditionally into a per-axis failure bin. Axis selection and
+problematic-bin detection add those failure counts to the ordinary error
+counts, so a region the inversion cannot handle attracts points just as a
+high-error region does. A failure is never converted into a number: only
+measured errors enter the max, the average and the thresholded bins.
+
+#### Calibration record
+
+`//tests:reference_oracle_calibration_test` is the measurement. It runs
+nightly on six contracts — an ATM 1-year put with three \$0.50 dividends, the
+#500 trigger point, a 30-day OTM put, a 7-day deep-OTM put, a 2-year ITM put
+and a 6-month ATM call — over four nested grids $G_{1/2}, G, 2G, 4G$, at both
+$\tau_{iv} \in \{5\times10^{-4},\, 10^{-3}\}$ and all three stencil
+volatilities. $G$ and $G_{1/2}$ are production's own pair; $2G$ and $4G$ are
+refinements of $G$ built above the profile cap for calibration only.
+
+For a triple listed coarse to fine, with $d_\text{coarse} = V_\text{mid} -
+V_\text{coarse}$ and $d_\text{fine} = V_\text{fine} - V_\text{mid}$: the
+triple carries *insufficient signal* when either difference is at most
+$\theta = 2^{-40}K$, is *oscillatory* when the two differ in sign, and is
+otherwise *usable* with $p_\text{obs} =
+\log_2(d_\text{coarse}/d_\text{fine})$. Triple A is $(G_{1/2}, G, 2G)$ — the
+order of the very pair $\hat\delta$ differences — and sets the constant.
+Triple B is $(G, 2G, 4G)$, one level finer, and checks the order holds there
+too.
+
+Measured 2026-09-21, per point, as the range over both $\tau_{iv}$ and all
+three stencil volatilities:
+
+| Point | $p_A$ | $p_B$ |
+|---|---|---|
+| `atm-1y-3div` | 1.317 – 1.341 | 1.647 – 1.660 |
+| `500-trigger` | 1.921 – 2.369 | 1.833 – 2.444 |
+| `otm-30d` | 1.558 – 1.687 | 0.671 – 1.401 |
+| `deep-otm-7d` | 1.916 – 1.996 | 1.996 – 2.112 |
+| `itm-2y` | 1.619 – 1.829 | 1.738 – 1.780 |
+| `atm-6m-call` | 2.000 – 2.000 | 2.000 – 2.000 |
+
+72 usable triples, 0 oscillatory, 0 with insufficient signal; all six points
+carry both triples usable at the base volatility, against a coverage rule of
+four. The minimum usable $p_A$ is 1.31722 (`atm-1y-3div`, $\tau_{iv} =
+5\times10^{-4}$, $\sigma_\text{lo}$) and the maximum is 2.36881. The minimum
+over both triples is $p_\text{min} = 0.670717$ (`otm-30d`, $\tau_{iv} =
+10^{-3}$).
+
+`kReferenceConvergenceOrder` is held at **1.0**, below every observed order
+of the production pair. Triple A's minimum would license 1.3, but the next
+finer pair wanders down to 0.67 at 30 days, and a lower assumed $p$ only
+enlarges $\hat\delta$ — so 1.0 costs conservatism in the safe direction and
+buys margin where the order is not settled.
+
+The residual understatement is what $F_s$ absorbs. If the true local order is
+$p_\text{min}$ rather than the assumed $p$, the correct divisor is
+$2^{p_\text{min}} - 1$, and the estimate understates by at most
+
+$$\frac{2^{p} - 1}{2^{p_\text{min}} - 1}
+= \frac{2^{1.0} - 1}{2^{0.670717} - 1} = 1.69 ,$$
+
+against the shipped $F_s = 3$. The test asserts that coverage. It replaced a
+fixed order-stability allowance, which was tighter than the wander the free
+boundary produces: at 30 days the observed order moves through $[0.67,
+1.40]$ while successive prices agree to $6\times10^{-9}$.
+
+**Profile adequacy.** At every point $|V_\text{High} - V_\text{Ultra}| \le
+\hat\delta_\text{High}$, and
+
+$$\max \frac{|V_\text{High} - V_\text{Ultra}|}{K} = 6.34\times10^{-8}$$
+
+on the 30-day OTM put — which the floor $10^{-7}$ covers, so that constant
+stands as calibrated on this set.
+
+**Domain sensitivity.** Widening the spatial domain by one extra
+$\sigma\sqrt{T}$ moves the price by at most $\hat\delta$ at every point; the
+test asserts it. The largest shift is $2.38\times10^{-6}$, on `otm-30d`.
+
+**Split-axis attribution.** Refining space alone, time alone, and both, each
+measured against $V_G$ (reported, not asserted):
+
+| Point | domain | spatial only | temporal only | both ($2G$) |
+|---|---|---|---|---|
+| `atm-1y-3div` | 1.906e-06 | 2.015e-06 | 4.231e-06 | 6.259e-06 |
+| `500-trigger` | 3.104e-08 | 1.464e-07 | 2.635e-08 | 1.199e-07 |
+| `otm-30d` | 2.378e-06 | 1.133e-06 | 1.039e-05 | 1.158e-05 |
+| `deep-otm-7d` | 1.615e-08 | 7.749e-08 | 3.470e-07 | 4.243e-07 |
+| `itm-2y` | 1.894e-06 | 2.278e-06 | 1.823e-06 | 4.106e-06 |
+| `atm-6m-call` | 3.134e-07 | 3.944e-06 | 6.040e-08 | 4.004e-06 |
+
+Time dominates at the short-dated and dividend-carrying points; space
+dominates the 6-month call. Neither axis is negligible, which is why the
+family refines both together and the calibrated order is an effective one.
+
+If a calibration assertion fails, the constant is not tuned to pass. The next
+step is a finer controlled refinement, and, if the production pair's order
+remains unusable, a revised oracle family.
+
+#### Constant inventory
+
+| Constant | Kind | Where |
+|---|---|---|
+| `target_iv_error` | user | `AdaptiveGridParams` |
+| $\hat\delta$ | estimate (two-grid GCI) | reference stencil |
+| $p = 1.0$ | calibrated constant | reference stencil |
+| $F_s = 3$ | literature convention (Roache, two grids) | reference stencil |
+| `kReferenceAccuracy = High` | chosen from measurement | reference stencil |
+| grid rounding $n \equiv 1 \pmod{16}$ | construction rule (nesting to 3 levels) | grid family |
+| $\theta = 2^{-40}K$, four-of-six coverage, safety-factor coverage $F_s \ge (2^p-1)/(2^{p_\text{min}}-1)$ | calibration classification and acceptance policy | calibration test |
+| coverage $\max(4, N/4)$ on prepared and on resolved references | operational policy | admission |
+| inversion policy: config $\sigma$ 0.01/3.0, `vega_threshold` 1e-4, 17 screen points, zero tolerance $10^{-9}S$, Brent $10^{-6}$ (residual and width) / 50 iterations, time-value cap 1.5/2/3 | product policy, reused unchanged | round trip |
+| edge band $\tau_{iv}$ | the user's own tolerance, reused as the acceptance band | round trip |
+| `kReferenceUncertaintyFloor` $= 10^{-7}$ | calibrated constant ($\ge \max\lvert V_\text{High}-V_\text{Ultra}\rvert/K$) | reference stencil |
+| monotonicity-scan floor $10^{-8}S$ | diagnostic floor, pre-existing | monotonicity scan |
+| walk restart 2 % | pre-existing loop policy | refinement walk |
+
+Nothing else numeric appears in the metric.
+
+#### Sources
+
+The primary-source synthesis behind these choices is
+`docs/research/2026-09-19-iv-inversion-conditioning.md`.
+
+- **Higham, N. J. (2002)**, *Accuracy and Stability of Numerical Algorithms*,
+  2nd ed., SIAM, §1.6 — "forward error $\lesssim$ condition number $\times$
+  backward error". Applied to $\sigma = f(V)$, whose absolute condition
+  number is $1/\nu$: a small tolerance in $\sigma$ is attainable only where
+  the input error times $1/\nu$ is small. A first-order diagnostic, not a
+  certificate.
+- **Roache, P. J. (1994)**, "Perspective: A Method for Uniform Reporting of
+  Grid Refinement Studies", *ASME J. Fluids Eng.* 116(3):405–413 — the
+  generalized-Richardson error estimator and Grid Convergence Index, and the
+  safety factors $F_s = 1.25$ with three or more grids, $F_s = 3.0$ for a
+  bare two-grid comparison.
+- **Forsyth, P. A. & Vetzal, K. R. (2002)**, "Quadratic convergence for
+  valuing American options using a penalty method", *SIAM J. Sci. Comput.*
+  23(6):2095–2122 — Table 8.1: American put, constant timesteps, ratios
+  3.2/3.0/2.8, i.e. $p \approx 1.5$, not 2; Table 11.1: variable timesteps,
+  ratios 4.3/4.0/4.5, quadratic restored. The order that goes into a
+  Richardson estimate is a property of the scheme, the timestep policy and
+  the payoff smoothing, and it must be measured.
+- **Liu, S., Leitao, Á., Borovykh, A. & Oosterlee, C. W. (2020)**, "On
+  Calibration Neural Networks for extracting implied information from
+  American options", arXiv:2001.11786, §2.3.1 — existence of $\sigma^*$
+  rests on monotonicity of the price in the continuation region, and the
+  exercise region is where that fails.
+- **Jäckel, P. (2015)**, "Let's Be Rational", *Wilmott* 2015(75):40–53, §7 —
+  the attainable-accuracy argument: where there is no discernible vega, no
+  root-finder recovers $\sigma$ to a useful tolerance.
+- **Ackerer, D., Tagasovska, N. & Vatter, T. (2020)**, "Deep Smoothing of the
+  Implied Volatility Surface", NeurIPS 2020, arXiv:1906.05065, eq. (10) — the
+  vega-weighted RMSE, justified only as a first-order approximation when
+  $\pi_j \approx \hat\pi_j$, and applied by its authors to out-of-the-money
+  options only. That is the metric this one replaces, and the restriction is
+  why.
 
 ---
 
@@ -1042,7 +1400,7 @@ Typical behavior:
 
 For the B-spline price tables, the additional interpolation error is $O(h^4)$ per dimension. The separable fitting preserves this order. In practice, the dominant error source is the volatility dimension (highest curvature), which is why it receives 1.5× weight in the grid budget.
 
-Adaptive refinement (section 10) provides a verified error bound by testing against fresh PDE solves at random parameter combinations.
+Adaptive refinement (section 10) measures the error on a declared sample of random parameter combinations, by inverting fresh PDE reference prices on the candidate surface. The result is an empirical measurement on that sample, not a bound over the domain.
 
 ---
 

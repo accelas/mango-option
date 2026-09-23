@@ -21,6 +21,7 @@
 
 #include "mango/option/dividend_utils.hpp"
 #include "mango/option/option_spec.hpp"
+#include "mango/option/surface_inversion.hpp"
 #include "mango/option/iv_result.hpp"
 #include "mango/option/table/price_table.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
@@ -31,7 +32,6 @@
 #include "mango/option/table/chebyshev/chebyshev_surface.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"
-#include "mango/math/root_finding.hpp"
 #include <expected>
 #include <array>
 #include <cmath>
@@ -84,71 +84,6 @@ struct InterpolatedIVSolverConfig {
     /// interim measure.
     bool detect_multiple_roots = true;
 };
-
-namespace detail {
-
-/// Non-owning view of the IV objective f(sigma).
-///
-/// `screen_bracket` runs on the `noexcept` solve path, where a
-/// `std::function` conversion could heap-allocate (the solve objective
-/// captures more than the small-object buffer holds) and so introduce a
-/// `std::bad_alloc` that would terminate.  The view must not outlive the
-/// callable it wraps; the screen only calls it during the scan.
-class ObjectiveRef {
-public:
-    template <typename F>
-    ObjectiveRef(const F& f) noexcept  // NOLINT(google-explicit-constructor)
-        : ctx_(&f), call_([](const void* ctx, double sigma) {
-              return (*static_cast<const F*>(ctx))(sigma);
-          }) {}
-
-    double operator()(double sigma) const { return call_(ctx_, sigma); }
-
-private:
-    const void* ctx_;
-    double (*call_)(const void*, double);
-};
-
-/// Verdict of the multiple-root bracket screen (spec D8.2).
-///
-/// Exactly one of three outcomes is expressed:
-///  - `refusal` engaged: the screen refuses the query (MultipleRoots,
-///    NumericalInstability at a scan point, or BracketingFailed at an
-///    endpoint whose residual misses the solver tolerance).
-///  - `boundary_root` engaged: an endpoint satisfies the solver tolerance
-///    and is the only root feature; the caller returns it directly (after
-///    setting `used_rate_approximation`, which the screen cannot know).
-///  - neither engaged: proceed to Brent on `[lo, hi]` — the full bracket,
-///    or the single scan interval containing the one sign change, in which
-///    case `check_slope` is set and `f_lo`/`f_hi` carry the scan samples
-///    for the caller's post-hoc slope check.
-struct BracketScreen {
-    std::optional<IVError> refusal;
-    std::optional<IVSuccess> boundary_root;
-    double lo = 0.0;           ///< bracket to hand Brent
-    double hi = 0.0;
-    bool check_slope = false;  ///< post-hoc slope check applies to [lo, hi]
-    double f_lo = 0.0;         ///< objective at lo (valid when check_slope)
-    double f_hi = 0.0;         ///< objective at hi (valid when check_slope)
-};
-
-/// Screen the solve bracket for multiple roots before inverting (spec D8.2).
-///
-/// Samples `objective` at 17 equally spaced volatilities across
-/// `[sigma_min, sigma_max]` and classifies the sign pattern: consecutive
-/// zeros (|f| <= `zero_tol` = 1e-9 * spot) collapse into one run, a run
-/// between opposite signs is a transition, between equal signs a tangency
-/// (counted as two features — an even-multiplicity contact is at least a
-/// double root), at an endpoint a boundary root.  More than one feature is
-/// ambiguous by construction.  Pure function of its arguments; the
-/// guarantees and blind spots are documented on
-/// `InterpolatedIVSolverConfig::detect_multiple_roots`.
-[[nodiscard]] BracketScreen screen_bracket(
-    ObjectiveRef objective,
-    double sigma_min, double sigma_max,
-    double spot, double tolerance);
-
-}  // namespace detail
 
 /// Interpolation-based IV Solver
 ///
@@ -291,9 +226,6 @@ private:
 
     /// Validate query parameters
     std::optional<ValidationError> validate_query(const IVQuery& query) const;
-
-    /// Determine adaptive volatility bounds based on intrinsic value
-    std::pair<double, double> adaptive_bounds(const IVQuery& query) const;
 };
 
 // =====================================================================
@@ -613,36 +545,6 @@ InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
 }
 
 template <typename Surface>
-std::pair<double, double>
-InterpolatedIVSolver<Surface>::adaptive_bounds(const IVQuery& query) const
-{
-    double intrinsic = intrinsic_value(query.spot, query.strike, query.option_type);
-
-    // Analyze time value to set adaptive bounds
-    const double time_value = query.market_price - intrinsic;
-    const double time_value_pct = time_value / query.market_price;
-
-    double sigma_upper;
-    if (time_value_pct > 0.5) {
-        sigma_upper = 3.0;  // 300%
-    } else if (time_value_pct > 0.2) {
-        sigma_upper = 2.0;  // 200%
-    } else {
-        sigma_upper = 1.5;  // 150%
-    }
-
-    double sigma_min = std::max(config_.sigma_min, sigma_range_.first);
-    double sigma_max = std::min({sigma_upper, config_.sigma_max, sigma_range_.second});
-
-    if (sigma_min >= sigma_max) {
-        sigma_min = sigma_range_.first;
-        sigma_max = sigma_range_.second;
-    }
-
-    return {sigma_min, sigma_max};
-}
-
-template <typename Surface>
 std::expected<IVSuccess, IVError>
 InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
 {
@@ -655,19 +557,6 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
 
     const double moneyness = query.spot / query.strike;
 
-    // Get adaptive bounds
-    auto [sigma_min, sigma_max] = adaptive_bounds(query);
-
-    // Check if query is within surface bounds
-    if (!is_in_bounds(query, sigma_min) || !is_in_bounds(query, sigma_max)) {
-        return std::unexpected(IVError{
-            .code = IVErrorCode::InvalidGridConfig,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-
     // Extract zero rate for surface lookup
     // For yield curves, use zero rate = -ln(D(T))/T which matches how surfaces are built
     // Using instantaneous forward rate curve.rate(T) would be incorrect as it only
@@ -676,140 +565,51 @@ InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
     // Note: When a YieldCurve is provided, we collapse it to a single zero rate.
     // This loses term structure dynamics. For full curve support, use IVSolver.
     const bool rate_is_curve = is_yield_curve(query.rate);
-    double rate_value = get_zero_rate(query.rate, query.maturity);
+    const double rate_value = get_zero_rate(query.rate, query.maturity);
 
-    // Vega pre-check: reject queries where the option has no usable
-    // sensitivity to volatility.  Probes are the quartile points of the
-    // actual bracket (fixed probe vols could fall outside it entirely) and
-    // the maximum is signed: a uniformly negative vega is a broken surface,
-    // not a healthy one.  ~600 ns, saves a doomed Brent search.
-    if (config_.vega_threshold > 0.0) {
-        const double vega_span = sigma_max - sigma_min;
-        const double probe_vols[3] = {sigma_min + 0.25 * vega_span,
-                                      sigma_min + 0.50 * vega_span,
-                                      sigma_min + 0.75 * vega_span};
-        double max_vega = -std::numeric_limits<double>::infinity();
-        for (double sv : probe_vols) {
-            const double v = surface_.vega(query.spot, query.strike,
-                                           query.maturity, sv, rate_value);
-            if (!std::isfinite(v)) {
-                return std::unexpected(IVError{
-                    .code = IVErrorCode::NumericalInstability,
-                    .iterations = 0,
-                    .final_error = std::numeric_limits<double>::quiet_NaN(),
-                    .last_vol = sv
-                });
-            }
-            max_vega = std::max(max_vega, v);
-        }
-        if (max_vega < config_.vega_threshold) {
-            return std::unexpected(IVError{
-                .code = IVErrorCode::VegaTooSmall,
-                .iterations = 0,
-                .final_error = max_vega,
-                .last_vol = std::nullopt
-            });
-        }
-    }
-
-    // Define objective function: f(s) = Price(s) - Market_Price
-    auto objective = [&](double sigma) -> double {
-        return eval_price(moneyness, query.maturity, sigma, rate_value, query.strike) - query.market_price;
+    const SurfaceInversionPolicy policy{
+        .config_sigma_min = config_.sigma_min,
+        .config_sigma_max = config_.sigma_max,
+        .published_sigma_min = sigma_range_.first,
+        .published_sigma_max = sigma_range_.second,
+        .vega_threshold = config_.vega_threshold,
+        .detect_multiple_roots = config_.detect_multiple_roots,
+        .tolerance = config_.tolerance,
+        .max_iter = config_.max_iter
     };
 
-    // Bracket handed to Brent.  The multiple-root screen may narrow it to
-    // the single scan interval that contains a sign change.
-    double brent_lo = sigma_min;
-    double brent_hi = sigma_max;
-    bool check_narrowed_slope = false;
-    double narrowed_f_lo = 0.0;
-    double narrowed_f_hi = 0.0;
+    const auto bracket = effective_sigma_bracket(
+        query.spot, query.strike, query.option_type, query.market_price, policy);
 
-    // Multiple-root screen (spec D8.2).  A price surface that is not
-    // monotone in sigma admits several implied vols for one market price;
-    // Brent would silently return whichever one it lands on.
-    // `detail::screen_bracket` samples the objective on a uniform 17-point
-    // scan and refuses ambiguous brackets; a single sign change narrows the
-    // bracket handed to Brent.
-    if (config_.detect_multiple_roots) {
-        auto screen = detail::screen_bracket(objective, sigma_min, sigma_max,
-                                             query.spot, config_.tolerance);
-        if (screen.refusal.has_value()) {
-            return std::unexpected(*screen.refusal);
-        }
-        if (screen.boundary_root.has_value()) {
-            screen.boundary_root->used_rate_approximation = rate_is_curve;
-            return *screen.boundary_root;
-        }
-        brent_lo = screen.lo;
-        brent_hi = screen.hi;
-        check_narrowed_slope = screen.check_slope;
-        narrowed_f_lo = screen.f_lo;
-        narrowed_f_hi = screen.f_hi;
-    }
-
-    // Brent's method
-    RootFindingConfig brent_config{
-        .max_iter = config_.max_iter,
-        .brent_tol_abs = config_.tolerance
-    };
-
-    auto result = find_root(objective, brent_lo, brent_hi, brent_config);
-
-    // Check convergence - transform RootFindingError to IVError
-    if (!result.has_value()) {
-        const auto& root_error = result.error();
-        IVErrorCode error_code;
-        switch (root_error.code) {
-            case RootFindingErrorCode::MaxIterationsExceeded:
-                error_code = IVErrorCode::MaxIterationsExceeded;
-                break;
-            case RootFindingErrorCode::InvalidBracket:
-                error_code = IVErrorCode::BracketingFailed;
-                break;
-            case RootFindingErrorCode::NumericalInstability:
-                error_code = IVErrorCode::NumericalInstability;
-                break;
-            case RootFindingErrorCode::NoProgress:
-                error_code = IVErrorCode::NumericalInstability;
-                break;
-            default:
-                error_code = IVErrorCode::NumericalInstability;
-                break;
-        }
-
+    // Check if query is within surface bounds
+    if (!is_in_bounds(query, bracket.first) || !is_in_bounds(query, bracket.second)) {
         return std::unexpected(IVError{
-            .code = error_code,
-            .iterations = root_error.iterations,
-            .final_error = root_error.final_error,
-            .last_vol = root_error.last_value
+            .code = IVErrorCode::InvalidGridConfig,
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
         });
     }
 
-    // Post-hoc slope check on the narrowed interval.  A converged root is
-    // only trustworthy if the objective rises through it; a falling
-    // objective means the surface is non-monotone in sigma there, so the
-    // root the screen isolated is not the only one.  Reuses the scan
-    // samples — no extra surface evaluations.
-    if (check_narrowed_slope) {
-        const double slope = (narrowed_f_hi - narrowed_f_lo) / (brent_hi - brent_lo);
-        if (!(slope > 0.0)) {
-            return std::unexpected(IVError{
-                .code = IVErrorCode::MultipleRoots,
-                .iterations = result->iterations,
-                .final_error = 1.0,
-                .last_vol = brent_lo
-            });
-        }
+    // Price goes through eval_price, which reconstructs spot from moneyness
+    // and strike; vega goes to the surface with the query's own spot.  Both
+    // reproduce what this function did inline, evaluation for evaluation.
+    const auto price = [&](double sigma) {
+        return eval_price(moneyness, query.maturity, sigma, rate_value, query.strike);
+    };
+    const auto vega = [&](double sigma) {
+        return surface_.vega(query.spot, query.strike, query.maturity, sigma, rate_value);
+    };
+
+    auto result = invert_price_on_surface(price, vega, query.market_price,
+                                          bracket, query.spot, policy);
+    if (!result.has_value()) {
+        return std::unexpected(result.error());
     }
 
-    return IVSuccess{
-        .implied_vol = result->root,
-        .iterations = result->iterations,
-        .final_error = result->final_error,
-        .vega = std::nullopt,
-        .used_rate_approximation = rate_is_curve
-    };
+    // Only the solver knows whether the rate came from a collapsed curve.
+    result->used_rate_approximation = rate_is_curve;
+    return *result;
 }
 
 template <typename Surface>

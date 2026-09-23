@@ -7,6 +7,7 @@
 #include "mango/option/table/bspline/bspline_segmented_builder.hpp"
 #include "mango/option/table/bspline/bspline_surface.hpp"
 #include "mango/option/table/chebyshev/chebyshev_adaptive.hpp"
+#include "mango/option/table/chebyshev/chebyshev_table_builder.hpp"
 #include "mango/option/table/adaptive_metrics.hpp"
 #include "mango/option/table/adaptive_refinement.hpp"
 #include "mango/math/chebyshev/chebyshev_nodes.hpp"
@@ -15,9 +16,11 @@
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/option/grid_spec_types.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <memory>
 
 namespace mango {
 namespace {
@@ -47,12 +50,26 @@ TEST_P(SegmentedDividendPlacement, BuildsAndPricesAcrossExactEventBoundaries) {
         .vol = {0.10, 0.15, 0.20, 0.30},
         .rate = {0.02, 0.03, 0.05, 0.07},
     };
+    // The one placement in this family the round-trip metric refuses -- the
+    // first dividend at day 10 of a 60-day expiry -- is not instantiated
+    // here; it is pinned on its own in
+    // DayTenOfSixtyIsRefusedAsNearIntrinsic below.
+    //
+    // Budget (2026-09-21): two iterations and 16 samples, not the struct's
+    // default eight and 64.  What this case asserts is structural -- the
+    // surface covers every event boundary and prices finitely across it --
+    // and that holds on the first candidate; the extra iterations only
+    // sharpened an accuracy this case never reads.  At the default the seven
+    // placements cost 1320 s of the target's 3106 s, because a reference
+    // preparation is now six High-accuracy solves.
     auto result = build_adaptive_bspline_segmented(
-        AdaptiveGridParams{.target_iv_error = 1e-3}, config, domain);
+        AdaptiveGridParams{.target_iv_error = 1e-3, .max_iter = 2,
+                           .validation_samples = 16}, config, domain);
     ASSERT_TRUE(result.has_value())
         << "code " << static_cast<int>(result.error().code);
     EXPECT_TRUE(std::isfinite(result->achieved_max_error));
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_GT(result->diagnostics.holdout_points_measured, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 
@@ -73,7 +90,54 @@ INSTANTIATE_TEST_SUITE_P(Issue501, SegmentedDividendPlacement,
     testing::Values(std::pair{10.0, 30.0}, std::pair{60.0, 180.0},
                     std::pair{75.0, 365.0}, std::pair{10.0, 14.0},
                     std::pair{20.0, 30.0}, std::pair{45.0, 60.0},
-                    std::pair{10.0, 60.0}, std::pair{75.0, 90.0}));
+                    std::pair{75.0, 90.0}));
+
+// Regression: the (day 10, 60-day) placement is refused, and the refusal is
+// the measured outcome, not a gap misclassification.
+// Bug: this schedule puts a quarter of the holdout on deep-ITM samples with
+// essentially no time value, where the shipped inversion cannot recover a
+// volatility however accurate the price is.  Measured 2026-09-21 over 8
+// candidates: SurfaceAmbiguous 25, SurfaceNoRoot 0 -- every failure is the
+// 17-point screen reporting MultipleRoots on a price that is flat in sigma,
+// and one such point is enough to make a candidate non-viable under D4.
+// Representative coordinate: K = 106.6849, tau = 0.04912, sigma0 = 0.17117,
+// reference 6.6855678 against an intrinsic of 6.6849043 -- TV/K = 6.2e-6 --
+// which the surface reproduces to 2.2e-6 of strike with a vega of 0.428.
+// The surface is accurate; the metric cannot measure it here, and the
+// acceptance band is not what is missing.  The event-boundary pricing this
+// suite exists for is asserted on the seven placements above.
+TEST(SegmentedDividendPlacement, DayTenOfSixtyIsRefusedAsNearIntrinsic) {
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {},
+        .maturity = 60.0 / 365.0,
+        .kref_config = {.K_refs = {90.0, 92.5, 95.0, 97.5, 100.0,
+                                 102.5, 105.0, 107.5, 110.0}},
+    };
+    for (double day = 10.0; day < 60.0; day += 91.25) {
+        config.discrete_dividends.push_back({day / 365.0, 0.50});
+    }
+    IVGrid domain{
+        .moneyness = {std::log(0.92), std::log(0.95), 0.0,
+                      std::log(1.05), std::log(1.08)},
+        .vol = {0.10, 0.15, 0.20, 0.30},
+        .rate = {0.02, 0.03, 0.05, 0.07},
+    };
+    // Budget: the sample count is the struct's default 64 and stays there.
+    // The refusal is about one near-intrinsic coordinate, so it is a
+    // property of the draw: at 16 samples this configuration builds.  Only
+    // the iteration count is cut, from eight to two, and the refusal was
+    // re-measured at that budget on 2026-09-21: still NoViableSurface.  The
+    // candidate counts quoted above were measured at eight iterations.
+    auto result = build_adaptive_bspline_segmented(
+        AdaptiveGridParams{.target_iv_error = 1e-3, .max_iter = 2},
+        config, domain);
+    ASSERT_FALSE(result.has_value())
+        << "near-intrinsic samples must not be certified as measured";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
+}
 
 TEST(SegmentedShortMaturity, RecoversOneDayAtmVolatility) {
     SegmentedAdaptiveConfig config{
@@ -85,6 +149,10 @@ TEST(SegmentedShortMaturity, RecoversOneDayAtmVolatility) {
         .moneyness = {std::log(0.92), std::log(0.95), 0, std::log(1.05), std::log(1.08)},
         .vol = {0.10, 0.15, 0.20, 0.30}, .rate = {0.02, 0.03, 0.05, 0.07},
     };
+    // Budget: the struct's defaults, deliberately.  This case reads an
+    // accuracy -- the one-day ATM volatility below, to 1e-3 -- and at two
+    // iterations and 16 samples it recovers 0.2237 against 0.225, so the
+    // budget is what buys the assertion and cannot be cut.
     auto built = build_adaptive_bspline_segmented(
         AdaptiveGridParams{.target_iv_error = 1e-3}, config, domain);
     ASSERT_TRUE(built.has_value());
@@ -116,6 +184,14 @@ std::vector<double> to_log_m(std::initializer_list<double> sk) {
     return v;
 }
 
+// Budget note (2026-09-21), for the three knobs raised below.  At the
+// original budget -- three vol seeds, a 51-point / 200-step PDE grid, two
+// iterations, eight samples -- this chain's fit left 72-133 bps of error at
+// the top of its sigma domain ([0.15, 0.25]).  That put the round trip's
+// root 21-145 bps *outside* the fit range, where a B-spline has no support
+// at all, so the shipped inversion reported SurfaceNoRoot and no candidate
+// was viable.  Resolution is what was missing, not tolerance; the target
+// below is unchanged.
 TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
     // Create a minimal synthetic chain
     OptionGrid chain;
@@ -125,17 +201,19 @@ TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
     // Add strikes and maturities
     chain.strikes = {90.0, 95.0, 100.0, 105.0, 110.0};
     chain.maturities = {0.25, 0.5, 1.0};
-    chain.implied_vols = {0.18, 0.20, 0.22};  // Some variation
+    chain.implied_vols = {0.16, 0.18, 0.20, 0.22, 0.24};  // five seeds, not three
     chain.rates = {0.04, 0.05, 0.06};
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.002;  // 20 bps - relaxed for test speed
-    params.max_iter = 2;
-    params.validation_samples = 8;  // Fewer for test speed
+    params.max_iter = 5;             // was 2
+    params.validation_samples = 16;  // was 8
 
-    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0).value();
+    // The explicit grid is what this test supplies, so it is what gets
+    // refined: 201 points and 400 steps, was 51 and 200.
+    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0).value();
     auto result = build_adaptive_bspline(params, chain,
-        PDEGridConfig{grid_spec, 200, {}}, OptionType::PUT);
+        PDEGridConfig{grid_spec, 400, {}}, OptionType::PUT);
 
     if (!result.has_value()) {
         std::cerr << "Build failed with error code: "
@@ -187,7 +265,12 @@ TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;  // Very relaxed
-    params.max_iter = 1;
+    // max_iter 4, not 1: a single iteration leaves ~117 bps of sigma-axis fit
+    // error at the top of [0.15, 0.25], which puts the round trip's root 89
+    // bps outside the domain.  A B-spline has no support beyond its fit
+    // range, so the acceptance band cannot reach it and the inversion
+    // reports SurfaceNoRoot.  Refining is the fix; the tolerance is not.
+    params.max_iter = 4;
     params.validation_samples = 8;  // spec D3 minimum
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 31).value();
@@ -211,19 +294,26 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
     chain1.dividend_yield = 0.0;
     chain1.strikes = {90.0, 100.0, 110.0};
     chain1.maturities = {0.25, 0.5, 1.0};
-    chain1.implied_vols = {0.18, 0.22};
+    chain1.implied_vols = {0.17, 0.19, 0.21, 0.23};  // see BuildsWithSyntheticChain
     chain1.rates = {0.04, 0.05};
 
     OptionGrid chain2 = chain1;
-    // Different spot => cache must not reuse chain1 slices.  90, not 50: at a
-    // spot of 50 against strikes of 90-110 every holdout point is a deep-ITM
-    // put whose time value is below the TV/K filter, so the build is measured
-    // nowhere and now refuses (spec D4/D5) -- a real contract, but not the
-    // one this test is about.
-    chain2.spot = 90.0;
+    // A different rate set, not a different spot: the cache keys on the whole
+    // chain, so any difference exercises it.  Moving the spot instead (90
+    // against strikes of 90-110) makes every holdout point a deep-ITM put
+    // whose reference stencil barely separates and whose surface price falls
+    // below intrinsic, so the build refuses under D2/D4 -- a real contract,
+    // but not the one this test is about.  Measured on 2026-09-21 at spot 90:
+    // K = 109.9658, tau = 0.85237, sigma0 = 0.21304, reference 20.11304
+    // against an intrinsic of 19.96583, surface 19.94375 -- below intrinsic --
+    // with a surface vega of 0.816.
+    chain2.rates = {0.045, 0.055};
 
     AdaptiveGridParams params;
-    params.max_iter = 1;
+    // max_iter 4, not 1: see RegressionSingleValueAxes -- one iteration
+    // leaves ~79 bps of sigma-axis error at the domain edge, which the round
+    // trip cannot invert from inside the fit range.
+    params.max_iter = 4;
     params.validation_samples = 8;  // spec D3 minimum
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 31).value();
@@ -265,7 +355,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value());
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 }
 
@@ -369,7 +460,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedDegenerateProbeBandWidened) {
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
     EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
 }
 
@@ -412,7 +504,21 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedEmptyProbeBandSkipped) {
 
 // A single automatic reference can pass validation after spot remapping.
 // Its normalized cash amount remains an approximation away from that strike.
-TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
+// Regression: one auto reference strike cannot serve S/K in [0.7, 1.3].
+// Bug: the surface preserves moneyness and blends normalized prices in
+// inverse strike, so a single K_ref (K_ref_count = 1, span 0.3 => K_ref =
+// 100) has nothing to blend against at the ends of a +-30 % moneyness
+// domain.  Measured on 2026-09-21 at K = 135.4196 (S/K = 0.738), tau =
+// 0.5939, sigma0 = 0.2769: the reference is 36.9412 (intrinsic 35.4196,
+// time value 1.52) while the surface's *entire* attainable range over
+// sigma in [0.1, 0.3] is [37.5051, 37.7440] -- a 37 % time-value error,
+// $0.56 per $135 of strike, with no root anywhere in the domain, i.e.
+// ~1266 bps below sigma_min.  The other five measured points come in at
+// 39.8 bps against a 50 bps target, so it is this one coordinate, not the
+// fit budget, that is wrong.  CLAUDE.md's K_ref/moneyness coherence rule
+// says the K_refs must span and resolve the strike range the moneyness
+// grid implies; here they do not, and the metric refuses.
+TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRefRefusesWideMoneyness) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
     params.max_iter = 1;
@@ -433,9 +539,9 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    ASSERT_TRUE(result.has_value());
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
-    EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
+    ASSERT_FALSE(result.has_value())
+        << "a single K_ref must not certify a +-30 % moneyness domain";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
 }
 
 // Short-maturity construction retains a positive measurement domain while
@@ -444,7 +550,11 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
     params.max_iter = 1;
-    params.validation_samples = 8;
+    // 24, not 8: at a 0.05 y maturity most sampled options are worth 1e-7 or
+    // less, and a +-50 bps sigma bump moves the price by less than the
+    // reference's own two-grid uncertainty, so the point cannot resolve (D2).
+    // Only 3 of 8 resolved against a floor of 4.
+    params.validation_samples = 24;
 
     SegmentedAdaptiveConfig seg_config{
         .spot = 100.0,
@@ -467,10 +577,24 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     EXPECT_LE(bounds->tau_max, seg_config.maturity);
     EXPECT_GT(bounds->tau_min, 0.0);
 
+    // Regression: at a 0.05 y maturity the adaptive path refuses, and the
+    // domain assertions above are what this test is really for.
+    // Bug: the sampled options carry almost no time value, so the shipped
+    // inversion cannot recover a volatility from the reference price on that
+    // surface however accurate the surface's own price is.  Measured on
+    // 2026-09-21 at K = 106.2027, tau = 0.01846, sigma0 = 0.2093:
+    // reference 6.2032083 against
+    // an intrinsic of 6.2027205 -- a time value of 4.9e-4, i.e. TV/K =
+    // 4.6e-6 -- with a surface price residual of 1.1e-5 of strike and a
+    // surface vega of 0.222.  The 17-point screen reports MultipleRoots on a
+    // price that is flat in sigma, which is a surface failure under D4 and
+    // leaves no candidate viable.  Raising the sample count fixed the
+    // separate D2 coverage refusal (24 samples now clear the floor); it
+    // cannot make a near-intrinsic price invertible.
     auto result = build_adaptive_bspline_segmented(params, seg_config, {m, v, r});
-    ASSERT_TRUE(result.has_value());
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
-    EXPECT_EQ(result->diagnostics.holdout_points_invalid, 0u);
+    ASSERT_FALSE(result.has_value())
+        << "a near-intrinsic 18-day sample cannot be round-tripped";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::NoViableSurface);
 }
 
 // ===========================================================================
@@ -601,20 +725,52 @@ TEST(AdaptiveGridBuilderTest, SegmentedChebyshevNarrowSegmentsStillWork) {
     std::vector<double> v_domain = {0.15, 0.25};
     std::vector<double> r_domain = {0.05};
 
-    // A 7-day option has near-zero vega, so any price error divides into an
-    // enormous IV error: the assembled surface measures 970 (9.7 million
-    // bps) on the final validation, and the adaptive path now refuses it
-    // (spec D9) exactly as BuildSegmentedVeryShortMaturity does.  The
-    // regression under test is in segment classification, not in
-    // refinement, so it is pinned on the fixed-level build of the same
-    // configuration.  Revisit when MultiKRefSplit spot-scaling is fixed
-    // (follow-up): part of this error is the lone K_ref, not the maturity.
+    // Re-measured 2026-09-21 under the round-trip metric's acceptance band
+    // (spec D3, rev 5): this configuration builds again.  Under the earlier
+    // exact-bracket rule the segmented Chebyshev surface was refused on a
+    // single edge-adjacent sample, which said nothing about the segment
+    // classification this test exists for.  The Chebyshev segmented fit
+    // domain carries sigma headroom beyond the sampled range, so the
+    // tolerance band is not clipped away and the edge roots are measured.
     auto adaptive = build_adaptive_chebyshev_segmented(
         params, seg_config, {m_domain, v_domain, r_domain});
-    ASSERT_FALSE(adaptive.has_value());
-    EXPECT_EQ(adaptive.error().code, PriceTableErrorCode::NoViableSurface)
+    ASSERT_TRUE(adaptive.has_value())
         << "the segments must build and be measured; a gap misclassification "
-           "would surface as a build error instead";
+           "would surface as a build error instead: code "
+        << static_cast<int>(adaptive.error().code);
+    // What the metric now certifies, pinned as measured rather than assumed:
+    // no candidate point defeated the shipped inversion, and the holdout was
+    // large enough to say so.  The achieved accuracy itself is not pinned --
+    // a 7-day option has near-zero vega, so any price error divides into a
+    // large IV error, and that is a property of the maturity, not of segment
+    // classification.
+    EXPECT_EQ(adaptive->diagnostics.surface_failures, 0u);
+    EXPECT_GT(adaptive->diagnostics.holdout_points_measured, 0u);
+    // Every prepared holdout point ends in exactly one of four outcomes --
+    // measured, unresolved, surface failure, or a non-finite evaluation
+    // ("skipped") -- but `skipped` is never reported on its own: it is
+    // folded into `holdout_points_invalid` together with the preparations
+    // that failed and so never entered the prepared set at all
+    // (chebyshev_adaptive.cpp: `invalid + final_score.skipped`).  The three
+    // separable outcomes can therefore only under-count the prepared set,
+    // and adding the folded counter can only over-count it; an exact
+    // identity is not expressible from the public fields.
+    // Bug: the previous `measured + unresolved + unsupported + invalid ==
+    // holdout_points` was not an identity.  `holdout_points` is already the
+    // prepared set, so it excludes the unsupported and invalid samples the
+    // assertion subtracted a second time, and on the segmented Chebyshev
+    // path it mixed two draws: `holdout_points_unsupported` comes from the
+    // sizing loop's fixed holdout while `holdout_points` is the final
+    // validation set.
+    EXPECT_LE(adaptive->diagnostics.holdout_points_measured
+                  + adaptive->diagnostics.holdout_points_unresolved
+                  + adaptive->diagnostics.surface_failures,
+              adaptive->diagnostics.holdout_points);
+    EXPECT_GE(adaptive->diagnostics.holdout_points_measured
+                  + adaptive->diagnostics.holdout_points_unresolved
+                  + adaptive->diagnostics.surface_failures
+                  + adaptive->diagnostics.holdout_points_invalid,
+              adaptive->diagnostics.holdout_points);
 
     auto surface = build_chebyshev_segmented_manual(
         seg_config, {m_domain, v_domain, r_domain});
@@ -703,7 +859,14 @@ TEST(SegmentedPriceTableBuilderTest, RegressionUlpRoundTripDoesNotExpand) {
 // independently reproduced reference set and must match what it reported.
 TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
     AdaptiveGridParams params;
-    params.target_iv_error = 1e-6;  // unreachable => the retry path is taken
+    // 1e-4 (1 bp), not 1e-6: the target must be unreachable by the *fit*
+    // (so the retry path runs) while staying resolvable by the *reference*.
+    // At 1e-6 a sigma bump moves the price by 7e-6..2.7e-5 against a
+    // High-profile two-grid estimate of 5e-5..5e-4 -- 10x to 138x the
+    // signal -- so no point resolved and the build refused at validation
+    // (ValidationFailed) before scoring any surface.  The subject here is
+    // loop mechanics, not the smallest representable tolerance.
+    params.target_iv_error = 1e-4;  // unreachable by the fit; resolvable by the oracle
     params.max_iter = 1;
     // 16, not 8: `solve_american_option` refuses a schedule whose dividend
     // date is at or beyond the requested maturity, so every sample with
@@ -740,7 +903,8 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
     EXPECT_DOUBLE_EQ(result->diagnostics.achieved_avg_error,
                      result->achieved_avg_error);
     EXPECT_GT(result->diagnostics.holdout_points, 0u);
-    EXPECT_LE(result->achieved_max_error, kViabilityBound);
+    // D4: accuracy no longer gates admissibility; Task 10 re-measures this.
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
 
     // Reproduce the builder's final validation set exactly (same sample
     // domain, same seed, same references) and re-score the surface we were
@@ -759,10 +923,15 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
         .bounds = *sample,
         .sample_bounds = *sample,
     };
-    auto validate_fn = make_validate_fn(seg_config.dividend_yield,
-                                        seg_config.option_type,
-                                        seg_config.discrete_dividends, seg_config.maturity);
-    auto refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+    const ReferenceOracle oracle{
+        .dividend_yield = seg_config.dividend_yield,
+        .option_type = seg_config.option_type,
+        .discrete_dividends = seg_config.discrete_dividends,
+        .reference_maturity = seg_config.maturity,
+        .accuracy = make_grid_accuracy(kReferenceAccuracy),
+    };
+    auto refs_fn = make_stencil_refs_fn(
+        params, oracle, std::make_shared<ReferenceSolveCounter>());
     auto points = detail::prepare_final_validation(params, ctx, refs_fn,
                                                    params.lhs_seed + 999);
     ASSERT_TRUE(points.has_value());
@@ -771,10 +940,14 @@ TEST(SegmentedFinalContract, ReportedErrorsDescribeReturnedSurface) {
         .price = [&](double spot, double strike, double tau, double sigma,
                      double rate) {
             return result->surface.price(spot, strike, tau, sigma, rate);
+        },
+        .vega = [&](double spot, double strike, double tau, double sigma,
+                    double rate) {
+            return result->surface.vega(spot, strike, tau, sigma, rate);
         }};
     auto measured = detail::score_final_surface(
-        points->points, returned, make_iv_score_fn(params, seg_config.option_type),
-        ctx);
+        points->points, returned,
+        make_round_trip_score_fn(params, ctx, seg_config.option_type), ctx);
 
     EXPECT_EQ(measured.measured,
               result->diagnostics.holdout_points_measured);
@@ -894,8 +1067,10 @@ TEST(AdaptiveGridBuilderTest, TensorTailsMatchFdmAtExtremeMoneyness) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.002;  // relaxed: accuracy is asserted below
-    params.max_iter = 2;
-    params.validation_samples = 8;
+    params.max_iter = 4;  // see AutomaticGridCoversMoneynessTailsWithFixedBudget
+    // 16, not 8: see AutomaticGridCoversMoneynessTailsWithFixedBudget -- the
+    // same 60-140 strike range at tau <= 0.1 leaves most samples unresolvable.
+    params.validation_samples = 16;
 
     auto result = build_adaptive_bspline(
         params, chain, make_grid_accuracy(GridAccuracyProfile::High),
@@ -952,8 +1127,15 @@ TEST(AdaptiveGridBuilderTest, AutomaticGridCoversMoneynessTailsWithFixedBudget) 
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.002;
-    params.max_iter = 2;
-    params.validation_samples = 8;
+    // max_iter 4, not 2: the seeded sigma axis left ~10 bps of fit error at
+    // the top of [0.1, 0.2], enough to push the round trip's root just
+    // outside the fit range where the B-spline has no support.
+    params.max_iter = 4;
+    // 16, not 8: strikes 60-140 at tau <= 0.1 put much of the sample domain
+    // where the reference is exactly 0 or exactly intrinsic, so its stencil
+    // cannot separate and the point does not resolve (D2).  At 8 samples the
+    // floor is max(4, 2) = 4, i.e. 50 % must resolve; at 16 it is 25 %.
+    params.validation_samples = 16;
 
     GridAccuracyParams accuracy;
     accuracy.min_spatial_points = accuracy.max_spatial_points = 101;
@@ -1011,7 +1193,7 @@ TEST(AdaptiveGridBuilderTest, AutomaticGridCoversMoneynessTailsWithFixedBudget) 
 // widens this chain's covering half-width from ~1.20 to ~1.65 and clamps
 // Nx at the Ultra 5,000-point cap: both classes moved by less than one
 // part in a thousand of their own size.)
-TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
+TEST(AdaptiveGridBuilderTest, ChebyshevRefusesADomainOfIntrinsicReferences) {
     OptionGrid chain;
     chain.spot = 100.0;
     chain.dividend_yield = 0.0;
@@ -1021,49 +1203,152 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
     chain.rates = {0.03, 0.05};
 
     AdaptiveGridParams params;
-    params.target_iv_error = 0.002;  // relaxed: accuracy is asserted below
+    params.target_iv_error = 0.002;
     params.max_iter = 2;
-    params.validation_samples = 8;
+    params.validation_samples = 16;
 
+    // Regression: this chain cannot be measured, and the refusal is the
+    // outcome, pinned rather than worked around.
+    // Bug: at strikes 40-250 with tau <= 0.1 the reference price is exactly 0
+    // (deep OTM) or exactly K - S (deep ITM) at almost every sampled point.
+    // Implied volatility is undefined there, so the six-solve stencil cannot
+    // separate and the point does not resolve (D2).  Measured 2026-09-21: 16
+    // prepared, 2 resolved, against a floor of max(4, 16/4) = 4.  More
+    // samples do not help -- the domain is degenerate, not undersampled: at
+    // 32 samples the count is 3 resolved against a floor of 8, the same
+    // fraction and the same refusal, so 16 is kept as the cheaper measurement.
+    // Widening the vol axis to {0.10, 0.60} only trades the D2 refusal for a
+    // D4 one: the samples then resolve, but the Chebyshev polynomial cannot
+    // represent a deep-OTM price of 1.7e-4 (its minimum over the acceptance
+    // band is 16x that), so the inversion reports MultipleRoots.
+    //
+    // The #480 S1 node-level FDM agreement this fixture used to carry is
+    // re-homed on the manual continuous-Chebyshev builder, in
+    // ChebyshevNodesMatchFdmAtExtremeMoneyness below: `build_chebyshev_table`
+    // owns the same batch-coverage seam and takes a fit domain directly, so
+    // the check no longer depends on the adaptive loop certifying a domain it
+    // is right to refuse.
     auto result = build_adaptive_chebyshev(params, chain, OptionType::PUT);
-    ASSERT_TRUE(result.has_value())
-        << "build failed: " << static_cast<int>(result.error().code);
-    ASSERT_NE(result->surface, nullptr);
-    const auto& surface = *result->surface;
+    ASSERT_FALSE(result.has_value())
+        << "a domain of exactly-intrinsic references must not be certified";
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::ValidationFailed);
+}
 
-    // Node span of the fit domain (CC-extended), read back from the
-    // interpolant so the test cannot drift from the builder's headroom.
-    const auto& dom = surface.inner().interpolant().domain();
+// Regression (#480, S1; re-homed per #509): the continuous Chebyshev build
+// solved its (sigma, rate) batch gridless, so the shared PDE grid did not
+// cover the moneyness nodes the fit then read.  `build_chebyshev_table` owns
+// that seam -- it sets `accuracy.log_moneyness_coverage` from its own node
+// span before estimating the batch grid -- and it takes the fit domain
+// directly, so this check no longer has to route through the adaptive loop.
+//
+// Bug: extract_chain_domain floors the tau axis to a 0.5y spread and the
+// Chebyshev builder adds CC headroom, so for this chain the PDE maturity is
+// 0.6875 and the old batch-union half-width was 5 * sigma_hi * sqrt(0.694)
+// ~= 5 * 0.225 * 0.833 ~= 0.94 (the batch is normalized-ineligible: its
+// first param is the sigma_lo = 0.01 node, whose margin is far below 0.35).
+// The moneyness nodes reach +-ln(2.5) * (1 + 6/32) ~= +-1.088, so both
+// endpoint nodes were cubic-spline extrapolations -- and a Chebyshev
+// interpolant is a global polynomial, so the garbage reaches the user's own
+// strikes.
+//
+// Pre-fix max abs error on this branch's parent: 27.85, at the node
+// m_lo = -1.088095 with sigma=0.15 -- got 94.16 for a put whose reference
+// price is 66.31, i.e. above the K=100 intrinsic ceiling.  The same ~27.85
+// showed at every queried sigma (27.850638466 / 27.850638459 /
+// 27.850638458), and that sigma-independence to eight significant figures is
+// the signature of extrapolating one slice past the PDE domain edge rather
+// than of interpolation error.  The two query classes below keep the
+// tolerances that measurement set.
+//
+// Re-measured on this fixture 2026-09-21 by deleting the coverage line from
+// `build_chebyshev_table` again: the m_lo node then reads 67.6879 against an
+// FDM reference of 66.3142, an error of 1.3737 that is identical to eight
+// significant figures across all four queried sigmas (1.3736853175 /
+// 1.3736853175 / 1.3736853160 / 1.3736853276).  Smaller in dollars than the
+// adaptive fixture's 27.85 -- this batch carries neither the dividend
+// extension nor that fixture's sigma span -- but the same signature, and
+// still ~1.4e5x above TOL_NODE, so the class keeps its discriminating power.
+TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
+    OptionGrid chain;
+    chain.spot = 100.0;
+    chain.dividend_yield = 0.0;
+    chain.strikes = {40.0, 60.0, 100.0, 160.0, 250.0};
+    chain.maturities = {0.05, 0.1};
+    chain.implied_vols = {0.10};
+    chain.rates = {0.03, 0.05};
+
+    // The fit domain build_adaptive_chebyshev hands its seed candidate: the
+    // chain's sample domain, plus that builder's frozen CC headroom at its
+    // initial levels (m 5, tau 3, sigma 2, rate 1).  Recomputed here from the
+    // shared `extract_chain_domain` rather than copied, so the fixture tracks
+    // the sample domain; the node span is pinned below.
+    AdaptiveGridParams defaults;
+    auto domain = extract_chain_domain(chain, defaults.min_moneyness_points);
+    ASSERT_TRUE(domain.has_value());
+    const SurfaceBounds& sb = domain->sample_bounds;
+
+    constexpr std::array<size_t, 4> kNumPts{33, 9, 5, 3};  // CC levels 5/3/2/1
+    auto headroom = [](double lo, double hi, size_t n) {
+        return 3.0 * (hi - lo) / static_cast<double>(n - 1);
+    };
+    const double hm = headroom(sb.m_min, sb.m_max, kNumPts[0]);
+    const double ht = headroom(sb.tau_min, sb.tau_max, kNumPts[1]);
+    const double hs = headroom(sb.sigma_min, sb.sigma_max, kNumPts[2]);
+    const double hr = headroom(sb.rate_min, sb.rate_max, kNumPts[3]);
+
+    Domain<4> dom;
+    dom.lo = {sb.m_min - hm, std::max(sb.tau_min - ht, 1e-4),
+              std::max(sb.sigma_min - hs, 0.01),
+              std::max(sb.rate_min - hr, -0.05)};
+    dom.hi = {sb.m_max + hm, sb.tau_max + ht, sb.sigma_max + hs,
+              sb.rate_max + hr};
+
+    // Pin the fixture the pre-fix number was measured on: without this node
+    // span the test measures nothing.
+    EXPECT_NEAR(dom.lo[0], -1.088095, 1e-6);
+    EXPECT_NEAR(dom.hi[0], 1.088095, 1e-6);
+    EXPECT_NEAR(dom.hi[1], 0.6875, 1e-5);  // 0.687501: tau_min floors at 1e-6
+    EXPECT_NEAR(dom.lo[2], 0.01, 1e-12);
+    EXPECT_NEAR(dom.hi[2], 0.225, 1e-12);
+
+    auto table = build_chebyshev_table(ChebyshevTableConfig{
+        .num_pts = kNumPts,
+        .domain = dom,
+        .K_ref = chain.spot,
+        .option_type = OptionType::PUT,
+        .dividend_yield = chain.dividend_yield,
+    });
+    ASSERT_TRUE(table.has_value())
+        << "build failed: " << static_cast<int>(table.error().code);
+
     const double K = chain.spot;
     const double tau = dom.hi[1];   // a tau node: isolates m extraction
     const double r = dom.hi[3];     // a rate node
-    const auto& sb = result->sample_bounds;
 
     // Tolerances in $ per K=100, split by query class because the two
     // classes measure different things.
     //
     // TOL_NODE guards the two on-node m endpoints -- the queries that
     // actually discriminate this defect.  Post-fix max deviation over that
-    // class is 6.65e-09 (m_lo, sigma=0.15), so the plan's ">= 10x post-fix"
+    // class was 6.65e-09 on the adaptive fixture, so the ">= 10x post-fix"
     // rule would pin ~7e-08; it is loosened to 1e-5 for exactly the reason
     // the #437 test above uses 1e-5 -- this compares two independently-run
-    // pipelines (batch PDE solve + Chebyshev fit vs. a separate
-    // High-profile FDM solve) and CI must not depend on bit-level agreement
-    // between them across toolchains.  1e-5 is still ~2.8e6x below the
-    // 27.85 pre-fix error, far inside the "<= 1/50 of pre-fix" bound, so
-    // the class keeps its full discriminating power.
+    // pipelines (batch PDE solve + Chebyshev fit vs. a separate High-profile
+    // FDM solve) and CI must not depend on bit-level agreement between them
+    // across toolchains.  1e-5 is still ~2.8e6x below the 27.85 pre-fix
+    // error, so the class keeps its full discriminating power.
     constexpr double TOL_NODE = 1e-5;
     //
-    // TOL_USER guards the two user strikes.  These sit off-node in m, so
-    // the class carries ordinary Chebyshev interpolation error across the
-    // intrinsic-value kink: post-fix max deviation is 0.01759, at strike
-    // 250 with the sigma_lo = 0.01 node, where the exact American put value
-    // is its intrinsic 60 and a global polynomial cannot follow the kink.
-    // TOL_USER = 0.2 is ~11x that per the ">= 10x post-fix" rule, and
-    // ~139x below the 27.85 pre-fix error.  This class is a user-visible
-    // sanity assertion, not the discriminator: pre-fix its worst deviation
-    // was only 0.0139 (strike 250, sigma=0.01), so it would have passed at
-    // this tolerance on the unfixed code.  The bug is caught by TOL_NODE.
+    // TOL_USER guards the two user strikes.  These sit off-node in m, so the
+    // class carries ordinary Chebyshev interpolation error across the
+    // intrinsic-value kink: post-fix max deviation was 0.01759, at strike 250
+    // with the sigma_lo = 0.01 node, where the exact American put value is
+    // its intrinsic 60 and a global polynomial cannot follow the kink.
+    // TOL_USER = 0.2 is ~11x that per the ">= 10x post-fix" rule, and ~139x
+    // below the 27.85 pre-fix error.  This class is a user-visible sanity
+    // assertion, not the discriminator: pre-fix its worst deviation was only
+    // 0.0139 (strike 250, sigma=0.01), so it would have passed at this
+    // tolerance on the unfixed code.  The bug is caught by TOL_NODE.
     constexpr double TOL_USER = 0.2;
 
     struct Query { double m; const char* what; double tol; };
@@ -1081,7 +1366,7 @@ TEST(AdaptiveGridBuilderTest, ChebyshevNodesMatchFdmAtExtremeMoneyness) {
         for (double sigma : sigmas) {
             const double S = K * std::exp(q.m);
             const double ref = fdm_reference_price(S, K, tau, sigma, r);
-            const double got = surface.price(S, K, tau, sigma, r);
+            const double got = table->price(S, K, tau, sigma, r);
             EXPECT_NEAR(got, ref, q.tol)
                 << q.what << " m=" << q.m << " sigma=" << sigma;
         }
@@ -1172,6 +1457,80 @@ TEST(SegmentedKnotRetention, ReturnedGridKeepsSeedKnotPositions) {
         EXPECT_TRUE(contains(result->grid.moneyness, m))
             << "moneyness seed knot " << m << " was lost by aggregation";
     }
+}
+
+// ===========================================================================
+// Segmented Chebyshev sizing loop: probe contract and maturity support
+// ===========================================================================
+
+// One off-ATM reference-strike pair and one cash dividend, shared by the two
+// tests below.  No K_ref sits at the spot, so a sizing handle scored on the
+// user's contract would carry the dividend-scaling residual described in
+// spec D1/L6.
+SegmentedAdaptiveConfig probe_contract_config() {
+    return SegmentedAdaptiveConfig{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 1.50}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {95.0, 105.0}},
+    };
+}
+
+IVGrid probe_contract_domain() {
+    return IVGrid{
+        .moneyness = {std::log(100.0 / 108.0), std::log(100.0 / 92.0)},
+        .vol = {0.15, 0.35},
+        .rate = {0.02, 0.06},
+    };
+}
+
+// The sizing loop must get through an off-ATM reference-strike pair with a
+// cash dividend: no K_ref sits at the spot here, so every sample is scored on
+// a scaled probe.  What the scaling does to the references is pinned directly
+// by `ProbeScaledRefs.*` in reference_oracle_test.cc; this covers the build
+// end to end, including that the stencil actually ran.
+TEST(SegmentedChebyshevAdaptive, SizingLoopBuildsWithOffAtmKrefAndDividend) {
+    AdaptiveGridParams params{.target_iv_error = 1e-3, .max_iter = 2,
+                              .validation_samples = 16};
+    const auto cfg = probe_contract_config();
+    const auto domain = probe_contract_domain();
+
+    auto result = build_adaptive_chebyshev_segmented(params, cfg, domain);
+    ASSERT_TRUE(result.has_value())
+        << "code " << static_cast<int>(result.error().code);
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
+    EXPECT_GT(result->diagnostics.holdout_points_measured, 0u);
+    // The stencil runs six solves per preparation, so a wired-up builder
+    // reports reference solves on both grid levels.
+    EXPECT_GT(result->diagnostics.reference_solves_fine, 0u);
+    EXPECT_GT(result->diagnostics.reference_solves_coarse, 0u);
+}
+
+// Spec D4: event-gap maturities are excluded before preparation, not scored
+// as defects.  The dividend at calendar time 0.5 of a 1y contract puts the
+// event at tau = 0.5, and `compute_segment_boundaries` opens a +-5e-4 gap
+// there; the sizing loop's holdout draw must skip whatever lands inside it.
+//
+// The seed is pinned, not arbitrary: the holdout draw is
+// `latin_hypercube_4d(16, lhs_seed ^ 0x484F4C44)` scaled to the sample
+// domain's tau range [0.01, 1.0], and seed 27 is the first seed whose draw
+// puts exactly one sample inside the gap.  The observed count is that one
+// sample.
+TEST(SegmentedChebyshevAdaptive, EventGapSamplesAreUnsupportedNotFailures) {
+    AdaptiveGridParams params{.target_iv_error = 1e-3, .max_iter = 2,
+                              .validation_samples = 16, .lhs_seed = 27};
+    const auto cfg = probe_contract_config();
+    const auto domain = probe_contract_domain();
+
+    auto result = build_adaptive_chebyshev_segmented(params, cfg, domain);
+    ASSERT_TRUE(result.has_value())
+        << "code " << static_cast<int>(result.error().code);
+    EXPECT_EQ(result->diagnostics.surface_failures, 0u);
+    // An excluded maturity is neither a reference nor a defect.
+    EXPECT_EQ(result->diagnostics.holdout_points_unsupported, 1u);
+    EXPECT_GT(result->diagnostics.holdout_points_measured, 0u);
 }
 
 }  // namespace

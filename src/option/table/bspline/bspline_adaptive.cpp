@@ -17,10 +17,12 @@
 #include "mango/option/dividend_utils.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include "mango/pde/core/time_domain.hpp"
+#include "mango/support/ivcalc_trace.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -420,10 +422,17 @@ build_cached_surface(
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
+    // One wrapper shared by both callables: the round-trip inversion must
+    // take its price and its slope from the same object.
+    auto w = std::make_shared<BSplinePriceTable>(std::move(*wrapper));
     return SurfaceHandle{
-        .price = [w = std::move(*wrapper)](double query_spot, double strike, double tau,
-                                           double sigma, double rate) -> double {
-            return w.price(query_spot, strike, tau, sigma, rate);
+        .price = [w](double query_spot, double strike, double tau,
+                     double sigma, double rate) -> double {
+            return w->price(query_spot, strike, tau, sigma, rate);
+        },
+        .vega = [w](double query_spot, double strike, double tau,
+                    double sigma, double rate) -> double {
+            return w->vega(query_spot, strike, tau, sigma, rate);
         },
         .pde_solves = pde_solves
     };
@@ -477,10 +486,21 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
             build_iteration, last_spline, last_axes);
     };
 
-    auto validate_fn = make_validate_fn(chain.dividend_yield, type);
-
-    auto prepare_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
-    auto score_fn = make_iv_score_fn(params, type);
+    // One counter for the whole build: the loop's fresh and holdout
+    // preparations all draw from it, so `total_pde_solves` reports the
+    // reference work once (spec D7).
+    auto ref_counter = std::make_shared<ReferenceSolveCounter>();
+    // A continuous surface describes a contract from now: no schedule to
+    // roll, and no fixed expiry to roll it onto.
+    const ReferenceOracle oracle{
+        .dividend_yield = chain.dividend_yield,
+        .option_type = type,
+        .discrete_dividends = {},
+        .reference_maturity = std::nullopt,
+        .accuracy = make_grid_accuracy(kReferenceAccuracy),
+    };
+    auto prepare_refs_fn = make_stencil_refs_fn(params, oracle, ref_counter);
+    auto score_fn = make_round_trip_score_fn(params, ctx, type);
 
     auto refine_fn = make_bspline_refine_fn(params);
     // No state hooks: the B-spline refiner's whole state is the grids (D6).
@@ -504,12 +524,16 @@ build_adaptive_bspline(const AdaptiveGridParams& params,
     result.achieved_avg_error = grids.achieved_avg_error;
     result.target_met = grids.target_met;
     result.diagnostics = std::move(grids.diagnostics);
+    result.diagnostics.reference_solves_fine = ref_counter->fine_attempts.load();
+    result.diagnostics.reference_solves_coarse = ref_counter->coarse_attempts.load();
     result.sample_bounds = ctx.sample_bounds;
-    result.total_pde_solves = 0;
-    for (auto& it : result.iterations) {
-        // Standard path uses FD American vega: 1 base solve + 2 vega bump solves = 3x
-        it.pde_solves_validation *= 3;
-        result.total_pde_solves += it.pde_solves_table + it.pde_solves_validation;
+    // `pde_solves_validation` counts *preparations*, not solves (spec D7);
+    // the solves the stencil actually ran come from the one counter this
+    // build owns, so they are added once rather than per iteration.
+    result.total_pde_solves = result.diagnostics.reference_solves_fine
+                            + result.diagnostics.reference_solves_coarse;
+    for (const auto& it : result.iterations) {
+        result.total_pde_solves += it.pde_solves_table;
     }
 
     return result;
@@ -679,6 +703,22 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
 
     // 2. Run adaptive refinement per probe, measured over its own band
     BuildDiagnostics diagnostics;
+
+    // One counter for the whole build: every probe loop, the final
+    // validation and the retry draw from it, so `total_pde_solves` reports
+    // the reference work once (spec D7).
+    auto ref_counter = std::make_shared<ReferenceSolveCounter>();
+    // A segmented surface follows one fixed expiry: the schedule is anchored
+    // to `config_.maturity` and rolled onto each query's remaining life.
+    const ReferenceOracle oracle{
+        .dividend_yield = config_.dividend_yield,
+        .option_type = config_.option_type,
+        .discrete_dividends = config_.discrete_dividends,
+        .reference_maturity = config_.maturity,
+        .accuracy = make_grid_accuracy(kReferenceAccuracy),
+    };
+    auto user_refs_fn = make_stencil_refs_fn(params, oracle, ref_counter);
+
     std::vector<RefinementResult> probe_results;
     for (double probe_ref : probes) {
         // Measurement domain for this probe: the user's tau/vol/rate ranges,
@@ -764,38 +804,24 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
                     return scale * shared->price(spot / scale, probe_ref,
                                                  tau, sigma, rate);
                 },
+                // The same map, so the round-trip inversion takes its slope
+                // from the same probe problem as its price.
+                .vega = [shared, probe_ref](double spot, double strike,
+                                            double tau, double sigma,
+                                            double rate) -> double {
+                    const double scale =
+                        (strike > 0.0) ? strike / probe_ref : 1.0;
+                    return scale * shared->vega(spot / scale, probe_ref,
+                                                tau, sigma, rate);
+                },
                 .pde_solves = result->pde_solves
             };
         };
 
-        auto validate_fn = make_validate_fn(
-            config_.dividend_yield, config_.option_type,
-            config_.discrete_dividends, config_.maturity);
-
-        // The probe's references live on the probe's own problem.  A query
-        // (S, K) reaches the surface as scale * probe(S/scale, K_ref) with
-        // scale = K/K_ref, so the reference is the FD solve at
-        // (S/scale, K_ref) under the same dividend schedule, scaled the same
-        // way.  Rescaling the *option* rather than the query -- pricing
-        // (S, K) and comparing against a K_ref-struck surface, or leaning on
-        // P(lambda S, lambda K) homogeneity -- does not hold here: absolute
-        // discrete dividends are not scaled by lambda, so
-        // scale * P(S/scale, K_ref; D) is P(S, K; scale * D), and the
-        // (scale - 1) * D * dP/dD residual would be scored as interpolation
-        // error.  Price and vega scale together, so the IV error the loop
-        // sees is unaffected by the scaling itself.
-        auto base_refs_fn = make_fd_vega_refs_fn(params, validate_fn);
+        // A probe surface is measured on its own contract: the loop scores
+        // this probe's interpolation error and nothing else (spec D1/L6).
         PrepareRefsFn prepare_refs_fn =
-            [base_refs_fn, probe_ref](double spot, double strike, double tau,
-                                      double sigma, double rate)
-            -> std::expected<ErrorRefs, SolverError> {
-            const double scale = (strike > 0.0) ? strike / probe_ref : 1.0;
-            auto refs = base_refs_fn(spot / scale, probe_ref, tau, sigma, rate);
-            if (!refs) return std::unexpected(refs.error());
-            return ErrorRefs{.ref_price = scale * refs->ref_price,
-                             .vega = scale * refs->vega};
-        };
-        auto score_fn = make_iv_score_fn(params, config_.option_type);
+            make_probe_scaled_refs_fn(user_refs_fn, probe_ref);
 
         // Grids still span the whole fit domain; only the *measurement* is
         // band-scoped (spec D2: measure where the surface is used).
@@ -805,7 +831,14 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             .option_type = config_.option_type,
             .bounds = fit_domain,
             .sample_bounds = probe_sample,
+            // No maturity-support predicate (spec D4, law L4): this backend's
+            // segments are contiguous, so `TauSegmentSplit::contains_maturity`
+            // admits every tau in the domain, event neighborhoods included.
+            // Excluding them here would stop measuring maturities the surface
+            // actually serves.
         };
+        auto score_fn = make_round_trip_score_fn(params, ctx,
+                                                 config_.option_type);
 
         auto refine_fn = make_bspline_refine_fn(params);
         // No state hooks: the B-spline refiner's whole state is the grids.
@@ -827,7 +860,10 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     for (const auto& pr : probe_results) {
         for (const auto& it : pr.iterations) {
             all_iterations.push_back(it);
-            total_pde += it.pde_solves_table + it.pde_solves_validation;
+            // `pde_solves_validation` counts *preparations*, not solves
+            // (spec D7); the solves the stencil actually ran come from the
+            // one counter this build owns and are added once, below.
+            total_pde += it.pde_solves_table;
         }
     }
 
@@ -856,23 +892,26 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         // Final validation measures the user-facing domain (spec D2), not
         // the interpolation support band.
         .sample_bounds = sample_domain_,
+        // No maturity-support predicate; see the probe context above.
     };
 
-    auto final_validate_fn = make_validate_fn(
-        config_.dividend_yield, config_.option_type,
-        config_.discrete_dividends, config_.maturity);
-    auto final_prepare_refs_fn = make_fd_vega_refs_fn(params, final_validate_fn);
-    auto final_score_fn = make_iv_score_fn(params, config_.option_type);
+    auto final_score_fn = make_round_trip_score_fn(params, final_ctx,
+                                                   config_.option_type);
 
     // References are computed ONCE here and reused for the retry, so the two
-    // assembled surfaces are compared on identical coordinates.
+    // assembled surfaces are compared on identical coordinates.  The
+    // assembled surface answers on the user's own contract, so it takes the
+    // unscaled stencil -- the probe adapter above belongs to the sizing
+    // loops alone.
     auto validation = detail::prepare_final_validation(
-        params, final_ctx, final_prepare_refs_fn, params.lhs_seed + 999);
+        params, final_ctx, user_refs_fn, params.lhs_seed + 999);
     if (!validation) return std::unexpected(validation.error());
 
-    // The final validation is not free: every reference is a base solve plus
-    // two sigma bumps, and the caller's PDE budget should say so.
-    total_pde += validation->ref_attempts * 3;
+    // The references are not free: the stencil runs up to six solves per
+    // prepared point across the probe loops, the final validation and the
+    // retry, and the caller's PDE budget should say so (spec D7).
+    total_pde += ref_counter->fine_attempts.load()
+               + ref_counter->coarse_attempts.load();
 
     // The lambda captures the surface by pointer, not by reference to the
     // parameter: a reference capture would dangle the moment `handle_for`
@@ -882,6 +921,10 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
             .price = [p = &s](double query_spot, double strike, double tau,
                               double sigma, double rate) -> double {
                 return p->price(query_spot, strike, tau, sigma, rate);
+            },
+            .vega = [p = &s](double query_spot, double strike, double tau,
+                             double sigma, double rate) -> double {
+                return p->vega(query_spot, strike, tau, sigma, rate);
             },
             .pde_solves = 0,
         };
@@ -932,6 +975,28 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
     // 8. Return the lower-error viable surface; neither viable => refuse.
     const auto pick = detail::select_final_surface(orig_score, retry_score);
     if (pick == detail::FinalPick::None) {
+        // The returned error has no room for the outcomes that produced the
+        // refusal, so the probe carries them (spec D7).  The two assembled
+        // surfaces are different candidates built on different grids, so
+        // each reports under its own stage rather than as one pooled count.
+        const auto trace_refusal = [](int stage,
+                                      const detail::FinalScore& score) {
+            MANGO_TRACE_ADAPTIVE_NO_VIABLE_SURFACE(
+                stage, 1u,
+                score.status_counts[
+                    static_cast<size_t>(PointStatus::SurfaceNoRoot)],
+                score.status_counts[
+                    static_cast<size_t>(PointStatus::SurfaceAmbiguous)],
+                score.status_counts[
+                    static_cast<size_t>(PointStatus::SurfaceNonConvergent)],
+                score.status_counts[
+                    static_cast<size_t>(PointStatus::SurfaceNonFinite)],
+                score.status_counts[
+                    static_cast<size_t>(PointStatus::SurfaceVegaTooSmall)],
+                score.edge_band_rescues);
+        };
+        trace_refusal(ADAPTIVE_STAGE_FINAL, orig_score);
+        if (retry_score) trace_refusal(ADAPTIVE_STAGE_RETRY, *retry_score);
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::NoViableSurface});
     }
@@ -942,7 +1007,7 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         use_retry ? std::move(*retry_surface) : std::move(*surface);
 
     diagnostics.target_met =
-        final_score.measured > 0 &&
+        final_score.viable() &&
         final_score.max_error <= params.target_iv_error;
     diagnostics.achieved_max_error = final_score.max_error;
     diagnostics.achieved_avg_error = final_score.avg_error;
@@ -954,17 +1019,26 @@ BSplineSegmentedBuilder::build_adaptive(const AdaptiveGridParams& params) const
         [](const IterationStats& it) { return it.refined_dim >= -1; }));
     // Same meaning as the loop's (spec D7): `holdout_points` is the usable
     // reference set, `holdout_points_measured` how much of it actually scored
-    // the returned surface -- the difference is what the score fn filtered.
+    // the returned surface -- the difference is the unresolved references and
+    // the points where the shipped inversion failed on the surface's price.
     diagnostics.holdout_points = validation->points.size();
     diagnostics.holdout_points_measured = final_score.measured;
     diagnostics.holdout_points_invalid = validation->invalid + final_score.skipped;
+    diagnostics.holdout_points_unresolved = final_score.unresolved;
+    diagnostics.surface_failures = final_score.surface_failures;
+    diagnostics.edge_band_rescues = final_score.edge_band_rescues;
+    diagnostics.max_price_residual = final_score.max_price_residual;
+    // An estimate of how far the references themselves could be off, never a
+    // certificate that they are not further.
+    diagnostics.reference_uncertainty_max = final_score.max_delta;
+    diagnostics.reference_solves_fine = ref_counter->fine_attempts.load();
+    diagnostics.reference_solves_coarse = ref_counter->coarse_attempts.load();
     for (const auto& pr : probe_results) {
         diagnostics.build_failure_fallback |=
             pr.diagnostics.build_failure_fallback;
     }
     detail::scan_monotonicity(validation->points, handle_for(picked_surface),
-                              final_ctx, params.target_iv_error,
-                              params.vega_floor, diagnostics);
+                              final_ctx, params.target_iv_error, diagnostics);
     diagnostics.iterations = all_iterations;
 
     size_t max_tau_points = 0;
